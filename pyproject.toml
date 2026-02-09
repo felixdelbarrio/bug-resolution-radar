@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bug-resolution-radar"
+version = "0.2.0"
+requires-python = ">=3.9"
+dependencies = [
+  "streamlit>=1.36",
+  "python-dotenv>=1.0",
+  "requests>=2.31",
+  "pandas>=2.0",
+  "plotly>=5.20",
+  "pydantic>=2.6",
+  "tenacity>=8.2",
+  "browser-cookie3>=0.19.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24.4",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "pytest>=8.2",
+  "types-requests>=2.31.0.20240406",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E","F","I","B","UP","N","S","SIM","RUF"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+check_untyped_defs = true
+strict_equality = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
