@@ -3,15 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 class NormalizedIssue(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     key: str
     summary: str
     status: str
     type: str
     priority: str
-    criticality: str
     created: Optional[str] = None
     updated: Optional[str] = None
     resolved: Optional[str] = None
@@ -19,13 +20,13 @@ class NormalizedIssue(BaseModel):
     reporter: str = ""
     labels: List[str] = Field(default_factory=list)
     components: List[str] = Field(default_factory=list)
-    affected_clients_count: int = 0
-    is_master: bool = False
     resolution: str = ""
     resolution_type: str = ""
     url: str = ""
 
 class IssuesDocument(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     schema_version: str = "1.0"
     ingested_at: str = ""
     jira_base_url: str = ""

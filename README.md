@@ -7,7 +7,7 @@ Bug Resolution Radar convierte tu lista de incidencias en un **panel ejecutivo y
 
 ## ¿Para qué sirve?
 - **Visibilidad inmediata**: cuántas incidencias siguen abiertas, cuáles crecen, cuáles se estancan.
-- **Priorización basada en datos**: filtros por criticidad, estado, tipo, componente y asignado.
+- **Priorización basada en datos**: filtros por prioridad (Jira), estado, tipo y asignado.
 - **KPIs de resolución**: nuevas vs cerradas, tiempo medio de resolución, % de abiertas con antigüedad > X días.
 - **Tendencias**: evolución de los últimos 90 días y distribución de antigüedad del backlog.
 - **Operación sin fricción**: no requiere backend ni despliegues. Ideal para equipos pequeños/medianos o para análisis rápido.
@@ -119,14 +119,13 @@ Valores clave:
 - `JIRA_BASE_URL` → Ej: `https://tu-dominio.atlassian.net`
 - `JIRA_PROJECT_KEY` → Ej: `ABC`
 - `JIRA_JQL` (opcional) → si lo dejas vacío usa: `project = "<KEY>" ORDER BY updated DESC`
-- `JIRA_COOKIE_DOMAIN` → dominio del Jira (ej: `tu-dominio.atlassian.net`)
 - `JIRA_BROWSER` → `chrome` o `edge`
 
 ---
 
 ## Uso
 1) Abre la app (Streamlit) en `http://localhost:8501`
-2) Pestaña **Configuración**: rellena Jira URL, Project Key, dominio y navegador.
+2) Pestaña **Configuración**: rellena Jira URL, Project Key y navegador.
 3) Pestaña **Ingesta**:
    - **Test conexión Jira**
    - **Reingestar Jira ahora**

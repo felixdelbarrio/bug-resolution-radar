@@ -2,23 +2,73 @@ from __future__ import annotations
 
 from typing import Optional
 
-def get_jira_session_cookie(browser: str, domain: str) -> Optional[str]:
+
+def _cookie_applies_to_host(cookie_domain: str, host: str) -> bool:
+    cd = (cookie_domain or "").lstrip(".").lower()
+    h = (host or "").lower()
+    if not cd or not h:
+        return False
+    return h == cd or h.endswith("." + cd)
+
+
+def _candidate_domains_from_host(host: str) -> list[str]:
+    h = (host or "").strip().lower()
+    if not h:
+        return []
+
+    parts = [p for p in h.split(".") if p]
+    candidates: list[str] = [h]
+    if len(parts) >= 3:
+        candidates.append(".".join(parts[1:]))  # e.g. globaldevtools.bbva.com
+    if len(parts) >= 2:
+        candidates.append(".".join(parts[-2:]))  # e.g. bbva.com
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in candidates:
+        if c and c not in seen:
+            out.append(c)
+            seen.add(c)
+    return out
+
+
+def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
     """
     Extrae cookies de Chrome/Edge (Chromium) usando browser-cookie3.
     No persiste cookies. Devuelve un string listo para header Cookie.
+
+    No requiere configurar dominio: se autodetecta desde el host de JIRA_BASE_URL.
     """
-    if not domain:
+    if not host:
         return None
 
     import browser_cookie3  # type: ignore
 
-    if browser == "edge":
-        cj = browser_cookie3.edge(domain_name=domain)
-    else:
-        cj = browser_cookie3.chrome(domain_name=domain)
+    getter = browser_cookie3.edge if browser == "edge" else browser_cookie3.chrome
 
-    parts = []
-    for c in cj:
-        if c.domain and domain in c.domain:
-            parts.append(f"{c.name}={c.value}")
-    return "; ".join(parts) if parts else None
+    # Prefer small cookie-jar queries by scoping with domain_name.
+    # Some environments still fail; we fall back to unscoped retrieval.
+    cookie_jars = []
+    for d in _candidate_domains_from_host(host):
+        try:
+            cookie_jars.append(getter(domain_name=d))
+        except Exception:
+            continue
+    if not cookie_jars:
+        try:
+            cookie_jars.append(getter())
+        except Exception:
+            return None
+
+    parts: dict[str, str] = {}
+    for cj in cookie_jars:
+        for c in cj:
+            if not c.domain or not _cookie_applies_to_host(c.domain, host):
+                continue
+            if not c.name:
+                continue
+            # Keep first seen value for stability.
+            parts.setdefault(c.name, c.value)
+
+    return "; ".join([f"{k}={v}" for k, v in parts.items()]) if parts else None
+

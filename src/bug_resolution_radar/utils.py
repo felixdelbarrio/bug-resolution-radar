@@ -1,18 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-def parse_criticality_map(s: str) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    for part in (p.strip() for p in s.split(",") if p.strip()):
-        if ":" in part:
-            k, v = part.split(":", 1)
-            out[k.strip()] = v.strip()
-    return out
 
 def parse_int_list(s: str) -> List[int]:
     return [int(x.strip()) for x in s.split(",") if x.strip()]

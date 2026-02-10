@@ -25,10 +25,10 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
     open_df = df[df["resolved"].isna()]
     open_now_total = len(open_df)
 
-    def by_crit(sub: pd.DataFrame) -> Dict[str, int]:
-        if "criticality" not in sub.columns:
+    def by_priority(sub: pd.DataFrame) -> Dict[str, int]:
+        if "priority" not in sub.columns:
             return {}
-        return sub["criticality"].fillna("").value_counts().to_dict()
+        return sub["priority"].fillna("").value_counts().to_dict()
 
     fort_start = now - timedelta(days=fort_days)
     new_fort = df[df["created"] >= fort_start]
@@ -38,14 +38,14 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
     if len(closed_all) > 0:
         closed_all["res_days"] = (closed_all["resolved"] - closed_all["created"]).dt.total_seconds() / 86400.0
         mean_resolution_days = float(closed_all["res_days"].mean())
-        mean_by_crit = (
-            closed_all.groupby("criticality")["res_days"].mean().sort_values().round(2).to_dict()
-            if "criticality" in closed_all.columns
+        mean_by_priority = (
+            closed_all.groupby("priority")["res_days"].mean().sort_values().round(2).to_dict()
+            if "priority" in closed_all.columns
             else {}
         )
     else:
         mean_resolution_days = 0.0
-        mean_by_crit = {}
+        mean_by_priority = {}
 
     x_days_list = parse_int_list(settings.KPI_OPEN_AGE_X_DAYS)
     pct_parts: List[str] = []
@@ -77,20 +77,18 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
     start = now - timedelta(days=range_days)
     created_daily = (
         df[df["created"].notna() & (df["created"] >= start)]
-        .groupby(df["created"].dt.date)
+        .assign(date=lambda d: d["created"].dt.date)
+        .groupby("date")
         .size()
-        .rename("created")
-        .reset_index()
+        .reset_index(name="created")
     )
-    created_daily.columns = ["date", "created"]
     closed_daily = (
         df[df["resolved"].notna() & (df["resolved"] >= start)]
-        .groupby(df["resolved"].dt.date)
+        .assign(date=lambda d: d["resolved"].dt.date)
+        .groupby("date")
         .size()
-        .rename("closed")
-        .reset_index()
+        .reset_index(name="closed")
     )
-    closed_daily.columns = ["date", "closed"]
     daily = pd.merge(created_daily, closed_daily, on="date", how="outer").fillna(0)
     daily["date"] = pd.to_datetime(daily["date"])
     daily = daily.sort_values("date")
@@ -110,9 +108,9 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
 
     return {
         "open_now_total": open_now_total,
-        "open_now_by_criticality": by_crit(open_df),
+        "open_now_by_priority": by_priority(open_df),
         "new_fortnight_total": int(len(new_fort)),
-        "new_fortnight_by_criticality": by_crit(new_fort),
+        "new_fortnight_by_priority": by_priority(new_fort),
         "closed_fortnight_total": int(len(closed_fort)),
         "closed_fortnight_by_resolution_type": (
             closed_fort["resolution_type"].fillna("").value_counts().to_dict()
@@ -120,7 +118,7 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
             else {}
         ),
         "mean_resolution_days": mean_resolution_days,
-        "mean_resolution_days_by_criticality": mean_by_crit,
+        "mean_resolution_days_by_priority": mean_by_priority,
         "pct_open_gt_x_days": pct_open_gt_x,
         "age_buckets_chart": age_buckets_chart,
         "timeseries_chart": timeseries_chart,

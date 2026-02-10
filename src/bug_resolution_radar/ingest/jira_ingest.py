@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -7,7 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import Settings
 from ..schema import IssuesDocument, NormalizedIssue
-from ..utils import now_iso, parse_criticality_map
+from ..utils import now_iso
 from .jira_session import get_jira_session_cookie
 
 
@@ -28,15 +29,26 @@ def ingest_jira(
     if not settings.JIRA_BASE_URL or not settings.JIRA_PROJECT_KEY:
         return False, "Configura JIRA_BASE_URL y JIRA_PROJECT_KEY.", None
 
-    jql = settings.JIRA_JQL.strip() or f'project = "{settings.JIRA_PROJECT_KEY}" ORDER BY updated DESC'
+    jql = (settings.JIRA_JQL or "").strip()
+    # Jira accepts whitespace, but sending a single-line JQL avoids issues with env/UI formatting.
+    jql = jql.replace("\r", " ").replace("\n", " ")
+    jql = jql or f'project = "{settings.JIRA_PROJECT_KEY}" ORDER BY updated DESC'
     base = settings.JIRA_BASE_URL.rstrip("/")
     session = requests.Session()
     session.headers.update({"Accept": "application/json"})
 
+    base_candidates: List[str] = [base]
+    if not base.endswith("/jira"):
+        base_candidates.append(base + "/jira")
+
     cookie = cookie_manual
     if not cookie:
         try:
-            cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, domain=settings.JIRA_COOKIE_DOMAIN)
+            host = urlparse(base).hostname or ""
+            cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
+            if not cookie:
+                other = "edge" if settings.JIRA_BROWSER == "chrome" else "chrome"
+                cookie = get_jira_session_cookie(browser=other, host=host)
         except Exception as e:
             return False, f"No se pudo leer cookie del navegador. Usa fallback manual. Detalle: {e}", None
 
@@ -46,20 +58,31 @@ def ingest_jira(
     session.headers.update({"Cookie": cookie})
 
     if dry_run:
-        url = f"{base}/rest/api/3/myself"
-        r = _request(session, "GET", url)
-        if r.status_code == 200:
-            me = r.json()
-            return True, f"OK Jira: autenticado como {me.get('displayName','(unknown)')}", None
-        return False, f"Error Jira ({r.status_code}): {r.text[:200]}", None
+        attempts: List[str] = []
+        for b in base_candidates:
+            for api_ver in ("3", "2"):
+                url = f"{b}/rest/api/{api_ver}/myself"
+                r = _request(session, "GET", url)
+                if r.status_code == 200:
+                    me = r.json()
+                    who = me.get("displayName") or me.get("name") or "(unknown)"
+                    return True, f"OK Jira: autenticado como {who}", None
+                attempts.append(f"{api_ver}@{b} => {r.status_code}")
+                # 404 often means wrong API version or missing context path; keep trying.
+                if r.status_code == 404:
+                    continue
+        return False, f"Error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. " f"Detalle: {r.text[:200]}", None
 
     start_at = 0
     max_results = 100
     issues: List[NormalizedIssue] = []
-    crit_map = parse_criticality_map(settings.CRITICALITY_MAP)
 
+    api_base: Optional[str] = None
     while True:
-        url = f"{base}/rest/api/3/search"
+        if api_base is None:
+            # Autodetect the working API base on first request.
+            api_base = f"{base}/rest/api/3"
+
         payload = {
             "jql": jql,
             "startAt": start_at,
@@ -69,33 +92,40 @@ def ingest_jira(
                 "assignee","reporter","labels","components","resolution",
             ],
         }
-        r = _request(session, "POST", url, json=payload)
+        r = _request(session, "POST", f"{api_base}/search", json=payload)
+        if r.status_code == 404:
+            # Try alternate API versions and/or /jira context path.
+            found = False
+            for b in base_candidates:
+                for api_ver in ("3", "2"):
+                    trial = f"{b}/rest/api/{api_ver}"
+                    rr = _request(session, "POST", f"{trial}/search", json=payload)
+                    if rr.status_code == 200:
+                        api_base = trial
+                        r = rr
+                        found = True
+                        break
+                if found:
+                    break
         if r.status_code != 200:
             return False, f"Error Jira search ({r.status_code}): {r.text[:200]}", None
         data = r.json()
 
         for it in data.get("issues", []):
             fields = it.get("fields") or {}
-            priority = (fields.get("priority") or {}).get("name", "") if fields.get("priority") else ""
-            criticality = crit_map.get(priority, "")
+            priority = ((fields.get("priority") or {}).get("name", "") if fields.get("priority") else "").strip()
             labels = fields.get("labels") or []
             components = [c.get("name","") for c in (fields.get("components") or [])]
             resolution = (fields.get("resolution") or {}).get("name", "") if fields.get("resolution") else ""
             res_type = resolution
 
-            affected = 0  # placeholder (si tienes un customfield, lo añadimos)
-            is_master = (settings.MASTER_LABEL.lower() in [l.lower() for l in labels]) or (
-                affected > int(settings.MASTER_AFFECTED_CLIENTS_THRESHOLD)
-            )
-
             issues.append(
                 NormalizedIssue(
                     key=it.get("key",""),
                     summary=fields.get("summary",""),
-                    status=(fields.get("status") or {}).get("name",""),
-                    type=(fields.get("issuetype") or {}).get("name",""),
+                    status=((fields.get("status") or {}).get("name","") or "").strip(),
+                    type=((fields.get("issuetype") or {}).get("name","") or "").strip(),
                     priority=priority,
-                    criticality=criticality,
                     created=fields.get("created"),
                     updated=fields.get("updated"),
                     resolved=fields.get("resolutiondate"),
@@ -103,8 +133,6 @@ def ingest_jira(
                     reporter=(fields.get("reporter") or {}).get("displayName","") if fields.get("reporter") else "",
                     labels=labels,
                     components=components,
-                    affected_clients_count=affected,
-                    is_master=is_master,
                     resolution=resolution,
                     resolution_type=res_type,
                     url=f"{base}/browse/{it.get('key','')}",

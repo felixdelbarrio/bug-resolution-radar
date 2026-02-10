@@ -1,0 +1,8 @@
+[theme]
+# BBVA Experience (Color: Primary)
+base = "light"
+primaryColor = "#0051F1"               # BBVA Electric Blue
+backgroundColor = "#F4F6F9"            # Page background (very light neutral)
+secondaryBackgroundColor = "#FFFFFF"   # Surfaces/cards
+textColor = "#11192D"                  # BBVA Grey 900
+font = "sans serif"

@@ -9,6 +9,17 @@ from pydantic import BaseModel
 ENV_PATH = Path(".env")
 ENV_EXAMPLE_PATH = Path(".env.example")
 
+
+def _decode_env_multiline(v: str) -> str:
+    # We persist multi-line values in .env as a single line using "\n".
+    return v.replace("\\n", "\n")
+
+
+def _encode_env_multiline(v: str) -> str:
+    # Normalize and escape newlines so each KEY=VALUE stays on one physical line.
+    return v.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+
+
 class Settings(BaseModel):
     APP_TITLE: str = "Bug Resolution Radar"
     THEME: str = "auto"
@@ -19,12 +30,7 @@ class Settings(BaseModel):
     JIRA_BASE_URL: str = ""
     JIRA_PROJECT_KEY: str = ""
     JIRA_JQL: str = ""
-    JIRA_COOKIE_DOMAIN: str = ""
     JIRA_BROWSER: str = "chrome"
-
-    CRITICALITY_MAP: str = "Highest:P0,High:P1,Medium:P2,Low:P3,Lowest:P4"
-    MASTER_LABEL: str = "master"
-    MASTER_AFFECTED_CLIENTS_THRESHOLD: str = "5"
 
     KPI_FORTNIGHT_DAYS: str = "15"
     KPI_MONTH_DAYS: str = "30"
@@ -40,11 +46,15 @@ def ensure_env() -> None:
 
 def load_settings() -> Settings:
     vals: Dict[str, str] = {k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None}
+    if "JIRA_JQL" in vals:
+        vals["JIRA_JQL"] = _decode_env_multiline(vals["JIRA_JQL"])
     return Settings(**vals)
 
 def save_settings(settings: Settings) -> None:
     lines = []
     data = settings.model_dump()
     for k, v in data.items():
+        if isinstance(v, str):
+            v = _encode_env_multiline(v)
         lines.append(f"{k}={v}")
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
