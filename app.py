@@ -9,11 +9,13 @@ import plotly.express as px
 import streamlit as st
 
 from bug_resolution_radar.config import Settings, ensure_env, load_settings, save_settings
+from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
 from bug_resolution_radar.insights import find_similar_issue_clusters
 from bug_resolution_radar.kpis import compute_kpis
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.schema import IssuesDocument
+from bug_resolution_radar.schema_helix import HelixDocument
 from bug_resolution_radar.security import consent_banner
 
 
@@ -25,6 +27,19 @@ def _load_doc(path: str) -> IssuesDocument:
 
 
 def _save_doc(path: str, doc: IssuesDocument) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(doc.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_helix_doc(path: str) -> HelixDocument:
+    p = Path(path)
+    if not p.exists():
+        return HelixDocument.empty()
+    return HelixDocument.model_validate_json(p.read_text(encoding="utf-8"))
+
+
+def _save_helix_doc(path: str, doc: HelixDocument) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(doc.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
@@ -46,11 +61,11 @@ def _inject_card_css() -> None:
         """
         <style>
           :root {
-            --bbva-primary: #0051F1;   /* Electric Blue */
-            --bbva-midnight: #070E46;  /* Midnight Blue */
-            --bbva-text: #11192D;      /* Grey 900 */
+            --bbva-primary: #0051F1;
+            --bbva-midnight: #070E46;
+            --bbva-text: #11192D;
             --bbva-surface: #FFFFFF;
-            --bbva-surface-2: #F4F6F9; /* Light neutral */
+            --bbva-surface-2: #F4F6F9;
             --bbva-border: rgba(17,25,45,0.12);
             --bbva-border-strong: rgba(17,25,45,0.18);
             --bbva-radius-s: 4px;
@@ -58,7 +73,6 @@ def _inject_card_css() -> None:
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
 
-            /* Streamlit theme variables (force consistency; avoids odd red/black defaults). */
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
             --background-color: var(--bbva-surface-2);
@@ -72,13 +86,11 @@ def _inject_card_css() -> None:
             line-height: 1.5;
           }
 
-          /* Use serif only for headline-like elements; keep most UI in Benton Sans style */
           .bbva-hero-title {
             font-family: "Tiempos Headline", "Tiempos Headline Bold", Georgia, "Times New Roman", serif;
             letter-spacing: -0.01em;
           }
 
-          /* App page background + content surface */
           [data-testid="stAppViewContainer"] {
             background: var(--bbva-surface-2);
           }
@@ -91,7 +103,6 @@ def _inject_card_css() -> None:
             max-width: 1200px;
           }
 
-          /* BBVA Experience-like top band */
           .bbva-hero {
             background: var(--bbva-midnight);
             border-radius: var(--bbva-radius-xl);
@@ -113,13 +124,9 @@ def _inject_card_css() -> None:
             font-size: 14px;
           }
 
-          /* Make the native Streamlit header blend in (avoid dark gradient mismatch) */
-          header[data-testid="stHeader"] {
-            background: transparent;
-          }
+          header[data-testid="stHeader"] { background: transparent; }
           header[data-testid="stHeader"] * { color: inherit !important; }
 
-          /* Sidebar like BBVA Experience left nav */
           section[data-testid="stSidebar"] {
             background: var(--bbva-surface);
             border-right: 1px solid var(--bbva-border);
@@ -128,7 +135,6 @@ def _inject_card_css() -> None:
             font-size: 14px;
           }
 
-          /* Make widget corners consistent */
           .stButton > button,
           .stDownloadButton > button,
           .stTextInput input,
@@ -138,13 +144,11 @@ def _inject_card_css() -> None:
             border-radius: var(--bbva-radius-m) !important;
           }
 
-          /* Labels: readable on light background */
           label, [data-testid="stWidgetLabel"] p {
             color: rgba(17,25,45,0.82) !important;
             font-weight: 600 !important;
           }
 
-          /* Inputs: force BBVA light surfaces even if Streamlit theme drifts */
           .stTextInput input,
           .stTextArea textarea,
           .stNumberInput input,
@@ -189,52 +193,6 @@ def _inject_card_css() -> None:
             cursor: not-allowed !important;
           }
 
-          /* Pills (Streamlit 1.50): ensure readable in light mode */
-          div[data-testid="stPills"] button {
-            background: var(--bbva-surface) !important;
-            border: 1px solid var(--bbva-border) !important;
-            color: rgba(17,25,45,0.88) !important;
-            border-radius: 999px !important;
-          }
-          div[data-testid="stPills"] button span,
-          div[data-testid="stPills"] button p {
-            color: rgba(17,25,45,0.88) !important;
-            font-weight: 700 !important;
-          }
-          div[data-testid="stPills"] button[aria-pressed="true"],
-          div[data-testid="stPills"] button[kind="primary"] {
-            background: rgba(0,81,241,0.10) !important;
-            border-color: rgba(0,81,241,0.30) !important;
-          }
-          div[data-testid="stPills"] button:focus-visible {
-            outline: none !important;
-            box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
-          }
-
-          /* Tabs: accent must be BBVA primary (avoid red underline) */
-          div[data-baseweb="tab-list"] {
-            gap: 8px;
-          }
-          div[data-baseweb="tab"] button {
-            color: rgba(17,25,45,0.72) !important;
-            font-weight: 700 !important;
-          }
-          div[data-baseweb="tab"] button[aria-selected="true"] {
-            color: var(--bbva-primary) !important;
-          }
-          div[data-baseweb="tab-highlight"] {
-            background-color: var(--bbva-primary) !important;
-          }
-          [role="tablist"] button[role="tab"][aria-selected="true"] {
-            color: var(--bbva-primary) !important;
-          }
-          [role="tablist"] button[role="tab"]:focus-visible {
-            outline: none !important;
-            box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
-            border-radius: var(--bbva-radius-m) !important;
-          }
-
-          /* Links use BBVA primary */
           a, a:visited { color: var(--bbva-primary); }
 
           .issue-card {
@@ -293,7 +251,6 @@ def _inject_card_css() -> None:
 
 
 def _priority_rank(p: str) -> int:
-    # Common Jira names, fallback to stable alphabetical.
     order = ["highest", "high", "medium", "low", "lowest"]
     pl = (p or "").strip().lower()
     if pl in order:
@@ -302,11 +259,6 @@ def _priority_rank(p: str) -> int:
 
 
 def _priority_color_map() -> Dict[str, str]:
-    # Traffic-light palette for charts only (requested):
-    # - Red 2 (Tertiary):   #FF5252
-    # - Orange 2 (Secondary): #FFB56B
-    # - Green 6 (Secondary):  #88E783
-    # Rest: coherent from the same BBVA palettes.
     return {
         "Highest": "#FF5252",
         "High": "#FFB56B",
@@ -319,13 +271,11 @@ def _priority_color_map() -> Dict[str, str]:
 
 
 def _matrix_set_filters(st_name: str, prio: str) -> None:
-    # Callback: runs before the next rerun, so it can safely update widget state.
     st.session_state["filter_status"] = [st_name]
     st.session_state["filter_priority"] = [prio]
 
 
 def _matrix_clear_filters() -> None:
-    # Callback: runs before the next rerun.
     st.session_state["filter_status"] = []
     st.session_state["filter_priority"] = []
 
@@ -348,7 +298,6 @@ def _render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> Non
     else:
         open_df["open_age_days"] = 0.0
 
-    # Sort: priority (rough), then updated desc.
     open_df["_prio_rank"] = open_df["priority"].astype(str).map(_priority_rank)
     open_df = open_df.sort_values(by=["_prio_rank", "updated"], ascending=[True, False]).head(max_cards)
 
@@ -386,7 +335,6 @@ def _render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> Non
 
 
 def _apply_plotly_bbva(fig: Any) -> Any:
-    # Keep visuals aligned with BBVA Experience (Color: Primary).
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -394,15 +342,7 @@ def _apply_plotly_bbva(fig: Any) -> Any:
             family='"BBVA Benton Sans","Benton Sans","Inter",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
             color="#11192D",
         ),
-        colorway=[
-            "#0051F1",  # Electric Blue (primary)
-            "#2165CA",  # Royal Blue Dark
-            "#0C6DFF",  # Royal Blue
-            "#53A9EF",  # Serene Dark Blue
-            "#85C8FF",  # Serene Blue
-            "#D6E9FF",  # Light Blue
-            "#070E46",  # Midnight Blue
-        ],
+        colorway=["#0051F1", "#2165CA", "#0C6DFF", "#53A9EF", "#85C8FF", "#D6E9FF", "#070E46"],
         legend=dict(bgcolor="rgba(255,255,255,0.65)"),
         margin=dict(l=16, r=16, t=48, b=16),
     )
@@ -441,11 +381,25 @@ def main() -> None:
             jira_project = st.text_input("PROJECT_KEY", value=settings.JIRA_PROJECT_KEY)
             jira_jql = st.text_area("JQL (opcional)", value=settings.JIRA_JQL, height=80)
 
+            st.markdown("#### Helix")
+            helix_base = st.text_input("Helix Base URL", value=getattr(settings, "HELIX_BASE_URL", ""))
+            helix_org = st.text_input("Helix Organization", value=getattr(settings, "HELIX_ORGANIZATION", ""))
+            helix_proxy = st.text_input(
+                "Helix Proxy (opcional)",
+                value=getattr(settings, "HELIX_PROXY", ""),
+                help="Ej: http://127.0.0.1:8999 (si tu navegador usa proxy local para Helix)",
+            )
+
         with c2:
             jira_browser = st.selectbox(
-                "Navegador (lectura cookie)",
+                "Navegador Jira (lectura cookie)",
                 options=["chrome", "edge"],
                 index=0 if settings.JIRA_BROWSER == "chrome" else 1,
+            )
+            helix_browser = st.selectbox(
+                "Navegador Helix (lectura cookie)",
+                options=["chrome", "edge"],
+                index=0 if getattr(settings, "HELIX_BROWSER", "chrome") == "chrome" else 1,
             )
 
         k1, k2, k3 = st.columns(3)
@@ -469,24 +423,29 @@ def main() -> None:
                     KPI_MONTH_DAYS=str(month),
                     KPI_OPEN_AGE_X_DAYS=open_age.strip(),
                     KPI_AGE_BUCKETS=age_buckets.strip(),
+                    HELIX_BASE_URL=helix_base.strip(),
+                    HELIX_ORGANIZATION=helix_org.strip(),
+                    HELIX_BROWSER=helix_browser,
+                    HELIX_PROXY=helix_proxy.strip(),
                 )
             )
             save_settings(new_settings)
             st.success("Configuración guardada en .env (cookies NO se guardan).")
 
     with tabs[1]:
-        st.subheader("Ingesta (solo Jira)")
-        st.caption("Las llamadas se hacen directamente a Jira desde tu máquina. No hay backend.")
+        st.subheader("Ingesta (Jira y Helix)")
+        st.caption("Las llamadas se hacen directamente desde tu máquina. No hay backend.")
         st.info(
-            "Consentimiento: Se leerán cookies locales del navegador solo para autenticar tu sesión personal hacia Jira. "
+            "Consentimiento: Se leerán cookies locales del navegador solo para autenticar tu sesión personal hacia Jira/Helix. "
             "No se envían a terceros."
         )
 
+        # Jira
+        st.markdown("### Jira")
         jira_cookie_manual = st.text_input(
-            "Fallback: pegar cookie (header Cookie) manualmente (solo memoria, NO persistente)",
+            "Fallback Jira: pegar cookie (header Cookie) manualmente (solo memoria, NO persistente)",
             value="",
             type="password",
-            help="Ejemplo: atlassian.xsrf.token=...; cloud.session.token=... (solo si tu entorno lo requiere)",
         )
 
         colA, colB = st.columns([1, 1])
@@ -499,9 +458,7 @@ def main() -> None:
 
         if test_jira:
             with st.spinner("Probando Jira..."):
-                ok, msg, _ = ingest_jira(
-                    settings=settings, cookie_manual=jira_cookie_manual or None, dry_run=True
-                )
+                ok, msg, _ = ingest_jira(settings=settings, cookie_manual=jira_cookie_manual or None, dry_run=True)
             (st.success if ok else st.error)(msg)
 
         if run_jira:
@@ -518,8 +475,7 @@ def main() -> None:
             else:
                 st.error(msg)
 
-        st.markdown("---")
-        st.markdown("### Última ingesta")
+        st.markdown("#### Última ingesta Jira")
         st.json(
             {
                 "schema_version": doc.schema_version,
@@ -528,6 +484,66 @@ def main() -> None:
                 "project_key": doc.project_key,
                 "query": doc.query,
                 "issues_count": len(doc.issues),
+            }
+        )
+
+        # Helix
+        st.markdown("---")
+        st.markdown("### Helix")
+
+        helix_cookie_manual = st.text_input(
+            "Fallback Helix: pegar cookie (header Cookie) manualmente (solo memoria, NO persistente)",
+            value="",
+            type="password",
+        )
+
+        hcolA, hcolB = st.columns([1, 1])
+        with hcolA:
+            test_helix = st.button("🔎 Test conexión Helix")
+        with hcolB:
+            run_helix = st.button("⬇️ Reingestar Helix ahora")
+
+        helix_data_path = getattr(settings, "HELIX_DATA_PATH", "data/helix_dump.json")
+        helix_doc = _load_helix_doc(helix_data_path)
+
+        if test_helix:
+            with st.spinner("Probando Helix..."):
+                ok, msg, _ = ingest_helix(
+                    helix_base_url=getattr(settings, "HELIX_BASE_URL", ""),
+                    browser=getattr(settings, "HELIX_BROWSER", "chrome"),
+                    organization=getattr(settings, "HELIX_ORGANIZATION", ""),
+                    proxy=getattr(settings, "HELIX_PROXY", ""),
+                    cookie_manual=helix_cookie_manual or None,
+                    dry_run=True,
+                )
+            (st.success if ok else st.error)(msg)
+
+        if run_helix:
+            with st.spinner("Ingestando Helix..."):
+                ok, msg, new_hdoc = ingest_helix(
+                    helix_base_url=getattr(settings, "HELIX_BASE_URL", ""),
+                    browser=getattr(settings, "HELIX_BROWSER", "chrome"),
+                    organization=getattr(settings, "HELIX_ORGANIZATION", ""),
+                    proxy=getattr(settings, "HELIX_PROXY", ""),
+                    cookie_manual=helix_cookie_manual or None,
+                    dry_run=False,
+                    existing_doc=helix_doc,
+                )
+            if ok and new_hdoc is not None:
+                _save_helix_doc(helix_data_path, new_hdoc)
+                st.success(f"{msg}. Guardado en {helix_data_path}")
+            else:
+                st.error(msg)
+
+        st.markdown("#### Última ingesta Helix")
+        st.json(
+            {
+                "schema_version": helix_doc.schema_version,
+                "ingested_at": helix_doc.ingested_at,
+                "helix_base_url": helix_doc.helix_base_url,
+                "query": helix_doc.query,
+                "items_count": len(helix_doc.items),
+                "proxy": getattr(settings, "HELIX_PROXY", ""),
             }
         )
 
@@ -544,7 +560,6 @@ def main() -> None:
             return
 
         st.markdown("### Filtros")
-        # Normalize empty values so filters + matrix can round-trip selections.
         status_col = (
             df["status"].fillna("(sin estado)").replace("", "(sin estado)")
             if "status" in df.columns
@@ -600,74 +615,7 @@ def main() -> None:
         if assignee:
             dff = dff[dff["assignee"].isin(assignee)]
 
-        # Open issues (used by matrix + several gadgets).
         open_df = dff[dff["resolved"].isna()].copy() if "resolved" in dff.columns else dff.copy()
-        # Matrix stuck to filters. Matrix click syncs filters + table/cards.
-        if not open_df.empty and "status" in open_df.columns and "priority" in open_df.columns:
-            st.markdown("### Matriz Estado x Priority (abiertas)")
-
-            mx = open_df.assign(
-                status=open_df["status"].fillna("(sin estado)").replace("", "(sin estado)"),
-                priority=open_df["priority"].fillna("(sin priority)").replace("", "(sin priority)"),
-            )
-            status_counts = mx["status"].value_counts()
-            statuses = status_counts.index.tolist()
-            priorities = sorted(
-                mx["priority"].dropna().astype(str).unique().tolist(),
-                key=lambda p: (_priority_rank(p), p),
-            )
-
-            selected_status = status[0] if isinstance(status, list) and len(status) == 1 else None
-            selected_priority = priority[0] if isinstance(priority, list) and len(priority) == 1 else None
-            has_matrix_sel = bool(selected_status and selected_priority)
-
-            cA, cB = st.columns([3, 1])
-            with cA:
-                if has_matrix_sel:
-                    st.caption(f"Seleccionado: Estado={selected_status} · Priority={selected_priority}")
-                else:
-                    st.caption("Click en una celda: sincroniza Estado/Priority y actualiza la tabla.")
-            with cB:
-                st.button(
-                    "Limpiar selección",
-                    disabled=not has_matrix_sel,
-                    on_click=_matrix_clear_filters,
-                )
-
-            # Header row
-            hdr = st.columns(len(priorities) + 1)
-            hdr[0].markdown("**Estado**")
-            for i, p in enumerate(priorities):
-                if selected_priority == p:
-                    hdr[i + 1].markdown(
-                        f'<span style="color:var(--bbva-primary); font-weight:800;">{html.escape(p)}</span>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    hdr[i + 1].markdown(f"**{p}**")
-
-            counts = pd.crosstab(mx["status"], mx["priority"])
-            for st_name in statuses[:12]:  # keep it usable; top statuses by count
-                row = st.columns(len(priorities) + 1)
-                if selected_status == st_name:
-                    row[0].markdown(
-                        f'<span style="color:var(--bbva-primary); font-weight:800;">{html.escape(st_name)}</span>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    row[0].markdown(st_name)
-                for i, p in enumerate(priorities):
-                    cnt = int(counts.at[st_name, p]) if (st_name in counts.index and p in counts.columns) else 0
-                    is_selected = bool(selected_status == st_name and selected_priority == p)
-                    row[i + 1].button(
-                        str(cnt),
-                        key=f"mx::{st_name}::{p}",
-                        disabled=(cnt == 0),
-                        type="primary" if is_selected else "secondary",
-                        use_container_width=True,
-                        on_click=_matrix_set_filters,
-                        args=(st_name, p),
-                    )
 
         st.markdown("### Issues")
         view = st.radio("Vista", options=["Tabla", "Cards"], horizontal=True, index=0, label_visibility="collapsed")
@@ -682,7 +630,6 @@ def main() -> None:
         if view == "Cards":
             _render_issue_cards(dff_show, max_cards=max_issues, title="Open issues (prioridad + ultima actualizacion)")
         else:
-            # Show a clickable Jira link (opens in a new tab) using the stored issue URL.
             display_df = dff_show.copy()
             if "url" in display_df.columns:
                 display_df["jira"] = display_df["url"]
@@ -703,10 +650,7 @@ def main() -> None:
             show_cols = [c for c in show_cols if c in display_df.columns]
             column_config = {}
             if "jira" in show_cols:
-                column_config["jira"] = st.column_config.LinkColumn(
-                    "Jira",
-                    display_text=r".*/browse/(.*)",
-                )
+                column_config["jira"] = st.column_config.LinkColumn("Jira", display_text=r".*/browse/(.*)")
             st.dataframe(
                 display_df[show_cols].sort_values(by="updated", ascending=False),
                 use_container_width=True,
@@ -725,15 +669,6 @@ def main() -> None:
         with kcol3:
             st.metric("Cerradas (quincena)", int(kpis["closed_fortnight_total"]))
             st.caption(kpis["closed_fortnight_by_resolution_type"])
-
-        kcol4, kcol5, kcol6 = st.columns(3)
-        with kcol4:
-            st.metric("Tiempo medio resolución (días)", f'{kpis["mean_resolution_days"]:.1f}')
-            st.caption(kpis["mean_resolution_days_by_priority"])
-        with kcol5:
-            st.metric("% abiertas > X días", kpis["pct_open_gt_x_days"])
-        with kcol6:
-            st.metric("Top 10 abiertas", "ver tabla")
 
         if not open_df.empty:
             st.markdown("### Distribuciones (abiertas)")
@@ -757,79 +692,6 @@ def main() -> None:
 
         st.markdown("### Evolución (últimos 90 días)")
         st.plotly_chart(_apply_plotly_bbva(kpis["timeseries_chart"]), use_container_width=True)
-
-        st.markdown("### Distribución antigüedad (abiertas)")
-        st.plotly_chart(_apply_plotly_bbva(kpis["age_buckets_chart"]), use_container_width=True)
-
-        with st.expander("Distribución de tiempos de resolución", expanded=False):
-            closed = dff[dff["resolved"].notna() & dff["created"].notna()].copy()
-            if not closed.empty:
-                closed["resolution_days"] = (
-                    (closed["resolved"] - closed["created"]).dt.total_seconds() / 86400.0
-                ).clip(lower=0.0)
-                fig = px.histogram(
-                    closed,
-                    x="resolution_days",
-                    nbins=30,
-                    title="Histograma: días hasta resolución (cerradas)",
-                )
-                st.plotly_chart(_apply_plotly_bbva(fig), use_container_width=True)
-            else:
-                st.info("No hay incidencias cerradas con fechas suficientes para calcular resolución.")
-
-        st.markdown("### Top 10 problemas/funcionalidades (abiertas)")
-        st.dataframe(kpis["top_open_table"], use_container_width=True, hide_index=True)
-
-        with st.expander("Incidencias similares (posibles duplicados)", expanded=False):
-            clusters = find_similar_issue_clusters(dff_show, only_open=True)
-            if not clusters:
-                st.info("No se encontraron clusters de incidencias similares (o hay pocos datos).")
-            else:
-                st.caption("Agrupado por similitud de texto en el summary (heurístico).")
-                for c in clusters[:12]:
-                    st.markdown(f"**{c.size}x** · {c.summary}")
-                    st.write(", ".join(c.keys))
-
-        with st.expander("Vista Kanban (abiertas por Estado)", expanded=False):
-            kan = open_df.copy()
-            kan["status"] = kan["status"].fillna("(sin estado)").replace("", "(sin estado)")
-            status_counts = kan["status"].value_counts()
-            all_statuses = status_counts.index.tolist()
-
-            if len(all_statuses) > 8:
-                selected_statuses = st.multiselect(
-                    "Estados a mostrar (máx 8 recomendado)",
-                    options=all_statuses,
-                    default=all_statuses[:6],
-                )
-            else:
-                selected_statuses = all_statuses
-
-            selected_statuses = selected_statuses[:8]
-            if not selected_statuses:
-                st.info("Selecciona al menos un estado.")
-            else:
-                per_col = st.slider("Max issues por columna", min_value=5, max_value=30, value=12, step=1)
-                cols = st.columns(len(selected_statuses))
-                for col, st_name in zip(cols, selected_statuses):
-                    sub = kan[kan["status"] == st_name].copy()
-                    sub["_prio_rank"] = sub["priority"].astype(str).map(_priority_rank)
-                    sub = sub.sort_values(by=["_prio_rank", "updated"], ascending=[True, False]).head(per_col)
-                    with col:
-                        st.markdown(f"**{st_name}**  \n{len(kan[kan['status']==st_name])} issues")
-                        for _, r in sub.iterrows():
-                            key = html.escape(str(r.get("key", "") or ""))
-                            url = html.escape(str(r.get("url", "") or ""))
-                            summ = html.escape(str(r.get("summary", "") or ""))
-                            if len(summ) > 80:
-                                summ = summ[:77] + "..."
-                            st.markdown(
-                                f'<div style="margin: 8px 0 10px 0;">'
-                                f'<div><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>'
-                                f'<div style="opacity:0.85; font-size:0.85rem; line-height:1.1rem;">{summ}</div>'
-                                f"</div>",
-                                unsafe_allow_html=True,
-                            )
 
         st.markdown("#### Editar nota local")
         issue_key = st.selectbox("Issue", dff["key"].tolist())
