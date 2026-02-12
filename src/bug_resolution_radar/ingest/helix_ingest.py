@@ -16,9 +16,6 @@ from .helix_session import get_helix_session_cookie
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
-    """
-    Acepta: true/false, 1/0, yes/no, y/n, on/off (case-insensitive).
-    """
     if value is None:
         return default
     if isinstance(value, bool):
@@ -33,32 +30,43 @@ def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
     return default
 
 
-def _get_timeouts() -> Tuple[float, float]:
+def _get_timeouts(has_proxy: bool) -> Tuple[float, float]:
     """
     Timeouts separados (connect/read). Ajustables por env.
+    Si hay proxy, por defecto elevamos el read-timeout porque suele añadir latencia.
     """
     try:
         connect = float(os.getenv("HELIX_CONNECT_TIMEOUT", "10"))
     except Exception:
         connect = 10.0
+
+    # base read (sin proxy)
     try:
         read = float(os.getenv("HELIX_READ_TIMEOUT", "30"))
     except Exception:
         read = 30.0
+
+    if has_proxy:
+        # mínimo recomendado con proxy (ajustable)
+        try:
+            min_proxy_read = float(os.getenv("HELIX_PROXY_MIN_READ_TIMEOUT", "120"))
+        except Exception:
+            min_proxy_read = 120.0
+        read = max(read, min_proxy_read)
+
     return connect, read
 
 
 def _dry_run_timeouts(connect_to: float, read_to: float) -> Tuple[float, float]:
     """
-    En dry-run NO queremos matar la request a los 10s si el proxy añade latencia.
-    Por defecto damos al menos 60s de read-timeout (o el read_to si es mayor).
-    Ajustable por env: HELIX_DRYRUN_READ_TIMEOUT / HELIX_DRYRUN_CONNECT_TIMEOUT
+    En dry-run no reintentamos, pero tampoco queremos cortar demasiado pronto.
     """
     try:
         c = float(os.getenv("HELIX_DRYRUN_CONNECT_TIMEOUT", str(connect_to)))
     except Exception:
         c = connect_to
 
+    # mínimo 60s por defecto en dry-run
     try:
         r = float(os.getenv("HELIX_DRYRUN_READ_TIMEOUT", str(max(read_to, 60.0))))
     except Exception:
@@ -70,8 +78,6 @@ def _dry_run_timeouts(connect_to: float, read_to: float) -> Tuple[float, float]:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
-    # SSL no se arregla reintentando: NO lo reintentamos.
-    # Ojo: en requests SSLError hereda de ConnectionError, así que hay que excluirlo explícitamente.
     retry=retry_if_exception(
         lambda e: isinstance(
             e,
@@ -80,29 +86,14 @@ def _dry_run_timeouts(connect_to: float, read_to: float) -> Tuple[float, float]:
         and not isinstance(e, requests.exceptions.SSLError)
     ),
 )
-def _request(session: requests.Session, method: str, url: str, **kwargs) -> requests.Response:
-    """
-    Request con tenacity y timeout (connect, read).
-    Puedes pasar timeout explícito en kwargs para sobrescribir.
-    """
-    timeout = kwargs.pop("timeout", None)
-    if timeout is None:
-        timeout = _get_timeouts()  # (connect, read)
-
+def _request(session: requests.Session, method: str, url: str, timeout: Tuple[float, float], **kwargs) -> requests.Response:
     r = session.request(method, url, timeout=timeout, **kwargs)
-
     if r.status_code in (429, 503):
         raise RuntimeError("rate limited")
-
     return r
 
 
 def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
-    """
-    Normaliza la respuesta de Helix/SmartIT:
-    - SmartIT suele ser: [ { "items": [ { "objects": [ {...}, ... ] } ] } ]
-      o dict con "items" -> [{"objects":[...]}]
-    """
     if isinstance(payload, list):
         out: List[Dict[str, Any]] = []
         for x in payload:
@@ -144,9 +135,6 @@ def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
 
 
 def _extract_total(payload: Any) -> Optional[int]:
-    """
-    SmartIT a veces devuelve total en el wrapper (dict) o dentro de una lista de wrappers.
-    """
     wrappers: List[Dict[str, Any]] = []
     if isinstance(payload, dict):
         wrappers = [payload]
@@ -170,7 +158,6 @@ def _cookies_to_jar(session: requests.Session, cookie_header: str, host: str) ->
     }
 
     names: List[str] = []
-
     for part in (cookie_header or "").split(";"):
         part = part.strip()
         if not part or "=" not in part:
@@ -184,13 +171,9 @@ def _cookies_to_jar(session: requests.Session, cookie_header: str, host: str) ->
         names.append(name)
         path = "/smartit" if name in smartit_path_names else "/"
 
-        # host-only
         session.cookies.set(name, value, domain=host, path=path)
-
-        # fallback sin dominio explícito
         session.cookies.set(name, value, path=path)
 
-        # dominio padre típico (.onbmc.com)
         parts = host.split(".")
         if len(parts) >= 3:
             parent = "." + ".".join(parts[-3:])
@@ -213,8 +196,7 @@ def _get_cookie_anywhere(session: requests.Session, name: str) -> Optional[str]:
     return None
 
 
-def _format_retry_error(e: RetryError) -> str:
-    # Tenacity encapsula la excepción original en e.last_attempt.exception()
+def _retry_root_cause(e: RetryError) -> str:
     try:
         last = e.last_attempt.exception()
         if last is not None:
@@ -252,16 +234,11 @@ def ingest_helix(
 
     session = requests.Session()
 
-    # -----------------------------
-    # Proxy
-    # -----------------------------
     helix_proxy = (proxy or os.getenv("HELIX_PROXY", "")).strip()
-    if helix_proxy:
+    has_proxy = bool(helix_proxy)
+    if has_proxy:
         session.proxies.update({"http": helix_proxy, "https": helix_proxy})
 
-    # -----------------------------
-    # SSL verify / CA bundle
-    # -----------------------------
     verify_env = os.getenv("HELIX_SSL_VERIFY", "true")
     ca_env = os.getenv("HELIX_CA_BUNDLE", "")
 
@@ -294,9 +271,6 @@ def ingest_helix(
         }
     )
 
-    # -----------------------------
-    # Cookie
-    # -----------------------------
     cookie = cookie_manual
     if not cookie:
         try:
@@ -305,25 +279,23 @@ def ingest_helix(
                 other = "edge" if browser == "chrome" else "chrome"
                 cookie = get_helix_session_cookie(browser=other, host=host)
         except Exception as e:
-            return False, f"No se pudo leer cookie del navegador. Usa cookie manual. Detalle: {e}", None
+            return False, f"No se pudo leer la cookie del navegador. Usa cookie manual. Detalle: {e}", None
 
     if not cookie:
         return False, "Cookie Helix vacía. Usa fallback manual.", None
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
 
-    # Warm-up (no crítico)
     try:
         session.get(f"{base}/app/", timeout=(5, 15))
     except Exception:
         pass
 
-    # CSRF token desde cookie (en captura: X-Xsrf-Token)
     xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
     if xsrf:
-        session.headers["X-Xsrf-Token"] = xsrf  # tal cual navegador
-        session.headers["X-XSRF-TOKEN"] = xsrf  # compat
-        session.headers["X-CSRF-Token"] = xsrf  # compat
+        session.headers["X-Xsrf-Token"] = xsrf
+        session.headers["X-XSRF-TOKEN"] = xsrf
+        session.headers["X-CSRF-Token"] = xsrf
 
     attribute_names = [
         "priority",
@@ -345,38 +317,37 @@ def ingest_helix(
             "attributeNames": attribute_names,
             "chunkInfo": {"startIndex": int(start_index), "chunkSize": int(chunk_size)},
             "customAttributeNames": [],
-            "sortInfo": {},  # importante: sortInfo (no sortingInfo)
+            "sortInfo": {},
         }
 
-    connect_to, read_to = _get_timeouts()
+    connect_to, read_to = _get_timeouts(has_proxy=has_proxy)
 
     # -----------------------------
-    # Dry-run (SIN reintentos, pero con read-timeout "realista")
+    # Dry-run
     # -----------------------------
     if dry_run:
         body = make_body(0)
         dry_c, dry_r = _dry_run_timeouts(connect_to, read_to)
         try:
             r = session.post(endpoint, json=body, timeout=(dry_c, dry_r))
-        except SSLError as e:
-            return (
-                False,
-                "Helix dry-run SSL error: "
-                f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
-            )
         except requests.exceptions.Timeout as e:
             return (
                 False,
-                "Helix dry-run timeout: "
-                f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
-                f"timeout(connect/read)={dry_c}/{dry_r} | connect/read={connect_to}/{read_to}",
+                "Timeout en Helix (dry-run): el servidor no respondió a tiempo. "
+                f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"timeout(connect/read)={dry_c}/{dry_r}",
+                None,
+            )
+        except SSLError as e:
+            return (
+                False,
+                f"Error SSL en Helix (dry-run): {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
         except requests.exceptions.RequestException as e:
             return (
                 False,
-                "Helix dry-run request error: "
+                "Error de red en Helix (dry-run): "
                 f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -403,7 +374,6 @@ def ingest_helix(
     items: List[HelixWorkItem] = []
     start = 0
 
-    # airbags anti-bucle + anti-spinner
     seen_ids: set = set()
     max_pages = 200
     page = 0
@@ -413,40 +383,39 @@ def ingest_helix(
         if page > max_pages:
             return (
                 False,
-                f"Helix ingest abortado: max_pages={max_pages} (posible paginación ignorada). "
+                "Ingesta Helix abortada: demasiadas páginas (posible paginación ignorada). "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
 
         try:
-            r = _request(session, "POST", endpoint, json=make_body(start))
+            r = _request(session, "POST", endpoint, json=make_body(start), timeout=(connect_to, read_to))
         except RetryError as e:
             return (
                 False,
-                "Helix request timeout (reintentos agotados): "
-                f"{_format_retry_error(e)} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
-                f"connect/read={connect_to}/{read_to} | endpoint={endpoint}",
-                None,
-            )
-        except SSLError as e:
-            return (
-                False,
-                "Helix SSL error: "
-                f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                "Timeout en Helix (reintentos agotados): el servidor no respondió a tiempo. "
+                f"Causa: {_retry_root_cause(e)} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"timeout(connect/read)={connect_to}/{read_to} | endpoint={endpoint}",
                 None,
             )
         except requests.exceptions.Timeout as e:
             return (
                 False,
-                "Helix timeout: "
-                f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
-                f"connect/read={connect_to}/{read_to}",
+                "Timeout en Helix: el servidor no respondió a tiempo. "
+                f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"timeout(connect/read)={connect_to}/{read_to}",
+                None,
+            )
+        except SSLError as e:
+            return (
+                False,
+                f"Error SSL en Helix: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
         except requests.exceptions.RequestException as e:
             return (
                 False,
-                "Helix request error: "
+                "Error de red en Helix: "
                 f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -467,16 +436,14 @@ def ingest_helix(
         total = _extract_total(data)
 
         new_in_page = 0
-
         for it in batch:
             values = it.get("values") if isinstance(it.get("values"), dict) else it
-
             wid = str(values.get("displayId") or values.get("id") or values.get("workItemId") or "").strip()
             if not wid:
                 continue
-
             if wid in seen_ids:
                 continue
+
             seen_ids.add(wid)
             new_in_page += 1
 
@@ -507,7 +474,6 @@ def ingest_helix(
                 )
             )
 
-        # Si Helix ignora startIndex y siempre devuelve la misma página, aquí cortamos.
         if new_in_page == 0:
             break
 
