@@ -3,19 +3,19 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import requests
 from requests.exceptions import SSLError
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ..schema_helix import HelixDocument, HelixWorkItem
 from ..utils import now_iso
 from .helix_session import get_helix_session_cookie
 
 
-def _parse_bool(value: str | bool | None, default: bool = True) -> bool:
+def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
     """
     Acepta: true/false, 1/0, yes/no, y/n, on/off (case-insensitive).
     """
@@ -33,6 +33,21 @@ def _parse_bool(value: str | bool | None, default: bool = True) -> bool:
     return default
 
 
+def _get_timeouts() -> Tuple[float, float]:
+    """
+    Timeouts separados (connect/read). Ajustables por env.
+    """
+    try:
+        connect = float(os.getenv("HELIX_CONNECT_TIMEOUT", "10"))
+    except Exception:
+        connect = 10.0
+    try:
+        read = float(os.getenv("HELIX_READ_TIMEOUT", "30"))
+    except Exception:
+        read = 30.0
+    return connect, read
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -47,20 +62,28 @@ def _parse_bool(value: str | bool | None, default: bool = True) -> bool:
     ),
 )
 def _request(session: requests.Session, method: str, url: str, **kwargs) -> requests.Response:
-    r = session.request(method, url, timeout=30, **kwargs)
+    """
+    Request con tenacity y timeout (connect, read).
+    Puedes pasar timeout explícito en kwargs para sobrescribir.
+    """
+    timeout = kwargs.pop("timeout", None)
+    if timeout is None:
+        timeout = _get_timeouts()  # (connect, read)
+
+    r = session.request(method, url, timeout=timeout, **kwargs)
+
     if r.status_code in (429, 503):
         raise RuntimeError("rate limited")
+
     return r
 
 
 def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
     """
-    Normaliza la respuesta de Helix:
-    - A veces devuelve un dict con keys tipo: items/entries/results...
-    - En SmartIT suele ser: [ { "items": [ { "objects": [ {...}, ... ] } ] } ]
+    Normaliza la respuesta de Helix/SmartIT:
+    - SmartIT suele ser: [ { "items": [ { "objects": [ {...}, ... ] } ] } ]
       o dict con "items" -> [{"objects":[...]}]
     """
-    # Caso típico SmartIT: lista conteniendo un dict "items"...
     if isinstance(payload, list):
         out: List[Dict[str, Any]] = []
         for x in payload:
@@ -70,33 +93,28 @@ def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
 
-    # Si ya viene "objects"
     v = payload.get("objects")
     if isinstance(v, list):
         return [x for x in v if isinstance(x, dict)]
 
-    # "items" suele ser lista de wrappers que contienen "objects"
     items = payload.get("items")
     if isinstance(items, list):
-        out: List[Dict[str, Any]] = []
+        out2: List[Dict[str, Any]] = []
         for it in items:
-            out.extend(_extract_objects(it))
-        return out
+            out2.extend(_extract_objects(it))
+        return out2
 
-    # Fallback: otros nombres comunes
     for k in ("workItems", "entries", "records", "results"):
         v2 = payload.get(k)
         if isinstance(v2, list):
-            # Puede ser lista de dicts finales o wrappers
-            out: List[Dict[str, Any]] = []
+            out3: List[Dict[str, Any]] = []
             for it in v2:
                 if isinstance(it, dict) and ("objects" in it or "items" in it):
-                    out.extend(_extract_objects(it))
+                    out3.extend(_extract_objects(it))
                 elif isinstance(it, dict):
-                    out.append(it)
-            return out
+                    out3.append(it)
+            return out3
 
-    # Último recurso: busca dentro de valores
     for vv in payload.values():
         if isinstance(vv, (dict, list)):
             got = _extract_objects(vv)
@@ -104,6 +122,23 @@ def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
                 return got
 
     return []
+
+
+def _extract_total(payload: Any) -> Optional[int]:
+    """
+    SmartIT a veces devuelve total en el wrapper (dict) o dentro de una lista de wrappers.
+    """
+    wrappers: List[Dict[str, Any]] = []
+    if isinstance(payload, dict):
+        wrappers = [payload]
+    elif isinstance(payload, list):
+        wrappers = [x for x in payload if isinstance(x, dict)]
+
+    for w in wrappers:
+        for k in ("total", "totalSize", "totalCount", "countTotal"):
+            if isinstance(w.get(k), int):
+                return int(w[k])
+    return None
 
 
 def _cookies_to_jar(session: requests.Session, cookie_header: str, host: str) -> List[str]:
@@ -157,6 +192,17 @@ def _get_cookie_anywhere(session: requests.Session, name: str) -> Optional[str]:
         if getattr(c, "name", "") == name and getattr(c, "value", ""):
             return str(c.value)
     return None
+
+
+def _format_retry_error(e: RetryError) -> str:
+    # Tenacity encapsula la excepción original en e.last_attempt.exception()
+    try:
+        last = e.last_attempt.exception()
+        if last is not None:
+            return f"{type(last).__name__}: {last}"
+    except Exception:
+        pass
+    return str(e)
 
 
 def ingest_helix(
@@ -218,7 +264,6 @@ def ingest_helix(
                 "Chrome/141.0.0.0 Safari/537.36"
             ),
             "Accept": "application/json, text/plain, */*",
-            # En la captura del navegador: application/json;charset=UTF-8
             "Content-Type": "application/json;charset=UTF-8",
             "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
             "Origin": f"{scheme}://{host}",
@@ -248,21 +293,19 @@ def ingest_helix(
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
 
-    # Warm-up
+    # Warm-up (no crítico)
     try:
-        _request(session, "GET", f"{base}/app/")
+        session.get(f"{base}/app/", timeout=(5, 10))
     except Exception:
         pass
 
     # CSRF token desde cookie (en captura: X-Xsrf-Token)
     xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
     if xsrf:
-        session.headers["X-Xsrf-Token"] = xsrf  # 👈 tal cual navegador
-        # dejamos también por compatibilidad
-        session.headers["X-XSRF-TOKEN"] = xsrf
-        session.headers["X-CSRF-Token"] = xsrf
+        session.headers["X-Xsrf-Token"] = xsrf  # tal cual navegador
+        session.headers["X-XSRF-TOKEN"] = xsrf  # compat
+        session.headers["X-CSRF-Token"] = xsrf  # compat
 
-    # En tu captura, attributeNames incluye "slaStatus"
     attribute_names = [
         "priority",
         "id",
@@ -283,22 +326,38 @@ def ingest_helix(
             "attributeNames": attribute_names,
             "chunkInfo": {"startIndex": int(start_index), "chunkSize": int(chunk_size)},
             "customAttributeNames": [],
-            # ✅ CLAVE: en el navegador es sortInfo, NO sortingInfo
-            "sortInfo": {},
+            "sortInfo": {},  # importante: sortInfo (no sortingInfo)
         }
 
+    connect_to, read_to = _get_timeouts()
+
     # -----------------------------
-    # Dry-run
+    # Dry-run (SIN reintentos, timeout corto)
     # -----------------------------
     if dry_run:
         body = make_body(0)
         try:
-            r = _request(session, "POST", endpoint, json=body)
+            r = session.post(endpoint, json=body, timeout=(min(connect_to, 5.0), min(read_to, 10.0)))
         except SSLError as e:
             return (
                 False,
                 "Helix dry-run SSL error: "
                 f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
+        except requests.exceptions.Timeout as e:
+            return (
+                False,
+                "Helix dry-run timeout: "
+                f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"connect/read={connect_to}/{read_to}",
+                None,
+            )
+        except requests.exceptions.RequestException as e:
+            return (
+                False,
+                "Helix dry-run request error: "
+                f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
 
@@ -315,6 +374,7 @@ def ingest_helix(
                 f"body={json.dumps(body, ensure_ascii=False)}",
                 None,
             )
+
         return True, "OK Helix: autenticación válida y endpoint responde 200.", None
 
     # -----------------------------
@@ -323,14 +383,52 @@ def ingest_helix(
     items: List[HelixWorkItem] = []
     start = 0
 
+    # airbags anti-bucle + anti-spinner
+    seen_ids: set = set()
+    max_pages = 200
+    page = 0
+
     while True:
+        page += 1
+        if page > max_pages:
+            return (
+                False,
+                f"Helix ingest abortado: max_pages={max_pages} (posible paginación ignorada). "
+                f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
+
         try:
             r = _request(session, "POST", endpoint, json=make_body(start))
+        except RetryError as e:
+            return (
+                False,
+                "Helix request timeout (reintentos agotados): "
+                f"{_format_retry_error(e)} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"connect/read={connect_to}/{read_to} | endpoint={endpoint}",
+                None,
+            )
         except SSLError as e:
             return (
                 False,
                 "Helix SSL error: "
                 f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
+        except requests.exceptions.Timeout as e:
+            # por si entra sin RetryError (raro, pero posible si cambian decoradores)
+            return (
+                False,
+                "Helix timeout: "
+                f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"connect/read={connect_to}/{read_to}",
+                None,
+            )
+        except requests.exceptions.RequestException as e:
+            return (
+                False,
+                "Helix request error: "
+                f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
 
@@ -347,14 +445,21 @@ def ingest_helix(
         if not batch:
             break
 
+        total = _extract_total(data)
+
+        new_in_page = 0
+
         for it in batch:
-            # SmartIT suele traer el objeto plano (id, displayId, summary, customer...)
             values = it.get("values") if isinstance(it.get("values"), dict) else it
 
-            # id: a veces es "displayId" (INC...) y a veces "id" (GUID-ish)
             wid = str(values.get("displayId") or values.get("id") or values.get("workItemId") or "").strip()
             if not wid:
                 continue
+
+            if wid in seen_ids:
+                continue
+            seen_ids.add(wid)
+            new_in_page += 1
 
             assignee = values.get("assignee") or values.get("assigneeName") or ""
             if isinstance(assignee, dict):
@@ -383,14 +488,12 @@ def ingest_helix(
                 )
             )
 
-        total = None
-        if isinstance(data, dict):
-            for k in ("total", "totalSize", "totalCount", "countTotal"):
-                if isinstance(data.get(k), int):
-                    total = int(data[k])
-                    break
+        # Si Helix ignora startIndex y siempre devuelve la misma página, aquí cortamos.
+        if new_in_page == 0:
+            break
 
         start += int(chunk_size)
+
         if total is not None and start >= total:
             break
         if len(batch) < int(chunk_size):
