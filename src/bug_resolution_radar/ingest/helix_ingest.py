@@ -53,20 +53,56 @@ def _request(session: requests.Session, method: str, url: str, **kwargs) -> requ
     return r
 
 
-def _pick_items(payload: Any) -> List[Dict[str, Any]]:
+def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
+    """
+    Normaliza la respuesta de Helix:
+    - A veces devuelve un dict con keys tipo: items/entries/results...
+    - En SmartIT suele ser: [ { "items": [ { "objects": [ {...}, ... ] } ] } ]
+      o dict con "items" -> [{"objects":[...]}]
+    """
+    # Caso típico SmartIT: lista conteniendo un dict "items"...
     if isinstance(payload, list):
-        return [x for x in payload if isinstance(x, dict)]
+        out: List[Dict[str, Any]] = []
+        for x in payload:
+            out.extend(_extract_objects(x))
+        return out
+
     if not isinstance(payload, dict):
         return []
 
-    for k in ("workItems", "items", "entries", "records", "results"):
-        v = payload.get(k)
-        if isinstance(v, list):
-            return [x for x in v if isinstance(x, dict)]
+    # Si ya viene "objects"
+    v = payload.get("objects")
+    if isinstance(v, list):
+        return [x for x in v if isinstance(x, dict)]
 
-    for v in payload.values():
-        if isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
-            return v  # type: ignore[return-value]
+    # "items" suele ser lista de wrappers que contienen "objects"
+    items = payload.get("items")
+    if isinstance(items, list):
+        out: List[Dict[str, Any]] = []
+        for it in items:
+            out.extend(_extract_objects(it))
+        return out
+
+    # Fallback: otros nombres comunes
+    for k in ("workItems", "entries", "records", "results"):
+        v2 = payload.get(k)
+        if isinstance(v2, list):
+            # Puede ser lista de dicts finales o wrappers
+            out: List[Dict[str, Any]] = []
+            for it in v2:
+                if isinstance(it, dict) and ("objects" in it or "items" in it):
+                    out.extend(_extract_objects(it))
+                elif isinstance(it, dict):
+                    out.append(it)
+            return out
+
+    # Último recurso: busca dentro de valores
+    for vv in payload.values():
+        if isinstance(vv, (dict, list)):
+            got = _extract_objects(vv)
+            if got:
+                return got
+
     return []
 
 
@@ -177,17 +213,20 @@ def ingest_helix(
     session.headers.update(
         {
             "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/121.0.0.0 Safari/537.36"
+                "Chrome/141.0.0.0 Safari/537.36"
             ),
             "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
+            # En la captura del navegador: application/json;charset=UTF-8
+            "Content-Type": "application/json;charset=UTF-8",
             "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
             "Origin": f"{scheme}://{host}",
             "Referer": f"{base}/app/",
             "X-Requested-With": "XMLHttpRequest",
             "X-Requested-By": "SmartIT",
+            "Pragma": "no-cache",
+            "Cache-Control": "no-cache",
         }
     )
 
@@ -215,20 +254,24 @@ def ingest_helix(
     except Exception:
         pass
 
-    # CSRF token desde cookie
+    # CSRF token desde cookie (en captura: X-Xsrf-Token)
     xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
     if xsrf:
+        session.headers["X-Xsrf-Token"] = xsrf  # 👈 tal cual navegador
+        # dejamos también por compatibilidad
         session.headers["X-XSRF-TOKEN"] = xsrf
         session.headers["X-CSRF-Token"] = xsrf
 
+    # En tu captura, attributeNames incluye "slaStatus"
     attribute_names = [
         "priority",
         "id",
         "targetDate",
-        "status",
+        "slaStatus",
         "customerName",
         "assignee",
         "summary",
+        "status",
         "lastModifiedDate",
     ]
 
@@ -240,7 +283,8 @@ def ingest_helix(
             "attributeNames": attribute_names,
             "chunkInfo": {"startIndex": int(start_index), "chunkSize": int(chunk_size)},
             "customAttributeNames": [],
-            "sortingInfo": {},
+            # ✅ CLAVE: en el navegador es sortInfo, NO sortingInfo
+            "sortInfo": {},
         }
 
     # -----------------------------
@@ -299,20 +343,31 @@ def ingest_helix(
             )
 
         data = r.json()
-        batch = _pick_items(data)
+        batch = _extract_objects(data)
         if not batch:
             break
 
         for it in batch:
+            # SmartIT suele traer el objeto plano (id, displayId, summary, customer...)
             values = it.get("values") if isinstance(it.get("values"), dict) else it
 
-            wid = str(values.get("id") or values.get("workItemId") or values.get("displayId") or "").strip()
+            # id: a veces es "displayId" (INC...) y a veces "id" (GUID-ish)
+            wid = str(values.get("displayId") or values.get("id") or values.get("workItemId") or "").strip()
             if not wid:
                 continue
 
             assignee = values.get("assignee") or values.get("assigneeName") or ""
             if isinstance(assignee, dict):
-                assignee = assignee.get("displayName") or assignee.get("name") or ""
+                assignee = assignee.get("fullName") or assignee.get("displayName") or assignee.get("name") or ""
+
+            customer_name = values.get("customerName") or values.get("customer") or ""
+            if isinstance(customer_name, dict):
+                customer_name = (
+                    customer_name.get("fullName")
+                    or customer_name.get("displayName")
+                    or customer_name.get("name")
+                    or ""
+                )
 
             items.append(
                 HelixWorkItem(
@@ -321,7 +376,7 @@ def ingest_helix(
                     status=str(values.get("status") or "").strip(),
                     priority=str(values.get("priority") or "").strip(),
                     assignee=str(assignee or "").strip(),
-                    customer_name=str(values.get("customerName") or values.get("customer") or "").strip(),
+                    customer_name=str(customer_name or "").strip(),
                     target_date=values.get("targetDate"),
                     last_modified=values.get("lastModifiedDate") or values.get("lastModified"),
                     url=f"{base}/app/#/ticket-console",
