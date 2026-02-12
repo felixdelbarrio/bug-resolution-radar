@@ -48,6 +48,25 @@ def _get_timeouts() -> Tuple[float, float]:
     return connect, read
 
 
+def _dry_run_timeouts(connect_to: float, read_to: float) -> Tuple[float, float]:
+    """
+    En dry-run NO queremos matar la request a los 10s si el proxy añade latencia.
+    Por defecto damos al menos 60s de read-timeout (o el read_to si es mayor).
+    Ajustable por env: HELIX_DRYRUN_READ_TIMEOUT / HELIX_DRYRUN_CONNECT_TIMEOUT
+    """
+    try:
+        c = float(os.getenv("HELIX_DRYRUN_CONNECT_TIMEOUT", str(connect_to)))
+    except Exception:
+        c = connect_to
+
+    try:
+        r = float(os.getenv("HELIX_DRYRUN_READ_TIMEOUT", str(max(read_to, 60.0))))
+    except Exception:
+        r = max(read_to, 60.0)
+
+    return c, r
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -295,7 +314,7 @@ def ingest_helix(
 
     # Warm-up (no crítico)
     try:
-        session.get(f"{base}/app/", timeout=(5, 10))
+        session.get(f"{base}/app/", timeout=(5, 15))
     except Exception:
         pass
 
@@ -332,12 +351,13 @@ def ingest_helix(
     connect_to, read_to = _get_timeouts()
 
     # -----------------------------
-    # Dry-run (SIN reintentos, timeout corto)
+    # Dry-run (SIN reintentos, pero con read-timeout "realista")
     # -----------------------------
     if dry_run:
         body = make_body(0)
+        dry_c, dry_r = _dry_run_timeouts(connect_to, read_to)
         try:
-            r = session.post(endpoint, json=body, timeout=(min(connect_to, 5.0), min(read_to, 10.0)))
+            r = session.post(endpoint, json=body, timeout=(dry_c, dry_r))
         except SSLError as e:
             return (
                 False,
@@ -350,7 +370,7 @@ def ingest_helix(
                 False,
                 "Helix dry-run timeout: "
                 f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
-                f"connect/read={connect_to}/{read_to}",
+                f"timeout(connect/read)={dry_c}/{dry_r} | connect/read={connect_to}/{read_to}",
                 None,
             )
         except requests.exceptions.RequestException as e:
@@ -416,7 +436,6 @@ def ingest_helix(
                 None,
             )
         except requests.exceptions.Timeout as e:
-            # por si entra sin RetryError (raro, pero posible si cambian decoradores)
             return (
                 False,
                 "Helix timeout: "
