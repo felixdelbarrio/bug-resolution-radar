@@ -43,9 +43,9 @@ class Settings(BaseModel):
     HELIX_BROWSER: str = "chrome"
     HELIX_DATA_PATH: str = "data/helix_dump.json"
 
-    # Proxy y SSL
+    # Proxy y SS
     HELIX_PROXY: str = ""
-    HELIX_SSL_VERIFY: str = "true"   # "true" o "false"
+    HELIX_SSL_VERIFY: str = ""   # "true" o "false"
     HELIX_CA_BUNDLE: str = ""        # ruta a .pem si usas CA corporativa
 
     # -------------------------

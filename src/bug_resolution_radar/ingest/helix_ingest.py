@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import requests
 from requests.exceptions import SSLError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ..schema_helix import HelixDocument, HelixWorkItem
 from ..utils import now_iso
@@ -37,7 +37,14 @@ def _parse_bool(value: str | bool | None, default: bool = True) -> bool:
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     # SSL no se arregla reintentando: NO lo reintentamos.
-    retry=retry_if_exception_type((RuntimeError, requests.exceptions.ConnectionError, requests.exceptions.Timeout)),
+    # Ojo: en requests SSLError hereda de ConnectionError, así que hay que excluirlo explícitamente.
+    retry=retry_if_exception(
+        lambda e: isinstance(
+            e,
+            (RuntimeError, requests.exceptions.ConnectionError, requests.exceptions.Timeout),
+        )
+        and not isinstance(e, requests.exceptions.SSLError)
+    ),
 )
 def _request(session: requests.Session, method: str, url: str, **kwargs) -> requests.Response:
     r = session.request(method, url, timeout=30, **kwargs)

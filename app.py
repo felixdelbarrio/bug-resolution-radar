@@ -19,6 +19,24 @@ from bug_resolution_radar.schema_helix import HelixDocument
 from bug_resolution_radar.security import consent_banner
 
 
+def _boolish(value: Any, default: bool = True) -> bool:
+    """
+    Acepta bool o strings tipo: true/false, 1/0, yes/no, on/off.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    s = str(value).strip().lower()
+    if s == "":
+        return default
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return default
+
+
 def _load_doc(path: str) -> IssuesDocument:
     p = Path(path)
     if not p.exists():
@@ -382,12 +400,28 @@ def main() -> None:
             jira_jql = st.text_area("JQL (opcional)", value=settings.JIRA_JQL, height=80)
 
             st.markdown("#### Helix")
-            helix_base = st.text_input("Helix Base URL", value=getattr(settings, "HELIX_BASE_URL", ""))
-            helix_org = st.text_input("Helix Organization", value=getattr(settings, "HELIX_ORGANIZATION", ""))
+            helix_base = st.text_input("Helix Base URL", value=settings.HELIX_BASE_URL)
+            helix_org = st.text_input("Helix Organization", value=settings.HELIX_ORGANIZATION)
+            helix_data_path = st.text_input(
+                "Helix Data Path",
+                value=settings.HELIX_DATA_PATH,
+                help="Ruta local donde se guarda el dump JSON de Helix.",
+            )
             helix_proxy = st.text_input(
                 "Helix Proxy (opcional)",
-                value=getattr(settings, "HELIX_PROXY", ""),
+                value=settings.HELIX_PROXY,
                 help="Ej: http://127.0.0.1:8999 (si tu navegador usa proxy local para Helix)",
+            )
+            helix_ssl_verify = st.selectbox(
+                "Helix SSL verify",
+                options=["true", "false"],
+                index=0 if _boolish(getattr(settings, "HELIX_SSL_VERIFY", True), default=True) else 1,
+                help="Pon false si estás detrás de inspección SSL corporativa o si tu proxy rompe el certificado.",
+            )
+            helix_ca_bundle = st.text_input(
+                "Helix CA bundle (opcional)",
+                value=settings.HELIX_CA_BUNDLE,
+                help="Ruta a un .pem con la CA corporativa. Si se rellena, tiene prioridad sobre SSL verify.",
             )
 
         with c2:
@@ -399,7 +433,7 @@ def main() -> None:
             helix_browser = st.selectbox(
                 "Navegador Helix (lectura cookie)",
                 options=["chrome", "edge"],
-                index=0 if getattr(settings, "HELIX_BROWSER", "chrome") == "chrome" else 1,
+                index=0 if settings.HELIX_BROWSER == "chrome" else 1,
             )
 
         k1, k2, k3 = st.columns(3)
@@ -426,7 +460,10 @@ def main() -> None:
                     HELIX_BASE_URL=helix_base.strip(),
                     HELIX_ORGANIZATION=helix_org.strip(),
                     HELIX_BROWSER=helix_browser,
+                    HELIX_DATA_PATH=helix_data_path.strip(),
                     HELIX_PROXY=helix_proxy.strip(),
+                    HELIX_SSL_VERIFY=str(helix_ssl_verify).strip().lower(),
+                    HELIX_CA_BUNDLE=helix_ca_bundle.strip(),
                 )
             )
             save_settings(new_settings)
@@ -503,16 +540,18 @@ def main() -> None:
         with hcolB:
             run_helix = st.button("⬇️ Reingestar Helix ahora")
 
-        helix_data_path = getattr(settings, "HELIX_DATA_PATH", "data/helix_dump.json")
+        helix_data_path = settings.HELIX_DATA_PATH
         helix_doc = _load_helix_doc(helix_data_path)
 
         if test_helix:
             with st.spinner("Probando Helix..."):
                 ok, msg, _ = ingest_helix(
-                    helix_base_url=getattr(settings, "HELIX_BASE_URL", ""),
-                    browser=getattr(settings, "HELIX_BROWSER", "chrome"),
-                    organization=getattr(settings, "HELIX_ORGANIZATION", ""),
-                    proxy=getattr(settings, "HELIX_PROXY", ""),
+                    helix_base_url=settings.HELIX_BASE_URL,
+                    browser=settings.HELIX_BROWSER,
+                    organization=settings.HELIX_ORGANIZATION,
+                    proxy=settings.HELIX_PROXY,
+                    ssl_verify=settings.HELIX_SSL_VERIFY,
+                    ca_bundle=settings.HELIX_CA_BUNDLE,
                     cookie_manual=helix_cookie_manual or None,
                     dry_run=True,
                 )
@@ -521,10 +560,12 @@ def main() -> None:
         if run_helix:
             with st.spinner("Ingestando Helix..."):
                 ok, msg, new_hdoc = ingest_helix(
-                    helix_base_url=getattr(settings, "HELIX_BASE_URL", ""),
-                    browser=getattr(settings, "HELIX_BROWSER", "chrome"),
-                    organization=getattr(settings, "HELIX_ORGANIZATION", ""),
-                    proxy=getattr(settings, "HELIX_PROXY", ""),
+                    helix_base_url=settings.HELIX_BASE_URL,
+                    browser=settings.HELIX_BROWSER,
+                    organization=settings.HELIX_ORGANIZATION,
+                    proxy=settings.HELIX_PROXY,
+                    ssl_verify=settings.HELIX_SSL_VERIFY,
+                    ca_bundle=settings.HELIX_CA_BUNDLE,
                     cookie_manual=helix_cookie_manual or None,
                     dry_run=False,
                     existing_doc=helix_doc,
@@ -543,7 +584,10 @@ def main() -> None:
                 "helix_base_url": helix_doc.helix_base_url,
                 "query": helix_doc.query,
                 "items_count": len(helix_doc.items),
-                "proxy": getattr(settings, "HELIX_PROXY", ""),
+                "data_path": helix_data_path,
+                "proxy": settings.HELIX_PROXY,
+                "ssl_verify": settings.HELIX_SSL_VERIFY,
+                "ca_bundle": settings.HELIX_CA_BUNDLE,
             }
         )
 
