@@ -1,19 +1,44 @@
+# src/bug_resolution_radar/ingest/helix_ingest.py
 from __future__ import annotations
 
-import os
 import json
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
+from requests.exceptions import SSLError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ..schema_helix import HelixDocument, HelixWorkItem
 from ..utils import now_iso
 from .helix_session import get_helix_session_cookie
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+def _parse_bool(value: str | bool | None, default: bool = True) -> bool:
+    """
+    Acepta: true/false, 1/0, yes/no, y/n, on/off (case-insensitive).
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    s = str(value).strip().lower()
+    if s == "":
+        return default
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return default
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    # SSL no se arregla reintentando: NO lo reintentamos.
+    retry=retry_if_exception_type((RuntimeError, requests.exceptions.ConnectionError, requests.exceptions.Timeout)),
+)
 def _request(session: requests.Session, method: str, url: str, **kwargs) -> requests.Response:
     r = session.request(method, url, timeout=30, **kwargs)
     if r.status_code in (429, 503):
@@ -65,7 +90,7 @@ def _cookies_to_jar(session: requests.Session, cookie_header: str, host: str) ->
         # host-only
         session.cookies.set(name, value, domain=host, path=path)
 
-        # fallback sin dominio
+        # fallback sin dominio explícito
         session.cookies.set(name, value, path=path)
 
         # dominio padre típico (.onbmc.com)
@@ -96,6 +121,8 @@ def ingest_helix(
     browser: str,
     organization: str,
     proxy: str = "",
+    ssl_verify: str = "",
+    ca_bundle: str = "",
     cookie_manual: Optional[str] = None,
     chunk_size: int = 75,
     dry_run: bool = False,
@@ -117,9 +144,28 @@ def ingest_helix(
 
     session = requests.Session()
 
+    # -----------------------------
+    # Proxy
+    # -----------------------------
     helix_proxy = (proxy or os.getenv("HELIX_PROXY", "")).strip()
     if helix_proxy:
         session.proxies.update({"http": helix_proxy, "https": helix_proxy})
+
+    # -----------------------------
+    # SSL verify / CA bundle
+    # -----------------------------
+    verify_env = os.getenv("HELIX_SSL_VERIFY", "true")
+    ca_env = os.getenv("HELIX_CA_BUNDLE", "")
+
+    verify_bool = _parse_bool(ssl_verify or verify_env, default=True)
+    ca_path = (ca_bundle or ca_env).strip()
+
+    if ca_path:
+        session.verify = ca_path
+        verify_desc = f"ca_bundle:{ca_path}"
+    else:
+        session.verify = verify_bool
+        verify_desc = "true" if verify_bool else "false"
 
     session.headers.update(
         {
@@ -138,6 +184,9 @@ def ingest_helix(
         }
     )
 
+    # -----------------------------
+    # Cookie
+    # -----------------------------
     cookie = cookie_manual
     if not cookie:
         try:
@@ -153,12 +202,13 @@ def ingest_helix(
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
 
-    # Warm-up (puede refrescar cookies / sesión)
+    # Warm-up
     try:
         _request(session, "GET", f"{base}/app/")
     except Exception:
         pass
 
+    # CSRF token desde cookie
     xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
     if xsrf:
         session.headers["X-XSRF-TOKEN"] = xsrf
@@ -178,18 +228,29 @@ def ingest_helix(
     org = (organization or "").strip()
 
     def make_body(start_index: int) -> Dict[str, Any]:
-        # ✅ body “clonado” de DevTools (incluye customAttributeNames)
         return {
             "filterCriteria": {"organizations": [org]},
             "attributeNames": attribute_names,
-            "chunkInfo": {"startIndex": start_index, "chunkSize": int(chunk_size)},
+            "chunkInfo": {"startIndex": int(start_index), "chunkSize": int(chunk_size)},
             "customAttributeNames": [],
             "sortingInfo": {},
         }
 
+    # -----------------------------
+    # Dry-run
+    # -----------------------------
     if dry_run:
         body = make_body(0)
-        r = _request(session, "POST", endpoint, json=body)
+        try:
+            r = _request(session, "POST", endpoint, json=body)
+        except SSLError as e:
+            return (
+                False,
+                "Helix dry-run SSL error: "
+                f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
+
         if r.status_code != 200:
             return (
                 False,
@@ -197,6 +258,7 @@ def ingest_helix(
                 f"({r.status_code}): {r.text[:800]} | "
                 f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | "
+                f"verify={verify_desc} | "
                 f"xsrf={'sí' if bool(xsrf) else 'no'} | "
                 f"endpoint={endpoint} | "
                 f"body={json.dumps(body, ensure_ascii=False)}",
@@ -204,13 +266,30 @@ def ingest_helix(
             )
         return True, "OK Helix: autenticación válida y endpoint responde 200.", None
 
+    # -----------------------------
+    # Ingest real
+    # -----------------------------
     items: List[HelixWorkItem] = []
     start = 0
 
     while True:
-        r = _request(session, "POST", endpoint, json=make_body(start))
+        try:
+            r = _request(session, "POST", endpoint, json=make_body(start))
+        except SSLError as e:
+            return (
+                False,
+                "Helix SSL error: "
+                f"{e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
+
         if r.status_code != 200:
-            return False, f"Error Helix ({r.status_code}): {r.text[:800]}", None
+            return (
+                False,
+                f"Error Helix ({r.status_code}): {r.text[:800]} | "
+                f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
 
         data = r.json()
         batch = _pick_items(data)
