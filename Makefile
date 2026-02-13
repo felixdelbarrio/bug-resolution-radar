@@ -12,8 +12,8 @@ help:
 	@echo ""
 	@echo "Bug Resolution Radar - comandos"
 	@echo ""
-	@echo "  make setup       Crea venv e instala dependencias (requirements.txt)"
-	@echo "  make install     Reinstala dependencias en el venv existente"
+	@echo "  make setup       Crea venv e instala dependencias + paquete editable"
+	@echo "  make install     Reinstala dependencias + paquete en el venv existente"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
 	@echo "  make format      Formatea el código (black, si está instalado)"
 	@echo "  make lint        Lint (ruff, si está instalado)"
@@ -29,6 +29,7 @@ setup:
 	$(PY) -m venv $(VENV)
 	$(PIP) install -U pip
 	$(PIP) install -r requirements.txt
+	$(PIP) install -e .
 	@echo ""
 	@echo "Entorno listo."
 	@echo "Activa con: source .venv/bin/activate"
@@ -36,6 +37,7 @@ setup:
 install:
 	$(PIP) install -U pip
 	$(PIP) install -r requirements.txt
+	$(PIP) install -e .
 
 format:
 	@if [ -f $(VENV)/bin/black ]; then \

@@ -47,7 +47,7 @@ class Settings(BaseModel):
     # Proxy y SS
     HELIX_PROXY: str = ""
     HELIX_SSL_VERIFY: str = ""   # "true" o "false"
-    HELIX_CA_BUNDLE: str = ""        # ruta a .pem si usas CA corporativa
+    HELIX_PROXY_MIN_READ_TIMEOUT: int = 30
 
     # -------------------------
     # KPIs

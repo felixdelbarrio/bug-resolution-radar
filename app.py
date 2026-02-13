@@ -418,11 +418,6 @@ def main() -> None:
                 index=0 if _boolish(getattr(settings, "HELIX_SSL_VERIFY", True), default=True) else 1,
                 help="Pon false si estás detrás de inspección SSL corporativa o si tu proxy rompe el certificado.",
             )
-            helix_ca_bundle = st.text_input(
-                "Helix CA bundle (opcional)",
-                value=settings.HELIX_CA_BUNDLE,
-                help="Ruta a un .pem con la CA corporativa. Si se rellena, tiene prioridad sobre SSL verify.",
-            )
 
         with c2:
             jira_browser = st.selectbox(
@@ -463,7 +458,6 @@ def main() -> None:
                     HELIX_DATA_PATH=helix_data_path.strip(),
                     HELIX_PROXY=helix_proxy.strip(),
                     HELIX_SSL_VERIFY=str(helix_ssl_verify).strip().lower(),
-                    HELIX_CA_BUNDLE=helix_ca_bundle.strip(),
                 )
             )
             save_settings(new_settings)
@@ -551,7 +545,6 @@ def main() -> None:
                     organization=settings.HELIX_ORGANIZATION,
                     proxy=settings.HELIX_PROXY,
                     ssl_verify=settings.HELIX_SSL_VERIFY,
-                    ca_bundle=settings.HELIX_CA_BUNDLE,
                     cookie_manual=helix_cookie_manual or None,
                     dry_run=True,
                 )
@@ -565,7 +558,6 @@ def main() -> None:
                     organization=settings.HELIX_ORGANIZATION,
                     proxy=settings.HELIX_PROXY,
                     ssl_verify=settings.HELIX_SSL_VERIFY,
-                    ca_bundle=settings.HELIX_CA_BUNDLE,
                     cookie_manual=helix_cookie_manual or None,
                     dry_run=False,
                     existing_doc=helix_doc,
@@ -587,7 +579,6 @@ def main() -> None:
                 "data_path": helix_data_path,
                 "proxy": settings.HELIX_PROXY,
                 "ssl_verify": settings.HELIX_SSL_VERIFY,
-                "ca_bundle": settings.HELIX_CA_BUNDLE,
             }
         )
 
