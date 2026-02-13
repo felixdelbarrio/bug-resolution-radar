@@ -502,6 +502,7 @@ def main() -> None:
                 )
             if ok and new_doc is not None:
                 _save_doc(settings.DATA_PATH, new_doc)
+                doc = new_doc
                 st.success(f"{msg}. Guardado en {settings.DATA_PATH}")
             else:
                 st.error(msg)
@@ -521,6 +522,11 @@ def main() -> None:
         # Helix
         st.markdown("---")
         st.markdown("### Helix")
+        helix_cookie_manual = st.text_input(
+            "Fallback Helix: pegar cookie (header Cookie) manualmente (solo memoria, NO persistente)",
+            value="",
+            type="password",
+        )
 
         hcolA, hcolB = st.columns([1, 1])
         with hcolA:
@@ -539,7 +545,15 @@ def main() -> None:
                     organization=settings.HELIX_ORGANIZATION,
                     proxy=settings.HELIX_PROXY,
                     ssl_verify=settings.HELIX_SSL_VERIFY,
-                    cookie_manual=None,
+                    ca_bundle=settings.HELIX_CA_BUNDLE,
+                    connect_timeout=settings.HELIX_CONNECT_TIMEOUT,
+                    read_timeout=settings.HELIX_READ_TIMEOUT,
+                    proxy_min_read_timeout=settings.HELIX_PROXY_MIN_READ_TIMEOUT,
+                    dryrun_connect_timeout=settings.HELIX_DRYRUN_CONNECT_TIMEOUT,
+                    dryrun_read_timeout=settings.HELIX_DRYRUN_READ_TIMEOUT,
+                    max_pages=settings.HELIX_MAX_PAGES,
+                    max_ingest_seconds=settings.HELIX_MAX_INGEST_SECONDS,
+                    cookie_manual=helix_cookie_manual or None,
                     dry_run=True,
                 )
             (st.success if ok else st.error)(msg)
@@ -552,12 +566,21 @@ def main() -> None:
                     organization=settings.HELIX_ORGANIZATION,
                     proxy=settings.HELIX_PROXY,
                     ssl_verify=settings.HELIX_SSL_VERIFY,
-                    cookie_manual=None,
+                    ca_bundle=settings.HELIX_CA_BUNDLE,
+                    connect_timeout=settings.HELIX_CONNECT_TIMEOUT,
+                    read_timeout=settings.HELIX_READ_TIMEOUT,
+                    proxy_min_read_timeout=settings.HELIX_PROXY_MIN_READ_TIMEOUT,
+                    dryrun_connect_timeout=settings.HELIX_DRYRUN_CONNECT_TIMEOUT,
+                    dryrun_read_timeout=settings.HELIX_DRYRUN_READ_TIMEOUT,
+                    max_pages=settings.HELIX_MAX_PAGES,
+                    max_ingest_seconds=settings.HELIX_MAX_INGEST_SECONDS,
+                    cookie_manual=helix_cookie_manual or None,
                     dry_run=False,
                     existing_doc=helix_doc,
                 )
             if ok and new_hdoc is not None:
                 _save_helix_doc(helix_data_path, new_hdoc)
+                helix_doc = new_hdoc
                 st.success(f"{msg}. Guardado en {helix_data_path}")
             else:
                 st.error(msg)

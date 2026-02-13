@@ -12,6 +12,26 @@ def _cookie_applies_to_host(cookie_domain: str, host: str) -> bool:
     return h == cd or h.endswith("." + cd)
 
 
+def _cookie_applies_to_any_host(cookie_domain: str, hosts: list[str]) -> bool:
+    return any(_cookie_applies_to_host(cookie_domain, h) for h in hosts)
+
+
+def _related_hosts(host: str) -> list[str]:
+    h = (host or "").strip().lower()
+    if not h:
+        return []
+    out = [h]
+    if "-smartit." in h:
+        out.append(h.replace("-smartit.", "-rsso.", 1))
+    seen: set[str] = set()
+    dedup: list[str] = []
+    for x in out:
+        if x and x not in seen:
+            dedup.append(x)
+            seen.add(x)
+    return dedup
+
+
 def _candidate_domains_from_host(host: str) -> list[str]:
     h = (host or "").strip().lower()
     if not h:
@@ -45,22 +65,36 @@ def get_helix_session_cookie(browser: str, host: str) -> Optional[str]:
 
     getter = browser_cookie3.edge if browser == "edge" else browser_cookie3.chrome
 
+    hosts = _related_hosts(host)
+
+    domains: list[str] = []
+    seen_domains: set[str] = set()
+    for h in hosts:
+        for d in _candidate_domains_from_host(h):
+            if d and d not in seen_domains:
+                domains.append(d)
+                seen_domains.add(d)
+
     cookie_jars = []
-    for d in _candidate_domains_from_host(host):
+    for d in domains:
         try:
             cookie_jars.append(getter(domain_name=d))
         except Exception:
             continue
+    # Fallback amplio: en algunos perfiles Chromium el filtro por domain_name
+    # no devuelve todas las cookies válidas de sesión.
+    try:
+        cookie_jars.append(getter())
+    except Exception:
+        pass
+
     if not cookie_jars:
-        try:
-            cookie_jars.append(getter())
-        except Exception:
-            return None
+        return None
 
     parts: dict[str, str] = {}
     for cj in cookie_jars:
         for c in cj:
-            if not c.domain or not _cookie_applies_to_host(c.domain, host):
+            if not c.domain or not _cookie_applies_to_any_host(c.domain, hosts):
                 continue
             if not c.name:
                 continue

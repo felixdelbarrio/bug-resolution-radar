@@ -42,12 +42,18 @@ class Settings(BaseModel):
     HELIX_ORGANIZATION: str = ""
     HELIX_BROWSER: str = "chrome"
     HELIX_DATA_PATH: str = "data/helix_dump.json"
-    HELIX_PROXY_MIN_READ_TIMEOUT: int = 120 # segundos, para evitar timeouts en consultas largas
 
     # Proxy y SS
     HELIX_PROXY: str = ""
     HELIX_SSL_VERIFY: str = ""   # "true" o "false"
+    HELIX_CA_BUNDLE: str = ""
+    HELIX_CONNECT_TIMEOUT: int = 10
+    HELIX_READ_TIMEOUT: int = 30
     HELIX_PROXY_MIN_READ_TIMEOUT: int = 30
+    HELIX_DRYRUN_CONNECT_TIMEOUT: int = 10
+    HELIX_DRYRUN_READ_TIMEOUT: int = 60
+    HELIX_MAX_PAGES: int = 200
+    HELIX_MAX_INGEST_SECONDS: int = 900
 
     # -------------------------
     # KPIs
