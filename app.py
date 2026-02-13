@@ -522,12 +522,6 @@ def main() -> None:
         st.markdown("---")
         st.markdown("### Helix")
 
-        helix_cookie_manual = st.text_input(
-            "Fallback Helix: pegar cookie (header Cookie) manualmente (solo memoria, NO persistente)",
-            value="",
-            type="password",
-        )
-
         hcolA, hcolB = st.columns([1, 1])
         with hcolA:
             test_helix = st.button("🔎 Test conexión Helix")
@@ -545,7 +539,7 @@ def main() -> None:
                     organization=settings.HELIX_ORGANIZATION,
                     proxy=settings.HELIX_PROXY,
                     ssl_verify=settings.HELIX_SSL_VERIFY,
-                    cookie_manual=helix_cookie_manual or None,
+                    cookie_manual=None,
                     dry_run=True,
                 )
             (st.success if ok else st.error)(msg)
@@ -558,7 +552,7 @@ def main() -> None:
                     organization=settings.HELIX_ORGANIZATION,
                     proxy=settings.HELIX_PROXY,
                     ssl_verify=settings.HELIX_SSL_VERIFY,
-                    cookie_manual=helix_cookie_manual or None,
+                    cookie_manual=None,
                     dry_run=False,
                     existing_doc=helix_doc,
                 )
