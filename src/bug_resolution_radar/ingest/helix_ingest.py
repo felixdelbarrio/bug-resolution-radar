@@ -111,7 +111,7 @@ def _dry_run_timeouts(
     retry=retry_if_exception(
         lambda e: isinstance(
             e,
-            (RuntimeError, requests.exceptions.ConnectionError, requests.exceptions.Timeout),
+            (RuntimeError, requests.exceptions.ConnectionError),
         )
         and not isinstance(e, requests.exceptions.SSLError)
     ),
@@ -262,6 +262,11 @@ def _short_text(s: str, max_chars: int = 240) -> str:
     return txt[:max_chars] + "..."
 
 
+def _is_timeout_text(s: str) -> bool:
+    t = (s or "").lower()
+    return "timeout" in t or "timed out" in t or "read timed out" in t
+
+
 def _has_auth_cookie(cookie_names: List[str]) -> bool:
     wanted = {"jsessionid", "xsrf-token", "loginid", "sso.session.restore.cookies", "route"}
     got = {str(x).strip().lower() for x in cookie_names}
@@ -282,6 +287,8 @@ def ingest_helix(
     proxy_min_read_timeout: Any = None,
     dryrun_connect_timeout: Any = None,
     dryrun_read_timeout: Any = None,
+    max_read_timeout: Any = None,
+    min_chunk_size: Any = None,
     max_pages: Any = None,
     max_ingest_seconds: Any = None,
     dry_run: bool = False,
@@ -391,11 +398,12 @@ def ingest_helix(
 
     org = (organization or "").strip()
 
-    def make_body(start_index: int) -> Dict[str, Any]:
+    def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
+        size = int(page_chunk_size if page_chunk_size is not None else chunk_size)
         return {
             "filterCriteria": {"organizations": [org]},
             "attributeNames": attribute_names,
-            "chunkInfo": {"startIndex": int(start_index), "chunkSize": int(chunk_size)},
+            "chunkInfo": {"startIndex": int(start_index), "chunkSize": size},
             "customAttributeNames": [],
             "sortInfo": {},
         }
@@ -484,6 +492,24 @@ def ingest_helix(
     # -----------------------------
     items: List[HelixWorkItem] = []
     start = 0
+    base_chunk_size = max(1, int(chunk_size))
+    current_chunk_size = base_chunk_size
+    min_chunk_limit = max(
+        1,
+        _coerce_int(
+            min_chunk_size if min_chunk_size is not None else os.getenv("HELIX_MIN_CHUNK_SIZE", "10"),
+            10,
+        ),
+    )
+    min_chunk_limit = min(min_chunk_limit, base_chunk_size)
+    current_read_to = read_to
+    max_read_to = max(
+        current_read_to,
+        _coerce_float(
+            max_read_timeout if max_read_timeout is not None else os.getenv("HELIX_MAX_READ_TIMEOUT", "120"),
+            120.0,
+        ),
+    )
 
     seen_ids: set = set()
     started_at = time.monotonic()
@@ -507,36 +533,68 @@ def ingest_helix(
                 "Ingesta Helix abortada por tiempo máximo excedido "
                 f"({elapsed:.1f}s > {max_elapsed_seconds:.1f}s). "
                 f"Páginas={page}, items_nuevos={len(items)} | "
+                f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
 
-        page += 1
-        if page > max_pages_limit:
+        if page >= max_pages_limit:
             return (
                 False,
                 "Ingesta Helix abortada: demasiadas páginas (posible paginación ignorada). "
-                f"max_pages={max_pages_limit} | páginas={page - 1} | items_nuevos={len(items)} | "
+                f"max_pages={max_pages_limit} | páginas={page} | items_nuevos={len(items)} | "
+                f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
 
         try:
-            r = _request(session, "POST", endpoint, json=make_body(start), timeout=(connect_to, read_to))
+            r = _request(
+                session,
+                "POST",
+                endpoint,
+                json=make_body(start, current_chunk_size),
+                timeout=(connect_to, current_read_to),
+            )
         except RetryError as e:
+            cause = _retry_root_cause(e)
+            if _is_timeout_text(cause):
+                if current_chunk_size > min_chunk_limit:
+                    current_chunk_size = max(min_chunk_limit, current_chunk_size // 2)
+                    continue
+                if current_read_to < max_read_to:
+                    current_read_to = min(max_read_to, max(current_read_to + 5.0, current_read_to * 1.5))
+                    continue
+            if "rate limited" in cause.lower():
+                return (
+                    False,
+                    "Helix responde con rate limit tras reintentos agotados. "
+                    f"Causa: {cause} | endpoint={endpoint} | "
+                    f"chunk={current_chunk_size} | timeout(connect/read)={connect_to}/{current_read_to}",
+                    None,
+                )
             return (
                 False,
                 "Timeout en Helix (reintentos agotados): el servidor no respondió a tiempo. "
-                f"Causa: {_retry_root_cause(e)} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
-                f"timeout(connect/read)={connect_to}/{read_to} | endpoint={endpoint}",
+                f"Causa: {cause} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
+                f"timeout(connect/read)={connect_to}/{current_read_to} | "
+                f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to} | "
+                f"endpoint={endpoint}",
                 None,
             )
         except requests.exceptions.Timeout as e:
+            if current_chunk_size > min_chunk_limit:
+                current_chunk_size = max(min_chunk_limit, current_chunk_size // 2)
+                continue
+            if current_read_to < max_read_to:
+                current_read_to = min(max_read_to, max(current_read_to + 5.0, current_read_to * 1.5))
+                continue
             return (
                 False,
                 "Timeout en Helix: el servidor no respondió a tiempo. "
                 f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
-                f"timeout(connect/read)={connect_to}/{read_to}",
+                f"timeout(connect/read)={connect_to}/{current_read_to} | "
+                f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to}",
                 None,
             )
         except SSLError as e:
@@ -552,6 +610,8 @@ def ingest_helix(
                 f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
+
+        page += 1
 
         if r.status_code != 200:
             return (
@@ -610,11 +670,11 @@ def ingest_helix(
         if new_in_page == 0:
             break
 
-        start += int(chunk_size)
+        start += int(current_chunk_size)
 
         if total is not None and (start >= total or len(seen_ids) >= total):
             break
-        if len(batch) < int(chunk_size):
+        if len(batch) < int(current_chunk_size):
             break
 
     doc = existing_doc or HelixDocument.empty()
