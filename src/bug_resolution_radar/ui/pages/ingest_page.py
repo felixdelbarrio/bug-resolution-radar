@@ -1,63 +1,180 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
+from bug_resolution_radar.schema_helix import HelixDocument
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
 
 
+def _get_helix_path(settings: Settings) -> str:
+    # Prefer config (HELIX_DATA_PATH). Fallback to a sensible default.
+    p = (getattr(settings, "HELIX_DATA_PATH", "") or "").strip()
+    return p or "data/helix.json"
+
+
 def render(settings: Settings) -> None:
-    st.subheader("Ingesta (solo Jira)")
-    st.caption("Las llamadas se hacen directamente a Jira desde tu máquina. No hay backend.")
+    st.subheader("Ingesta")
+    st.caption("Las llamadas se hacen directamente desde tu máquina. No hay backend.")
     st.info(
-        "Consentimiento: Se leerán cookies locales del navegador solo para autenticar tu sesión personal hacia Jira. "
+        "Consentimiento: Se leerán cookies locales del navegador (Jira/Helix) solo para autenticar tu sesión personal. "
         "No se envían a terceros."
     )
 
-    jira_cookie_manual = st.text_input(
-        "Fallback: pegar cookie (header Cookie) manualmente (solo memoria, NO persistente)",
-        value="",
-        type="password",
-        help="Ejemplo: atlassian.xsrf.token=...; cloud.session.token=... (solo si tu entorno lo requiere)",
-    )
+    # Sub-tabs inside ingestion page
+    t_jira, t_helix = st.tabs(["🟦 Jira", "🟩 Helix"])
 
-    colA, colB = st.columns([1, 1])
-    with colA:
-        test_jira = st.button("🔎 Test conexión Jira")
-    with colB:
-        run_jira = st.button("⬇️ Reingestar Jira ahora")
+    # -----------------------------
+    # Jira
+    # -----------------------------
+    with t_jira:
+        st.markdown("### Ingesta Jira")
+        st.caption("Fuente: Jira (cookies locales).")
 
-    doc = load_issues_doc(settings.DATA_PATH)
+        jira_cookie_manual = st.text_input(
+            "Fallback: pegar cookie Jira (header Cookie) manualmente (solo memoria, NO persistente)",
+            value="",
+            type="password",
+            help="Ejemplo: atlassian.xsrf.token=...; cloud.session.token=... (solo si tu entorno lo requiere)",
+            key="jira_cookie_manual",
+        )
 
-    if test_jira:
-        with st.spinner("Probando Jira..."):
-            ok, msg, _ = ingest_jira(settings=settings, cookie_manual=jira_cookie_manual or None, dry_run=True)
-        (st.success if ok else st.error)(msg)
+        colA, colB = st.columns([1, 1])
+        with colA:
+            test_jira = st.button("🔎 Test conexión Jira", key="btn_test_jira")
+        with colB:
+            run_jira = st.button("⬇️ Reingestar Jira ahora", key="btn_run_jira")
 
-    if run_jira:
-        with st.spinner("Ingestando Jira..."):
-            ok, msg, new_doc = ingest_jira(
-                settings=settings,
-                cookie_manual=jira_cookie_manual or None,
-                dry_run=False,
-                existing_doc=doc,
+        doc = load_issues_doc(settings.DATA_PATH)
+
+        if test_jira:
+            with st.spinner("Probando Jira..."):
+                ok, msg, _ = ingest_jira(
+                    settings=settings,
+                    cookie_manual=jira_cookie_manual or None,
+                    dry_run=True,
+                )
+            (st.success if ok else st.error)(msg)
+
+        if run_jira:
+            with st.spinner("Ingestando Jira..."):
+                ok, msg, new_doc = ingest_jira(
+                    settings=settings,
+                    cookie_manual=jira_cookie_manual or None,
+                    dry_run=False,
+                    existing_doc=doc,
+                )
+            if ok and new_doc is not None:
+                save_issues_doc(settings.DATA_PATH, new_doc)
+                st.success(f"{msg}. Guardado en {settings.DATA_PATH}")
+            else:
+                st.error(msg)
+
+        st.markdown("---")
+        st.markdown("### Última ingesta (Jira)")
+        st.json(
+            {
+                "schema_version": doc.schema_version,
+                "ingested_at": doc.ingested_at,
+                "jira_base_url": doc.jira_base_url,
+                "project_key": doc.project_key,
+                "query": doc.query,
+                "issues_count": len(doc.issues),
+            }
+        )
+
+    # -----------------------------
+    # Helix
+    # -----------------------------
+    with t_helix:
+        st.markdown("### Ingesta Helix")
+        st.caption("Fuente: Helix/SmartIT (cookies locales).")
+
+        helix_base_url = (getattr(settings, "HELIX_BASE_URL", "") or "").strip()
+        helix_org = (getattr(settings, "HELIX_ORGANIZATION", "") or "").strip()
+        helix_browser = (getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip()
+        helix_proxy = (getattr(settings, "HELIX_PROXY", "") or "").strip()
+        helix_ssl_verify = (getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip()
+
+        helix_path = _get_helix_path(settings)
+        helix_repo = HelixRepo(Path(helix_path))
+
+        helix_doc = helix_repo.load() or HelixDocument.empty()
+
+        # Show current config (read-only hint)
+        with st.expander("Config Helix (desde .env)", expanded=False):
+            st.json(
+                {
+                    "HELIX_BASE_URL": helix_base_url,
+                    "HELIX_ORGANIZATION": helix_org,
+                    "HELIX_BROWSER": helix_browser,
+                    "HELIX_PROXY": helix_proxy,
+                    "HELIX_SSL_VERIFY": helix_ssl_verify,
+                    "HELIX_DATA_PATH": helix_path,
+                }
             )
-        if ok and new_doc is not None:
-            save_issues_doc(settings.DATA_PATH, new_doc)
-            st.success(f"{msg}. Guardado en {settings.DATA_PATH}")
-        else:
-            st.error(msg)
 
-    st.markdown("---")
-    st.markdown("### Última ingesta")
-    st.json(
-        {
-            "schema_version": doc.schema_version,
-            "ingested_at": doc.ingested_at,
-            "jira_base_url": doc.jira_base_url,
-            "project_key": doc.project_key,
-            "query": doc.query,
-            "issues_count": len(doc.issues),
-        }
-    )
+        helix_cookie_manual = st.text_input(
+            "Fallback: pegar cookie Helix (header Cookie) manualmente (solo memoria, NO persistente)",
+            value="",
+            type="password",
+            help="Pega aquí el header Cookie si no se puede leer del navegador.",
+            key="helix_cookie_manual",
+        )
+
+        colH1, colH2 = st.columns([1, 1])
+        with colH1:
+            test_helix = st.button("🔎 Test conexión Helix", key="btn_test_helix")
+        with colH2:
+            run_helix = st.button("⬇️ Reingestar Helix ahora", key="btn_run_helix")
+
+        if test_helix:
+            with st.spinner("Probando Helix..."):
+                ok, msg, _ = ingest_helix(
+                    helix_base_url=helix_base_url,
+                    browser=helix_browser,
+                    organization=helix_org,
+                    proxy=helix_proxy,
+                    ssl_verify=helix_ssl_verify,
+                    cookie_manual=helix_cookie_manual or None,
+                    dry_run=True,
+                    existing_doc=helix_doc,
+                )
+            (st.success if ok else st.error)(msg)
+
+        if run_helix:
+            with st.spinner("Ingestando Helix... (puede tardar con proxy)"):
+                ok, msg, new_doc = ingest_helix(
+                    helix_base_url=helix_base_url,
+                    browser=helix_browser,
+                    organization=helix_org,
+                    proxy=helix_proxy,
+                    ssl_verify=helix_ssl_verify,
+                    cookie_manual=helix_cookie_manual or None,
+                    dry_run=False,
+                    existing_doc=helix_doc,
+                )
+            if ok and new_doc is not None:
+                helix_repo.save(new_doc)
+                st.success(f"{msg}. Guardado en {helix_path}")
+                helix_doc = new_doc
+            else:
+                st.error(msg)
+
+        st.markdown("---")
+        st.markdown("### Última ingesta (Helix)")
+        st.json(
+            {
+                "schema_version": helix_doc.schema_version,
+                "ingested_at": helix_doc.ingested_at,
+                "helix_base_url": helix_doc.helix_base_url,
+                "query": helix_doc.query,
+                "items_count": len(helix_doc.items),
+                "data_path": helix_path,
+            }
+        )
