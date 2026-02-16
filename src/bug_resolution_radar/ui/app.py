@@ -19,13 +19,13 @@ def main() -> None:
     inject_bbva_css()
     render_hero(settings.APP_TITLE)
 
-    tabs = st.tabs(["⚙️ Configuración", "⬇️ Ingesta", "📊 Dashboard"])
+    tabs = st.tabs(["📊 Dashboard", "⬇️ Ingesta","⚙️ Configuración" ])
 
     with tabs[0]:
-        config_page.render(settings)
+        dashboard_page.render(settings)
 
     with tabs[1]:
         ingest_page.render(settings)
 
     with tabs[2]:
-        dashboard_page.render(settings)
+        config_page.render(settings)
