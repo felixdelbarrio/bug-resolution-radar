@@ -1,3 +1,4 @@
+# bug_resolution_radar/ui/components/filters.py
 from __future__ import annotations
 
 import html
@@ -14,14 +15,78 @@ from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 class FilterState:
     status: List[str]
     priority: List[str]
-    itype: List[str]
+    # type eliminado a propósito (se ignora en UI y en apply_filters)
     assignee: List[str]
 
 
-def render_filters(df: pd.DataFrame) -> FilterState:
+# ---------------------------------------------------------------------
+# Canonical status order (single source of truth for display order)
+# ---------------------------------------------------------------------
+_CANONICAL_STATUS_ORDER: List[str] = [
+    "New",
+    "Analysing",
+    "Blocked",
+    "En progreso",
+    "To Rework",
+    "Test",
+    "Ready To Verify",
+    "Accepted",
+    "Ready to Deploy",
+    # Si aparece "Deployed" en tu ingesta y quieres ordenarlo, añade aquí donde corresponda.
+]
+
+
+def _order_statuses_canonical(statuses: List[str]) -> List[str]:
+    """Order statuses by canonical flow. Unknown ones keep stable order and go last."""
+    idx = {s.lower(): i for i, s in enumerate(_CANONICAL_STATUS_ORDER)}
+
+    def key_fn(pair):
+        orig_i, s = pair
+        k = (s or "").strip().lower()
+        return (idx.get(k, 10_000), orig_i)
+
+    return [s for _, s in sorted(list(enumerate(statuses)), key=key_fn)]
+
+
+# ---------------------------------------------------------------------
+# Internal: canonical keys + namespaced UI keys
+# ---------------------------------------------------------------------
+_CAN_STATUS = "filter_status"
+_CAN_PRIO = "filter_priority"
+_CAN_ASSIGNEE = "filter_assignee"
+
+
+def _ui_key(prefix: str, name: str) -> str:
+    p = (prefix or "").strip()
+    return f"{p}::{name}" if p else name
+
+
+def _sync_from_ui_to_canonical(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
+    """Copy UI widget state (namespaced keys) into canonical shared keys."""
+    st.session_state[_CAN_STATUS] = list(st.session_state.get(ui_status_key) or [])
+    st.session_state[_CAN_PRIO] = list(st.session_state.get(ui_prio_key) or [])
+    st.session_state[_CAN_ASSIGNEE] = list(st.session_state.get(ui_assignee_key) or [])
+
+
+def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
+    """Before creating widgets, ensure their state reflects canonical keys (for cross-component sync)."""
+    st.session_state[ui_status_key] = list(st.session_state.get(_CAN_STATUS) or [])
+    st.session_state[ui_prio_key] = list(st.session_state.get(_CAN_PRIO) or [])
+    st.session_state[ui_assignee_key] = list(st.session_state.get(_CAN_ASSIGNEE) or [])
+
+
+# ---------------------------------------------------------------------
+# Filters UI
+# ---------------------------------------------------------------------
+def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     """Render filter widgets and return the selected filter state.
 
-    Uses Streamlit session_state keys so other components (matrix) can update them.
+    IMPORTANT:
+    - Widgets use NAMESPACED keys (by key_prefix) to avoid StreamlitDuplicateElementKey
+      when the same filters are rendered in multiple tabs.
+    - Canonical shared state remains in:
+        filter_status, filter_priority, filter_assignee
+      so matrix/kanban/insights can still sync by writing those keys.
     """
     st.markdown("### Filtros")
 
@@ -31,38 +96,72 @@ def render_filters(df: pd.DataFrame) -> FilterState:
         normalize_text_col(df["priority"], "(sin priority)") if "priority" in df.columns else pd.Series([], dtype=str)
     )
 
-    f1, f2, f3, f4 = st.columns(4)
+    # Namespaced widget keys (avoid duplicates across tabs)
+    ui_status_key = _ui_key(key_prefix, "filter_status_ui")
+    ui_prio_key = _ui_key(key_prefix, "filter_priority_ui")
+    ui_assignee_key = _ui_key(key_prefix, "filter_assignee_ui")
+
+    # Mirror canonical -> ui before widget creation (so matrix clicks reflect in widgets)
+    _mirror_canonical_to_ui(ui_status_key, ui_prio_key, ui_assignee_key)
+
+    # Layout: Estado | Priority | Asignado  (Tipo eliminado)
+    f1, f2, f3 = st.columns(3)
 
     with f1:
-        status_opts = sorted(status_col.astype(str).unique().tolist())
-        status = st.pills("Estado", options=status_opts, selection_mode="multi", default=[], key="filter_status")
+        status_opts_raw = status_col.astype(str).unique().tolist()
+        status_opts = _order_statuses_canonical(status_opts_raw)
+
+        # pills no siempre soporta "default" en todas las versiones, pero sí key/state.
+        # Usamos session_state como fuente de verdad, y on_change para sincronizar canónico.
+        st.pills(
+            "Estado",
+            options=status_opts,
+            selection_mode="multi",
+            default=list(st.session_state.get(ui_status_key) or []),
+            key=ui_status_key,
+            on_change=_sync_from_ui_to_canonical,
+            args=(ui_status_key, ui_prio_key, ui_assignee_key),
+        )
 
     with f2:
         if "priority" in df.columns:
-            prio_opts = sorted(priority_col.astype(str).unique().tolist(), key=lambda p: (priority_rank(p), p))
-            priority = st.multiselect("Priority", prio_opts, default=[], key="filter_priority")
+            prio_opts = sorted(
+                priority_col.astype(str).unique().tolist(),
+                key=lambda p: (priority_rank(p), p),
+            )
+            st.multiselect(
+                "Priority",
+                prio_opts,
+                default=list(st.session_state.get(ui_prio_key) or []),
+                key=ui_prio_key,
+                on_change=_sync_from_ui_to_canonical,
+                args=(ui_status_key, ui_prio_key, ui_assignee_key),
+            )
         else:
-            priority = []
+            # keep ui key consistent
+            st.session_state[ui_prio_key] = []
+            st.session_state[_CAN_PRIO] = []
 
     with f3:
-        if "type" in df.columns:
-            itype_opts = sorted(df["type"].dropna().astype(str).unique().tolist())
-            itype = st.multiselect("Tipo", itype_opts, default=[], key="filter_type")
-        else:
-            itype = []
-
-    with f4:
         if "assignee" in df.columns:
             assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
-            assignee = st.multiselect("Asignado", assignee_opts, default=[], key="filter_assignee")
+            st.multiselect(
+                "Asignado",
+                assignee_opts,
+                default=list(st.session_state.get(ui_assignee_key) or []),
+                key=ui_assignee_key,
+                on_change=_sync_from_ui_to_canonical,
+                args=(ui_status_key, ui_prio_key, ui_assignee_key),
+            )
         else:
-            assignee = []
+            st.session_state[ui_assignee_key] = []
+            st.session_state[_CAN_ASSIGNEE] = []
 
+    # Return canonical state (single source of truth)
     return FilterState(
-        status=list(status or []),
-        priority=list(priority or []),
-        itype=list(itype or []),
-        assignee=list(assignee or []),
+        status=list(st.session_state.get(_CAN_STATUS) or []),
+        priority=list(st.session_state.get(_CAN_PRIO) or []),
+        assignee=list(st.session_state.get(_CAN_ASSIGNEE) or []),
     )
 
 
@@ -82,29 +181,32 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
         dff = dff[dff["status"].isin(fs.status)]
     if fs.priority and "priority" in dff.columns:
         dff = dff[dff["priority"].isin(fs.priority)]
-    if fs.itype and "type" in dff.columns:
-        dff = dff[dff["type"].isin(fs.itype)]
     if fs.assignee and "assignee" in dff.columns:
         dff = dff[dff["assignee"].isin(fs.assignee)]
 
+    # IMPORTANTE: no filtramos por "type" (se muestra todo lo que entra por ingesta)
     return dff
 
 
-# ----------------------------
+# ---------------------------------------------------------------------
 # Matrix (Estado x Priority)
-# ----------------------------
-
-
+# ---------------------------------------------------------------------
 def _matrix_set_filters(st_name: str, prio: str) -> None:
-    # Callback: runs before the next rerun, so it can safely update widget state.
-    st.session_state["filter_status"] = [st_name]
-    st.session_state["filter_priority"] = [prio]
+    # Canonical keys (shared across tabs)
+    st.session_state[_CAN_STATUS] = [st_name]
+    st.session_state[_CAN_PRIO] = [prio]
 
 
 def _matrix_clear_filters() -> None:
-    # Callback: runs before the next rerun.
-    st.session_state["filter_status"] = []
-    st.session_state["filter_priority"] = []
+    st.session_state[_CAN_STATUS] = []
+    st.session_state[_CAN_PRIO] = []
+    st.session_state[_CAN_ASSIGNEE] = []
+
+
+def _any_filter_active(fs: Optional[FilterState]) -> bool:
+    if fs is None:
+        return False
+    return bool(fs.status or fs.priority or fs.assignee)
 
 
 def render_status_priority_matrix(
@@ -130,20 +232,23 @@ def render_status_priority_matrix(
         priority=normalize_text_col(open_df["priority"], "(sin priority)"),
     )
 
-    status_counts = mx["status"].value_counts()
-    statuses = status_counts.index.tolist()
+    # Orden filas: CANÓNICO
+    statuses = _order_statuses_canonical(mx["status"].value_counts().index.tolist())
 
+    # Orden columnas: impedimento primero + resto por rank
     priorities = sorted(
         mx["priority"].dropna().astype(str).unique().tolist(),
         key=lambda p: (priority_rank(p), p),
     )
+    if "Supone un impedimento" in priorities:
+        priorities = ["Supone un impedimento"] + [p for p in priorities if p != "Supone un impedimento"]
 
-    # current selection from session_state (single selection only)
+    # current selection from canonical session_state (single selection only)
     selected_status = None
     selected_priority = None
 
-    ss = st.session_state.get("filter_status")
-    sp = st.session_state.get("filter_priority")
+    ss = st.session_state.get(_CAN_STATUS)
+    sp = st.session_state.get(_CAN_PRIO)
 
     if isinstance(ss, list) and len(ss) == 1:
         selected_status = ss[0]
@@ -151,6 +256,7 @@ def render_status_priority_matrix(
         selected_priority = sp[0]
 
     has_matrix_sel = bool(selected_status and selected_priority)
+    has_any_filter = _any_filter_active(fs)
 
     cA, cB = st.columns([3, 1])
     with cA:
@@ -162,33 +268,42 @@ def render_status_priority_matrix(
         st.button(
             "Limpiar selección",
             key=f"{key_prefix}::clear",
-            disabled=not has_matrix_sel,
+            disabled=not has_any_filter,
             on_click=_matrix_clear_filters,
         )
 
-    # Header row
-    hdr = st.columns(len(priorities) + 1)
-    hdr[0].markdown("**Estado**")
-    for i, p in enumerate(priorities):
-        if selected_priority == p:
-            hdr[i + 1].markdown(
-                f'<span style="color:var(--bbva-primary); font-weight:800;">{html.escape(p)}</span>',
-                unsafe_allow_html=True,
-            )
-        else:
-            hdr[i + 1].markdown(f"**{p}**")
-
     counts = pd.crosstab(mx["status"], mx["priority"])
 
-    for st_name in statuses[:12]:  # keep it usable; top statuses by count
-        row = st.columns(len(priorities) + 1)
-        if selected_status == st_name:
-            row[0].markdown(
-                f'<span style="color:var(--bbva-primary); font-weight:800;">{html.escape(st_name)}</span>',
+    # Totales: columnas + filas
+    col_totals = {p: int(counts[p].sum()) if p in counts.columns else 0 for p in priorities}
+    row_totals = counts.sum(axis=1).to_dict()
+
+    # Header row (con totales por columna)
+    hdr = st.columns(len(priorities) + 1)
+    hdr[0].markdown("**Estado (total)**")
+    for i, p in enumerate(priorities):
+        label = f"{p} ({col_totals.get(p, 0)})"
+        if selected_priority == p:
+            hdr[i + 1].markdown(
+                f'<span style="color:var(--bbva-primary); font-weight:800;">{html.escape(label)}</span>',
                 unsafe_allow_html=True,
             )
         else:
-            row[0].markdown(st_name)
+            hdr[i + 1].markdown(f"**{label}**")
+
+    # Rows (con total por estado)
+    for st_name in statuses:
+        total_row = int(row_totals.get(st_name, 0))
+        row = st.columns(len(priorities) + 1)
+
+        row_label = f"{st_name} ({total_row})"
+        if selected_status == st_name:
+            row[0].markdown(
+                f'<span style="color:var(--bbva-primary); font-weight:800;">{html.escape(row_label)}</span>',
+                unsafe_allow_html=True,
+            )
+        else:
+            row[0].markdown(row_label)
 
         for i, p in enumerate(priorities):
             cnt = int(counts.at[st_name, p]) if (st_name in counts.index and p in counts.columns) else 0
