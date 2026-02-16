@@ -71,6 +71,18 @@ def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
     return values.map(_rank)
 
 
+def _age_bucket_from_days(age_days: pd.Series) -> pd.Categorical:
+    """
+    Buckets canon:
+      0-2, 3-7, 8-14, 15-30, >30
+    """
+    bins = [-np.inf, 2, 7, 14, 30, np.inf]
+    labels = ["0-2", "3-7", "8-14", "15-30", ">30"]
+    cat = pd.cut(age_days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
+    # For plotly ordering stability
+    return cat
+
+
 # -------------------------
 # Charts catalog
 # -------------------------
@@ -153,10 +165,60 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
         return
 
     if chart_id == "age_buckets":
-        fig = kpis.get("age_buckets_chart")
-        if fig is None:
-            st.info("No hay datos suficientes para antigüedad con los filtros actuales.")
+        # ✅ NUEVO: barras apiladas por Status dentro de cada bucket de antigüedad
+        if open_df.empty or "created" not in open_df.columns:
+            st.info("No hay datos suficientes (created) para antigüedad con los filtros actuales.")
             return
+
+        df = open_df.copy()
+        df["__created_dt"] = _to_dt_naive(df["created"])
+        df = df[df["__created_dt"].notna()].copy()
+        if df.empty:
+            st.info("No hay fechas válidas (created) para calcular antigüedad con los filtros actuales.")
+            return
+
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
+        df["__age_days"] = df["__age_days"].clip(lower=0.0)
+
+        # status puede no existir; si no, ponemos un placeholder
+        if "status" not in df.columns:
+            df["status"] = "(sin estado)"
+        else:
+            df["status"] = df["status"].astype(str)
+
+        df["bucket"] = _age_bucket_from_days(df["__age_days"])
+
+        # Agregado: bucket x status
+        grp = (
+            df.groupby(["bucket", "status"], dropna=False)
+            .size()
+            .reset_index(name="count")
+            .sort_values(["bucket", "count"], ascending=[True, False])
+        )
+        if grp.empty:
+            st.info("No hay datos suficientes para este gráfico con los filtros actuales.")
+            return
+
+        # Orden canónico de status (y los desconocidos al final)
+        statuses = grp["status"].astype(str).unique().tolist()
+        # canon primero (si están), luego resto en orden estable
+        canon_present = [s for s in CANON_STATUS_ORDER if s in statuses]
+        rest = [s for s in statuses if s not in set(canon_present)]
+        status_order = canon_present + rest
+
+        bucket_order = ["0-2", "3-7", "8-14", "15-30", ">30"]
+
+        fig = px.bar(
+            grp,
+            x="bucket",
+            y="count",
+            color="status",
+            barmode="stack",
+            title="Antigüedad de abiertas (distribución) — por estado",
+            category_orders={"bucket": bucket_order, "status": status_order},
+        )
+        fig.update_layout(xaxis_title="bucket", yaxis_title="count")
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
 
