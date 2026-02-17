@@ -32,8 +32,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-soft-bg: #203A60;
             --bbva-tab-soft-border: #5D79A9;
             --bbva-tab-soft-text: #E6EFFF;
-            --bbva-tab-active-bg: #0E5BFF;
-            --bbva-tab-active-border: #7BB2FF;
+            --bbva-tab-active-bg: #355A86;
+            --bbva-tab-active-border: #6F92BF;
             --bbva-tab-active-text: #FFFFFF;
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
@@ -264,6 +264,33 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 0.25rem 0.25rem !important;
             border-radius: 11px !important;
             font-size: 1.05rem !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_config div[data-testid="stButton"] > button,
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_ingest [data-testid^="baseButton-"],
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_config [data-testid^="baseButton-"],
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_theme [data-testid^="baseButton-"] {
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_ingest [kind="primary"],
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_config [kind="primary"],
+          [class*="st-key-workspace_nav_bar_"] .st-key-workspace_btn_theme [kind="primary"] {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          div[data-testid="stButton"] > button[aria-label="🛰️"][kind="primary"],
+          div[data-testid="stButton"] > button[aria-label="◐"][kind="primary"],
+          div[data-testid="stButton"] > button[aria-label="⚙️"][kind="primary"] {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
           }
           .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
           .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
@@ -334,6 +361,64 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label:has(input:checked) {
             background: var(--bbva-tab-active-bg) !important;
             border-color: var(--bbva-tab-active-border) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          /* Fallback robusto: resalta la pestaña activa principal por posición */
+          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(1),
+          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(1) > button,
+          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(2),
+          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(2) > button,
+          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(3),
+          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(3) > button,
+          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(4),
+          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(4) > button,
+          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(5),
+          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(5) > button,
+          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(6),
+          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(6) > button {
+            background: var(--bbva-tab-active-bg) !important;
+            border-color: var(--bbva-tab-active-border) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_nav_bar .bbva-force-active,
+          [class*="st-key-workspace_nav_bar_"] .bbva-force-active {
+            background: var(--bbva-tab-active-bg) !important;
+            border-color: var(--bbva-tab-active-border) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_nav_bar .bbva-force-active-text,
+          [class*="st-key-workspace_nav_bar_"] .bbva-force-active-text {
+            color: var(--bbva-tab-active-text) !important;
+          }
+          /* Extra robust selectors for Streamlit segmented-control DOM variants */
+          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] button:nth-of-type(1),
+          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] button:nth-of-type(2),
+          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] button:nth-of-type(3),
+          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] button:nth-of-type(4),
+          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] button:nth-of-type(5),
+          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] button:nth-of-type(6),
+          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(1),
+          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(2),
+          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(3),
+          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(4),
+          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(5),
+          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(6),
+          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] label:nth-of-type(1),
+          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] label:nth-of-type(2),
+          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] label:nth-of-type(3),
+          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] label:nth-of-type(4),
+          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] label:nth-of-type(5),
+          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] label:nth-of-type(6) {
+            background: var(--bbva-tab-active-bg) !important;
+            border-color: var(--bbva-tab-active-border) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] button:nth-of-type(1) *,
+          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] button:nth-of-type(2) *,
+          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] button:nth-of-type(3) *,
+          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] button:nth-of-type(4) *,
+          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] button:nth-of-type(5) *,
+          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] button:nth-of-type(6) * {
             color: var(--bbva-tab-active-text) !important;
           }
           .st-key-workspace_dashboard_content {

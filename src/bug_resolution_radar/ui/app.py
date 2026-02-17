@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import Dict, List
 
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.config import (
     Settings,
@@ -107,7 +109,6 @@ def _render_workspace_header() -> None:
             "Sección",
             options=section_options,
             selection_mode="single",
-            default=current_label if mode == "dashboard" else None,
             key=picker_key,
             label_visibility="collapsed",
         )
@@ -147,6 +148,37 @@ def _render_workspace_header() -> None:
             on_click=_set_workspace_mode,
             args=("config",),
         )
+
+    # Force a clear active state on the main segmented nav (same behavior perceived in tabs).
+    components_html(
+        f"""
+        <script>
+          (function() {{
+            const activeLabel = {json.dumps(current_label)};
+            const doc = window.parent.document;
+            const navRoot =
+              doc.querySelector('[class*="st-key-workspace_nav_bar_"]') ||
+              doc.querySelector('.st-key-workspace_nav_bar');
+            if (!navRoot) return;
+            const seg = navRoot.querySelector('[data-testid="stSegmentedControl"]');
+            if (!seg) return;
+
+            seg.querySelectorAll('.bbva-force-active').forEach((el) => el.classList.remove('bbva-force-active'));
+            seg.querySelectorAll('.bbva-force-active-text').forEach((el) => el.classList.remove('bbva-force-active-text'));
+
+            const nodes = Array.from(
+              seg.querySelectorAll('button, label, [role="radio"], [data-baseweb="button-group"] > *')
+            );
+            const best = nodes.find((el) => ((el.innerText || '').trim() === activeLabel));
+            if (!best) return;
+
+            best.classList.add('bbva-force-active');
+            best.querySelectorAll('*').forEach((child) => child.classList.add('bbva-force-active-text'));
+          }})();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _render_workspace_scope(settings: Settings) -> None:
@@ -207,15 +239,15 @@ def main() -> None:
     render_hero(hero_title)
     _ensure_scope_state(settings)
     _ensure_nav_state()
-    with st.container(key="workspace_scope_bar"):
-        _render_workspace_scope(settings)
-    with st.container(key="workspace_nav_bar"):
-        _render_workspace_header()
-
-    mode = str(st.session_state.get("workspace_mode") or "dashboard")
     section = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
+    with st.container(key="workspace_scope_bar"):
+        _render_workspace_scope(settings)
+    with st.container(key=f"workspace_nav_bar_{section}"):
+        _render_workspace_header()
+
+    mode = str(st.session_state.get("workspace_mode") or "dashboard")
 
     if mode == "ingest":
         ingest_page.render(settings)
