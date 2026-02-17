@@ -26,11 +26,23 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_STATUS_KEY,
 )
 from bug_resolution_radar.ui.insights.engine import ActionInsight, build_trend_insight_pack
+from bug_resolution_radar.ui.insights.copilot import (
+    CopilotAnswer,
+    NextBestAction,
+    answer_copilot_question,
+    build_operational_snapshot,
+    build_session_delta_lines,
+    choose_next_best_action,
+    simulate_backlog_what_if,
+)
 from bug_resolution_radar.ui.insights.learning_store import (
+    LEARNING_BASELINE_SNAPSHOT_KEY,
     LEARNING_INTERACTIONS_KEY,
     LEARNING_STATE_KEY,
     ensure_learning_session_loaded,
+    increment_learning_interactions,
     persist_learning_session,
+    set_learning_snapshot,
 )
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
@@ -214,10 +226,7 @@ def _track_context_interaction(*, chart_id: str, active_filters: Dict[str, List[
         return
     state["last_context_token"] = token
     st.session_state[LEARNING_STATE_KEY] = state
-    st.session_state[LEARNING_INTERACTIONS_KEY] = int(
-        st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0
-    ) + 1
-    persist_learning_session()
+    increment_learning_interactions(step=1, persist=True)
 
 
 def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
@@ -823,6 +832,17 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
     """Render management-oriented insights for the selected trend chart."""
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
+    snapshot = build_operational_snapshot(dff=dff, open_df=open_df)
+    set_learning_snapshot(snapshot, persist=True)
+    baseline_snapshot = st.session_state.get(LEARNING_BASELINE_SNAPSHOT_KEY)
+    if not isinstance(baseline_snapshot, dict):
+        baseline_snapshot = {}
+
+    with st.container(border=True, key=f"trend_delta_shell_{chart_id}"):
+        st.markdown("#### Que cambio desde tu ultima sesion")
+        for line in build_session_delta_lines(snapshot, baseline_snapshot):
+            st.markdown(f"- {line}")
+
     pack = build_trend_insight_pack(chart_id, dff=dff, open_df=open_df)
     if not pack.metrics and not pack.cards:
         st.caption("Sin insights para este grafico con los filtros actuales.")
@@ -841,6 +861,30 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
         pack.cards, chart_id=str(chart_id), active_filters=active_filters
     )
     key_prefix = str(chart_id or "chart").strip().replace("-", "_")
+    next_action = choose_next_best_action(snapshot, cards=personalized_cards)
+
+    with st.container(border=True, key=f"next_best_action_shell_{chart_id}"):
+        st.markdown("#### Next Best Action")
+        st.markdown(f"**{next_action.title}**")
+        st.markdown(next_action.body)
+        st.caption(next_action.expected_impact)
+        has_action_filters = bool(
+            next_action.status_filters or next_action.priority_filters or next_action.assignee_filters
+        )
+        if has_action_filters:
+            st.button(
+                "Aplicar accion en Issues ↗",
+                key=f"nba_apply_btn_{chart_id}",
+                width="stretch",
+                on_click=_jump_to_issues,
+                kwargs={
+                    "status_filters": list(next_action.status_filters or []),
+                    "priority_filters": list(next_action.priority_filters or []),
+                    "assignee_filters": list(next_action.assignee_filters or []),
+                    "insight_id": f"nextbest::{chart_id}",
+                },
+            )
+
     _render_insight_cards(personalized_cards, key_prefix=key_prefix, chart_id=str(chart_id))
     _register_shown_insights(
         personalized_cards,
@@ -849,6 +893,129 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
             chart_id=str(chart_id), dff=dff, open_df=open_df, active_filters=active_filters
         ),
     )
+
+    with st.container(border=True, key=f"what_if_shell_{chart_id}"):
+        st.markdown("#### Simulador de impacto (what-if)")
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            entry_reduction = st.slider(
+                "Reducir entrada (%)",
+                min_value=0,
+                max_value=50,
+                value=15,
+                step=5,
+                key=f"whatif_entry_{chart_id}",
+            )
+        with s2:
+            closure_boost = st.slider(
+                "Aumentar cierre (%)",
+                min_value=0,
+                max_value=60,
+                value=20,
+                step=5,
+                key=f"whatif_close_{chart_id}",
+            )
+        with s3:
+            unblock = st.slider(
+                "Desbloquear bloqueadas (%)",
+                min_value=0,
+                max_value=100,
+                value=30,
+                step=10,
+                key=f"whatif_unblock_{chart_id}",
+            )
+        sim = simulate_backlog_what_if(
+            snapshot,
+            entry_reduction_pct=float(entry_reduction),
+            closure_boost_pct=float(closure_boost),
+            unblock_pct=float(unblock),
+        )
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Neto semanal simulado", f"{float(sim.get('weekly_net', 0.0)):+.1f}")
+        with m2:
+            st.metric("Backlog estimado en 8 semanas", f"{float(sim.get('backlog_8w', 0.0)):.0f}")
+        with m3:
+            weeks_to_zero = sim.get("weeks_to_zero")
+            st.metric(
+                "Semanas para vaciar",
+                f"{float(weeks_to_zero):.1f}"
+                if isinstance(weeks_to_zero, (int, float))
+                else "No converge",
+            )
+        st.caption(
+            "Estimacion orientativa basada en ritmo reciente y palancas de gestion sobre el filtro activo."
+        )
+
+    with st.container(border=True, key=f"copilot_shell_{chart_id}"):
+        st.markdown("#### Copilot operativo")
+        st.caption("Pregunta en lenguaje natural sobre lo que ves en pantalla.")
+        suggestions = [
+            "Cual es el mayor riesgo cliente hoy?",
+            "Que accion concreta priorizo esta semana?",
+            "Como ha cambiado la situacion desde mi ultima sesion?",
+            "Que cuello de botella penaliza mas el flujo?",
+        ]
+        hist_key = f"copilot_history::{chart_id}"
+        pick_col, action_col = st.columns([3, 1])
+        with pick_col:
+            pick = st.selectbox(
+                "Preguntas sugeridas",
+                options=["(elige)"] + suggestions,
+                key=f"copilot_suggest_{chart_id}",
+            )
+        with action_col:
+            if st.button("Usar sugerida", key=f"copilot_use_suggest_{chart_id}", width="stretch"):
+                if pick and pick != "(elige)":
+                    st.session_state[f"copilot_query_value_{chart_id}"] = pick
+
+        with st.form(key=f"copilot_form_{chart_id}", clear_on_submit=False):
+            q_default = str(st.session_state.get(f"copilot_query_value_{chart_id}") or "")
+            query = st.text_input(
+                "Pregunta",
+                value=q_default,
+                key=f"copilot_query_input_{chart_id}",
+                placeholder="Ej: donde esta el mayor riesgo cliente hoy?",
+            )
+            asked = st.form_submit_button("Analizar")
+
+        if asked and str(query or "").strip():
+            ans: CopilotAnswer = answer_copilot_question(
+                question=str(query),
+                snapshot=snapshot,
+                baseline_snapshot=baseline_snapshot,
+                next_action=next_action,
+            )
+            history = st.session_state.get(hist_key)
+            if not isinstance(history, list):
+                history = []
+            history.append(
+                {
+                    "q": str(query).strip(),
+                    "a": ans.answer,
+                    "confidence": float(ans.confidence),
+                    "evidence": list(ans.evidence or []),
+                    "followups": list(ans.followups or []),
+                }
+            )
+            st.session_state[hist_key] = history[-5:]
+            increment_learning_interactions(step=1, persist=True)
+
+        history = st.session_state.get(hist_key)
+        if isinstance(history, list) and history:
+            latest = history[-1]
+            st.markdown(f"**Respuesta** (confianza {float(latest.get('confidence', 0.0))*100.0:.0f}%)")
+            st.markdown(str(latest.get("a", "")))
+            ev = latest.get("evidence")
+            if isinstance(ev, list) and ev:
+                st.markdown("**Evidencia usada**")
+                for line in ev[:4]:
+                    st.markdown(f"- {line}")
+            fups = latest.get("followups")
+            if isinstance(fups, list) and fups:
+                st.caption("Siguientes preguntas sugeridas:")
+                for line in fups[:3]:
+                    st.markdown(f"- {line}")
 
     interactions = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
     if interactions > 0:
@@ -882,10 +1049,7 @@ def _jump_to_issues(
             "assignee": list(assignee_filters or []),
         }
         st.session_state[LEARNING_STATE_KEY] = state
-        st.session_state[LEARNING_INTERACTIONS_KEY] = int(
-            st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0
-        ) + 1
-        persist_learning_session()
+        increment_learning_interactions(step=1, persist=True)
 
 
 def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str, chart_id: str) -> None:

@@ -16,6 +16,8 @@ LEARNING_INTERACTIONS_KEY = "__insights_interactions"
 LEARNING_SCOPE_KEY = "__insights_learning_scope"
 LEARNING_STORE_PATH_SESSION_KEY = "__insights_learning_store_path"
 LEARNING_LAST_SAVED_HASH_KEY = "__insights_learning_last_saved_hash"
+LEARNING_BASELINE_SNAPSHOT_KEY = "__insights_session_baseline_snapshot"
+LEARNING_LATEST_SNAPSHOT_KEY = "__insights_latest_snapshot"
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -42,10 +44,11 @@ def default_learning_path(settings: Settings) -> Path:
     return Path("data/insights_learning.json")
 
 
-def learning_payload_hash(*, state: Dict[str, Any], interactions: int) -> str:
+def learning_payload_hash(*, state: Dict[str, Any], interactions: int, snapshot: Dict[str, Any]) -> str:
     payload = {
         "state": _as_dict(state),
         "interactions": int(interactions),
+        "snapshot": _as_dict(snapshot),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
@@ -87,6 +90,14 @@ class InsightsLearningStore:
         interactions = _safe_int(record.get("interactions"), default=0)
         return state, interactions
 
+    def get_scope_bundle(self, scope: str) -> Tuple[Dict[str, Any], int, Dict[str, Any]]:
+        scopes = _as_dict(self._raw.get("scopes"))
+        record = _as_dict(scopes.get(scope))
+        state = _as_dict(record.get("state"))
+        interactions = _safe_int(record.get("interactions"), default=0)
+        snapshot = _as_dict(record.get("last_snapshot"))
+        return state, interactions, snapshot
+
     def set_scope(
         self,
         scope: str,
@@ -95,13 +106,19 @@ class InsightsLearningStore:
         interactions: int,
         country: str,
         source_id: str,
+        snapshot: Dict[str, Any] | None = None,
     ) -> None:
         scopes = _as_dict(self._raw.get("scopes"))
+        current = _as_dict(scopes.get(scope))
+        resolved_snapshot = _as_dict(snapshot) if isinstance(snapshot, dict) else _as_dict(
+            current.get("last_snapshot")
+        )
         scopes[scope] = {
             "state": _as_dict(state),
             "interactions": int(interactions),
             "country": str(country or ""),
             "source_id": str(source_id or ""),
+            "last_snapshot": resolved_snapshot,
             "updated_at": now_iso(),
         }
         self._raw["scopes"] = scopes
@@ -124,14 +141,18 @@ def ensure_learning_session_loaded(*, settings: Settings) -> None:
 
     store = InsightsLearningStore(path)
     store.load()
-    state, interactions = store.get_scope(scope)
+    state, interactions, baseline_snapshot = store.get_scope_bundle(scope)
 
     st.session_state[LEARNING_STATE_KEY] = state
     st.session_state[LEARNING_INTERACTIONS_KEY] = int(interactions)
     st.session_state[LEARNING_SCOPE_KEY] = scope
     st.session_state[LEARNING_STORE_PATH_SESSION_KEY] = str(path)
+    st.session_state[LEARNING_BASELINE_SNAPSHOT_KEY] = baseline_snapshot
+    st.session_state[LEARNING_LATEST_SNAPSHOT_KEY] = baseline_snapshot
     st.session_state[LEARNING_LAST_SAVED_HASH_KEY] = learning_payload_hash(
-        state=state, interactions=interactions
+        state=state,
+        interactions=interactions,
+        snapshot=baseline_snapshot,
     )
 
 
@@ -144,7 +165,8 @@ def persist_learning_session() -> None:
 
     state = _as_dict(st.session_state.get(LEARNING_STATE_KEY))
     interactions = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
-    payload_hash = learning_payload_hash(state=state, interactions=interactions)
+    snapshot = _as_dict(st.session_state.get(LEARNING_LATEST_SNAPSHOT_KEY))
+    payload_hash = learning_payload_hash(state=state, interactions=interactions, snapshot=snapshot)
     if payload_hash == str(st.session_state.get(LEARNING_LAST_SAVED_HASH_KEY) or ""):
         return
 
@@ -159,7 +181,20 @@ def persist_learning_session() -> None:
         interactions=interactions,
         country=country,
         source_id=source_id,
+        snapshot=snapshot,
     )
     store.save()
     st.session_state[LEARNING_LAST_SAVED_HASH_KEY] = payload_hash
 
+
+def set_learning_snapshot(snapshot: Dict[str, Any], *, persist: bool = False) -> None:
+    st.session_state[LEARNING_LATEST_SNAPSHOT_KEY] = _as_dict(snapshot)
+    if persist:
+        persist_learning_session()
+
+
+def increment_learning_interactions(step: int = 1, *, persist: bool = True) -> None:
+    cur = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
+    st.session_state[LEARNING_INTERACTIONS_KEY] = cur + max(step, 0)
+    if persist:
+        persist_learning_session()
