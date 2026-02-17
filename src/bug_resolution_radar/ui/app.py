@@ -1,3 +1,5 @@
+"""Main Streamlit application shell for navigation, scope and global UI state."""
+
 from __future__ import annotations
 
 from typing import Dict, List
@@ -16,14 +18,14 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 
 def _set_workspace_mode(mode: str) -> None:
+    """Switch top-level workspace mode and reset transient dashboard picker state."""
     st.session_state["workspace_mode"] = mode
-    # Force no preselected dashboard tab while in non-dashboard modes.
-    # This lets users return with one click to the desired section.
     if mode in {"ingest", "config"}:
         st.session_state.pop("workspace_section_picker_aux", None)
 
 
 def _dashboard_labels() -> Dict[str, str]:
+    """Map internal dashboard section ids to visible labels."""
     return {
         "overview": "Resumen",
         "issues": "Issues",
@@ -35,6 +37,7 @@ def _dashboard_labels() -> Dict[str, str]:
 
 
 def _ensure_scope_state(settings: Settings) -> None:
+    """Ensure selected country/source are valid for current configuration."""
     countries = supported_countries(settings)
     default_country = countries[0] if countries else "México"
 
@@ -58,6 +61,7 @@ def _ensure_scope_state(settings: Settings) -> None:
 
 
 def _ensure_nav_state() -> None:
+    """Initialize and keep navigation state consistent across reruns and jumps."""
     labels = _dashboard_labels()
     section_names: List[str] = dashboard_page.dashboard_sections()
     default_section = "overview"
@@ -77,12 +81,21 @@ def _ensure_nav_state() -> None:
         st.session_state["workspace_section_label"] = labels.get(sec, labels[default_section])
 
 
+def _toggle_dark_mode() -> None:
+    """Toggle global dark theme mode."""
+    st.session_state["workspace_dark_mode"] = not bool(
+        st.session_state.get("workspace_dark_mode", False)
+    )
+
+
 def _render_workspace_header() -> None:
+    """Render top navigation bar and action icons."""
     labels = _dashboard_labels()
     name_by_label = {v: k for k, v in labels.items()}
     section_options = [labels[s] for s in dashboard_page.dashboard_sections()]
     mode = str(st.session_state.get("workspace_mode") or "dashboard")
     current_label = str(st.session_state.get("workspace_section_label") or section_options[0])
+    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
 
     left, right = st.columns([5.0, 0.9], gap="small")
 
@@ -107,7 +120,7 @@ def _render_workspace_header() -> None:
             st.session_state["workspace_mode"] = "dashboard"
 
     with right:
-        b_ing, b_cfg = st.columns(2, gap="small")
+        b_ing, b_theme, b_cfg = st.columns(3, gap="small")
         b_ing.button(
             "🛰️",
             key="workspace_btn_ingest",
@@ -116,6 +129,14 @@ def _render_workspace_header() -> None:
             help="Ingesta",
             on_click=_set_workspace_mode,
             args=("ingest",),
+        )
+        b_theme.button(
+            "◐",
+            key="workspace_btn_theme",
+            type="primary" if is_dark else "secondary",
+            use_container_width=True,
+            help="Tema oscuro",
+            on_click=_toggle_dark_mode,
         )
         b_cfg.button(
             "⚙️",
@@ -129,6 +150,7 @@ def _render_workspace_header() -> None:
 
 
 def _render_workspace_scope(settings: Settings) -> None:
+    """Render country/source selectors used to scope the working dataset."""
     countries = supported_countries(settings)
     if not countries:
         return
@@ -169,6 +191,7 @@ def _render_workspace_scope(settings: Settings) -> None:
 
 
 def main() -> None:
+    """Boot application, render hero/shell and dispatch the selected page."""
     ensure_env()
     settings = load_settings()
     hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
@@ -177,7 +200,10 @@ def main() -> None:
 
     st.set_page_config(page_title=hero_title, layout="wide", page_icon="assets/bbva/favicon.png")
 
-    inject_bbva_css()
+    if "workspace_dark_mode" not in st.session_state:
+        st.session_state["workspace_dark_mode"] = False
+
+    inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)
     _ensure_scope_state(settings)
     _ensure_nav_state()

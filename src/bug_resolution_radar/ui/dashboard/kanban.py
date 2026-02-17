@@ -1,3 +1,5 @@
+"""Kanban rendering utilities and grouped issue presentation."""
+
 from __future__ import annotations
 
 import html

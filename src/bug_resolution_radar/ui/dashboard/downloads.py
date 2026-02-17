@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/downloads.py
+"""Reusable export controls and helper serializers for dashboard downloads."""
+
 from __future__ import annotations
 
 import html

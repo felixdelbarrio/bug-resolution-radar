@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ui/insights/duplicates.py
+"""Duplicate detection views by exact title and heuristic similarity."""
+
 from __future__ import annotations
 
 from collections import Counter

@@ -1,3 +1,5 @@
+"""Ingestion page to trigger data collection from configured source endpoints."""
+
 from __future__ import annotations
 
 from pathlib import Path

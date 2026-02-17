@@ -1,3 +1,5 @@
+"""Configuration loading, validation and source normalization helpers."""
+
 from __future__ import annotations
 
 import json

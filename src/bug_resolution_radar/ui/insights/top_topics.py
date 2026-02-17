@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ui/insights/top_topics.py
+"""Top topics insights grouped by functional themes."""
+
 from __future__ import annotations
 
 import re

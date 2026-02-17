@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ingest/helix_ingest.py
+"""Helix ingestion pipeline and normalization routines."""
+
 from __future__ import annotations
 
 import os

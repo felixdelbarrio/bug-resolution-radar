@@ -1,3 +1,5 @@
+"""Chip styling and HTML builders used by insights sections."""
+
 from __future__ import annotations
 
 import html

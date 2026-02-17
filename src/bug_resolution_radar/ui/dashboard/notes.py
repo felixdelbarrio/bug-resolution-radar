@@ -1,3 +1,5 @@
+"""Notes section rendering and filtered issue linking helpers."""
+
 from __future__ import annotations
 
 import pandas as pd

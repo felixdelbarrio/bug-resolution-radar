@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ui/pages/insights_page.py
+"""Insights page router for top topics, duplicates, people and operational health."""
+
 from __future__ import annotations
 
 from typing import Any, Dict

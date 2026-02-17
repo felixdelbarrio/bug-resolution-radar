@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/slides.py
+"""Slide-style chart navigation helpers for trends-like pages."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,9 +8,6 @@ from typing import Callable, Dict, List, Sequence
 import streamlit as st
 
 
-# ---------------------------------------------------------------------
-# Types
-# ---------------------------------------------------------------------
 @dataclass(frozen=True)
 class SlideSpec:
     chart_id: str
@@ -17,16 +15,11 @@ class SlideSpec:
     subtitle: str = ""
 
 
-# Renderer signature:
-# - Must render the chart AND its insights (or return them for a second pass).
-# - We keep it flexible: pass chart_id and let renderer decide.
 SlideRenderer = Callable[[str], None]
 
 
-# ---------------------------------------------------------------------
-# CSS (premium "one chart per screen" feel)
-# ---------------------------------------------------------------------
 def inject_slides_css() -> None:
+    """Inject compact card-like CSS used by slide navigation UI."""
     css = """
     <style>
       /* Container that feels like a "slide" */
@@ -88,9 +81,6 @@ def inject_slides_css() -> None:
     st.markdown(css, unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------
-# State helpers (local to slides)
-# ---------------------------------------------------------------------
 def _get_slide_index(key: str, *, default: int = 0) -> int:
     v = st.session_state.get(key, default)
     try:
@@ -108,9 +98,6 @@ def _clamp(n: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
 
 
-# ---------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------
 def render_slides(
     *,
     slide_specs: Sequence[SlideSpec],
@@ -119,26 +106,9 @@ def render_slides(
     state_key: str = "trend_slide_idx",
     show_selector: bool = True,
 ) -> None:
-    """
-    "One chart per screen" slide deck.
-
-    Parameters
-    ----------
-    slide_specs:
-        Ordered list of all available slides (id + display metadata).
-    selected_ids:
-        Subset of slide_specs.chart_id that should be included in the deck (in that order).
-        Usually this comes from your settings (TREND_SELECTED_CHARTS) or UI selection.
-    renderer:
-        Function that takes chart_id and renders: title is handled here; renderer draws plot + insights.
-    state_key:
-        session_state key that stores current slide index.
-    show_selector:
-        If True, shows a selectbox to jump to a chart.
-    """
+    """Render a one-chart-per-screen deck with prev/next controls and optional jump selector."""
     inject_slides_css()
 
-    # Build deck in display order, filtered by selection
     specs_by_id: Dict[str, SlideSpec] = {s.chart_id: s for s in slide_specs}
     deck: List[SlideSpec] = [specs_by_id[cid] for cid in selected_ids if cid in specs_by_id]
 
@@ -150,7 +120,6 @@ def render_slides(
     idx = _clamp(idx, 0, len(deck) - 1)
     _set_slide_index(state_key, idx)
 
-    # --- Toolbar (prev/next + jump) ---
     left, mid, right = st.columns([2, 6, 2], vertical_alignment="center")
 
     with left:
@@ -193,10 +162,8 @@ def render_slides(
                 st.rerun()
 
     with right:
-        # Optional: fullscreen hint / micro-help
         st.caption("Tip: usa ◀︎ ▶︎ para navegar")
 
-    # --- Slide container ---
     spec = deck[idx]
     with st.container():
         st.markdown('<div class="bbva-slide">', unsafe_allow_html=True)
@@ -207,7 +174,6 @@ def render_slides(
 
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-        # Render the chart + insights
         st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
         renderer(spec.chart_id)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -215,9 +181,6 @@ def render_slides(
         st.markdown("</div>", unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------
-# Convenience builders
-# ---------------------------------------------------------------------
 def build_default_slide_specs() -> List[SlideSpec]:
     """
     Centralized titles/subtitles for the trend deck.

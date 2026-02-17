@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/renderers.py
+"""Visual component renderers for cards, chips and formatted metric blocks."""
+
 from __future__ import annotations
 
 import html

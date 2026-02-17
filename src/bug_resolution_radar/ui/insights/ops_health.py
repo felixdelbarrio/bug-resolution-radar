@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ui/insights/ops_health.py
+"""Operational health insights tab with KPI snapshot and aged-open cases."""
+
 from __future__ import annotations
 
 import html

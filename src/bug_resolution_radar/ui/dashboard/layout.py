@@ -1,3 +1,5 @@
+"""Shared layout helpers for dashboard sections."""
+
 from __future__ import annotations
 
 import streamlit as st
@@ -8,7 +10,6 @@ def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> 
     Configura el layout global del dashboard (page config + estilos).
     Debe llamarse una sola vez al inicio del render de la página.
     """
-    # Page config (solo 1 vez por app; Streamlit lo ignora si se repite)
     try:
         st.set_page_config(
             page_title=title,
@@ -17,10 +18,8 @@ def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> 
             initial_sidebar_state="expanded",
         )
     except Exception:
-        # En algunos contextos (tests / reruns raros) puede fallar; no rompemos la app.
         pass
 
-    # CSS “premium” y consistente con el look actual (sin tocar tus variables BBVA)
     st.markdown(
         """
         <style>

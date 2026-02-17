@@ -1,3 +1,5 @@
+"""Jira HTTP session factory and browser cookie integration."""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional

@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/insights.py
+"""Reusable computations for chart insights across dashboard and trends views."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

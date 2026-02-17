@@ -1,3 +1,5 @@
+"""Shared visual styling helpers for Streamlit and Plotly rendering."""
+
 from __future__ import annotations
 
 import html
@@ -8,36 +10,66 @@ import streamlit as st
 from bug_resolution_radar.ui.common import flow_signal_color_map
 
 
-def inject_bbva_css() -> None:
-    """Inject BBVA-like CSS styling into Streamlit app."""
-    st.markdown(
-        """
-        <style>
+def inject_bbva_css(*, dark_mode: bool = False) -> None:
+    """Inject global CSS tokens and components for light/dark runtime themes."""
+    if dark_mode:
+        css_vars = """
           :root {
-            --bbva-primary: #0051F1;   /* Electric Blue */
-            --bbva-midnight: #070E46;  /* Midnight Blue */
-            --bbva-text: #11192D;      /* Grey 900 */
+            --bbva-primary: #5F9FFF;
+            --bbva-midnight: #070E46;
+            --bbva-text: #EAF0FF;
+            --bbva-text-muted: rgba(234,240,255,0.72);
+            --bbva-surface: #151E35;
+            --bbva-surface-2: #0E1426;
+            --bbva-border: rgba(234,240,255,0.16);
+            --bbva-border-strong: rgba(234,240,255,0.26);
+            --bbva-radius-s: 4px;
+            --bbva-radius-m: 8px;
+            --bbva-radius-l: 12px;
+            --bbva-radius-xl: 16px;
+            --bbva-tab-soft-bg: #162239;
+            --bbva-tab-soft-border: #314664;
+            --bbva-tab-soft-text: #BED0ED;
+            --bbva-tab-active-bg: #24456B;
+            --bbva-tab-active-border: #3F6EA1;
+            --bbva-tab-active-text: #F3F8FF;
+            --primary-color: var(--bbva-primary);
+            --text-color: var(--bbva-text);
+            --background-color: var(--bbva-surface-2);
+            --secondary-background-color: var(--bbva-surface);
+          }
+        """
+    else:
+        css_vars = """
+          :root {
+            --bbva-primary: #0051F1;
+            --bbva-midnight: #070E46;
+            --bbva-text: #11192D;
+            --bbva-text-muted: rgba(17,25,45,0.72);
             --bbva-surface: #FFFFFF;
-            --bbva-surface-2: #F4F6F9; /* Light neutral */
+            --bbva-surface-2: #F4F6F9;
             --bbva-border: rgba(17,25,45,0.12);
             --bbva-border-strong: rgba(17,25,45,0.18);
             --bbva-radius-s: 4px;
             --bbva-radius-m: 8px;
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
-            --bbva-tab-soft-bg: #E9EEF4;      /* cool grey-blue */
-            --bbva-tab-soft-border: #C7D2DF;  /* muted border */
-            --bbva-tab-soft-text: #44546B;    /* desaturated ink */
-            --bbva-tab-active-bg: #6F839E;    /* muted steel blue */
+            --bbva-tab-soft-bg: #E9EEF4;
+            --bbva-tab-soft-border: #C7D2DF;
+            --bbva-tab-soft-text: #44546B;
+            --bbva-tab-active-bg: #6F839E;
             --bbva-tab-active-border: #657A94;
             --bbva-tab-active-text: #F8FBFF;
-
-            /* Streamlit theme variables (force consistency; avoids odd defaults). */
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
             --background-color: var(--bbva-surface-2);
             --secondary-background-color: var(--bbva-surface);
           }
+        """
+
+    css_template = """
+        <style>
+          __CSS_VARS__
 
           html, body, [class*="stApp"] {
             color: var(--bbva-text);
@@ -143,6 +175,7 @@ def inject_bbva_css() -> None:
             filter: brightness(0.99);
           }
           div[data-testid="stButton"] > button[aria-label="🛰️"],
+          div[data-testid="stButton"] > button[aria-label="◐"],
           div[data-testid="stButton"] > button[aria-label="⚙️"] {
             min-height: 2.2rem !important;
             padding: 0.25rem 0.25rem !important;
@@ -155,9 +188,9 @@ def inject_bbva_css() -> None:
             margin-bottom: -0.76rem;
             border: 1px solid var(--bbva-border);
             border-radius: 14px;
-            background: rgba(255,255,255,0.56);
+            background: color-mix(in srgb, var(--bbva-surface) 68%, transparent);
             padding: 0.32rem 0.42rem 0.26rem 0.42rem;
-            box-shadow: 0 1px 6px rgba(17,25,45,0.035);
+            box-shadow: 0 1px 6px color-mix(in srgb, var(--bbva-text) 8%, transparent);
           }
           .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"] {
             margin-bottom: 0 !important;
@@ -192,7 +225,7 @@ def inject_bbva_css() -> None:
 
           /* Labels */
           label, [data-testid="stWidgetLabel"] p {
-            color: rgba(17,25,45,0.82) !important;
+            color: var(--bbva-text-muted) !important;
             font-weight: 600 !important;
           }
 
@@ -209,7 +242,7 @@ def inject_bbva_css() -> None:
           }
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
-            color: rgba(17,25,45,0.45) !important;
+            color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
           }
           .stTextInput input:focus,
           .stTextArea textarea:focus,
@@ -229,12 +262,12 @@ def inject_bbva_css() -> None:
           .stButton > button[kind="secondary"] {
             background: var(--bbva-surface) !important;
             border-color: var(--bbva-border-strong) !important;
-            color: rgba(17,25,45,0.88) !important;
+            color: color-mix(in srgb, var(--bbva-text) 88%, transparent) !important;
             font-weight: 700 !important;
           }
           .stButton > button[kind="secondary"]:hover {
             border-color: rgba(0,81,241,0.35) !important;
-            background: rgba(0,81,241,0.06) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 12%, transparent) !important;
           }
           .stButton > button:disabled {
             opacity: 0.45 !important;
@@ -263,12 +296,12 @@ def inject_bbva_css() -> None:
           div[data-testid="stPills"] button {
             background: var(--bbva-surface) !important;
             border: 1px solid var(--bbva-border) !important;
-            color: rgba(17,25,45,0.88) !important;
+            color: color-mix(in srgb, var(--bbva-text) 88%, transparent) !important;
             border-radius: 999px !important;
           }
           div[data-testid="stPills"] button span,
           div[data-testid="stPills"] button p {
-            color: rgba(17,25,45,0.88) !important;
+            color: color-mix(in srgb, var(--bbva-text) 88%, transparent) !important;
             font-weight: 700 !important;
           }
           div[data-testid="stPills"] button[aria-pressed="true"],
@@ -328,7 +361,7 @@ def inject_bbva_css() -> None:
             margin-top: 6px;
             font-size: 0.95rem;
             line-height: 1.25rem;
-            opacity: 0.95;
+            color: color-mix(in srgb, var(--bbva-text) 95%, transparent);
           }
           .badges {
             margin-top: 8px;
@@ -358,7 +391,9 @@ def inject_bbva_css() -> None:
             background: rgba(0,81,241,0.06);
           }
         </style>
-        """,
+        """
+    st.markdown(
+        css_template.replace("__CSS_VARS__", css_vars),
         unsafe_allow_html=True,
     )
 
@@ -377,7 +412,12 @@ def render_hero(app_title: str) -> None:
 
 
 def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
-    """Apply a consistent Plotly style aligned with BBVA Experience."""
+    """Apply a consistent Plotly style aligned with app design tokens."""
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    text_color = "#EAF0FF" if dark_mode else "#11192D"
+    grid_color = "rgba(234,240,255,0.14)" if dark_mode else "rgba(17,25,45,0.10)"
+    legend_bg = "rgba(21,30,53,0.72)" if dark_mode else "rgba(255,255,255,0.65)"
+    legend_border = "rgba(234,240,255,0.20)" if dark_mode else "rgba(17,25,45,0.12)"
     legend_bottom_space = 92 if showlegend else 16
     undefined_tokens = {"undefined", "none", "nan", "null"}
     es_label_map = {
@@ -408,7 +448,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
             family='"BBVA Benton Sans","Benton Sans","Inter",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
-            color="#11192D",
+            color=text_color,
         ),
         colorway=[
             "#0051F1",  # Electric Blue (primary)
@@ -426,15 +466,15 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
             y=-0.22,
             xanchor="right",
             x=1.0,
-            bgcolor="rgba(255,255,255,0.65)",
-            bordercolor="rgba(17,25,45,0.12)",
+            bgcolor=legend_bg,
+            bordercolor=legend_border,
             borderwidth=1,
             font=dict(size=11),
         ),
         margin=dict(l=16, r=16, t=48, b=legend_bottom_space),
     )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
+    fig.update_xaxes(showgrid=True, gridcolor=grid_color, zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor=grid_color, zeroline=False)
     for series_name, color in flow_signal_color_map().items():
         fig.update_traces(
             line=dict(color=color),
@@ -463,6 +503,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
     try:
         for ann in list(getattr(fig.layout, "annotations", []) or []):
             ann.text = _localize(getattr(ann, "text", ""))
+            ann.font = dict(color=text_color)
     except Exception:
         pass
 

@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ui/insights/backlog_people.py
+"""People-focused insights tab with grouped backlog ownership views."""
+
 from __future__ import annotations
 
 import html

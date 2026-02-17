@@ -1,3 +1,5 @@
+"""Issue cards/table renderers and visual formatting helpers."""
+
 from __future__ import annotations
 
 import html

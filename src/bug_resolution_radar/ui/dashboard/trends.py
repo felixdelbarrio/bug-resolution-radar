@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/trends.py
+"""Trend charts and adaptive management insights for the dashboard."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,11 +26,8 @@ from bug_resolution_radar.ui.dashboard.state import (
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 
-# -------------------------
-# Helpers: fechas robustas (evita date vs datetime / tz-aware vs tz-naive)
-# -------------------------
 def _to_dt_naive(s: pd.Series) -> pd.Series:
-    """Coerce a datetime64[ns] y quita timezone si la hay (para comparaciones seguras)."""
+    """Convert to naive datetime64 for safe arithmetic/comparisons."""
     if s is None:
         return pd.Series([], dtype="datetime64[ns]")
     out = pd.to_datetime(s, errors="coerce")
@@ -37,7 +35,6 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
         if hasattr(out.dt, "tz") and out.dt.tz is not None:
             out = out.dt.tz_localize(None)
     except Exception:
-        # best-effort en tipos mixtos
         try:
             out = out.dt.tz_localize(None)
         except Exception:
@@ -72,26 +69,22 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
 
 
 def _age_bucket_from_days(age_days: pd.Series) -> pd.Categorical:
-    """
-    Buckets canon:
-      0-2, 3-7, 8-14, 15-30, >30
-    """
+    """Build canonical age buckets: 0-2, 3-7, 8-14, 15-30, >30 days."""
     bins = [-np.inf, 2, 7, 14, 30, np.inf]
     labels = ["0-2", "3-7", "8-14", "15-30", ">30"]
     cat = pd.cut(age_days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
-    # For plotly ordering stability
     return cat
 
 
 def _resolution_band(days: pd.Series) -> pd.Categorical:
-    """Semaforo para tiempos de resolucion."""
+    """Build resolution speed bands for semantic coloring."""
     bins = [-np.inf, 7, 30, np.inf]
     labels = ["Rapida (0-7d)", "Media (8-30d)", "Lenta (>30d)"]
     return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
 
 
 def _resolution_bucket(days: pd.Series) -> pd.Categorical:
-    """Buckets operativos para evitar confusión en ejes continuos."""
+    """Build categorical buckets to avoid confusion in continuous histograms."""
     bins = [-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, np.inf]
     labels = [
         "Mismo dia (0d)",
@@ -181,10 +174,8 @@ def _build_timeseries_from_filtered(dff: pd.DataFrame) -> Any | None:
     return px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
 
 
-# -------------------------
-# Charts catalog
-# -------------------------
 def available_trend_charts() -> List[Tuple[str, str]]:
+    """Return all available chart ids and visible labels for trends tab."""
     return [
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
         ("age_buckets", "Antigüedad de abiertas (distribución)"),
@@ -194,10 +185,8 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     ]
 
 
-# -------------------------
-# Public entrypoint
-# -------------------------
 def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -> None:
+    """Render trends tab with one selected chart and contextual insights."""
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
     kpis = kpis if isinstance(kpis, dict) else {}
@@ -210,7 +199,6 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
         st.info("No hay gráficos configurados.")
         return
 
-    # 1) Selector único ARRIBA
     if "trend_chart_single" not in st.session_state:
         st.session_state["trend_chart_single"] = (
             "open_status_bar" if "open_status_bar" in all_ids else all_ids[0]
@@ -547,14 +535,8 @@ def _render_trend_chart(
     st.info("Gráfico no reconocido.")
 
 
-# -------------------------
-# “WoW” insights
-# -------------------------
 def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.DataFrame) -> None:
-    """
-    Insights pensados para gestión (backlog, riesgo, foco, flujo).
-    Evita obviedades y devuelve acciones sugeridas.
-    """
+    """Render management-oriented insights for the selected trend chart."""
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
 
@@ -577,11 +559,14 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
 
 @dataclass(frozen=True)
 class _TrendActionInsight:
+    """Insight card model with optional filter actions and relevance score."""
+
     title: str
     body: str
     status_filters: List[str] | None = None
     priority_filters: List[str] | None = None
     assignee_filters: List[str] | None = None
+    score: float = 0.0
 
 
 def _jump_to_issues(
@@ -590,14 +575,17 @@ def _jump_to_issues(
     priority_filters: List[str] | None = None,
     assignee_filters: List[str] | None = None,
 ) -> None:
+    """Open Issues tab and sync filters derived from an actionable insight."""
     st.session_state["__jump_to_tab"] = "issues"
     st.session_state[FILTER_STATUS_KEY] = list(status_filters or [])
     st.session_state[FILTER_PRIORITY_KEY] = list(priority_filters or [])
     st.session_state[FILTER_ASSIGNEE_KEY] = list(assignee_filters or [])
 
 
-def _render_premium_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) -> None:
+def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) -> None:
+    """Render insight cards; only cards with filters are shown as actionable links."""
     items = [c for c in cards if str(c.title or "").strip() and str(c.body or "").strip()]
+    items = sorted(items, key=lambda c: float(c.score), reverse=True)
     if not items:
         return
 
@@ -728,6 +716,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
                     f"En los últimos 14 días el backlog proxy sube **+{int(slope_last)}** "
                     f"(vs **+{int(slope_prev)}** en los 14 días anteriores). Señal de saturación del flujo."
                 ),
+                score=max(20.0, float(slope_last)),
             )
         )
     elif slope_last > 0:
@@ -738,6 +727,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
                     f"El backlog proxy sube **+{int(slope_last)}** en 14 días. "
                     "Prioriza cerrar antes de seguir abriendo."
                 ),
+                score=max(10.0, float(slope_last)),
             )
         )
     elif slope_last < 0:
@@ -748,6 +738,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
                     f"El backlog proxy cae **{int(abs(slope_last))}** en 14 días. "
                     "Buen momento para atacar deuda técnica/causas raíz."
                 ),
+                score=6.0,
             )
         )
     else:
@@ -755,6 +746,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
             _TrendActionInsight(
                 title="Backlog estable",
                 body="Se mantiene estable en los últimos 14 días (señal de equilibrio).",
+                score=2.0,
             )
         )
 
@@ -763,6 +755,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
             _TrendActionInsight(
                 title="Cierre a cero",
                 body="No hay cierres en 14 días: revisa bloqueos (QA, releases) o colas de validación.",
+                score=30.0,
             )
         )
     elif flow_ratio >= 1.2:
@@ -773,6 +766,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
                     "Estás abriendo bastante más de lo que cierras. "
                     "Acción: fija un objetivo semanal de cierre y limita casos en curso."
                 ),
+                score=18.0 + float(flow_ratio),
             )
         )
     elif flow_ratio <= 0.9:
@@ -783,6 +777,7 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
                     "Cierras más de lo que abres. Usa el margen para eliminar reincidencias "
                     "y automatizar pruebas."
                 ),
+                score=7.0,
             )
         )
 
@@ -794,10 +789,11 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
                     f"~**{weekly_net:.1f}** issues/semana. "
                     "Si se mantiene, el backlog seguirá creciendo."
                 ),
+                score=14.0 + float(weekly_net),
             )
         )
 
-    _render_premium_insight_cards(cards[:5], key_prefix="timeseries")
+    _render_insight_cards(cards[:5], key_prefix="timeseries")
 
     st.caption(
         "Tip de gestión: si el ratio creación/cierre > 1 de forma sostenida, cualquier mejora visual será temporal. "
@@ -843,6 +839,7 @@ def _insights_age(open_df: pd.DataFrame) -> None:
                 "Cuando los casos más lentos tardan mucho, el equipo pierde foco y velocidad. "
                 "Separar esos casos en revisión específica mejora el ritmo general."
             ),
+            score=max(8.0, p90 / 15.0),
         )
     )
 
@@ -854,6 +851,7 @@ def _insights_age(open_df: pd.DataFrame) -> None:
                     f"**{pct_over30:.1f}%** supera 30 días. "
                     "Acción: clínica semanal para cerrar, re-priorizar o descomponer."
                 ),
+                score=float(pct_over30),
             )
         )
 
@@ -870,6 +868,7 @@ def _insights_age(open_df: pd.DataFrame) -> None:
                         "Si High/Highest aparecen, hay riesgo de impacto cliente."
                     ),
                     priority_filters=[str(p) for p in pr.index.tolist()],
+                    score=12.0 + float(len(pr)),
                 )
             )
 
@@ -881,10 +880,11 @@ def _insights_age(open_df: pd.DataFrame) -> None:
                 "y exige criterio de salida."
             ),
             status_filters=["En progreso", "In Progress", "To Rework", "Test", "Ready To Verify"],
+            score=5.0,
         )
     )
 
-    _render_premium_insight_cards(cards[:5], key_prefix="age")
+    _render_insight_cards(cards[:5], key_prefix="age")
 
 
 def _insights_resolution(dff: pd.DataFrame) -> None:
@@ -926,6 +926,7 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
                 "No basta con cerrar rápido los fáciles; si mejoras los más atascados, "
                 "la percepción del cliente mejora de verdad."
             ),
+            score=max(6.0, p90 / 10.0),
         )
     )
 
@@ -937,6 +938,7 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
                     "Algunos casos tardan mucho más que el promedio. "
                     "Clasifica por causa y asigna responsable."
                 ),
+                score=max(10.0, p95 / max(med, 1.0)),
             )
         )
 
@@ -956,6 +958,7 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
                         "Revisa pasos extra que alargan el ciclo."
                     ),
                     priority_filters=[worst],
+                    score=float(grp.iloc[0]),
                 )
             )
 
@@ -963,10 +966,11 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
         _TrendActionInsight(
             title="Vía rápida de incidentes",
             body=("Plantilla + checklist de evidencias reduce rebotes y acelera diagnóstico."),
+            score=3.0,
         )
     )
 
-    _render_premium_insight_cards(cards[:5], key_prefix="resolution")
+    _render_insight_cards(cards[:5], key_prefix="resolution")
 
 
 def _insights_priority(open_df: pd.DataFrame) -> None:
@@ -1005,6 +1009,7 @@ def _insights_priority(open_df: pd.DataFrame) -> None:
                     "Si es Medium/Low y crece, puede ocultar deuda."
                 ),
                 priority_filters=[top],
+                score=8.0 + pct,
             )
         )
 
@@ -1015,6 +1020,7 @@ def _insights_priority(open_df: pd.DataFrame) -> None:
                 "No basta contar issues; una High puede equivaler a varias Low en impacto. "
                 "Usa este score para decidir si activar modo incidente."
             ),
+            score=float(risk_score / max(total, 1)),
         )
     )
 
@@ -1033,6 +1039,7 @@ def _insights_priority(open_df: pd.DataFrame) -> None:
                         ),
                         priority_filters=["Supone un impedimento", "Highest", "High"],
                         status_filters=["New", "Analysing", "Analyzing"],
+                        score=15.0 + float(len(crit_early)),
                     )
                 )
 
@@ -1041,10 +1048,11 @@ def _insights_priority(open_df: pd.DataFrame) -> None:
             title="Gobierno de prioridades",
             body=("Si todo es High, nada es High. Mantén cupo de prioridades altas activas."),
             priority_filters=["Supone un impedimento", "Highest", "High"],
+            score=5.0,
         )
     )
 
-    _render_premium_insight_cards(cards[:5], key_prefix="priority")
+    _render_insight_cards(cards[:5], key_prefix="priority")
 
 
 def _insights_status(open_df: pd.DataFrame) -> None:
@@ -1078,6 +1086,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
                     "Revisa la condición de salida que está fallando."
                 ),
                 status_filters=[top_status],
+                score=top_share,
             )
         )
 
@@ -1103,6 +1112,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
             status_filters=[
                 s for s in active_states if s in df["status"].astype(str).unique().tolist()
             ],
+            score=active_pct,
         )
     )
 
@@ -1118,6 +1128,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
                     "Haz sesión diaria breve para convertir entrada en decisiones."
                 ),
                 status_filters=["New", "Analysing", "Analyzing"],
+                score=triage_pct + 5.0,
             )
         )
 
@@ -1137,6 +1148,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
                         f"(conversión **{rtd_conv:.1f}%**)."
                     ),
                     status_filters=["Accepted", "Ready to deploy"],
+                    score=max(12.0, float(accepted_cnt - rtd_cnt)),
                 )
             )
 
@@ -1151,6 +1163,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
                         f"(conversión **{dep_conv:.1f}%**)."
                     ),
                     status_filters=["Ready to deploy", "Deployed"],
+                    score=max(10.0, float(rtd_cnt - deployed_cnt)),
                 )
             )
     elif accepted_cnt > 0 and deployed_cnt == 0:
@@ -1159,6 +1172,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
                 title="Flujo detenido al final",
                 body="Existen Accepted pero no llegan a Ready to deploy ni a Deployed.",
                 status_filters=["Accepted", "Ready to deploy"],
+                score=18.0 + float(accepted_cnt),
             )
         )
 
@@ -1169,7 +1183,8 @@ def _insights_status(open_df: pd.DataFrame) -> None:
                 "Define tiempos máximos por estado para hacer visibles los cuellos "
                 "sin revisar caso por caso."
             ),
+            score=3.0,
         )
     )
 
-    _render_premium_insight_cards(cards[:5], key_prefix="status")
+    _render_insight_cards(cards[:5], key_prefix="status")

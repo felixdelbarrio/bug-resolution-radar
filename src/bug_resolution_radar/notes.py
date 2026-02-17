@@ -1,3 +1,5 @@
+"""Local notes persistence model and storage helpers."""
+
 from __future__ import annotations
 
 import json

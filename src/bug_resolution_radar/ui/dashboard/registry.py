@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/registry.py
+"""Chart registry for trends and summary visualizations."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

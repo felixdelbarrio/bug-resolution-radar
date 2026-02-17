@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/components/filters.py
+"""Dashboard filters, matrix interactions and synchronized filter state helpers."""
+
 from __future__ import annotations
 
 import html

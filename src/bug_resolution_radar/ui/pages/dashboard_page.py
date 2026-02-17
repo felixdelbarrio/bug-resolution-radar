@@ -1,3 +1,5 @@
+"""Top-level dashboard page router and section orchestration."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,8 +12,6 @@ from bug_resolution_radar.config import Settings
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
-
-# ✅ Modules live in bug_resolution_radar.ui.dashboard.*
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.dashboard.issues import render_issues_tab
 from bug_resolution_radar.ui.dashboard.kanban import render_kanban_tab
@@ -32,15 +32,18 @@ DASHBOARD_SECTIONS: Final[List[str]] = [
 
 
 def dashboard_sections() -> List[str]:
+    """Return ordered list of dashboard sections."""
     return list(DASHBOARD_SECTIONS)
 
 
 def normalize_dashboard_section(section: str | None) -> str:
+    """Normalize an arbitrary section value to a supported section id."""
     s = (section or "").strip().lower()
     return s if s in DASHBOARD_SECTIONS else "overview"
 
 
 def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
+    """Scope dataframe by currently selected country/source when columns are available."""
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -58,12 +61,11 @@ def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render(settings: Settings, *, active_section: str = "overview") -> str:
+    """Render selected dashboard section and return normalized section id."""
     section = normalize_dashboard_section(active_section)
 
-    # Layout / styles
     apply_dashboard_layout()
 
-    # Load dataframe (cached by file mtime to minimize rerun cost)
     df = load_issues_df(settings.DATA_PATH)
     scoped_df = _apply_workspace_source_scope(df)
 
@@ -71,11 +73,9 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
         return section
 
-    # Notes (local)
     notes = NotesStore(Path(settings.NOTES_PATH))
     notes.load()
 
-    # Filters only in Issues/Kanban/Trends (single canonical state for all sections).
     if section in {"issues", "kanban", "trends"}:
         render_filters(scoped_df, key_prefix="dashboard")
 
@@ -86,7 +86,6 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     )
 
     if section == "overview":
-        # Orden ejecutivo: KPIs -> resumen visual -> matriz.
         render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
         st.markdown("---")
         render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)

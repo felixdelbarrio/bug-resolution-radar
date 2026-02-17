@@ -1,3 +1,5 @@
+"""Common data normalization and color mapping helpers for the UI layer."""
+
 from __future__ import annotations
 
 import re
