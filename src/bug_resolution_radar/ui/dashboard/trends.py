@@ -8,29 +8,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
-from bug_resolution_radar.kpis import compute_kpis
 from bug_resolution_radar.ui.common import priority_color_map
-from bug_resolution_radar.ui.components.filters import apply_filters, render_filters
-from bug_resolution_radar.ui.dashboard.state import get_filter_state, open_only
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
-
-
-# -------------------------
-# Canonical display order (shared with Issues/Matrix/Kanban)
-# Keep this consistent with ui/components/filters.py
-# -------------------------
-CANON_STATUS_ORDER: List[str] = [
-    "New",
-    "Analysing",
-    "Blocked",
-    "En progreso",
-    "To Rework",
-    "Test",
-    "Ready To Verify",
-    "Accepted",
-    "Ready to Deploy",
-]
 
 
 # -------------------------
@@ -99,10 +79,11 @@ def available_trend_charts() -> List[Tuple[str, str]]:
 # -------------------------
 # Public entrypoint
 # -------------------------
-def render_trends_tab(*, settings: Settings, df_all: pd.DataFrame) -> None:
+def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -> None:
     st.markdown("## 📈 Tendencias")
-
-    df_all = _safe_df(df_all)
+    dff = _safe_df(dff)
+    open_df = _safe_df(open_df)
+    kpis = kpis if isinstance(kpis, dict) else {}
 
     chart_options = available_trend_charts()
     id_to_label: Dict[str, str] = {cid: label for cid, label in chart_options}
@@ -114,32 +95,24 @@ def render_trends_tab(*, settings: Settings, df_all: pd.DataFrame) -> None:
 
     # 1) Selector único ARRIBA
     if "trend_chart_single" not in st.session_state:
-        st.session_state["trend_chart_single"] = "timeseries" if "timeseries" in all_ids else all_ids[0]
+        st.session_state["trend_chart_single"] = (
+            "timeseries" if "timeseries" in all_ids else all_ids[0]
+        )
 
     selected_chart = st.selectbox(
         "Gráfico",
         options=all_ids,
-        index=all_ids.index(st.session_state["trend_chart_single"])
-        if st.session_state["trend_chart_single"] in all_ids
-        else 0,
+        index=(
+            all_ids.index(st.session_state["trend_chart_single"])
+            if st.session_state["trend_chart_single"] in all_ids
+            else 0
+        ),
         format_func=lambda x: id_to_label.get(x, x),
         key="trend_chart_single",
         help="Selecciona un único gráfico. Se mostrará 1 por pantalla.",
     )
 
-    st.markdown("---")
-
-    # 2) Filtros DEBAJO (widgets)
-    # ✅ IMPORTANT: namespaced keys to avoid duplicates across tabs
-    render_filters(df_all, key_prefix="trends")
-
-    # Recalcular con filtros actuales (canonical keys)
-    fs = get_filter_state()
-    dff = apply_filters(df_all, fs)
-    open_df = open_only(dff)
-    kpis = compute_kpis(dff, settings=settings)
-
-    # 3) Contenedor “pro”
+    # 2) Contenedor “pro”
     with st.container(border=True):
         st.markdown(f"### {id_to_label.get(selected_chart, selected_chart)}")
 
@@ -152,7 +125,9 @@ def render_trends_tab(*, settings: Settings, df_all: pd.DataFrame) -> None:
 # -------------------------
 # Chart renderers
 # -------------------------
-def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df: pd.DataFrame) -> None:
+def _render_trend_chart(
+    *, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df: pd.DataFrame
+) -> None:
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
 
@@ -174,7 +149,9 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
         df["__created_dt"] = _to_dt_naive(df["created"])
         df = df[df["__created_dt"].notna()].copy()
         if df.empty:
-            st.info("No hay fechas válidas (created) para calcular antigüedad con los filtros actuales.")
+            st.info(
+                "No hay fechas válidas (created) para calcular antigüedad con los filtros actuales."
+            )
             return
 
         now = pd.Timestamp.utcnow().tz_localize(None)
@@ -202,8 +179,9 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
 
         # Orden canónico de status (y los desconocidos al final)
         statuses = grp["status"].astype(str).unique().tolist()
+        canon_status_order = canonical_status_order()
         # canon primero (si están), luego resto en orden estable
-        canon_present = [s for s in CANON_STATUS_ORDER if s in statuses]
+        canon_present = [s for s in canon_status_order if s in statuses]
         rest = [s for s in statuses if s not in set(canon_present)]
         status_order = canon_present + rest
 
@@ -239,9 +217,9 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
             st.info("No hay incidencias cerradas con fechas suficientes para este filtro.")
             return
 
-        closed["resolution_days"] = ((closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0).clip(
-            lower=0.0
-        )
+        closed["resolution_days"] = (
+            (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+        ).clip(lower=0.0)
 
         fig = px.histogram(
             closed,
@@ -254,7 +232,9 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
 
     if chart_id == "open_priority_pie":
         if open_df.empty or "priority" not in open_df.columns:
-            st.info("No hay datos suficientes para el gráfico de Priority con los filtros actuales.")
+            st.info(
+                "No hay datos suficientes para el gráfico de Priority con los filtros actuales."
+            )
             return
 
         fig = px.pie(
@@ -278,7 +258,8 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
         stc.columns = ["status", "count"]
 
         # ✅ Orden canónico (mismo que Issues/Matrix/Kanban)
-        stc["__rank"] = _rank_by_canon(stc["status"], CANON_STATUS_ORDER)
+        canon_status_order = canonical_status_order()
+        stc["__rank"] = _rank_by_canon(stc["status"], canon_status_order)
         stc = stc.sort_values(["__rank", "count"], ascending=[True, False]).drop(columns="__rank")
 
         fig = px.bar(
@@ -286,7 +267,7 @@ def _render_trend_chart(*, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df
             x="status",
             y="count",
             title="Abiertas por Estado",
-            category_orders={"status": CANON_STATUS_ORDER},
+            category_orders={"status": canon_status_order},
         )
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
@@ -348,8 +329,16 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
     created_counts = created_day[created_day >= start_ts].value_counts()
 
     closed = df[df["__resolved_dt"].notna()].copy()
-    closed_day = closed["__resolved_dt"].dt.normalize() if not closed.empty else pd.Series([], dtype="datetime64[ns]")
-    closed_counts = closed_day[closed_day >= start_ts].value_counts() if not closed_day.empty else pd.Series([], dtype=int)
+    closed_day = (
+        closed["__resolved_dt"].dt.normalize()
+        if not closed.empty
+        else pd.Series([], dtype="datetime64[ns]")
+    )
+    closed_counts = (
+        closed_day[closed_day >= start_ts].value_counts()
+        if not closed_day.empty
+        else pd.Series([], dtype=int)
+    )
 
     days = pd.date_range(start=start_ts, end=end_ts, freq="D")
     created_series = pd.Series({d: int(created_counts.get(d, 0)) for d in days})
@@ -362,7 +351,9 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
     prev14 = backlog_proxy.tail(28).head(14) if len(backlog_proxy) >= 28 else None
 
     slope_last = float(last14.iloc[-1] - last14.iloc[0]) if len(last14) >= 2 else 0.0
-    slope_prev = float(prev14.iloc[-1] - prev14.iloc[0]) if prev14 is not None and len(prev14) >= 2 else 0.0
+    slope_prev = (
+        float(prev14.iloc[-1] - prev14.iloc[0]) if prev14 is not None and len(prev14) >= 2 else 0.0
+    )
 
     created_14 = int(created_series.tail(14).sum())
     closed_14 = int(closed_series.tail(14).sum())
@@ -401,7 +392,9 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
         bullets.append("⚖️ **Backlog estable** en los últimos 14 días (señal de equilibrio).")
 
     if flow_ratio == np.inf:
-        bullets.append("🚨 **Cierre a cero** en 14 días: revisa bloqueos (QA, releases) o colas de validación.")
+        bullets.append(
+            "🚨 **Cierre a cero** en 14 días: revisa bloqueos (QA, releases) o colas de validación."
+        )
     elif flow_ratio >= 1.2:
         bullets.append(
             "🧯 **Capacidad insuficiente**: estás abriendo bastante más de lo que cierras. "
@@ -503,9 +496,9 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
         st.caption("No hay cerradas con fechas suficientes para este filtro.")
         return
 
-    closed["resolution_days"] = ((closed["__resolved_dt"] - closed["__created_dt"]).dt.total_seconds() / 86400.0).clip(
-        lower=0.0
-    )
+    closed["resolution_days"] = (
+        (closed["__resolved_dt"] - closed["__created_dt"]).dt.total_seconds() / 86400.0
+    ).clip(lower=0.0)
 
     med = float(closed["resolution_days"].median())
     p90 = float(closed["resolution_days"].quantile(0.90))
@@ -533,7 +526,11 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
         )
 
     if "priority" in closed.columns:
-        grp = closed.groupby(closed["priority"].astype(str))["resolution_days"].median().sort_values(ascending=False)
+        grp = (
+            closed.groupby(closed["priority"].astype(str))["resolution_days"]
+            .median()
+            .sort_values(ascending=False)
+        )
         if not grp.empty:
             worst = str(grp.index[0])
             bullets.append(
@@ -635,7 +632,15 @@ def _insights_status(open_df: pd.DataFrame) -> None:
             "Acción: revisa qué condición de salida está fallando (QA, aprobación, dependencias, releases)."
         )
 
-    active_states = {"En progreso", "In Progress", "Analysing", "Analyzing", "Ready To Verify", "To Rework", "Test"}
+    active_states = {
+        "En progreso",
+        "In Progress",
+        "Analysing",
+        "Analyzing",
+        "Ready To Verify",
+        "To Rework",
+        "Test",
+    }
     active = df[df["status"].astype(str).isin(active_states)]
     active_pct = (len(active) / total * 100.0) if total else 0.0
 

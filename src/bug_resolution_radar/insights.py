@@ -3,10 +3,8 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Iterable, Optional
 
 import pandas as pd
-
 
 _WORD_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
@@ -122,10 +120,14 @@ def find_similar_issue_clusters(
     summaries = work["summary"].astype(str).tolist()
     keys = work["key"].astype(str).tolist()
     priorities = (
-        work["priority"].astype(str).fillna("").tolist() if "priority" in work.columns else [""] * len(work)
+        work["priority"].astype(str).fillna("").tolist()
+        if "priority" in work.columns
+        else [""] * len(work)
     )
     statuses = (
-        work["status"].astype(str).fillna("").tolist() if "status" in work.columns else [""] * len(work)
+        work["status"].astype(str).fillna("").tolist()
+        if "status" in work.columns
+        else [""] * len(work)
     )
 
     toksets = [_tokenize_summary(s) for s in summaries]
@@ -191,4 +193,3 @@ def find_similar_issue_clusters(
 
     clusters.sort(key=lambda c: c.size, reverse=True)
     return clusters
-

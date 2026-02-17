@@ -12,14 +12,16 @@ def main() -> None:
     ensure_env()
     settings = load_settings()
 
-    st.set_page_config(page_title=settings.APP_TITLE, layout="wide", page_icon="assets/bbva/favicon.png")
+    st.set_page_config(
+        page_title=settings.APP_TITLE, layout="wide", page_icon="assets/bbva/favicon.png"
+    )
     st.logo("assets/bbva/logo.png", size="medium")
 
     consent_banner()
     inject_bbva_css()
     render_hero(settings.APP_TITLE)
 
-    tabs = st.tabs(["📊 Dashboard", "⬇️ Ingesta","⚙️ Configuración" ])
+    tabs = st.tabs(["📊 Dashboard", "⬇️ Ingesta", "⚙️ Configuración"])
 
     with tabs[0]:
         dashboard_page.render(settings)

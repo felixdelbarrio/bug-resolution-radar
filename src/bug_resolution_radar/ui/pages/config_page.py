@@ -48,7 +48,9 @@ def _safe_update_settings(settings: Settings, update: Dict[str, Any]) -> Setting
 def render(settings: Settings) -> None:
     st.subheader("Configuración (persistente en .env; NO guarda cookies)")
 
-    t_jira, t_helix, t_kpis, t_prefs = st.tabs(["🟦 Jira", "🟩 Helix", "📊 KPIs", "⭐ Preferencias"])
+    t_jira, t_helix, t_kpis, t_prefs = st.tabs(
+        ["🟦 Jira", "🟩 Helix", "📊 KPIs", "⭐ Preferencias"]
+    )
 
     # -------------------------
     # Jira tab
@@ -58,9 +60,15 @@ def render(settings: Settings) -> None:
 
         c1, c2 = st.columns(2)
         with c1:
-            jira_base = st.text_input("Jira Base URL", value=settings.JIRA_BASE_URL, key="cfg_jira_base")
-            jira_project = st.text_input("PROJECT_KEY", value=settings.JIRA_PROJECT_KEY, key="cfg_jira_project")
-            jira_jql = st.text_area("JQL (opcional)", value=settings.JIRA_JQL, height=120, key="cfg_jira_jql")
+            jira_base = st.text_input(
+                "Jira Base URL", value=settings.JIRA_BASE_URL, key="cfg_jira_base"
+            )
+            jira_project = st.text_input(
+                "PROJECT_KEY", value=settings.JIRA_PROJECT_KEY, key="cfg_jira_project"
+            )
+            jira_jql = st.text_area(
+                "JQL (opcional)", value=settings.JIRA_JQL, height=120, key="cfg_jira_jql"
+            )
 
         with c2:
             jira_browser = st.selectbox(
@@ -85,8 +93,12 @@ def render(settings: Settings) -> None:
 
         c1, c2 = st.columns(2)
         with c1:
-            helix_base = st.text_input("Helix Base URL", value=helix_base_default, key="cfg_helix_base")
-            helix_org = st.text_input("Helix Organization", value=helix_org_default, key="cfg_helix_org")
+            helix_base = st.text_input(
+                "Helix Base URL", value=helix_base_default, key="cfg_helix_base"
+            )
+            helix_org = st.text_input(
+                "Helix Organization", value=helix_org_default, key="cfg_helix_org"
+            )
             helix_data_path = st.text_input(
                 "Helix Data Path",
                 value=helix_path_default,
@@ -169,8 +181,16 @@ def render(settings: Settings) -> None:
             return default
 
         fav1_default = _get_first_existing("TREND_FAV_1", "TREND_FAVORITE_1", default=all_ids[0])
-        fav2_default = _get_first_existing("TREND_FAV_2", "TREND_FAVORITE_2", default=all_ids[1] if len(all_ids) > 1 else all_ids[0])
-        fav3_default = _get_first_existing("TREND_FAV_3", "TREND_FAVORITE_3", default=all_ids[2] if len(all_ids) > 2 else all_ids[0])
+        fav2_default = _get_first_existing(
+            "TREND_FAV_2",
+            "TREND_FAVORITE_2",
+            default=all_ids[1] if len(all_ids) > 1 else all_ids[0],
+        )
+        fav3_default = _get_first_existing(
+            "TREND_FAV_3",
+            "TREND_FAVORITE_3",
+            default=all_ids[2] if len(all_ids) > 2 else all_ids[0],
+        )
 
         c1, c2, c3 = st.columns(3)
         with c1:

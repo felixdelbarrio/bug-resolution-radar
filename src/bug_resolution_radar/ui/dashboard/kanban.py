@@ -7,33 +7,21 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
 
 def _kanban_set_status_filter(st_name: str) -> None:
     # sincroniza con filtros/matriz: status = [st_name]
-    st.session_state["filter_status"] = [st_name]
-
-
-# Orden canónico (el mismo que “Issues” / matriz)
-_CANONICAL_STATUS_ORDER: List[str] = [
-    "New",
-    "Analysing",
-    "Blocked",
-    "En progreso",
-    "To Rework",
-    "Test",
-    "Ready To Verify",
-    "Accepted",
-    "Ready to Deploy",
-]
+    st.session_state[FILTER_STATUS_KEY] = [st_name]
 
 
 def _order_statuses_canonical(statuses: List[str]) -> List[str]:
     """Ordena según el orden canónico. Los no contemplados van al final manteniendo su orden de entrada."""
-    idx = {s.lower(): i for i, s in enumerate(_CANONICAL_STATUS_ORDER)}
+    idx = canonical_status_rank_map()
 
     # estable: para los no contemplados respetamos orden original
-    def key_fn(pair):
+    def key_fn(pair: tuple[int, str]) -> tuple[int, int]:
         i, s = pair
         return (idx.get((s or "").strip().lower(), 10_000), i)
 
@@ -63,7 +51,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
         all_statuses: List[str] = status_counts.index.tolist()
 
         # si hay filtro de estado activo => mostrar esos estados
-        selected_statuses = list(st.session_state.get("filter_status") or [])
+        selected_statuses = list(st.session_state.get(FILTER_STATUS_KEY) or [])
         selected_statuses = [s for s in selected_statuses if s in all_statuses]
 
         if selected_statuses:
@@ -86,7 +74,9 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
             sub = kan[kan["status"] == st_name].copy()
 
             # Orden: prioridad (rank) y luego updated desc si existe
-            sub["_prio_rank"] = sub["priority"].astype(str).map(priority_rank) if "priority" in sub.columns else 99
+            sub["_prio_rank"] = (
+                sub["priority"].astype(str).map(priority_rank) if "priority" in sub.columns else 99
+            )
             sort_cols = ["_prio_rank"]
             sort_asc = [True]
             if "updated" in sub.columns:

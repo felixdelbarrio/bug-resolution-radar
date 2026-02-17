@@ -103,8 +103,14 @@ def build_issue_lookup(
             k = str(r.get("key", "")).strip()
             if not k:
                 continue
-            stt = str(r.get("status", "(sin estado)")) if "status" in tmpm.columns else "(sin estado)"
-            pr = str(r.get("priority", "(sin priority)")) if "priority" in tmpm.columns else "(sin priority)"
+            stt = (
+                str(r.get("status", "(sin estado)")) if "status" in tmpm.columns else "(sin estado)"
+            )
+            pr = (
+                str(r.get("priority", "(sin priority)"))
+                if "priority" in tmpm.columns
+                else "(sin priority)"
+            )
             summ = str(r.get("summary", "")) if "summary" in tmpm.columns else ""
             key_to_meta[k] = (stt, pr, summ)
 

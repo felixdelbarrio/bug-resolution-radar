@@ -6,20 +6,19 @@ from typing import List
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.kpis import compute_kpis
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.ui.common import df_from_issues_doc, load_issues_doc
-from bug_resolution_radar.ui.components.filters import apply_filters, render_status_priority_matrix
+from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
 
 # ✅ Modules live in bug_resolution_radar.ui.dashboard.*
-from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
-from bug_resolution_radar.ui.dashboard.state import get_filter_state, open_only
-from bug_resolution_radar.ui.dashboard.overview import render_overview_tab
+from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.dashboard.issues import render_issues_tab
 from bug_resolution_radar.ui.dashboard.kanban import render_kanban_tab
+from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
+from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
+from bug_resolution_radar.ui.dashboard.overview import render_overview_tab
 from bug_resolution_radar.ui.dashboard.trends import render_trends_tab
 from bug_resolution_radar.ui.pages.insights_page import render as render_insights_page
-from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
 
 
 def _tab_names() -> List[str]:
@@ -67,17 +66,15 @@ def render(settings: Settings) -> None:
     notes = NotesStore(Path(settings.NOTES_PATH))
     notes.load()
 
-    # Read current filters from session_state (no widgets are created here)
-    fs = get_filter_state()
-    dff = apply_filters(df, fs)
-    open_df = open_only(dff)
-
-    # Compute KPIs once per rerun for the currently filtered dataframe
-    kpis = compute_kpis(dff, settings=settings)
+    # Single filters bar + single data context for every tab (no per-tab recompute divergence).
+    render_filters(df, key_prefix="dashboard")
+    ctx = build_dashboard_data_context(df_all=df, settings=settings)
 
     # Tabs (support jump-to-tab)
     default_idx = _consume_jump_tab()
-    tabs = st.tabs(["📌 Resumen", "🧾 Issues", "📋 Kanban", "📈 Tendencias", "🧠 Insights", "🗒️ Notas"])
+    tabs = st.tabs(
+        ["📌 Resumen", "🧾 Issues", "📋 Kanban", "📈 Tendencias", "🧠 Insights", "🗒️ Notas"]
+    )
 
     # If we need a jump, we still render all blocks, but we put the requested tab first for Streamlit focus.
     # Streamlit doesn't officially support programmatic tab selection; reordering is the practical workaround.
@@ -97,29 +94,27 @@ def render(settings: Settings) -> None:
         with tab:
             if name == "overview":
                 # 1) Resumen (arriba): los 3 gráficos configurados (dentro de overview_tab)
-                render_overview_tab(settings=settings, kpis=kpis, dff=dff, open_df=open_df)
+                render_overview_tab(
+                    settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df
+                )
 
                 st.markdown("---")
 
                 # 2) Justo debajo: Matriz Estado x Priority (abiertas)
                 # ⚠️ key_prefix distinto para evitar IDs duplicados si en el futuro se vuelve a renderizar en otro tab
-                render_status_priority_matrix(open_df, fs, key_prefix="mx_overview")
+                render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
 
             elif name == "issues":
-                # ✅ En Issues ya NO mostramos la matriz.
-                # ✅ Filtros deben renderizarse sobre el dataset completo para no “encoger” opciones.
-                # ✅ Pasamos también dff para compatibilidad y para que, si quieres, la tabla se base en la vista filtrada.
-                render_issues_tab(df_all=df, dff=dff)
+                render_issues_tab(dff=ctx.dff)
 
             elif name == "kanban":
-                render_kanban_tab(open_df=open_only(dff))
+                render_kanban_tab(open_df=ctx.open_df)
 
             elif name == "trends":
-                # Filtros SOLO aquí + 1 gráfico (modo slide) + contenedor en trends.py
-                render_trends_tab(settings=settings, df_all=df)
+                render_trends_tab(dff=ctx.dff, open_df=ctx.open_df, kpis=ctx.kpis)
 
             elif name == "insights":
-                render_insights_page(settings, dff_filtered=dff, kpis=kpis)
+                render_insights_page(settings, dff_filtered=ctx.dff, kpis=ctx.kpis)
 
             elif name == "notes":
-                render_notes_tab(dff=dff, notes=notes)
+                render_notes_tab(dff=ctx.dff, notes=notes)

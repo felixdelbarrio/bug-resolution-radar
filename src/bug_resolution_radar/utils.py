@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Tuple
 
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
 def parse_int_list(s: str) -> List[int]:
     return [int(x.strip()) for x in s.split(",") if x.strip()]
+
 
 def parse_age_buckets(spec: str) -> List[Tuple[int, int]]:
     buckets: List[Tuple[int, int]] = []
@@ -16,6 +19,6 @@ def parse_age_buckets(spec: str) -> List[Tuple[int, int]]:
             lo = int(part[1:])
             buckets.append((lo, 10**9))
         elif "-" in part:
-            lo, hi = part.split("-", 1)
-            buckets.append((int(lo), int(hi)))
+            lo_s, hi_s = part.split("-", 1)
+            buckets.append((int(lo_s), int(hi_s)))
     return buckets

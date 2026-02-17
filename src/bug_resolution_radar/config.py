@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
 
 from dotenv import dotenv_values
 from pydantic import BaseModel
@@ -45,7 +44,7 @@ class Settings(BaseModel):
 
     # Proxy y SS
     HELIX_PROXY: str = ""
-    HELIX_SSL_VERIFY: str = ""   # "true" o "false"
+    HELIX_SSL_VERIFY: str = ""  # "true" o "false"
     HELIX_CA_BUNDLE: str = ""
     HELIX_CONNECT_TIMEOUT: int = 10
     HELIX_READ_TIMEOUT: int = 30
@@ -78,15 +77,13 @@ def ensure_env() -> None:
 
 
 def load_settings() -> Settings:
-    vals: Dict[str, str] = {
-        k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None
-    }
+    vals = {k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None}
 
     # Decodificar multilínea
     if "JIRA_JQL" in vals:
         vals["JIRA_JQL"] = _decode_env_multiline(vals["JIRA_JQL"])
 
-    return Settings(**vals)
+    return Settings.model_validate(vals)
 
 
 def save_settings(settings: Settings) -> None:

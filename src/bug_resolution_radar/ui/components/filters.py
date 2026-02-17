@@ -2,45 +2,26 @@
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass
 from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
-
-
-@dataclass(frozen=True)
-class FilterState:
-    status: List[str]
-    priority: List[str]
-    # type eliminado a propósito (se ignora en UI y en apply_filters)
-    assignee: List[str]
-
-
-# ---------------------------------------------------------------------
-# Canonical status order (single source of truth for display order)
-# ---------------------------------------------------------------------
-_CANONICAL_STATUS_ORDER: List[str] = [
-    "New",
-    "Analysing",
-    "Blocked",
-    "En progreso",
-    "To Rework",
-    "Test",
-    "Ready To Verify",
-    "Accepted",
-    "Ready to Deploy",
-    # Si aparece "Deployed" en tu ingesta y quieres ordenarlo, añade aquí donde corresponda.
-]
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.state import (
+    FILTER_ASSIGNEE_KEY,
+    FILTER_PRIORITY_KEY,
+    FILTER_STATUS_KEY,
+    FilterState,
+)
 
 
 def _order_statuses_canonical(statuses: List[str]) -> List[str]:
     """Order statuses by canonical flow. Unknown ones keep stable order and go last."""
-    idx = {s.lower(): i for i, s in enumerate(_CANONICAL_STATUS_ORDER)}
+    idx = canonical_status_rank_map()
 
-    def key_fn(pair):
+    def key_fn(pair: tuple[int, str]) -> tuple[int, int]:
         orig_i, s = pair
         k = (s or "").strip().lower()
         return (idx.get(k, 10_000), orig_i)
@@ -51,11 +32,6 @@ def _order_statuses_canonical(statuses: List[str]) -> List[str]:
 # ---------------------------------------------------------------------
 # Internal: canonical keys + namespaced UI keys
 # ---------------------------------------------------------------------
-_CAN_STATUS = "filter_status"
-_CAN_PRIO = "filter_priority"
-_CAN_ASSIGNEE = "filter_assignee"
-
-
 def _ui_key(prefix: str, name: str) -> str:
     p = (prefix or "").strip()
     return f"{p}::{name}" if p else name
@@ -63,16 +39,16 @@ def _ui_key(prefix: str, name: str) -> str:
 
 def _sync_from_ui_to_canonical(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
     """Copy UI widget state (namespaced keys) into canonical shared keys."""
-    st.session_state[_CAN_STATUS] = list(st.session_state.get(ui_status_key) or [])
-    st.session_state[_CAN_PRIO] = list(st.session_state.get(ui_prio_key) or [])
-    st.session_state[_CAN_ASSIGNEE] = list(st.session_state.get(ui_assignee_key) or [])
+    st.session_state[FILTER_STATUS_KEY] = list(st.session_state.get(ui_status_key) or [])
+    st.session_state[FILTER_PRIORITY_KEY] = list(st.session_state.get(ui_prio_key) or [])
+    st.session_state[FILTER_ASSIGNEE_KEY] = list(st.session_state.get(ui_assignee_key) or [])
 
 
 def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
     """Before creating widgets, ensure their state reflects canonical keys (for cross-component sync)."""
-    st.session_state[ui_status_key] = list(st.session_state.get(_CAN_STATUS) or [])
-    st.session_state[ui_prio_key] = list(st.session_state.get(_CAN_PRIO) or [])
-    st.session_state[ui_assignee_key] = list(st.session_state.get(_CAN_ASSIGNEE) or [])
+    st.session_state[ui_status_key] = list(st.session_state.get(FILTER_STATUS_KEY) or [])
+    st.session_state[ui_prio_key] = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
+    st.session_state[ui_assignee_key] = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
 
 
 # ---------------------------------------------------------------------
@@ -91,9 +67,15 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     st.markdown("### Filtros")
 
     # Normalize empty values so filters + matrix can round-trip selections.
-    status_col = normalize_text_col(df["status"], "(sin estado)") if "status" in df.columns else pd.Series([], dtype=str)
+    status_col = (
+        normalize_text_col(df["status"], "(sin estado)")
+        if "status" in df.columns
+        else pd.Series([], dtype=str)
+    )
     priority_col = (
-        normalize_text_col(df["priority"], "(sin priority)") if "priority" in df.columns else pd.Series([], dtype=str)
+        normalize_text_col(df["priority"], "(sin priority)")
+        if "priority" in df.columns
+        else pd.Series([], dtype=str)
     )
 
     # Namespaced widget keys (avoid duplicates across tabs)
@@ -140,7 +122,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         else:
             # keep ui key consistent
             st.session_state[ui_prio_key] = []
-            st.session_state[_CAN_PRIO] = []
+            st.session_state[FILTER_PRIORITY_KEY] = []
 
     with f3:
         if "assignee" in df.columns:
@@ -155,13 +137,13 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
             )
         else:
             st.session_state[ui_assignee_key] = []
-            st.session_state[_CAN_ASSIGNEE] = []
+            st.session_state[FILTER_ASSIGNEE_KEY] = []
 
     # Return canonical state (single source of truth)
     return FilterState(
-        status=list(st.session_state.get(_CAN_STATUS) or []),
-        priority=list(st.session_state.get(_CAN_PRIO) or []),
-        assignee=list(st.session_state.get(_CAN_ASSIGNEE) or []),
+        status=list(st.session_state.get(FILTER_STATUS_KEY) or []),
+        priority=list(st.session_state.get(FILTER_PRIORITY_KEY) or []),
+        assignee=list(st.session_state.get(FILTER_ASSIGNEE_KEY) or []),
     )
 
 
@@ -193,14 +175,14 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
 # ---------------------------------------------------------------------
 def _matrix_set_filters(st_name: str, prio: str) -> None:
     # Canonical keys (shared across tabs)
-    st.session_state[_CAN_STATUS] = [st_name]
-    st.session_state[_CAN_PRIO] = [prio]
+    st.session_state[FILTER_STATUS_KEY] = [st_name]
+    st.session_state[FILTER_PRIORITY_KEY] = [prio]
 
 
 def _matrix_clear_filters() -> None:
-    st.session_state[_CAN_STATUS] = []
-    st.session_state[_CAN_PRIO] = []
-    st.session_state[_CAN_ASSIGNEE] = []
+    st.session_state[FILTER_STATUS_KEY] = []
+    st.session_state[FILTER_PRIORITY_KEY] = []
+    st.session_state[FILTER_ASSIGNEE_KEY] = []
 
 
 def _any_filter_active(fs: Optional[FilterState]) -> bool:
@@ -241,14 +223,16 @@ def render_status_priority_matrix(
         key=lambda p: (priority_rank(p), p),
     )
     if "Supone un impedimento" in priorities:
-        priorities = ["Supone un impedimento"] + [p for p in priorities if p != "Supone un impedimento"]
+        priorities = ["Supone un impedimento"] + [
+            p for p in priorities if p != "Supone un impedimento"
+        ]
 
     # current selection from canonical session_state (single selection only)
     selected_status = None
     selected_priority = None
 
-    ss = st.session_state.get(_CAN_STATUS)
-    sp = st.session_state.get(_CAN_PRIO)
+    ss = st.session_state.get(FILTER_STATUS_KEY)
+    sp = st.session_state.get(FILTER_PRIORITY_KEY)
 
     if isinstance(ss, list) and len(ss) == 1:
         selected_status = ss[0]
@@ -306,7 +290,11 @@ def render_status_priority_matrix(
             row[0].markdown(row_label)
 
         for i, p in enumerate(priorities):
-            cnt = int(counts.at[st_name, p]) if (st_name in counts.index and p in counts.columns) else 0
+            cnt = (
+                int(counts.at[st_name, p])
+                if (st_name in counts.index and p in counts.columns)
+                else 0
+            )
             is_selected = bool(selected_status == st_name and selected_priority == p)
             row[i + 1].button(
                 str(cnt),

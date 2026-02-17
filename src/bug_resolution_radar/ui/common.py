@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -7,10 +8,18 @@ import pandas as pd
 
 from bug_resolution_radar.schema import IssuesDocument
 
-
 # ----------------------------
 # Persistence: IssuesDocument
 # ----------------------------
+
+
+@lru_cache(maxsize=8)
+def _load_issues_doc_cached(path: str, mtime_ns: int) -> IssuesDocument:
+    del mtime_ns  # cache invalidation key only
+    p = Path(path)
+    if not p.exists():
+        return IssuesDocument.empty()
+    return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
 
 
 def load_issues_doc(path: str) -> IssuesDocument:
@@ -19,9 +28,9 @@ def load_issues_doc(path: str) -> IssuesDocument:
     If the file doesn't exist, returns an empty document.
     """
     p = Path(path)
-    if not p.exists():
-        return IssuesDocument.empty()
-    return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
+    mtime_ns = p.stat().st_mtime_ns if p.exists() else -1
+    # Return a defensive copy to avoid mutable state leaks across callers.
+    return _load_issues_doc_cached(str(p.resolve()), mtime_ns).model_copy(deep=True)
 
 
 def save_issues_doc(path: str, doc: IssuesDocument) -> None:
