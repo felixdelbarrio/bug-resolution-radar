@@ -1,7 +1,7 @@
 # src/ingest/helix_session.py
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Callable, Optional
 
 
 def _cookie_applies_to_host(cookie_domain: str, host: str) -> bool:
@@ -53,6 +53,19 @@ def _candidate_domains_from_host(host: str) -> list[str]:
     return out
 
 
+def _load_cookie_jar(
+    getter: Callable[..., Any],
+    *,
+    domain_name: Optional[str] = None,
+) -> Optional[Any]:
+    try:
+        if domain_name:
+            return getter(domain_name=domain_name)
+        return getter()
+    except Exception:
+        return None
+
+
 def get_helix_session_cookie(browser: str, host: str) -> Optional[str]:
     """
     Extrae cookies de Chrome/Edge (Chromium) usando browser-cookie3.
@@ -77,16 +90,14 @@ def get_helix_session_cookie(browser: str, host: str) -> Optional[str]:
 
     cookie_jars = []
     for d in domains:
-        try:
-            cookie_jars.append(getter(domain_name=d))
-        except Exception:
-            continue
+        jar = _load_cookie_jar(getter, domain_name=d)
+        if jar is not None:
+            cookie_jars.append(jar)
     # Fallback amplio: en algunos perfiles Chromium el filtro por domain_name
     # no devuelve todas las cookies válidas de sesión.
-    try:
-        cookie_jars.append(getter())
-    except Exception:
-        pass
+    jar = _load_cookie_jar(getter)
+    if jar is not None:
+        cookie_jars.append(jar)
 
     if not cookie_jars:
         return None

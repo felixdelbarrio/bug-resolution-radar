@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Sequence
 
 import streamlit as st
 
@@ -156,11 +156,18 @@ def render_slides(
     with left:
         c_prev, c_next = st.columns(2)
         with c_prev:
-            if st.button("◀︎", key=f"{state_key}__prev", use_container_width=True, disabled=(idx == 0)):
+            if st.button(
+                "◀︎", key=f"{state_key}__prev", use_container_width=True, disabled=(idx == 0)
+            ):
                 _set_slide_index(state_key, idx - 1)
                 st.rerun()
         with c_next:
-            if st.button("▶︎", key=f"{state_key}__next", use_container_width=True, disabled=(idx >= len(deck) - 1)):
+            if st.button(
+                "▶︎",
+                key=f"{state_key}__next",
+                use_container_width=True,
+                disabled=(idx >= len(deck) - 1),
+            ):
                 _set_slide_index(state_key, idx + 1)
                 st.rerun()
 
@@ -217,9 +224,27 @@ def build_default_slide_specs() -> List[SlideSpec]:
     Keep this in sync with your registry chart ids.
     """
     return [
-        SlideSpec("timeseries", "Evolución del backlog (últimos 90 días)", "Entrada vs salida diaria y tendencia de carga."),
-        SlideSpec("age_buckets", "Antigüedad de abiertas", "Dónde se está quedando el trabajo (cola larga y riesgo)."),
-        SlideSpec("resolution_hist", "Tiempos de resolución", "Distribución de lead time (cerradas) y fricción del flujo."),
-        SlideSpec("open_priority_pie", "Backlog por prioridad", "Señal de concentración: dónde se está acumulando el riesgo."),
-        SlideSpec("open_status_bar", "Backlog por estado", "Cuellos de botella por fase del proceso."),
+        SlideSpec(
+            "timeseries",
+            "Evolución del backlog (últimos 90 días)",
+            "Entrada vs salida diaria y tendencia de carga.",
+        ),
+        SlideSpec(
+            "age_buckets",
+            "Antigüedad de abiertas",
+            "Dónde se está quedando el trabajo (cola larga y riesgo).",
+        ),
+        SlideSpec(
+            "resolution_hist",
+            "Tiempos de resolución",
+            "Distribución de lead time (cerradas) y fricción del flujo.",
+        ),
+        SlideSpec(
+            "open_priority_pie",
+            "Backlog por prioridad",
+            "Señal de concentración: dónde se está acumulando el riesgo.",
+        ),
+        SlideSpec(
+            "open_status_bar", "Backlog por estado", "Cuellos de botella por fase del proceso."
+        ),
     ]

@@ -10,23 +10,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.ui.common import priority_color_map
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
-
-
-# ---------------------------------------------------------------------
-# Canonical display order (shared convention with Issues/Matrix/Kanban)
-# ---------------------------------------------------------------------
-CANON_STATUS_ORDER: List[str] = [
-    "New",
-    "Analysing",
-    "Blocked",
-    "En progreso",
-    "To Rework",
-    "Test",
-    "Ready to Verify",
-    "Accepted",
-    "Ready to Deploy",
-]
 
 
 # ---------------------------------------------------------------------
@@ -190,7 +175,9 @@ def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
 def _insights_age_buckets(ctx: ChartContext) -> List[str]:
     open_df = ctx.open_df
     if open_df is None or open_df.empty:
-        return ["No hay issues abiertas con los filtros actuales: buen momento para endurecer calidad de entrada y evitar re-aperturas."]
+        return [
+            "No hay issues abiertas con los filtros actuales: buen momento para endurecer calidad de entrada y evitar re-aperturas."
+        ]
 
     if "created" not in open_df.columns:
         return [
@@ -310,7 +297,8 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
     stc.columns = ["status", "count"]
 
     # ✅ Orden canónico (mismo que Issues/Matrix/Kanban)
-    stc["__rank"] = _rank_by_canon(stc["status"], CANON_STATUS_ORDER)
+    status_order = canonical_status_order()
+    stc["__rank"] = _rank_by_canon(stc["status"], status_order)
     stc = stc.sort_values(["__rank", "count"], ascending=[True, False]).drop(columns="__rank")
 
     fig = px.bar(
@@ -318,7 +306,7 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         x="status",
         y="count",
         title="Abiertas por Estado",
-        category_orders={"status": CANON_STATUS_ORDER},
+        category_orders={"status": status_order},
     )
     return apply_plotly_bbva(fig)
 

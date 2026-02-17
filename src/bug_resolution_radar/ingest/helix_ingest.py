@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
 import requests
@@ -11,6 +11,7 @@ from requests.exceptions import SSLError
 from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ..schema_helix import HelixDocument, HelixWorkItem
+from ..security import sanitize_cookie_header, validate_service_base_url
 from ..utils import now_iso
 from .helix_session import get_helix_session_cookie
 
@@ -55,7 +56,11 @@ def _get_timeouts(
     Si hay proxy, por defecto elevamos el read-timeout porque suele añadir latencia.
     """
     connect = _coerce_float(
-        connect_timeout if connect_timeout is not None else os.getenv("HELIX_CONNECT_TIMEOUT", "10"),
+        (
+            connect_timeout
+            if connect_timeout is not None
+            else os.getenv("HELIX_CONNECT_TIMEOUT", "10")
+        ),
         10.0,
     )
 
@@ -68,9 +73,11 @@ def _get_timeouts(
     if has_proxy:
         # mínimo recomendado con proxy (ajustable)
         min_proxy_read = _coerce_float(
-            proxy_min_read_timeout
-            if proxy_min_read_timeout is not None
-            else os.getenv("HELIX_PROXY_MIN_READ_TIMEOUT", "120"),
+            (
+                proxy_min_read_timeout
+                if proxy_min_read_timeout is not None
+                else os.getenv("HELIX_PROXY_MIN_READ_TIMEOUT", "120")
+            ),
             120.0,
         )
         read = max(read, min_proxy_read)
@@ -88,17 +95,21 @@ def _dry_run_timeouts(
     En dry-run no reintentamos, pero tampoco queremos cortar demasiado pronto.
     """
     c = _coerce_float(
-        dryrun_connect_timeout
-        if dryrun_connect_timeout is not None
-        else os.getenv("HELIX_DRYRUN_CONNECT_TIMEOUT", str(connect_to)),
+        (
+            dryrun_connect_timeout
+            if dryrun_connect_timeout is not None
+            else os.getenv("HELIX_DRYRUN_CONNECT_TIMEOUT", str(connect_to))
+        ),
         connect_to,
     )
 
     # mínimo 60s por defecto en dry-run
     r = _coerce_float(
-        dryrun_read_timeout
-        if dryrun_read_timeout is not None
-        else os.getenv("HELIX_DRYRUN_READ_TIMEOUT", str(max(read_to, 60.0))),
+        (
+            dryrun_read_timeout
+            if dryrun_read_timeout is not None
+            else os.getenv("HELIX_DRYRUN_READ_TIMEOUT", str(max(read_to, 60.0)))
+        ),
         max(read_to, 60.0),
     )
 
@@ -116,7 +127,13 @@ def _dry_run_timeouts(
         and not isinstance(e, requests.exceptions.SSLError)
     ),
 )
-def _request(session: requests.Session, method: str, url: str, timeout: Tuple[float, float], **kwargs) -> requests.Response:
+def _request(
+    session: requests.Session,
+    method: str,
+    url: str,
+    timeout: Tuple[float, float],
+    **kwargs: Any,
+) -> requests.Response:
     r = session.request(method, url, timeout=timeout, **kwargs)
     if r.status_code in (429, 503):
         raise RuntimeError("rate limited")
@@ -223,7 +240,7 @@ def _get_cookie_anywhere(session: requests.Session, name: str) -> Optional[str]:
         if v:
             return str(v)
     except Exception:
-        pass
+        return None
 
     for c in session.cookies:
         if getattr(c, "name", "") == name and getattr(c, "value", ""):
@@ -236,8 +253,8 @@ def _retry_root_cause(e: RetryError) -> str:
         last = e.last_attempt.exception()
         if last is not None:
             return f"{type(last).__name__}: {last}"
-    except Exception:
-        pass
+    except Exception as ex:
+        return f"{type(ex).__name__}: {ex}"
     return str(e)
 
 
@@ -249,7 +266,7 @@ def _looks_like_sso_redirect(resp: requests.Response) -> bool:
     markers = (
         "redirecting to single sign-on",
         "/rsso/start",
-        "name=\"goto\"",
+        'name="goto"',
         "name='goto'",
     )
     return any(m in body for m in markers)
@@ -294,12 +311,14 @@ def ingest_helix(
     dry_run: bool = False,
     existing_doc: Optional[HelixDocument] = None,
 ) -> Tuple[bool, str, Optional[HelixDocument]]:
-    if not helix_base_url:
-        return False, "Configura HELIX_BASE_URL.", None
     if not organization:
         return False, "Configura el filtro de organización (organization).", None
 
-    base = helix_base_url.rstrip("/")
+    try:
+        base = validate_service_base_url(helix_base_url, service_name="Helix")
+    except ValueError as e:
+        return False, str(e), None
+
     if base.endswith("/app"):
         base = base[:-4]
 
@@ -347,7 +366,7 @@ def ingest_helix(
         }
     )
 
-    cookie = cookie_manual
+    cookie = sanitize_cookie_header(cookie_manual)
     if not cookie:
         try:
             cookie = get_helix_session_cookie(browser=browser, host=host)
@@ -355,10 +374,15 @@ def ingest_helix(
                 other = "edge" if browser == "chrome" else "chrome"
                 cookie = get_helix_session_cookie(browser=other, host=host)
         except Exception as e:
-            return False, f"No se pudo leer la cookie del navegador. Usa cookie manual. Detalle: {e}", None
+            return (
+                False,
+                f"No se pudo leer la cookie del navegador. Usa cookie manual. Detalle: {e}",
+                None,
+            )
 
+    cookie = sanitize_cookie_header(cookie)
     if not cookie:
-        return False, "Cookie Helix vacía. Usa fallback manual.", None
+        return False, "Cookie Helix vacía o inválida. Usa fallback manual.", None
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
     if not _has_auth_cookie(cookie_names):
@@ -375,8 +399,8 @@ def ingest_helix(
     if not dry_run:
         try:
             preflight = session.get(f"{base}/app/", timeout=(5, 15))
-        except Exception:
-            pass
+        except requests.RequestException:
+            preflight = None
 
     xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
     if xsrf:
@@ -497,7 +521,11 @@ def ingest_helix(
     min_chunk_limit = max(
         1,
         _coerce_int(
-            min_chunk_size if min_chunk_size is not None else os.getenv("HELIX_MIN_CHUNK_SIZE", "10"),
+            (
+                min_chunk_size
+                if min_chunk_size is not None
+                else os.getenv("HELIX_MIN_CHUNK_SIZE", "10")
+            ),
             10,
         ),
     )
@@ -506,7 +534,11 @@ def ingest_helix(
     max_read_to = max(
         current_read_to,
         _coerce_float(
-            max_read_timeout if max_read_timeout is not None else os.getenv("HELIX_MAX_READ_TIMEOUT", "120"),
+            (
+                max_read_timeout
+                if max_read_timeout is not None
+                else os.getenv("HELIX_MAX_READ_TIMEOUT", "120")
+            ),
             120.0,
         ),
     )
@@ -518,9 +550,11 @@ def ingest_helix(
         200,
     )
     max_elapsed_seconds = _coerce_float(
-        max_ingest_seconds
-        if max_ingest_seconds is not None
-        else os.getenv("HELIX_MAX_INGEST_SECONDS", "900"),
+        (
+            max_ingest_seconds
+            if max_ingest_seconds is not None
+            else os.getenv("HELIX_MAX_INGEST_SECONDS", "900")
+        ),
         900.0,
     )
     page = 0
@@ -563,7 +597,9 @@ def ingest_helix(
                     current_chunk_size = max(min_chunk_limit, current_chunk_size // 2)
                     continue
                 if current_read_to < max_read_to:
-                    current_read_to = min(max_read_to, max(current_read_to + 5.0, current_read_to * 1.5))
+                    current_read_to = min(
+                        max_read_to, max(current_read_to + 5.0, current_read_to * 1.5)
+                    )
                     continue
             if "rate limited" in cause.lower():
                 return (
@@ -587,7 +623,9 @@ def ingest_helix(
                 current_chunk_size = max(min_chunk_limit, current_chunk_size // 2)
                 continue
             if current_read_to < max_read_to:
-                current_read_to = min(max_read_to, max(current_read_to + 5.0, current_read_to * 1.5))
+                current_read_to = min(
+                    max_read_to, max(current_read_to + 5.0, current_read_to * 1.5)
+                )
                 continue
             return (
                 False,
@@ -630,8 +668,13 @@ def ingest_helix(
 
         new_in_page = 0
         for it in batch:
-            values = it.get("values") if isinstance(it.get("values"), dict) else it
-            wid = str(values.get("displayId") or values.get("id") or values.get("workItemId") or "").strip()
+            values_raw = it.get("values")
+            values: Dict[str, Any] = cast(
+                Dict[str, Any], values_raw if isinstance(values_raw, dict) else it
+            )
+            wid = str(
+                values.get("displayId") or values.get("id") or values.get("workItemId") or ""
+            ).strip()
             if not wid:
                 continue
             if wid in seen_ids:
@@ -642,7 +685,12 @@ def ingest_helix(
 
             assignee = values.get("assignee") or values.get("assigneeName") or ""
             if isinstance(assignee, dict):
-                assignee = assignee.get("fullName") or assignee.get("displayName") or assignee.get("name") or ""
+                assignee = (
+                    assignee.get("fullName")
+                    or assignee.get("displayName")
+                    or assignee.get("name")
+                    or ""
+                )
 
             customer_name = values.get("customerName") or values.get("customer") or ""
             if isinstance(customer_name, dict):

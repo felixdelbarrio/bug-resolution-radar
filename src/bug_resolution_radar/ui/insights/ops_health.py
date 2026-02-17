@@ -1,8 +1,6 @@
 # src/bug_resolution_radar/ui/insights/ops_health.py
 from __future__ import annotations
 
-from typing import List
-
 import pandas as pd
 import streamlit as st
 
@@ -54,8 +52,12 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     # -------------------------
     # Top 10 abiertas más antiguas
     # -------------------------
-    if open_df.empty or not (col_exists(open_df, "created") and pd.api.types.is_datetime64_any_dtype(open_df["created"])):
-        st.caption("Tip: si tu ingest incluye `created` como datetime, aquí verás las más antiguas.")
+    if open_df.empty or not (
+        col_exists(open_df, "created") and pd.api.types.is_datetime64_any_dtype(open_df["created"])
+    ):
+        st.caption(
+            "Tip: si tu ingest incluye `created` como datetime, aquí verás las más antiguas."
+        )
         return
 
     tmp = open_df[open_df["created"].notna()].copy()

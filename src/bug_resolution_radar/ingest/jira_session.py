@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Callable, Optional
 
 
 def _cookie_applies_to_host(cookie_domain: str, host: str) -> bool:
@@ -32,6 +32,19 @@ def _candidate_domains_from_host(host: str) -> list[str]:
     return out
 
 
+def _load_cookie_jar(
+    getter: Callable[..., Any],
+    *,
+    domain_name: Optional[str] = None,
+) -> Optional[Any]:
+    try:
+        if domain_name:
+            return getter(domain_name=domain_name)
+        return getter()
+    except Exception:
+        return None
+
+
 def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
     """
     Extrae cookies de Chrome/Edge (Chromium) usando browser-cookie3.
@@ -50,15 +63,14 @@ def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
     # Some environments still fail; we fall back to unscoped retrieval.
     cookie_jars = []
     for d in _candidate_domains_from_host(host):
-        try:
-            cookie_jars.append(getter(domain_name=d))
-        except Exception:
-            continue
+        jar = _load_cookie_jar(getter, domain_name=d)
+        if jar is not None:
+            cookie_jars.append(jar)
     if not cookie_jars:
-        try:
-            cookie_jars.append(getter())
-        except Exception:
+        jar = _load_cookie_jar(getter)
+        if jar is None:
             return None
+        cookie_jars.append(jar)
 
     parts: dict[str, str] = {}
     for cj in cookie_jars:
@@ -71,4 +83,3 @@ def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
             parts.setdefault(c.name, c.value)
 
     return "; ".join([f"{k}={v}" for k, v in parts.items()]) if parts else None
-

@@ -1,13 +1,18 @@
 # src/bug_resolution_radar/ui/insights/backlog_people.py
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List
 
 import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.dashboard.state import (
+    FILTER_ASSIGNEE_KEY,
+    FILTER_PRIORITY_KEY,
+    FILTER_STATUS_KEY,
+)
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -25,14 +30,14 @@ from bug_resolution_radar.ui.insights.helpers import (
 # Acciones (sincroniza filtros globales + salto a Issues)
 # -------------------------
 def _apply_filters_base_for_assignee(assignee: str) -> None:
-    st.session_state["filter_assignee"] = [assignee] if assignee else []
+    st.session_state[FILTER_ASSIGNEE_KEY] = [assignee] if assignee else []
     # Nota: por decisión de producto, NO filtramos por type aquí (tipo eliminado de filtros)
-    st.session_state["filter_priority"] = []
+    st.session_state[FILTER_PRIORITY_KEY] = []
 
 
 def _jump_to_assignee_status(assignee: str, status: str) -> None:
     _apply_filters_base_for_assignee(assignee)
-    st.session_state["filter_status"] = [status] if status else []
+    st.session_state[FILTER_STATUS_KEY] = [status] if status else []
     st.session_state["__action_mode"] = True
     st.session_state["__action_assignee"] = assignee or ""
     st.session_state["__action_status"] = status or ""
@@ -41,8 +46,8 @@ def _jump_to_assignee_status(assignee: str, status: str) -> None:
 
 def _jump_assignee_highest_high(assignee: str) -> None:
     _apply_filters_base_for_assignee(assignee)
-    st.session_state["filter_status"] = []
-    st.session_state["filter_priority"] = ["Highest", "High"]
+    st.session_state[FILTER_STATUS_KEY] = []
+    st.session_state[FILTER_PRIORITY_KEY] = ["Highest", "High"]
     st.session_state["__action_mode"] = True
     st.session_state["__action_assignee"] = assignee or ""
     st.session_state["__action_status"] = "Highest/High"
@@ -51,8 +56,8 @@ def _jump_assignee_highest_high(assignee: str) -> None:
 
 def _jump_assignee_blocked(assignee: str) -> None:
     _apply_filters_base_for_assignee(assignee)
-    st.session_state["filter_priority"] = []
-    st.session_state["filter_status"] = ["Blocked"]
+    st.session_state[FILTER_PRIORITY_KEY] = []
+    st.session_state[FILTER_STATUS_KEY] = ["Blocked"]
     st.session_state["__action_mode"] = True
     st.session_state["__action_assignee"] = assignee or ""
     st.session_state["__action_status"] = "Blocked"
@@ -78,7 +83,9 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
 
     open_df = open_only(dff)
     if open_df.empty or not col_exists(open_df, "assignee"):
-        st.info("No hay incidencias abiertas (o no hay columna `assignee`) con los filtros actuales.")
+        st.info(
+            "No hay incidencias abiertas (o no hay columna `assignee`) con los filtros actuales."
+        )
         return
 
     df2 = open_df.copy()
@@ -95,7 +102,9 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         df2["priority"] = "(sin priority)"
 
     # Aging
-    has_created = col_exists(df2, "created") and pd.api.types.is_datetime64_any_dtype(df2["created"])
+    has_created = col_exists(df2, "created") and pd.api.types.is_datetime64_any_dtype(
+        df2["created"]
+    )
     if has_created:
         now = pd.Timestamp.utcnow().tz_localize(None)
         created_naive = as_naive_utc(df2["created"])
@@ -138,7 +147,11 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
 
             sub["__w"] = sub["priority"].astype(str).map(priority_weight)
             w_total = float(sub["__w"].sum()) if n_int else 0.0
-            w_bad = float(sub.loc[sub["__bucket"].isin(["entrada", "bloqueado"]), "__w"].sum()) if n_int else 0.0
+            w_bad = (
+                float(sub.loc[sub["__bucket"].isin(["entrada", "bloqueado"]), "__w"].sum())
+                if n_int
+                else 0.0
+            )
             crit_risk_pct = (w_bad / w_total * 100.0) if w_total > 0 else 0.0
 
             risk_score = 0.6 * flow_risk_pct + 0.4 * crit_risk_pct
@@ -206,11 +219,17 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             if b_bloq > 0:
                 recs.append("Ataca bloqueadas primero: desbloquear 1–3 items suele liberar flujo.")
             if crit_risk_pct >= 55.0:
-                recs.append("Criticidad atrapada en Entrada/Bloqueado: fija dueños/fechas y prioriza Highest/High.")
+                recs.append(
+                    "Criticidad atrapada en Entrada/Bloqueado: fija dueños/fechas y prioriza Highest/High."
+                )
             if flow_risk_pct >= 60.0:
-                recs.append("Entrada saturada: triage agresivo (duplicados/out-of-scope) y limita WIP nuevo.")
+                recs.append(
+                    "Entrada saturada: triage agresivo (duplicados/out-of-scope) y limita WIP nuevo."
+                )
             if b_curso > 0 and b_salida == 0:
-                recs.append("Crea ‘push’ hacia salida: objetivo semanal de mover X items a Verify/Deploy.")
+                recs.append(
+                    "Crea ‘push’ hacia salida: objetivo semanal de mover X items a Verify/Deploy."
+                )
             if not recs:
                 recs.append("Buen equilibrio: mantén WIP limitado y revisa aging semanalmente.")
             for rr in recs[:4]:
@@ -221,7 +240,9 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             # ---------------------------------
             if has_created and col_exists(sub, "key") and sub["age_days"].notna().any():
                 st.markdown("**Top 3 más antiguas (limpieza quirúrgica)**")
-                oldest = sub.dropna(subset=["age_days"]).sort_values("age_days", ascending=False).head(3)
+                oldest = (
+                    sub.dropna(subset=["age_days"]).sort_values("age_days", ascending=False).head(3)
+                )
 
                 for _, rr in oldest.iterrows():
                     k = str(rr.get("key", "") or "").strip()
@@ -236,7 +257,9 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
 
                     url = key_to_url.get(k, "")
                     if url:
-                        st.markdown(f"- **[{k}]({url})** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}")
+                        st.markdown(
+                            f"- **[{k}]({url})** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}"
+                        )
                     else:
                         st.markdown(f"- **{k}** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}")
 

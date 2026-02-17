@@ -2,22 +2,18 @@
 from __future__ import annotations
 
 import html
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
-    priority_color_map,
     priority_rank,
 )
-from bug_resolution_radar.ui.components.filters import FilterState, render_filters
+from bug_resolution_radar.ui.components.filters import render_filters
 from bug_resolution_radar.ui.components.issues import render_issue_cards, render_issue_table
-from bug_resolution_radar.ui.style import apply_plotly_bbva
-
 from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
     ChartSpec,
@@ -25,6 +21,7 @@ from bug_resolution_radar.ui.dashboard.registry import (
     list_trend_chart_options,
     render_chart_with_insights,
 )
+from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
 
 # ---------------------------------------------------------------------
@@ -128,10 +125,14 @@ def render_issues_section(dff: pd.DataFrame) -> None:
     st.markdown("### Issues")
 
     # Keep stable sort
-    dff_show = dff.sort_values(by="updated", ascending=False) if "updated" in dff.columns else dff.copy()
+    dff_show = (
+        dff.sort_values(by="updated", ascending=False) if "updated" in dff.columns else dff.copy()
+    )
 
     # Download CSV (always visible; independent of view)
-    top = _panel("Exportación", "Descarga el dataset filtrado (formato tabla) para análisis externo")
+    top = _panel(
+        "Exportación", "Descarga el dataset filtrado (formato tabla) para análisis externo"
+    )
     with top:
         c1, c2 = st.columns([1, 2])
         with c1:
@@ -197,7 +198,7 @@ def render_kanban(
     all_statuses = status_counts.index.tolist()
 
     # If user has status filter active, show exactly those statuses
-    selected_statuses = list(st.session_state.get("filter_status") or [])
+    selected_statuses = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     selected_statuses = [s for s in selected_statuses if s in all_statuses]
 
     if not selected_statuses:
@@ -220,7 +221,7 @@ def render_kanban(
     cols = st.columns(len(selected_statuses))
 
     def _set_status_filter(st_name: str) -> None:
-        st.session_state["filter_status"] = [st_name]
+        st.session_state[FILTER_STATUS_KEY] = [st_name]
 
     for col, st_name in zip(cols, selected_statuses):
         sub = kan[kan["status"] == st_name].copy()

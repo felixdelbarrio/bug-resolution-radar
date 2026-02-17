@@ -35,14 +35,16 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def df_to_csv_bytes(df: pd.DataFrame, *, include_index: bool = False, encoding: str = "utf-8") -> bytes:
+def df_to_csv_bytes(
+    df: pd.DataFrame, *, include_index: bool = False, encoding: str = "utf-8"
+) -> bytes:
     """Convert DataFrame to CSV bytes with safe defaults.
 
     - Dates are serialized by pandas; keep it simple and consistent.
     """
     if df is None:
         df = pd.DataFrame()
-    csv = df.to_csv(index=include_index)
+    csv: str = df.to_csv(index=include_index)
     return csv.encode(encoding, errors="replace")
 
 
@@ -51,7 +53,7 @@ def download_button_for_df(
     *,
     label: str = "⬇️ Descargar CSV",
     key: str = "download_csv",
-    spec: CsvDownloadSpec = CsvDownloadSpec(),
+    spec: Optional[CsvDownloadSpec] = None,
     suffix: str = "",
     disabled: Optional[bool] = None,
     use_container_width: bool = True,
@@ -67,18 +69,22 @@ def download_button_for_df(
     if disabled is None:
         disabled = is_empty
 
-    prefix = _safe_filename(spec.filename_prefix)
+    csv_spec = spec or CsvDownloadSpec()
+
+    prefix = _safe_filename(csv_spec.filename_prefix)
     suf = _safe_filename(suffix) if suffix else ""
     ts = _timestamp()
     fname = f"{prefix}{'_' + suf if suf else ''}_{ts}.csv"
 
-    csv_bytes = df_to_csv_bytes(df, include_index=spec.include_index, encoding=spec.encoding)
+    csv_bytes = df_to_csv_bytes(
+        df, include_index=csv_spec.include_index, encoding=csv_spec.encoding
+    )
 
     st.download_button(
         label=label,
         data=csv_bytes,
         file_name=fname,
-        mime=spec.mime,
+        mime=csv_spec.mime,
         key=key,
         disabled=disabled,
         use_container_width=use_container_width,
@@ -103,7 +109,9 @@ DEFAULT_TABLE_COLS = [
 ]
 
 
-def make_table_export_df(df: pd.DataFrame, *, preferred_cols: Optional[Iterable[str]] = None) -> pd.DataFrame:
+def make_table_export_df(
+    df: pd.DataFrame, *, preferred_cols: Optional[Iterable[str]] = None
+) -> pd.DataFrame:
     """Return a dataframe shaped like the table view export.
 
     - Keeps only known/important columns first
