@@ -29,12 +29,12 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-radius-m: 8px;
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
-            --bbva-tab-soft-bg: #1D2F4D;
-            --bbva-tab-soft-border: #4A6290;
+            --bbva-tab-soft-bg: #203A60;
+            --bbva-tab-soft-border: #5D79A9;
             --bbva-tab-soft-text: #E6EFFF;
-            --bbva-tab-active-bg: #284A73;
-            --bbva-tab-active-border: #6793C7;
-            --bbva-tab-active-text: #F3F8FF;
+            --bbva-tab-active-bg: #0E5BFF;
+            --bbva-tab-active-border: #7BB2FF;
+            --bbva-tab-active-text: #FFFFFF;
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
             --background-color: var(--bbva-surface-2);
@@ -193,9 +193,15 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-pressed="true"],
           div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-selected="true"],
           div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[data-selected="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[data-active="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-current="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-current="page"],
           div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-pressed="true"],
           div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-selected="true"],
-          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[data-selected="true"] {
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[data-selected="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[data-active="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-current="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-current="page"] {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
@@ -238,9 +244,15 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           [data-baseweb="button-group"] > *[aria-pressed="true"],
           [data-baseweb="button-group"] > *[aria-selected="true"],
           [data-baseweb="button-group"] > *[data-selected="true"],
+          [data-baseweb="button-group"] > *[data-active="true"],
+          [data-baseweb="button-group"] > *[aria-current="true"],
+          [data-baseweb="button-group"] > *[aria-current="page"],
           [data-baseweb="button-group"] > * > button[aria-pressed="true"],
           [data-baseweb="button-group"] > * > button[aria-selected="true"],
-          [data-baseweb="button-group"] > * > button[data-selected="true"] {
+          [data-baseweb="button-group"] > * > button[data-selected="true"],
+          [data-baseweb="button-group"] > * > button[data-active="true"],
+          [data-baseweb="button-group"] > * > button[aria-current="true"],
+          [data-baseweb="button-group"] > * > button[aria-current="page"] {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
@@ -252,6 +264,23 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 0.25rem 0.25rem !important;
             border-radius: 11px !important;
             font-size: 1.05rem !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button {
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_ingest [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_theme [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_config [data-testid="baseButton-primary"] {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
           }
           /* Tighten the vertical gap between top tabs and dashboard filters/content */
           .st-key-workspace_nav_bar {
@@ -316,6 +345,21 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             border: 1px solid var(--bbva-border-strong) !important;
             background: var(--bbva-surface-elevated) !important;
             box-shadow: 0 10px 28px color-mix(in srgb, var(--bbva-text) 12%, transparent) !important;
+          }
+          .st-key-overview_summary_shell [data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-trend_chart_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 92%, #8EB4FF 8%) !important;
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 90%, #0E234C 10%) !important;
+            box-shadow: 0 12px 28px color-mix(in srgb, #02091D 48%, transparent),
+                        inset 0 0 0 1px color-mix(in srgb, #9DC0FF 18%, transparent) !important;
+          }
+          [class*="st-key-overview_summary_chart_"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-trins_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 88%, #97BCFF 12%) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 80%, #0F244B 20%) !important;
+            box-shadow: 0 8px 22px color-mix(in srgb, #02091D 42%, transparent),
+                        inset 0 0 0 1px color-mix(in srgb, #9DC0FF 16%, transparent) !important;
           }
 
           /* Sidebar */

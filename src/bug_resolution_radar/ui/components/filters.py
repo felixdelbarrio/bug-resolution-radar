@@ -7,6 +7,7 @@ from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -102,6 +103,88 @@ def _inject_filters_panel_css() -> None:
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def _inject_combo_signal_script() -> None:
+    """Apply semantic signal colors to dropdown options/tags when frontend DOM differs by version."""
+    components_html(
+        """
+        <script>
+        (() => {
+          try {
+            const root = window.parent;
+            const doc = root && root.document;
+            if (!doc) return;
+
+            const match = (text, keys) => keys.some((k) => text.includes(k));
+            const toRgba = (hex, alpha) => {
+              const h = String(hex || "").replace("#", "");
+              if (h.length !== 6) return "rgba(122,139,173," + alpha + ")";
+              const r = parseInt(h.slice(0, 2), 16);
+              const g = parseInt(h.slice(2, 4), 16);
+              const b = parseInt(h.slice(4, 6), 16);
+              return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+            };
+
+            const signalColor = (raw) => {
+              const t = String(raw || "").trim().toLowerCase();
+              if (!t) return "#7A8BAD";
+              if (match(t, ["new", "analysing", "blocked", "created", "high", "highest", "impedimento"])) return "#B4232A";
+              if (match(t, ["en progreso", "in progress", "to rework", "test", "ready to verify", "open", "medium"])) return "#E08A00";
+              if (match(t, ["accepted", "ready to deploy", "deployed", "closed", "low", "lowest"])) return "#1E9E53";
+              return "#7A8BAD";
+            };
+
+            const paintOption = (el) => {
+              const label = (el.textContent || "").trim();
+              if (!label) return;
+              const color = signalColor(label);
+              el.style.setProperty("--bbva-opt-dot", color);
+              el.style.borderLeft = "2px solid " + toRgba(color, 0.75);
+            };
+
+            const paintTag = (el) => {
+              const label = (el.textContent || "").trim();
+              if (!label) return;
+              const color = signalColor(label);
+              el.style.background = toRgba(color, 0.14);
+              el.style.border = "1px solid " + toRgba(color, 0.52);
+              el.style.color = color;
+              el.style.backgroundImage = "none";
+              el.querySelectorAll("*").forEach((n) => {
+                n.style.color = color;
+              });
+            };
+
+            const tick = () => {
+              doc
+                .querySelectorAll('div[data-baseweb="popover"] [role="option"], div[data-baseweb="popover"] li[role="option"]')
+                .forEach(paintOption);
+              doc
+                .querySelectorAll('[data-baseweb="select"] [data-baseweb="tag"]')
+                .forEach(paintTag);
+            };
+
+            tick();
+            if (root.__bbvaSignalTimer) {
+              clearInterval(root.__bbvaSignalTimer);
+            }
+            const started = Date.now();
+            root.__bbvaSignalTimer = setInterval(() => {
+              tick();
+              if (Date.now() - started > 7000) {
+                clearInterval(root.__bbvaSignalTimer);
+              }
+            }, 250);
+          } catch (e) {
+            // no-op
+          }
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 
@@ -237,6 +320,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
       so matrix/kanban/insights can still sync by writing those keys.
     """
     _inject_filters_panel_css()
+    _inject_combo_signal_script()
 
     # Normalize empty values so filters + matrix can round-trip selections.
     status_col = (
