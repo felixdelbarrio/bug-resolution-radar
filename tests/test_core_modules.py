@@ -44,9 +44,7 @@ def test_security_masking_helpers() -> None:
     assert "abc123" not in masked
 
 
-def test_config_ensure_env_from_example_and_load_save(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
+def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_example = tmp_path / ".env.example"
     env_example.write_text(
