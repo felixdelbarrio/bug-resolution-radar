@@ -103,7 +103,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     elif section == "kanban":
         render_kanban_tab(open_df=ctx.open_df)
     elif section == "trends":
-        render_trends_tab(dff=ctx.dff, open_df=ctx.open_df, kpis=ctx.kpis)
+        render_trends_tab(settings=settings, dff=ctx.dff, open_df=ctx.open_df, kpis=ctx.kpis)
     elif section == "insights":
         render_insights_page(settings, dff_filtered=ctx.dff, kpis=ctx.kpis)
     elif section == "notes":

@@ -32,8 +32,10 @@ from bug_resolution_radar.ui.insights.helpers import (
     open_only,
     safe_df,
 )
-
-_INSIGHT_INTERACTIONS_KEY = "__insights_interactions"
+from bug_resolution_radar.ui.insights.learning_store import (
+    LEARNING_INTERACTIONS_KEY,
+    ensure_learning_session_loaded,
+)
 
 
 def _topic_selection_token(*, topic: str, total_open: int) -> str:
@@ -44,7 +46,7 @@ def _topic_selection_token(*, topic: str, total_open: int) -> str:
     assignee = ",".join(
         sorted([str(x) for x in list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])])
     )
-    nonce = int(st.session_state.get(_INSIGHT_INTERACTIONS_KEY, 0) or 0)
+    nonce = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
     return f"{topic}|{total_open}|{status}|{priority}|{assignee}|{nonce}"
 
 
@@ -166,6 +168,7 @@ def render_top_topics_tab(
     """
     _ = kpis  # maintained in signature for compatibility with caller
     inject_insights_chip_css()
+    ensure_learning_session_loaded(settings=settings)
 
     dff = safe_df(dff_filtered)
     if dff.empty:

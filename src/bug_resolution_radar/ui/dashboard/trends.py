@@ -56,7 +56,7 @@ def _safe_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _ensure_learning_state() -> Dict[str, Any]:
-    raw = st.session_state.get(_LEARNING_STATE_KEY)
+    raw = st.session_state.get(LEARNING_STATE_KEY)
     if isinstance(raw, dict):
         state: Dict[str, Any] = raw
     else:
@@ -73,7 +73,7 @@ def _ensure_learning_state() -> Dict[str, Any]:
         state["last_render_token"] = ""
     if not isinstance(state.get("last_context_token"), str):
         state["last_context_token"] = ""
-    st.session_state[_LEARNING_STATE_KEY] = state
+    st.session_state[LEARNING_STATE_KEY] = state
     return state
 
 
@@ -199,7 +199,8 @@ def _register_shown_insights(cards: List[ActionInsight], *, chart_id: str, rende
     chart_seen[chart_id] = int(chart_seen.get(chart_id, 0) or 0) + 1
     state["chart_seen_counts"] = chart_seen
     state["last_render_token"] = render_token
-    st.session_state[_LEARNING_STATE_KEY] = state
+    st.session_state[LEARNING_STATE_KEY] = state
+    persist_learning_session()
 
 
 def _track_context_interaction(*, chart_id: str, active_filters: Dict[str, List[str]]) -> None:
@@ -212,10 +213,11 @@ def _track_context_interaction(*, chart_id: str, active_filters: Dict[str, List[
     if token == prev:
         return
     state["last_context_token"] = token
-    st.session_state[_LEARNING_STATE_KEY] = state
-    st.session_state[_LEARNING_INTERACTIONS_KEY] = int(
-        st.session_state.get(_LEARNING_INTERACTIONS_KEY, 0) or 0
+    st.session_state[LEARNING_STATE_KEY] = state
+    st.session_state[LEARNING_INTERACTIONS_KEY] = int(
+        st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0
     ) + 1
+    persist_learning_session()
 
 
 def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
@@ -474,11 +476,14 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     ]
 
 
-def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -> None:
+def render_trends_tab(
+    *, settings: Settings, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict
+) -> None:
     """Render trends tab with one selected chart and contextual insights."""
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
     kpis = kpis if isinstance(kpis, dict) else {}
+    ensure_learning_session_loaded(settings=settings)
 
     chart_options = available_trend_charts()
     id_to_label: Dict[str, str] = {cid: label for cid, label in chart_options}
@@ -845,7 +850,7 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
         ),
     )
 
-    interactions = int(st.session_state.get(_LEARNING_INTERACTIONS_KEY, 0) or 0)
+    interactions = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
     if interactions > 0:
         st.caption(
             f"Priorizacion adaptativa activa: {interactions} interacciones consideradas en esta sesion."
@@ -876,10 +881,11 @@ def _jump_to_issues(
             "priority": list(priority_filters or []),
             "assignee": list(assignee_filters or []),
         }
-        st.session_state[_LEARNING_STATE_KEY] = state
-        st.session_state[_LEARNING_INTERACTIONS_KEY] = int(
-            st.session_state.get(_LEARNING_INTERACTIONS_KEY, 0) or 0
+        st.session_state[LEARNING_STATE_KEY] = state
+        st.session_state[LEARNING_INTERACTIONS_KEY] = int(
+            st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0
         ) + 1
+        persist_learning_session()
 
 
 def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str, chart_id: str) -> None:

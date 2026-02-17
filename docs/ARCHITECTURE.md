@@ -10,6 +10,7 @@ Aplicación Streamlit para gestión operativa de incidencias multi-fuente, con f
 - `src/bug_resolution_radar/ui/dashboard/*.py`: lógica de vistas core (Resumen, Issues, Kanban, Tendencias, Notas).
 - `src/bug_resolution_radar/ui/insights/*.py`: vistas analíticas especializadas (Top tópicos, Duplicados, Personas, Salud operativa).
 - `src/bug_resolution_radar/ui/insights/engine.py`: motor unificado de insights adaptativos y scoring ejecutivo.
+- `src/bug_resolution_radar/ui/insights/learning_store.py`: persistencia de aprendizaje por cliente entre sesiones.
 - `src/bug_resolution_radar/ui/components/*.py`: componentes reutilizables (filtros, tabla/cards de issues).
 - `src/bug_resolution_radar/ui/style.py`: tokens visuales, tema claro/oscuro y estilo Plotly.
 

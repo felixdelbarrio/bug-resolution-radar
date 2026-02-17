@@ -5,6 +5,7 @@ Generar mensajes ejecutivos dinamicos, no estaticos, adaptados al estado real de
 
 ## Dónde vive
 - Motor unificado: `src/bug_resolution_radar/ui/insights/engine.py`
+- Persistencia de aprendizaje: `src/bug_resolution_radar/ui/insights/learning_store.py`
 - Consumo en tendencias: `src/bug_resolution_radar/ui/dashboard/trends.py`
 - Consumo en resumen ejecutivo: `src/bug_resolution_radar/ui/dashboard/overview.py`
 - Consumo en insights por pestaña:
@@ -20,6 +21,7 @@ Generar mensajes ejecutivos dinamicos, no estaticos, adaptados al estado real de
 - Los insights se priorizan por puntuacion de relevancia (`score`) para que cambien con la situacion operativa.
 - Capa de aprendizaje de sesion: la priorizacion se ajusta por interacciones (clicks en insights, cambios de filtro y navegacion entre graficos).
 - Control de fatiga: los insights muy repetidos pierden prioridad y los no vistos ganan peso.
+- Persistencia cross-session: el aprendizaje se guarda por cliente (`workspace_country` + `workspace_source_id`) y se recarga automaticamente al volver.
 
 ## Contrato del motor
 `engine.py` expone tres tipos principales:
