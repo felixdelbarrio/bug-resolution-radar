@@ -584,13 +584,23 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             cursor: not-allowed !important;
           }
 
-          /* Download button: same quiet language as segmented controls */
-          .stDownloadButton > button {
-            min-height: 1.84rem !important;
-            min-width: 0 !important;
+          /* Download button: unified pill style across CSV/HTML exports */
+          .stDownloadButton {
             width: auto !important;
-            padding: 0.20rem 0.62rem !important;
-            border-radius: 10px !important;
+          }
+          .stDownloadButton > button {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.32rem !important;
+            min-height: 1.96rem !important;
+            min-width: 4.86rem !important; /* keeps "HTML" fully inside */
+            width: auto !important;
+            padding: 0.24rem 0.74rem !important;
+            border-radius: 999px !important;
+            box-sizing: border-box !important;
+            white-space: nowrap !important;
+            line-height: 1.05 !important;
             font-weight: 700 !important;
             border: 1px solid var(--bbva-tab-soft-border) !important;
             background: var(--bbva-tab-soft-bg) !important;

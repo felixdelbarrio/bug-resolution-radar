@@ -288,17 +288,21 @@ def _inject_minimal_export_css(scope_key: str) -> None:
         f"""
         <style>
           .st-key-{scope_key} {{
-            margin-top: -0.14rem;
+            margin-top: -0.10rem;
             margin-bottom: 0.12rem;
-            padding-right: 0.52rem;
+            padding-right: 0.34rem;
           }}
           .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
             justify-content: flex-end !important;
             align-items: center !important;
-            gap: 0.24rem !important;
+            gap: 0.32rem !important;
             margin: 0 !important;
+            flex-wrap: wrap !important;
           }}
           .st-key-{scope_key} [data-testid="stColumn"] {{
+            flex: 0 0 auto !important;
+            width: auto !important;
+            min-width: 0 !important;
             display: flex;
             justify-content: flex-end;
             align-items: center;
@@ -307,31 +311,12 @@ def _inject_minimal_export_css(scope_key: str) -> None:
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            width: auto;
+            width: auto !important;
           }}
           .st-key-{scope_key} .stDownloadButton {{
+            width: auto !important;
             display: flex;
             justify-content: flex-end;
-          }}
-          .st-key-{scope_key} .stDownloadButton > button {{
-            width: auto !important;
-            min-height: 1.66rem !important;
-            min-width: 0 !important;
-            padding: 0.12rem 0.52rem !important;
-            border-radius: 999px !important;
-            font-size: 0.74rem !important;
-            font-weight: 700 !important;
-            letter-spacing: 0.01em !important;
-            line-height: 1.08 !important;
-            white-space: nowrap !important;
-            border: 1px solid var(--bbva-border) !important;
-            background: color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-surface-2)) !important;
-            color: var(--bbva-text-muted) !important;
-          }}
-          .st-key-{scope_key} .stDownloadButton > button:hover {{
-            border-color: var(--bbva-border-strong) !important;
-            background: color-mix(in srgb, var(--bbva-primary) 10%, var(--bbva-surface)) !important;
-            color: var(--bbva-text) !important;
           }}
         </style>
         """,
@@ -387,9 +372,8 @@ def render_minimal_export_actions(
         )
 
     with st.container(key=scope_key):
-        layout = [24] + [1] * len(buttons) + [0.9]
-        cols = st.columns(layout, gap="small")
-        for col, btn in zip(cols[1 : 1 + len(buttons)], buttons):
+        cols = st.columns(len(buttons), gap="small")
+        for col, btn in zip(cols, buttons):
             with col:
                 st.download_button(
                     label=btn["label"],

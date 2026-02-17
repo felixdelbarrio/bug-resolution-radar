@@ -21,6 +21,16 @@ MAX_TABLE_HTML_ROWS = 450
 MAX_TABLE_NATIVE_ROWS = 2500
 
 
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) != 6:
+        return f"rgba(127,146,178,{alpha:.3f})"
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha:.3f})"
+
+
 def _safe_cell_text(value: object) -> str:
     null_tokens = {"nan", "none", "nat", "undefined", "null", ""}
 
@@ -84,6 +94,38 @@ def _chip_html(value: object, *, for_priority: bool) -> str:
         )
     style = chip_style_from_color(color)
     return f'<span class="issue-table-chip" style="{style}">{html.escape(txt)}</span>'
+
+
+def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
+    txt = _safe_cell_text(value)
+    if txt == "—":
+        return (
+            "color: var(--bbva-text-muted) !important; "
+            "font-weight: 700 !important; "
+            "background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important; "
+            "border: 1px solid var(--bbva-border) !important; "
+            "border-radius: 999px !important;"
+        )
+
+    color = priority_color(txt) if for_priority else status_color(txt)
+    if color.upper() == "#E2E6EE":
+        return (
+            "color: var(--bbva-text) !important; "
+            "font-weight: 700 !important; "
+            "background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important; "
+            "border: 1px solid var(--bbva-border) !important; "
+            "border-radius: 999px !important;"
+        )
+
+    border = _hex_to_rgba(color, 0.62)
+    bg = _hex_to_rgba(color, 0.16)
+    return (
+        f"color: {color} !important; "
+        f"background: {bg} !important; "
+        f"border: 1px solid {border} !important; "
+        "border-radius: 999px !important; "
+        "font-weight: 700 !important;"
+    )
 
 
 def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> None:
@@ -239,8 +281,20 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
     if "priority" in df_show.columns:
         col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
 
+    styler = df_show.style
+    if "status" in df_show.columns:
+        styler = styler.map(
+            lambda x: _native_signal_cell_style(x, for_priority=False),
+            subset=["status"],
+        )
+    if "priority" in df_show.columns:
+        styler = styler.map(
+            lambda x: _native_signal_cell_style(x, for_priority=True),
+            subset=["priority"],
+        )
+
     st.dataframe(
-        df_show,
+        styler,
         use_container_width=True,
         hide_index=False,
         column_config=col_cfg or None,
