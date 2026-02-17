@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-
-from _pytest.monkeypatch import MonkeyPatch
+from typing import Any
 
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.notes import NotesStore
@@ -46,7 +45,7 @@ def test_security_masking_helpers() -> None:
 
 
 def test_config_ensure_env_from_example_and_load_save(
-    monkeypatch: MonkeyPatch, tmp_path: Path
+    monkeypatch: Any, tmp_path: Path
 ) -> None:
     env_path = tmp_path / ".env"
     env_example = tmp_path / ".env.example"
