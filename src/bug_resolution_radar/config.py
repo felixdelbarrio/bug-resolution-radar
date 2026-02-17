@@ -85,6 +85,7 @@ class Settings(BaseModel):
     THEME: str = "auto"
     DATA_PATH: str = "data/issues.json"
     NOTES_PATH: str = "data/notes.json"
+    INSIGHTS_LEARNING_PATH: str = "data/insights_learning.json"
     LOG_LEVEL: str = "INFO"
 
     # -------------------------
