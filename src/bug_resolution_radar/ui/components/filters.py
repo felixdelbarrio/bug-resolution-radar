@@ -152,19 +152,32 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
 
     Also normalizes status/priority to keep UI consistent.
     """
-    dff = df.copy()
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    if "status" in dff.columns:
-        dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
-    if "priority" in dff.columns:
-        dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
+    mask = pd.Series(True, index=df.index)
 
-    if fs.status and "status" in dff.columns:
-        dff = dff[dff["status"].isin(fs.status)]
-    if fs.priority and "priority" in dff.columns:
-        dff = dff[dff["priority"].isin(fs.priority)]
-    if fs.assignee and "assignee" in dff.columns:
-        dff = dff[dff["assignee"].isin(fs.assignee)]
+    status_norm: pd.Series | None = None
+    if "status" in df.columns:
+        status_norm = normalize_text_col(df["status"], "(sin estado)")
+        if fs.status:
+            mask &= status_norm.isin(fs.status)
+
+    priority_norm: pd.Series | None = None
+    if "priority" in df.columns:
+        priority_norm = normalize_text_col(df["priority"], "(sin priority)")
+        if fs.priority:
+            mask &= priority_norm.isin(fs.priority)
+
+    if fs.assignee and "assignee" in df.columns:
+        mask &= df["assignee"].isin(fs.assignee)
+
+    dff = df.loc[mask].copy()
+
+    if status_norm is not None:
+        dff["status"] = status_norm.loc[mask].to_numpy()
+    if priority_norm is not None:
+        dff["priority"] = priority_norm.loc[mask].to_numpy()
 
     # IMPORTANTE: no filtramos por "type" (se muestra todo lo que entra por ingesta)
     return dff

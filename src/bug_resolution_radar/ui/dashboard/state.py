@@ -6,6 +6,8 @@ from typing import List, Optional
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.ui.common import open_issues_only
+
 # Canonical keys shared across dashboard modules/components.
 FILTER_STATUS_KEY = "filter_status"
 FILTER_PRIORITY_KEY = "filter_priority"
@@ -62,8 +64,4 @@ def open_only(df: pd.DataFrame) -> pd.DataFrame:
     Devuelve solo abiertas si existe columna 'resolved' (resolved isna()).
     Si no existe, devuelve copia del df.
     """
-    if df is None:
-        return df
-    if "resolved" in df.columns:
-        return df[df["resolved"].isna()].copy()
-    return df.copy()
+    return open_issues_only(df)

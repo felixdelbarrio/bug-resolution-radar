@@ -45,11 +45,7 @@ def save_issues_doc(path: str, doc: IssuesDocument) -> None:
 # ----------------------------
 
 
-def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
-    """Convert IssuesDocument into a pandas DataFrame.
-
-    Ensures datetime columns are parsed as UTC timestamps when present.
-    """
+def _issues_to_dataframe(doc: IssuesDocument) -> pd.DataFrame:
     rows: List[Dict[str, Any]] = [i.model_dump() for i in doc.issues]
     if not rows:
         return pd.DataFrame()
@@ -59,6 +55,43 @@ def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
     return df
+
+
+@lru_cache(maxsize=8)
+def _load_issues_df_cached(path: str, mtime_ns: int) -> pd.DataFrame:
+    doc = _load_issues_doc_cached(path, mtime_ns)
+    return _issues_to_dataframe(doc)
+
+
+def load_issues_df(path: str) -> pd.DataFrame:
+    """Load issues JSON as DataFrame with mtime-based cache invalidation.
+
+    Streamlit reruns frequently (filters, tabs, widgets). Caching avoids
+    repeating expensive model->rows->DataFrame conversion on each rerun.
+    """
+    p = Path(path)
+    mtime_ns = p.stat().st_mtime_ns if p.exists() else -1
+    # Defensive copy to avoid accidental mutation of cached base dataframe.
+    return _load_issues_df_cached(str(p.resolve()), mtime_ns).copy(deep=True)
+
+
+def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
+    """Convert IssuesDocument into a pandas DataFrame.
+
+    Ensures datetime columns are parsed as UTC timestamps when present.
+    """
+    return _issues_to_dataframe(doc)
+
+
+def open_issues_only(df: pd.DataFrame | None) -> pd.DataFrame:
+    """Return only open issues (`resolved` is null), or a safe empty DataFrame."""
+    if not isinstance(df, pd.DataFrame):
+        return pd.DataFrame()
+    if df.empty:
+        return df.copy()
+    if "resolved" in df.columns:
+        return df[df["resolved"].isna()].copy()
+    return df.copy()
 
 
 def normalize_text_col(series: pd.Series, empty_label: str) -> pd.Series:

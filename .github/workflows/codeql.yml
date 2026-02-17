@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
 
 jobs:
@@ -36,3 +35,16 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          # Keep CI green when repository-level Code Scanning is disabled.
+          # Results are still generated and published as workflow artifacts.
+          # Switch to `upload: always` after enabling Code Scanning in repo settings.
+          upload: never
+          output: sarif-results
+
+      - name: Upload CodeQL SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: sarif-results
+          if-no-files-found: error

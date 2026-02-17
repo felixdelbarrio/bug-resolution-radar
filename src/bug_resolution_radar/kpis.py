@@ -81,51 +81,61 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
         }
 
     total_issues = int(len(work_df))
-    if "resolved" in work_df.columns:
-        open_mask = work_df["resolved"].isna()
+    has_created = "created" in work_df.columns
+    has_resolved = "resolved" in work_df.columns
+    has_priority = "priority" in work_df.columns
+    has_resolution_type = "resolution_type" in work_df.columns
+    has_summary = "summary" in work_df.columns
+
+    if has_created:
+        created = work_df["created"]
     else:
-        open_mask = pd.Series([True] * total_issues, index=work_df.index)
+        created = pd.Series(pd.NaT, index=work_df.index, dtype="datetime64[ns, UTC]")
 
-    open_df = work_df[open_mask]
+    if has_resolved:
+        resolved = work_df["resolved"]
+    else:
+        resolved = pd.Series(pd.NaT, index=work_df.index, dtype="datetime64[ns, UTC]")
+
+    created_notna = created.notna()
+    resolved_notna = resolved.notna()
+    open_mask = ~resolved_notna
     open_now_total = int(open_mask.sum())
+    priority = work_df["priority"].fillna("").astype(str) if has_priority else pd.Series(dtype=str)
 
-    def by_priority(sub: pd.DataFrame) -> Dict[str, int]:
-        if sub.empty or "priority" not in sub.columns:
+    def by_priority_mask(mask: pd.Series) -> Dict[str, int]:
+        if not has_priority:
             return {}
-        counts = sub["priority"].fillna("").astype(str).value_counts()
-        return {str(priority): int(count) for priority, count in counts.items()}
+        counts = priority.loc[mask].value_counts()
+        return {str(priority_name): int(count) for priority_name, count in counts.items()}
 
     fort_start = now - timedelta(days=fort_days)
-    if "created" in work_df.columns:
-        new_fort = work_df[work_df["created"] >= fort_start]
-    else:
-        new_fort = work_df.iloc[0:0]
+    new_fort_mask = created_notna & (created >= fort_start) if has_created else created_notna
+    closed_fort_mask = resolved_notna & (resolved >= fort_start)
+    closed_all_mask = created_notna & resolved_notna
 
-    if "resolved" in work_df.columns:
-        closed_fort = work_df[work_df["resolved"].notna() & (work_df["resolved"] >= fort_start)]
-    else:
-        closed_fort = work_df.iloc[0:0]
-
-    if "resolved" in work_df.columns and "created" in work_df.columns:
-        closed_all = work_df[work_df["resolved"].notna() & work_df["created"].notna()]
-    else:
-        closed_all = work_df.iloc[0:0]
-
-    if closed_all.empty:
+    resolution_days = (
+        (
+            (resolved.loc[closed_all_mask] - created.loc[closed_all_mask]).dt.total_seconds()
+            / 86400.0
+        )
+        .clip(lower=0.0)
+        .astype(float)
+    )
+    if resolution_days.empty:
         mean_resolution_days = 0.0
         mean_by_priority: Dict[str, float] = {}
     else:
-        resolution_days = (
-            closed_all["resolved"] - closed_all["created"]
-        ).dt.total_seconds() / 86400.0
         mean_resolution_days = float(resolution_days.mean())
-        if "priority" in closed_all.columns:
+        if has_priority:
+            res_df = pd.DataFrame(
+                {
+                    "priority": priority.loc[closed_all_mask].to_numpy(),
+                    "res_days": resolution_days.to_numpy(),
+                }
+            )
             grouped = (
-                closed_all.assign(res_days=resolution_days)
-                .groupby("priority", dropna=False)["res_days"]
-                .mean()
-                .sort_values()
-                .round(2)
+                res_df.groupby("priority", dropna=False)["res_days"].mean().sort_values().round(2)
             )
             mean_by_priority = grouped.to_dict()
         else:
@@ -136,10 +146,11 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
     except Exception:
         x_days_list = []
 
-    if len(open_df) > 0 and "created" in open_df.columns:
-        open_age_days = ((now - open_df["created"]).dt.total_seconds() / 86400.0).clip(lower=0.0)
-    else:
-        open_age_days = pd.Series(dtype=float)
+    open_age_days = (
+        ((now - created.loc[open_mask & created_notna]).dt.total_seconds() / 86400.0)
+        .clip(lower=0.0)
+        .astype(float)
+    )
 
     pct_parts: List[str] = []
     if not open_age_days.empty:
@@ -175,41 +186,31 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
 
     range_days = 90
     start = now - timedelta(days=range_days)
-    if "created" in work_df.columns:
-        created_daily = (
-            work_df[work_df["created"].notna() & (work_df["created"] >= start)]
-            .assign(date=lambda d: d["created"].dt.date)
-            .groupby("date")
-            .size()
-            .reset_index(name="created")
-        )
-    else:
-        created_daily = pd.DataFrame(columns=["date", "created"])
 
-    if "resolved" in work_df.columns:
-        closed_daily = (
-            work_df[work_df["resolved"].notna() & (work_df["resolved"] >= start)]
-            .assign(date=lambda d: d["resolved"].dt.date)
-            .groupby("date")
-            .size()
-            .reset_index(name="closed")
-        )
-    else:
-        closed_daily = pd.DataFrame(columns=["date", "closed"])
+    created_daily = (
+        created.loc[created_notna & (created >= start)].dt.floor("D").value_counts(sort=False)
+        if has_created
+        else pd.Series(dtype=int)
+    )
+    closed_daily = (
+        resolved.loc[resolved_notna & (resolved >= start)].dt.floor("D").value_counts(sort=False)
+        if has_resolved
+        else pd.Series(dtype=int)
+    )
 
-    if not created_daily.empty or not closed_daily.empty:
-        daily = pd.merge(created_daily, closed_daily, on="date", how="outer").fillna(0)
-        daily["date"] = pd.to_datetime(daily["date"])
-        daily = daily.sort_values("date")
-        daily["open_delta"] = daily["created"] - daily["closed"]
-        daily["open_backlog_proxy"] = daily["open_delta"].cumsum()
-        timeseries_chart = px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
-    else:
+    if created_daily.empty and closed_daily.empty:
         timeseries_chart = _empty_timeseries_chart()
+    else:
+        all_dates = created_daily.index.union(closed_daily.index).sort_values()
+        daily = pd.DataFrame({"date": all_dates})
+        daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
+        daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
+        daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum()
+        timeseries_chart = px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
 
-    if not open_df.empty and "summary" in open_df.columns:
+    if open_now_total > 0 and has_summary:
         top_open = (
-            open_df["summary"]
+            work_df.loc[open_mask, "summary"]
             .fillna("")
             .astype(str)
             .value_counts()
@@ -225,13 +226,13 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
         "issues_open": open_now_total,
         "issues_closed": max(total_issues - open_now_total, 0),
         "open_now_total": open_now_total,
-        "open_now_by_priority": by_priority(open_df),
-        "new_fortnight_total": int(len(new_fort)),
-        "new_fortnight_by_priority": by_priority(new_fort),
-        "closed_fortnight_total": int(len(closed_fort)),
+        "open_now_by_priority": by_priority_mask(open_mask),
+        "new_fortnight_total": int(new_fort_mask.sum()),
+        "new_fortnight_by_priority": by_priority_mask(new_fort_mask),
+        "closed_fortnight_total": int(closed_fort_mask.sum()),
         "closed_fortnight_by_resolution_type": (
-            closed_fort["resolution_type"].fillna("").value_counts().to_dict()
-            if "resolution_type" in closed_fort.columns
+            work_df.loc[closed_fort_mask, "resolution_type"].fillna("").value_counts().to_dict()
+            if has_resolution_type
             else {}
         ),
         "mean_resolution_days": mean_resolution_days,

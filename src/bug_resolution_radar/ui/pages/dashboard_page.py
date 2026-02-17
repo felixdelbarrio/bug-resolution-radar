@@ -7,7 +7,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.notes import NotesStore
-from bug_resolution_radar.ui.common import df_from_issues_doc, load_issues_doc
+from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
 
 # ✅ Modules live in bug_resolution_radar.ui.dashboard.*
@@ -54,9 +54,8 @@ def render(settings: Settings) -> None:
     # Layout / styles (wide, spacing, etc.)
     apply_dashboard_layout()
 
-    # Load doc + dataframe
-    doc = load_issues_doc(settings.DATA_PATH)
-    df = df_from_issues_doc(doc)
+    # Load dataframe (cached by file mtime to minimize rerun cost)
+    df = load_issues_df(settings.DATA_PATH)
 
     if df.empty:
         st.warning("No hay datos todavía. Ve a la pestaña de Ingesta y ejecuta una ingesta.")

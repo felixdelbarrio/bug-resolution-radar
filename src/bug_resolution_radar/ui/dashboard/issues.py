@@ -6,6 +6,8 @@ import streamlit as st
 from bug_resolution_radar.ui.components.issues import render_issue_cards, render_issue_table
 from bug_resolution_radar.ui.dashboard.downloads import make_table_export_df, render_download_bar
 
+MAX_CARDS_RENDER = 250
+
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
@@ -23,7 +25,8 @@ def render_issues_section(
 ) -> None:
     """Render the Issues section with:
     - Default view: Cards
-    - Always shows ALL filtered issues (no 'max issues' slider)
+    - Table always includes all filtered issues
+    - Cards are capped for render performance on large datasets
     - CSV download always enabled (both Cards & Table), using the Table export format
     """
     st.markdown(f"### {title}")
@@ -56,9 +59,15 @@ def render_issues_section(
         return
 
     if view == "Cards":
+        max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
+        if len(dff_show) > MAX_CARDS_RENDER:
+            st.caption(
+                f"Vista Cards optimizada: mostrando {max_cards}/{len(dff_show)}."
+                " Usa Tabla para ver todo el dataset."
+            )
         render_issue_cards(
             dff_show,
-            max_cards=int(len(dff_show)),
+            max_cards=max_cards,
             title="Issues (prioridad + última actualización)",
         )
         return
