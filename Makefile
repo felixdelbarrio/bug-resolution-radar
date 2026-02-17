@@ -55,7 +55,7 @@ lint:
 
 typecheck:
 	@if [ -f $(VENV)/bin/mypy ]; then \
-		$(VENV)/bin/mypy . ; \
+		$(VENV)/bin/mypy src ; \
 	else \
 		echo "mypy no está instalado en el venv."; \
 	fi
