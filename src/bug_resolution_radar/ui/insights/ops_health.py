@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import html
-
 import pandas as pd
 import streamlit as st
 
@@ -123,7 +121,7 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
             '<article class="ops-kpi-card">'
             '<div class="ops-kpi-label">Prioridad dominante</div>'
             f'<div class="ops-kpi-value">{top_count:,}</div>'
-            f'<div class="ops-kpi-sub">{pr_chip} · {html.escape(top_pr)}</div>'
+            f'<div class="ops-kpi-sub">{pr_chip}</div>'
             "</article>"
             "</div>"
         ),
