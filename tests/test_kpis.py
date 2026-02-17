@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pandas as pd
-from _pytest.monkeypatch import MonkeyPatch
 
 from bug_resolution_radar import kpis as kpis_module
 from bug_resolution_radar.config import Settings
@@ -69,7 +69,7 @@ def test_kpis_empty_dataframe_returns_defaults() -> None:
     assert list(k["top_open_table"].columns) == ["summary", "open_count"]
 
 
-def test_kpis_handles_missing_columns_and_bad_settings(monkeypatch: MonkeyPatch) -> None:
+def test_kpis_handles_missing_columns_and_bad_settings(monkeypatch: Any) -> None:
     fixed_now = datetime(2025, 1, 20, tzinfo=timezone.utc)
     monkeypatch.setattr(kpis_module, "_utcnow", lambda: fixed_now)
 
@@ -95,7 +95,7 @@ def test_kpis_handles_missing_columns_and_bad_settings(monkeypatch: MonkeyPatch)
     assert k["pct_open_gt_x_days"] == "n/a"
 
 
-def test_kpis_top_open_table_is_sorted_by_frequency(monkeypatch: MonkeyPatch) -> None:
+def test_kpis_top_open_table_is_sorted_by_frequency(monkeypatch: Any) -> None:
     fixed_now = datetime(2025, 1, 20, tzinfo=timezone.utc)
     monkeypatch.setattr(kpis_module, "_utcnow", lambda: fixed_now)
 
