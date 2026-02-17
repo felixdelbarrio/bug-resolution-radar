@@ -23,10 +23,10 @@ from bug_resolution_radar.ui.pages.insights_page import render as render_insight
 
 DASHBOARD_SECTIONS: Final[List[str]] = [
     "overview",
+    "insights",
+    "trends",
     "issues",
     "kanban",
-    "trends",
-    "insights",
     "notes",
 ]
 

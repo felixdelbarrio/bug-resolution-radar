@@ -222,7 +222,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             align-items: center !important;
           }
           .st-key-workspace_nav_actions .stButton > button,
-          .st-key-workspace_nav_actions [data-testid^="baseButton-"] {
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"],
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button {
             min-height: 2.34rem !important;
             min-width: 2.34rem !important;
             padding: 0.20rem !important;
@@ -238,19 +239,80 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-size: 1.05rem !important;
           }
           .st-key-workspace_nav_actions .stButton > button *,
-          .st-key-workspace_nav_actions [data-testid^="baseButton-"] * {
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] *,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button * {
             color: inherit !important;
             fill: currentColor !important;
           }
           .st-key-workspace_nav_actions .stButton > button[kind="primary"],
-          .st-key-workspace_nav_actions [data-testid="baseButton-primary"] {
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"] > button {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             background-color: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
           }
           .st-key-workspace_nav_actions .stButton > button:hover,
-          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:hover {
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:hover {
+            border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+            background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+          }
+          /* Fallback by specific button keys to avoid default Streamlit primary/secondary bleeding */
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"],
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"],
+          .st-key-workspace_btn_config [data-testid^="baseButton-"],
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button {
+            min-height: 2.34rem !important;
+            min-width: 2.34rem !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            background-color: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+            box-shadow: none !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button *,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button *,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button * {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_ingest [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_theme [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_config [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_ingest [data-testid="baseButton-primary"] > button,
+          .st-key-workspace_btn_theme [data-testid="baseButton-primary"] > button,
+          .st-key-workspace_btn_config [data-testid="baseButton-primary"] > button {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            background-color: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button:hover,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button:hover,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button:hover {
             border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
             background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
             background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;

@@ -541,18 +541,6 @@ def _matrix_toggle_priority_filter(prio: str) -> None:
     st.session_state[FILTER_PRIORITY_KEY] = [] if priorities == [prio] else [prio]
 
 
-def _matrix_clear_filters() -> None:
-    st.session_state[FILTER_STATUS_KEY] = []
-    st.session_state[FILTER_PRIORITY_KEY] = []
-    st.session_state[FILTER_ASSIGNEE_KEY] = []
-
-
-def _any_filter_active(fs: Optional[FilterState]) -> bool:
-    if fs is None:
-        return False
-    return bool(fs.status or fs.priority or fs.assignee)
-
-
 def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
     color = (hex_color or "#8EA2C4").strip()
     border = _hex_with_alpha(color, 150 if selected else 110)
@@ -583,6 +571,7 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
     bg = _hex_with_alpha(color, 64 if selected else 28)
     hover_bg = _hex_with_alpha(color, 76 if selected else 42)
     ring = _hex_with_alpha(color, 86)
+    glow = _hex_with_alpha(color, 62)
     fw = "800" if selected else "700"
     return (
         f"border:1px solid {border} !important;"
@@ -595,6 +584,7 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
         "line-height:1.16 !important;"
         "white-space:normal !important;"
         "word-break:break-word !important;"
+        f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
         f"--mx-hover-bg:{hover_bg};"
         f"--mx-focus-ring:{ring};"
     )
@@ -610,6 +600,15 @@ def _inject_matrix_compact_css(scope_key: str) -> None:
             border-radius: 11px !important;
             font-size: 0.95rem !important;
             font-weight: 650 !important;
+          }}
+          .st-key-{scope_key} div[data-testid="stButton"] > button[kind="primary"] {{
+            border-color: color-mix(in srgb, var(--bbva-primary) 56%, var(--bbva-border-strong)) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 18%, var(--bbva-surface)) !important;
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 30%, transparent) !important;
+            font-weight: 790 !important;
+          }}
+          .st-key-{scope_key} div[data-testid="stButton"] > button[kind="secondary"] {{
+            opacity: 0.98 !important;
           }}
           .st-key-{scope_key} div[data-testid="stMarkdownContainer"] p {{
             margin-bottom: 0.16rem !important;
@@ -692,29 +691,16 @@ def render_status_priority_matrix(
     selected_priorities = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
 
     has_matrix_sel = bool(selected_statuses or selected_priorities)
-    has_any_filter = _any_filter_active(fs)
-
-    cA, cB = st.columns([3, 1])
-    with cA:
-        if has_matrix_sel:
-            status_txt = ", ".join(selected_statuses) if selected_statuses else "(todos)"
-            prio_txt = (
-                ", ".join(_matrix_priority_label(p) for p in selected_priorities)
-                if selected_priorities
-                else "(todas)"
-            )
-            st.caption(f"Seleccionado: Estado={status_txt} · Priority={prio_txt}")
-        else:
-            st.caption(
-                "Click en cabeceras o celdas: sincroniza Estado/Priority y actualiza la tabla."
-            )
-    with cB:
-        st.button(
-            "Limpiar selección",
-            key=f"{key_prefix}::clear",
-            disabled=not has_any_filter,
-            on_click=_matrix_clear_filters,
+    if has_matrix_sel:
+        status_txt = ", ".join(selected_statuses) if selected_statuses else "(todos)"
+        prio_txt = (
+            ", ".join(_matrix_priority_label(p) for p in selected_priorities)
+            if selected_priorities
+            else "(todas)"
         )
+        st.caption(f"Seleccionado: Estado={status_txt} · Priority={prio_txt}")
+    else:
+        st.caption("Click en cabeceras o celdas para filtrar. Repite click para desmarcar.")
 
     counts = pd.crosstab(mx["status"], mx["priority"])
 
