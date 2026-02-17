@@ -24,11 +24,11 @@ def inject_slides_css() -> None:
     <style>
       /* Container that feels like a "slide" */
       .bbva-slide {
-        border: 1px solid rgba(49, 60, 68, 0.15);
-        background: rgba(255,255,255,0.85);
+        border: 1px solid var(--bbva-border);
+        background: var(--bbva-surface-elevated);
         border-radius: 18px;
         padding: 18px 18px 14px 18px;
-        box-shadow: 0 10px 28px rgba(0,0,0,0.06);
+        box-shadow: 0 10px 28px color-mix(in srgb, var(--bbva-text) 10%, transparent);
       }
 
       /* Header: title + subtitle */
@@ -50,7 +50,7 @@ def inject_slides_css() -> None:
       .bbva-slide .divider {
         height: 1px;
         margin: 12px 0 14px 0;
-        background: linear-gradient(90deg, rgba(49,60,68,0.00), rgba(49,60,68,0.18), rgba(49,60,68,0.00));
+        background: linear-gradient(90deg, transparent, var(--bbva-border-strong), transparent);
       }
 
       /* The plotly chart container spacing */

@@ -50,45 +50,45 @@ def _inject_backlog_people_css() -> None:
             min-height: 1.75rem;
           }
           .people-kpi-card {
-            border: 1px solid rgba(17,25,45,0.12);
+            border: 1px solid var(--bbva-border);
             border-radius: 12px;
-            background: rgba(255,255,255,0.58);
+            background: var(--bbva-surface-soft);
             padding: 0.55rem 0.68rem 0.56rem 0.68rem;
             min-height: 94px;
           }
           .people-kpi-title {
-            color: rgba(17,25,45,0.68);
+            color: var(--bbva-text-muted);
             font-size: 0.78rem;
             font-weight: 700;
             letter-spacing: 0.01em;
             text-transform: uppercase;
           }
           .people-kpi-value {
-            color: #11192D;
+            color: var(--bbva-text);
             font-size: 1.85rem;
             font-weight: 800;
             line-height: 1.05;
             margin-top: 0.14rem;
           }
           .people-kpi-sub {
-            color: rgba(17,25,45,0.66);
+            color: var(--bbva-text-muted);
             font-size: 0.8rem;
             margin-top: 0.12rem;
           }
           .people-plan {
-            border: 1px solid rgba(17,25,45,0.10);
+            border: 1px solid var(--bbva-border);
             border-radius: 12px;
-            background: rgba(255,255,255,0.48);
+            background: color-mix(in srgb, var(--bbva-surface) 66%, transparent);
             padding: 0.7rem 0.8rem;
             margin-top: 0.2rem;
           }
           .people-plan-title {
             font-weight: 800;
-            color: #11192D;
+            color: var(--bbva-text);
             margin-bottom: 0.36rem;
           }
           .people-plan-item {
-            color: rgba(17,25,45,0.92);
+            color: color-mix(in srgb, var(--bbva-text) 92%, transparent);
             line-height: 1.38;
             margin: 0.28rem 0;
           }

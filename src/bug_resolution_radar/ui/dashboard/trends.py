@@ -107,13 +107,16 @@ def _add_bar_totals(
         return
     ymax = max(float(v) for v in y_totals) if y_totals else 0.0
     offset = max(1.0, ymax * 0.035)
+    text_color = (
+        "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
+    )
     fig.add_scatter(
         x=x_values,
         y=[float(v) + offset for v in y_totals],
         mode="text",
         text=[f"{int(v)}" for v in y_totals],
         textposition="top center",
-        textfont=dict(size=font_size, color="#11192D"),
+        textfont=dict(size=font_size, color=text_color),
         hoverinfo="skip",
         showlegend=False,
         cliponaxis=False,
@@ -314,7 +317,10 @@ def _render_trend_chart(
         fig.update_layout(
             title_text="", xaxis_title="Rango de antiguedad", yaxis_title="Incidencias"
         )
-        fig.update_traces(textposition="inside", textfont=dict(size=10, color="#11192D"))
+        text_color = (
+            "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
+        )
+        fig.update_traces(textposition="inside", textfont=dict(size=10, color=text_color))
         age_totals = grp.groupby("bucket", dropna=False)["count"].sum()
         _add_bar_totals(
             fig,
@@ -599,7 +605,7 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
             padding: 0 !important;
             border: 0 !important;
             background: transparent !important;
-            color: #11192D !important;
+            color: var(--bbva-text) !important;
             font-size: 0.98rem !important;
             font-weight: 800 !important;
             border-radius: 8px !important;
@@ -607,7 +613,7 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
             box-shadow: none !important;
           }
           [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover {
-            color: #0051F1 !important;
+            color: var(--bbva-primary) !important;
             transform: translateX(1px);
           }
         </style>

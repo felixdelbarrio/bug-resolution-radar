@@ -41,7 +41,7 @@ def _order_statuses_canonical(statuses: List[str]) -> List[str]:
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     h = (hex_color or "").strip().lstrip("#")
     if len(h) != 6:
-        return f"rgba(17,25,45,{alpha:.3f})"
+        return f"rgba(127,146,178,{alpha:.3f})"
     r = int(h[0:2], 16)
     g = int(h[2:4], 16)
     b = int(h[4:6], 16)
@@ -94,16 +94,16 @@ def _inject_kanban_item_css() -> None:
           .kan-items { display: grid; gap: 10px; }
           .kan-item {
             margin: 2px 0;
-            border: 1px solid rgba(17,25,45,0.12);
+            border: 1px solid var(--bbva-border);
             border-radius: 12px;
-            background: rgba(255,255,255,0.56);
+            background: var(--bbva-surface-soft);
             padding: 0.50rem 0.58rem;
             max-width: 100%;
             overflow: hidden;
           }
           .kan-item:hover {
-            border-color: rgba(17,25,45,0.18);
-            box-shadow: 0 2px 10px rgba(17,25,45,0.05);
+            border-color: var(--bbva-border-strong);
+            box-shadow: 0 2px 10px color-mix(in srgb, var(--bbva-text) 10%, transparent);
           }
           .kan-item-key a {
             display: block;
@@ -132,7 +132,7 @@ def _inject_kanban_item_css() -> None:
           }
           .kan-item-summary {
             margin-top: 0.30rem;
-            opacity: 0.90;
+            color: color-mix(in srgb, var(--bbva-text) 90%, transparent);
             font-size: 0.90rem;
             line-height: 1.26rem;
             display: -webkit-box;
@@ -149,7 +149,8 @@ def _inject_kanban_item_css() -> None:
 
 def _neutral_chip_style() -> str:
     return (
-        "color:#44546B; border:1px solid rgba(17,25,45,0.16); background:#F4F6F9; "
+        "color:var(--bbva-text-muted); border:1px solid var(--bbva-border-strong); "
+        "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.78rem;"
     )
 

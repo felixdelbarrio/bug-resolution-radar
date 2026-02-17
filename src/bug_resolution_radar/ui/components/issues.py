@@ -140,10 +140,10 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
         f"""
         <style>
           .issue-table-shell {{
-            border: 1px solid rgba(17,25,45,0.12);
+            border: 1px solid var(--bbva-border);
             border-radius: 14px;
             overflow: hidden;
-            background: #ffffff;
+            background: var(--bbva-surface);
           }}
           .issue-table-scroll {{
             max-height: 600px;
@@ -162,25 +162,25 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             z-index: 2;
             text-align: left;
             font-weight: 700;
-            color: rgba(17,25,45,0.60);
-            background: #F6F8FB;
-            border-bottom: 1px solid rgba(17,25,45,0.12);
+            color: var(--bbva-text-muted);
+            background: color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2));
+            border-bottom: 1px solid var(--bbva-border);
             padding: 0.60rem 0.72rem;
             white-space: nowrap;
           }}
           .issue-table td {{
-            border-top: 1px solid rgba(17,25,45,0.10);
+            border-top: 1px solid var(--bbva-border);
             padding: 0.50rem 0.72rem;
             vertical-align: middle;
-            color: #11192D;
+            color: var(--bbva-text);
             white-space: nowrap;
           }}
           .issue-table-index {{
             width: 54px;
             text-align: right !important;
-            color: rgba(17,25,45,0.52) !important;
+            color: var(--bbva-text-muted) !important;
             font-variant-numeric: tabular-nums;
-            background: #FBFCFE;
+            background: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-surface-2));
           }}
           .issue-table-summary {{
             min-width: 480px;
@@ -190,7 +190,7 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             text-overflow: ellipsis;
           }}
           .issue-table-jira {{
-            color: #0051F1 !important;
+            color: var(--bbva-primary) !important;
             font-weight: 700;
             text-decoration: none;
           }}
@@ -203,9 +203,9 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             max-width: 100%;
           }}
           .issue-table-chip-neutral {{
-            color: #44546B;
-            border: 1px solid rgba(17,25,45,0.16);
-            background: #F4F6F9;
+            color: var(--bbva-text-muted);
+            border: 1px solid var(--bbva-border-strong);
+            background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2));
             border-radius: 999px;
             padding: 2px 10px;
             font-weight: 700;

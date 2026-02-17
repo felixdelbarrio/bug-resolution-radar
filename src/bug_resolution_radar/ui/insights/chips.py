@@ -14,7 +14,8 @@ from bug_resolution_radar.ui.common import (
 )
 
 _NEUTRAL_CHIP_STYLE = (
-    "color:#44546B; border:1px solid rgba(17,25,45,0.16); background:#F4F6F9; "
+    "color:var(--bbva-text-muted); border:1px solid var(--bbva-border-strong); "
+    "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
     "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
 )
 
@@ -24,16 +25,16 @@ def inject_insights_chip_css() -> None:
         """
         <style>
           .ins-card {
-            border: 1px solid rgba(17,25,45,0.12);
+            border: 1px solid var(--bbva-border);
             border-radius: 12px;
-            background: rgba(255,255,255,0.58);
+            background: var(--bbva-surface-soft);
             padding: 0.50rem 0.62rem;
             margin: 0.34rem 0;
             transition: border-color 120ms ease, box-shadow 120ms ease;
           }
           .ins-card:hover {
-            border-color: rgba(17,25,45,0.18);
-            box-shadow: 0 2px 10px rgba(17,25,45,0.05);
+            border-color: var(--bbva-border-strong);
+            box-shadow: 0 2px 10px color-mix(in srgb, var(--bbva-text) 10%, transparent);
           }
           .ins-main {
             display: flex;
@@ -52,7 +53,7 @@ def inject_insights_chip_css() -> None:
             line-height: 1.25;
           }
           .ins-key-link {
-            color: #0051F1 !important;
+            color: var(--bbva-primary) !important;
             text-decoration: none;
           }
           .ins-key-link:hover {
@@ -65,8 +66,7 @@ def inject_insights_chip_css() -> None:
             max-width: 100%;
           }
           .ins-summary {
-            color: #11192D;
-            opacity: 0.96;
+            color: color-mix(in srgb, var(--bbva-text) 96%, transparent);
             line-height: 1.28;
           }
           .ins-meta-row {

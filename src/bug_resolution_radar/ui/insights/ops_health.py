@@ -60,21 +60,21 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
             margin-bottom: 0.4rem;
           }
           .ops-kpi-card {
-            border: 1px solid rgba(17,25,45,0.12);
+            border: 1px solid var(--bbva-border);
             border-radius: 12px;
-            background: rgba(255,255,255,0.60);
+            background: var(--bbva-surface-soft);
             padding: 0.64rem 0.72rem;
             min-height: 6.3rem;
           }
           .ops-kpi-label {
-            color: rgba(17,25,45,0.74);
+            color: var(--bbva-text-muted);
             font-weight: 700;
             font-size: 0.98rem;
             line-height: 1.2;
           }
           .ops-kpi-value {
             margin-top: 0.26rem;
-            color: #11192D;
+            color: var(--bbva-text);
             font-weight: 800;
             font-size: 2.10rem;
             line-height: 1.08;
@@ -82,7 +82,7 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
           }
           .ops-kpi-sub {
             margin-top: 0.34rem;
-            color: rgba(17,25,45,0.72);
+            color: var(--bbva-text-muted);
             font-size: 0.86rem;
             line-height: 1.2;
           }

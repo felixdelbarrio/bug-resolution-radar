@@ -60,6 +60,11 @@ def _priority_combo_label(priority: str) -> str:
 
 def _hex_with_alpha(hex_color: str, alpha: int) -> str:
     h = (hex_color or "").strip()
+    if bool(st.session_state.get("workspace_dark_mode", False)):
+        if alpha <= 40:
+            alpha = 52
+        elif alpha <= 130:
+            alpha = 178
     if len(h) == 7 and h.startswith("#"):
         return f"{h}{alpha:02X}"
     return h
@@ -77,15 +82,22 @@ def _inject_filters_panel_css() -> None:
           }
           /* Base chips style (neutral / assignee-like); status & priority overrides are injected later */
           [data-testid="stMultiSelect"] [data-baseweb="tag"] {
-            background: #F4F6F9 !important;
-            border: 1px solid rgba(17,25,45,0.12) !important;
-            color: #11192D !important;
+            background: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2)) !important;
+            border: 1px solid var(--bbva-border) !important;
+            color: var(--bbva-text) !important;
           }
           [data-testid="stMultiSelect"] [data-baseweb="tag"] * {
-            color: #11192D !important;
+            color: var(--bbva-text) !important;
           }
           [data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
-            fill: rgba(17,25,45,0.55) !important;
+            fill: var(--bbva-text-muted) !important;
+          }
+          [data-testid="stMultiSelect"] [role="listbox"] {
+            background: var(--bbva-surface) !important;
+            border: 1px solid var(--bbva-border) !important;
+          }
+          [data-testid="stMultiSelect"] [role="option"] {
+            color: var(--bbva-text) !important;
           }
         </style>
         """,
@@ -414,7 +426,7 @@ def _any_filter_active(fs: Optional[FilterState]) -> bool:
 
 
 def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
-    color = (hex_color or "#11192D").strip()
+    color = (hex_color or "#8EA2C4").strip()
     border = _hex_with_alpha(color, 150 if selected else 110)
     bg = _hex_with_alpha(color, 48 if selected else 24)
     fw = "800" if selected else "700"

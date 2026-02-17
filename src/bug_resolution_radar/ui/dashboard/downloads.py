@@ -301,14 +301,14 @@ def _inject_minimal_export_css(scope_key: str) -> None:
             letter-spacing: 0.01em !important;
             line-height: 1.0 !important;
             white-space: nowrap !important;
-            border: 1px solid rgba(17,25,45,0.14) !important;
-            background: rgba(17,25,45,0.035) !important;
-            color: rgba(17,25,45,0.70) !important;
+            border: 1px solid var(--bbva-border) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-surface-2)) !important;
+            color: var(--bbva-text-muted) !important;
           }}
           .st-key-{scope_key} .stDownloadButton > button:hover {{
-            border-color: rgba(17,25,45,0.24) !important;
-            background: rgba(17,25,45,0.06) !important;
-            color: rgba(17,25,45,0.86) !important;
+            border-color: var(--bbva-border-strong) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 10%, var(--bbva-surface)) !important;
+            color: var(--bbva-text) !important;
           }}
         </style>
         """,

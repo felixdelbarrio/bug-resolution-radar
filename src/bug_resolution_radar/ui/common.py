@@ -201,7 +201,7 @@ def flow_signal_color_map() -> Dict[str, str]:
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     h = hex_color.lstrip("#")
     if len(h) != 6:
-        return f"rgba(17,25,45,{alpha:.3f})"
+        return f"rgba(127,146,178,{alpha:.3f})"
     r = int(h[0:2], 16)
     g = int(h[2:4], 16)
     b = int(h[4:6], 16)
@@ -209,8 +209,8 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 
 
 def chip_style_from_color(hex_color: str) -> str:
-    border = _hex_to_rgba(hex_color, 0.45)
-    bg = _hex_to_rgba(hex_color, 0.12)
+    border = _hex_to_rgba(hex_color, 0.62)
+    bg = _hex_to_rgba(hex_color, 0.16)
     return (
         f"color:{hex_color}; border:1px solid {border}; background:{bg}; "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"

@@ -341,7 +341,7 @@ def render_overview_kpis(
             box-shadow: none !important;
           }
           [class*="st-key-exec_focus_"] div[data-testid="stButton"] > button:hover {
-            color: #0051F1 !important;
+            color: var(--bbva-primary) !important;
             transform: translateX(1px);
           }
           [class*="st-key-exec_focus_"] div[data-testid="stButton"] > button:focus-visible {

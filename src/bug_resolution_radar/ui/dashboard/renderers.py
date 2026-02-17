@@ -43,12 +43,12 @@ def _panel(title: str, subtitle: str | None = None) -> st.delta_generator.DeltaG
         """
         <style>
           .bbva-panel {
-            border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--bbva-border);
+            background: var(--bbva-surface-soft);
             border-radius: 16px;
             padding: 18px 18px 14px 18px;
             margin: 10px 0 16px 0;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+            box-shadow: 0 8px 24px color-mix(in srgb, var(--bbva-text) 12%, transparent);
           }
           .bbva-panel h3 {
             margin: 0 0 2px 0;
@@ -63,7 +63,7 @@ def _panel(title: str, subtitle: str | None = None) -> st.delta_generator.DeltaG
             line-height: 1.1rem;
           }
           .bbva-insights {
-            border-top: 1px dashed rgba(255,255,255,0.10);
+            border-top: 1px dashed var(--bbva-border);
             margin-top: 12px;
             padding-top: 10px;
           }

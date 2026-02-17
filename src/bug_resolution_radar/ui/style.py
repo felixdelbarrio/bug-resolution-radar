@@ -18,20 +18,22 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-primary: #5F9FFF;
             --bbva-midnight: #070E46;
             --bbva-text: #EAF0FF;
-            --bbva-text-muted: rgba(234,240,255,0.72);
-            --bbva-surface: #151E35;
-            --bbva-surface-2: #0E1426;
-            --bbva-border: rgba(234,240,255,0.16);
-            --bbva-border-strong: rgba(234,240,255,0.26);
+            --bbva-text-muted: rgba(234,240,255,0.84);
+            --bbva-surface: #182640;
+            --bbva-surface-2: #0A1228;
+            --bbva-surface-soft: rgba(24,38,64,0.64);
+            --bbva-surface-elevated: rgba(31,49,80,0.78);
+            --bbva-border: rgba(234,240,255,0.20);
+            --bbva-border-strong: rgba(234,240,255,0.30);
             --bbva-radius-s: 4px;
             --bbva-radius-m: 8px;
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
-            --bbva-tab-soft-bg: #162239;
-            --bbva-tab-soft-border: #314664;
-            --bbva-tab-soft-text: #BED0ED;
-            --bbva-tab-active-bg: #24456B;
-            --bbva-tab-active-border: #3F6EA1;
+            --bbva-tab-soft-bg: #1B2C49;
+            --bbva-tab-soft-border: #3A5076;
+            --bbva-tab-soft-text: #D8E5F9;
+            --bbva-tab-active-bg: #2A4B75;
+            --bbva-tab-active-border: #4D78AC;
             --bbva-tab-active-text: #F3F8FF;
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
@@ -48,6 +50,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-text-muted: rgba(17,25,45,0.72);
             --bbva-surface: #FFFFFF;
             --bbva-surface-2: #F4F6F9;
+            --bbva-surface-soft: rgba(255,255,255,0.58);
+            --bbva-surface-elevated: rgba(255,255,255,0.72);
             --bbva-border: rgba(17,25,45,0.12);
             --bbva-border-strong: rgba(17,25,45,0.18);
             --bbva-radius-s: 4px;
@@ -157,7 +161,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-testid="stSegmentedControl"] [role="radiogroup"] {
             gap: 0.22rem !important;
           }
-          div[data-testid="stSegmentedControl"] label {
+          div[data-testid="stSegmentedControl"] label,
+          div[data-testid="stSegmentedControl"] button {
             min-height: 2.15rem !important;
             padding: 0.35rem 0.78rem !important;
             border-radius: 10px !important;
@@ -166,13 +171,18 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: var(--bbva-tab-soft-bg) !important;
             color: var(--bbva-tab-soft-text) !important;
           }
-          div[data-testid="stSegmentedControl"] label:has(input:checked) {
+          div[data-testid="stSegmentedControl"] label:has(input:checked),
+          div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
           }
-          div[data-testid="stSegmentedControl"] label:hover {
+          div[data-testid="stSegmentedControl"] label:hover,
+          div[data-testid="stSegmentedControl"] button:hover {
             filter: brightness(0.99);
+          }
+          div[data-testid="stSegmentedControl"] [aria-disabled="true"] {
+            opacity: 0.72 !important;
           }
           div[data-testid="stButton"] > button[aria-label="🛰️"],
           div[data-testid="stButton"] > button[aria-label="◐"],
@@ -240,6 +250,32 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
             border: 1px solid var(--bbva-border) !important;
           }
+          .stSelectbox [data-baseweb="select"] svg,
+          .stMultiSelect [data-baseweb="select"] svg,
+          div[data-baseweb="select"] svg {
+            color: var(--bbva-text-muted) !important;
+            fill: var(--bbva-text-muted) !important;
+          }
+          div[data-baseweb="popover"] [role="listbox"],
+          div[data-baseweb="popover"] [role="menu"],
+          div[data-baseweb="popover"] ul {
+            background: var(--bbva-surface) !important;
+            border: 1px solid var(--bbva-border) !important;
+            color: var(--bbva-text) !important;
+          }
+          div[data-baseweb="popover"] [role="option"],
+          div[data-baseweb="popover"] li {
+            color: var(--bbva-text) !important;
+            background: transparent !important;
+          }
+          div[data-baseweb="popover"] [role="option"]:hover,
+          div[data-baseweb="popover"] li:hover {
+            background: color-mix(in srgb, var(--bbva-primary) 14%, transparent) !important;
+          }
+          div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
+            background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
+            color: var(--bbva-text) !important;
+          }
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
             color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
@@ -285,8 +321,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-tab-soft-text) !important;
           }
           .stDownloadButton > button:hover {
-            background: #e2e8ef !important;
-            border-color: #bcc8d6 !important;
+            background: color-mix(in srgb, var(--bbva-primary) 12%, var(--bbva-tab-soft-bg)) !important;
+            border-color: color-mix(in srgb, var(--bbva-primary) 40%, var(--bbva-tab-soft-border)) !important;
           }
           .stDownloadButton > button:disabled {
             opacity: 0.45 !important;
@@ -319,7 +355,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             gap: 8px;
           }
           div[data-baseweb="tab"] button {
-            color: rgba(17,25,45,0.72) !important;
+            color: var(--bbva-text-muted) !important;
             font-weight: 700 !important;
           }
           div[data-baseweb="tab"] button[aria-selected="true"] {
@@ -389,6 +425,47 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .badge-age {
             border-color: rgba(0,81,241,0.20);
             background: rgba(0,81,241,0.06);
+          }
+
+          /* Metrics and expanders for dark/light readability */
+          [data-testid="stMetric"] [data-testid="stMetricLabel"] * {
+            color: var(--bbva-text-muted) !important;
+          }
+          [data-testid="stMetric"] [data-testid="stMetricValue"] * {
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stMetric"] [data-testid="stMetricDelta"] * {
+            color: var(--bbva-text-muted) !important;
+          }
+          [data-testid="stExpander"] {
+            border: 1px solid var(--bbva-border) !important;
+            border-radius: 14px !important;
+            background: var(--bbva-surface-soft) !important;
+          }
+          [data-testid="stExpander"] > details {
+            background: var(--bbva-surface-soft) !important;
+            border-radius: 14px !important;
+          }
+          [data-testid="stExpander"] summary {
+            color: var(--bbva-text) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 78%, transparent) !important;
+            border-radius: 14px !important;
+          }
+          [data-testid="stExpander"] summary * {
+            color: var(--bbva-text) !important;
+            opacity: 1 !important;
+          }
+          [data-testid="stExpander"] details[open] summary {
+            border-bottom: 1px solid var(--bbva-border) !important;
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+          }
+          [data-testid="stExpander"] summary:hover {
+            background: color-mix(in srgb, var(--bbva-primary) 8%, transparent) !important;
+          }
+          [data-testid="stVerticalBlockBorderWrapper"] {
+            border-color: var(--bbva-border) !important;
+            background: var(--bbva-surface-soft) !important;
           }
         </style>
         """
