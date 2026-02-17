@@ -231,16 +231,19 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
         cols = st.columns(len(selected_statuses))
         now = pd.Timestamp.utcnow().tz_localize(None)
         if "created" in kan.columns:
-            created_naive = pd.to_datetime(kan["created"], errors="coerce", utc=True).dt.tz_localize(
-                None
-            )
+            created_naive = pd.to_datetime(
+                kan["created"], errors="coerce", utc=True
+            ).dt.tz_localize(None)
             kan["age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(lower=0.0)
         else:
             kan["age_days"] = pd.NA
 
         max_items_per_col = max(
             60,
-            min(MAX_KANBAN_ITEMS_PER_COLUMN, MAX_KANBAN_TOTAL_ITEMS // max(len(selected_statuses), 1)),
+            min(
+                MAX_KANBAN_ITEMS_PER_COLUMN,
+                MAX_KANBAN_TOTAL_ITEMS // max(len(selected_statuses), 1),
+            ),
         )
 
         for i, (col, st_name) in enumerate(zip(cols, selected_statuses)):
@@ -272,9 +275,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                         args=(st_name,),
                     )
                 if total_in_col > max_items_per_col:
-                    st.caption(
-                        f"{len(sub)}/{total_in_col} issues (cap de rendimiento por columna)"
-                    )
+                    st.caption(f"{len(sub)}/{total_in_col} issues (cap de rendimiento por columna)")
                 else:
                     st.caption(f"{total_in_col} issues")
                 cards_html: List[str] = []

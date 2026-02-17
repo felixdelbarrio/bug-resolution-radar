@@ -97,7 +97,9 @@ def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
                     else ""
                 ),
                 "priority_dominante": (
-                    Counter([str(p or "") for p in getattr(c, "priorities", [])]).most_common(1)[0][0]
+                    Counter([str(p or "") for p in getattr(c, "priorities", [])]).most_common(1)[0][
+                        0
+                    ]
                     if getattr(c, "priorities", [])
                     else ""
                 ),

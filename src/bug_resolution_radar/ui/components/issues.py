@@ -231,9 +231,7 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
     df_show = display_df[show_cols].copy(deep=False)
     col_cfg = {}
     if "jira" in df_show.columns:
-        col_cfg["jira"] = st.column_config.LinkColumn(
-            "Jira", display_text=r".*/browse/([^/?#]+)"
-        )
+        col_cfg["jira"] = st.column_config.LinkColumn("Jira", display_text=r".*/browse/([^/?#]+)")
     if "summary" in df_show.columns:
         col_cfg["summary"] = st.column_config.TextColumn("summary", width="large")
     if "status" in df_show.columns:

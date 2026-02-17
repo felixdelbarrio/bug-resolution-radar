@@ -69,7 +69,9 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     try:
         df = load_issues_df(settings.DATA_PATH)
     except Exception as exc:
-        st.error("No se pudieron cargar las incidencias. Revisa el archivo de datos o ejecuta Ingesta.")
+        st.error(
+            "No se pudieron cargar las incidencias. Revisa el archivo de datos o ejecuta Ingesta."
+        )
         st.caption(f"Detalle técnico: {exc}")
         return section
     scoped_df = _apply_workspace_source_scope(df)
