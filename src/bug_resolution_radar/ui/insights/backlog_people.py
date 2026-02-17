@@ -1,6 +1,8 @@
-# src/bug_resolution_radar/ui/insights/backlog_people.py
+"""People-focused insights tab with grouped backlog ownership views."""
+
 from __future__ import annotations
 
+import html
 from typing import List
 
 import pandas as pd
@@ -8,11 +10,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
-from bug_resolution_radar.ui.dashboard.state import (
-    FILTER_ASSIGNEE_KEY,
-    FILTER_PRIORITY_KEY,
-    FILTER_STATUS_KEY,
-)
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
     neutral_chip_html,
@@ -33,41 +31,71 @@ from bug_resolution_radar.ui.insights.helpers import (
 
 
 # -------------------------
-# Acciones (sincroniza filtros globales + salto a Issues)
+# Layout CSS
 # -------------------------
-def _apply_filters_base_for_assignee(assignee: str) -> None:
-    st.session_state[FILTER_ASSIGNEE_KEY] = [assignee] if assignee else []
-    # Nota: por decisión de producto, NO filtramos por type aquí (tipo eliminado de filtros)
-    st.session_state[FILTER_PRIORITY_KEY] = []
-
-
-def _jump_to_assignee_status(assignee: str, status: str) -> None:
-    _apply_filters_base_for_assignee(assignee)
-    st.session_state[FILTER_STATUS_KEY] = [status] if status else []
-    st.session_state["__action_mode"] = True
-    st.session_state["__action_assignee"] = assignee or ""
-    st.session_state["__action_status"] = status or ""
-    st.session_state["__jump_to_tab"] = "issues"
-
-
-def _jump_assignee_highest_high(assignee: str) -> None:
-    _apply_filters_base_for_assignee(assignee)
-    st.session_state[FILTER_STATUS_KEY] = []
-    st.session_state[FILTER_PRIORITY_KEY] = ["Highest", "High"]
-    st.session_state["__action_mode"] = True
-    st.session_state["__action_assignee"] = assignee or ""
-    st.session_state["__action_status"] = "Highest/High"
-    st.session_state["__jump_to_tab"] = "issues"
-
-
-def _jump_assignee_blocked(assignee: str) -> None:
-    _apply_filters_base_for_assignee(assignee)
-    st.session_state[FILTER_PRIORITY_KEY] = []
-    st.session_state[FILTER_STATUS_KEY] = ["Blocked"]
-    st.session_state["__action_mode"] = True
-    st.session_state["__action_assignee"] = assignee or ""
-    st.session_state["__action_status"] = "Blocked"
-    st.session_state["__jump_to_tab"] = "issues"
+def _inject_backlog_people_css() -> None:
+    st.markdown(
+        """
+        <style>
+          .people-state-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.45rem 0.5rem;
+            margin: 0.35rem 0 0.2rem 0;
+          }
+          .people-state-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.34rem;
+            min-height: 1.75rem;
+          }
+          .people-kpi-card {
+            border: 1px solid var(--bbva-border);
+            border-radius: 12px;
+            background: var(--bbva-surface-soft);
+            padding: 0.55rem 0.68rem 0.56rem 0.68rem;
+            min-height: 94px;
+          }
+          .people-kpi-title {
+            color: var(--bbva-text-muted);
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            text-transform: uppercase;
+          }
+          .people-kpi-value {
+            color: var(--bbva-text);
+            font-size: 1.85rem;
+            font-weight: 800;
+            line-height: 1.05;
+            margin-top: 0.14rem;
+          }
+          .people-kpi-sub {
+            color: var(--bbva-text-muted);
+            font-size: 0.8rem;
+            margin-top: 0.12rem;
+          }
+          .people-plan {
+            border: 1px solid var(--bbva-border);
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--bbva-surface) 66%, transparent);
+            padding: 0.7rem 0.8rem;
+            margin-top: 0.2rem;
+          }
+          .people-plan-title {
+            font-weight: 800;
+            color: var(--bbva-text);
+            margin-bottom: 0.36rem;
+          }
+          .people-plan-item {
+            color: color-mix(in srgb, var(--bbva-text) 92%, transparent);
+            line-height: 1.38;
+            margin: 0.28rem 0;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # -------------------------
@@ -77,11 +105,11 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     """
     Tab: Concentración de backlog por asignado (abiertas)
     - Expander por persona
-    - Dentro: desglose por estado (bullets) + KPIs + acciones rápidas
+    - Dentro: desglose por estado + KPIs
     - Extra: Top 3 más antiguas (si hay created)
     """
-    st.markdown("### 👤 Backlog por persona (abiertas)")
     inject_insights_chip_css()
+    _inject_backlog_people_css()
 
     dff = safe_df(dff_filtered)
     if dff.empty:
@@ -108,7 +136,14 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     else:
         df2["priority"] = "(sin priority)"
 
-    # Aging
+    export_cols = ["key", "summary", "assignee", "status", "priority", "created", "updated", "url"]
+    render_minimal_export_actions(
+        key_prefix="insights::personas",
+        filename_prefix="insights_personas",
+        suffix="backlog",
+        csv_df=df2[[c for c in export_cols if c in df2.columns]].copy(deep=False),
+    )
+
     has_created = col_exists(df2, "created") and pd.api.types.is_datetime64_any_dtype(
         df2["created"]
     )
@@ -122,38 +157,42 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
 
     total_open = int(len(df2))
     counts = df2.groupby("assignee").size().sort_values(ascending=False).head(12)
+    by_assignee = {str(k): g for k, g in df2.groupby("assignee", sort=False)}
 
     key_to_url, key_to_meta = build_issue_lookup(df2, settings=settings)
+
+    if counts.empty:
+        st.info("No hay personas con incidencias abiertas para mostrar.")
+        return
 
     for assignee, n in counts.items():
         n_int = int(n)
         hdr = f"**{assignee}** · **{n_int}** abiertas · **{pct(n_int, total_open):.1f}%**"
 
         with st.expander(hdr, expanded=False):
-            sub = df2[df2["assignee"] == assignee].copy()
+            sub = by_assignee.get(str(assignee), pd.DataFrame()).copy(deep=False)
 
-            # ---------------------------------
-            # 1) Bullets: estados (conteo)
-            # ---------------------------------
             st_counts = sub["status"].value_counts()
-            st.markdown("**Backlog por estado (bullets)**")
+            state_items: List[str] = []
             for st_name, c in st_counts.items():
-                st.markdown(
+                state_items.append(
                     (
-                        '<div class="ins-item">'
-                        '<span class="ins-bullet">•</span>'
-                        '<div class="ins-main">'
+                        '<div class="people-state-item">'
                         f"{status_chip_html(st_name)}"
                         f"{neutral_chip_html(int(c))}"
                         "</div>"
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
+                    )
                 )
+            st.markdown(
+                (
+                    '<div class="people-plan" style="margin-top:0.1rem;">'
+                    '<div class="people-plan-title">Backlog por estado</div>'
+                    f'<div class="people-state-grid">{"".join(state_items)}</div>'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
 
-            # ---------------------------------
-            # 2) KPIs riesgo (flow + criticidad)
-            # ---------------------------------
             sub["__bucket"] = sub["status"].astype(str).map(status_bucket)
             bcounts = sub["__bucket"].value_counts()
             b_entrada = int(bcounts.get("entrada", 0))
@@ -175,64 +214,65 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             risk_score = 0.6 * flow_risk_pct + 0.4 * crit_risk_pct
             risk_txt = risk_label(risk_score)
 
-            dom_status = str(st_counts.index[0]) if not st_counts.empty else ""
+            push_pct = pct(b_salida, n_int)
+            if has_created and sub["age_days"].notna().any():
+                p90 = float(sub["age_days"].quantile(0.90))
+                aging_value = f"{p90:.0f}d"
+                aging_caption = "Casos más lentos"
+            else:
+                aging_value = "—"
+                aging_caption = "Sin fecha de creación"
 
-            # ---------------------------------
-            # 3) Acciones rápidas (sincroniza filtros)
-            # ---------------------------------
-            cA, cB, cC = st.columns([1.2, 1.2, 2.6])
-            with cA:
-                st.button(
-                    "🎯 Abrir backlog (estado dominante)",
-                    key=f"assignee_jump::{assignee}",
-                    use_container_width=True,
-                    on_click=_jump_to_assignee_status,
-                    args=(assignee, dom_status),
-                    help="Sincroniza filtros: asignado + estado dominante.",
-                )
-            with cB:
-                st.button(
-                    "🔥 Solo Highest/High",
-                    key=f"assignee_high::{assignee}",
-                    use_container_width=True,
-                    on_click=_jump_assignee_highest_high,
-                    args=(assignee,),
-                    help="Filtro: assignee + priority Highest/High.",
-                )
-            with cC:
-                st.button(
-                    "⛔ Solo bloqueadas",
-                    key=f"assignee_blocked::{assignee}",
-                    use_container_width=True,
-                    on_click=_jump_assignee_blocked,
-                    args=(assignee,),
-                    help="Filtro: assignee + status=Blocked.",
-                )
-
-            # KPIs
             k1, k2, k3, k4 = st.columns(4)
             with k1:
-                st.metric("Riesgo (flow+criticidad)", f"{risk_txt}")
-                st.caption(f"Flow {flow_risk_pct:.0f}% · Crit {crit_risk_pct:.0f}%")
+                st.markdown(
+                    (
+                        '<div class="people-kpi-card">'
+                        '<div class="people-kpi-title">Riesgo operativo</div>'
+                        f'<div class="people-kpi-value">{html.escape(str(risk_txt))}</div>'
+                        f'<div class="people-kpi-sub">Flujo {flow_risk_pct:.0f}% · Criticidad {crit_risk_pct:.0f}%</div>'
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
             with k2:
-                st.metric("Empuje a salida", f"{pct(b_salida, n_int):.0f}%")
-                st.caption("Más alto suele indicar mejor throughput.")
+                st.markdown(
+                    (
+                        '<div class="people-kpi-card">'
+                        '<div class="people-kpi-title">Empuje a salida</div>'
+                        f'<div class="people-kpi-value">{push_pct:.0f}%</div>'
+                        '<div class="people-kpi-sub">Cuanto más alto, mejor ritmo de avance</div>'
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
             with k3:
-                st.metric("Bloqueadas", f"{b_bloq}")
-                st.caption("Bloqueo = colas ocultas.")
+                st.markdown(
+                    (
+                        '<div class="people-kpi-card">'
+                        '<div class="people-kpi-title">Bloqueadas</div>'
+                        f'<div class="people-kpi-value">{b_bloq}</div>'
+                        '<div class="people-kpi-sub">Prioridad alta para desbloqueo</div>'
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
             with k4:
-                if has_created and sub["age_days"].notna().any():
-                    p90 = float(sub["age_days"].quantile(0.90))
-                    st.metric("Aging P90", f"{p90:.0f}d")
-                    st.caption("Si sube: riesgo SLA/deuda.")
-                else:
-                    st.metric("Aging P90", "-")
-                    st.caption("Tip: incluye `created` (datetime).")
+                st.markdown(
+                    (
+                        '<div class="people-kpi-card">'
+                        '<div class="people-kpi-title">Antigüedad crítica</div>'
+                        f'<div class="people-kpi-value">{html.escape(aging_value)}</div>'
+                        f'<div class="people-kpi-sub">{html.escape(aging_caption)}</div>'
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
 
-            # ---------------------------------
-            # 4) Recomendación operativa
-            # ---------------------------------
-            st.markdown("**Recomendación operativa (acción)**")
+            st.markdown(
+                '<div class="people-plan-title" style="margin-top:0.55rem;">Plan recomendado</div>',
+                unsafe_allow_html=True,
+            )
             recs: List[str] = []
             if b_bloq > 0:
                 recs.append("Ataca bloqueadas primero: desbloquear 1–3 items suele liberar flujo.")
@@ -250,12 +290,18 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                 )
             if not recs:
                 recs.append("Buen equilibrio: mantén WIP limitado y revisa aging semanalmente.")
-            for rr in recs[:4]:
-                st.markdown(f"- {rr}")
+            st.markdown(
+                (
+                    '<div class="people-plan">'
+                    + "".join(
+                        f'<div class="people-plan-item">• {html.escape(rr)}</div>'
+                        for rr in recs[:4]
+                    )
+                    + "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
 
-            # ---------------------------------
-            # 5) Top 3 más antiguas (si hay created)
-            # ---------------------------------
             if has_created and col_exists(sub, "key") and sub["age_days"].notna().any():
                 st.markdown("**Top 3 más antiguas (limpieza quirúrgica)**")
                 oldest = (

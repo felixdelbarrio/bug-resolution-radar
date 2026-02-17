@@ -1,4 +1,5 @@
-# src/ingest/helix_session.py
+"""Helix HTTP session bootstrap and cookie/header authentication handling."""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional

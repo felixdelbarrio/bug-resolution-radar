@@ -1,3 +1,5 @@
+"""Session state keys and helper containers for dashboard UI state."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

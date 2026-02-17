@@ -1,3 +1,5 @@
+"""Local notes persistence model and storage helpers."""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +14,12 @@ class NotesStore:
 
     def load(self) -> None:
         if self.path.exists():
-            self._notes = json.loads(self.path.read_text(encoding="utf-8"))
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+            except Exception:
+                self._notes = {}
+                return
+            self._notes = raw if isinstance(raw, dict) else {}
         else:
             self._notes = {}
 

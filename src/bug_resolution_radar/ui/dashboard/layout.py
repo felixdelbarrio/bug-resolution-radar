@@ -1,14 +1,15 @@
+"""Shared layout helpers for dashboard sections."""
+
 from __future__ import annotations
 
 import streamlit as st
 
 
-def apply_dashboard_layout(*, title: str = "Bug Resolution Radar") -> None:
+def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> None:
     """
     Configura el layout global del dashboard (page config + estilos).
     Debe llamarse una sola vez al inicio del render de la página.
     """
-    # Page config (solo 1 vez por app; Streamlit lo ignora si se repite)
     try:
         st.set_page_config(
             page_title=title,
@@ -17,10 +18,8 @@ def apply_dashboard_layout(*, title: str = "Bug Resolution Radar") -> None:
             initial_sidebar_state="expanded",
         )
     except Exception:
-        # En algunos contextos (tests / reruns raros) puede fallar; no rompemos la app.
         pass
 
-    # CSS “premium” y consistente con el look actual (sin tocar tus variables BBVA)
     st.markdown(
         """
         <style>
@@ -32,11 +31,11 @@ def apply_dashboard_layout(*, title: str = "Bug Resolution Radar") -> None:
 
           /* Cards/containers: look limpio */
           .br-card {
-            background: rgba(255,255,255,0.6);
-            border: 1px solid rgba(0,0,0,0.06);
+            background: var(--bbva-surface-soft);
+            border: 1px solid var(--bbva-border);
             border-radius: 14px;
             padding: 18px 18px;
-            box-shadow: 0 8px 28px rgba(0,0,0,0.05);
+            box-shadow: 0 8px 28px color-mix(in srgb, var(--bbva-text) 8%, transparent);
             backdrop-filter: blur(6px);
           }
 

@@ -1,3 +1,5 @@
+"""Typed schema models for Jira issue payload normalization."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

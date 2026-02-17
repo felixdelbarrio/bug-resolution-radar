@@ -1,3 +1,5 @@
+"""Ingestion page to trigger data collection from configured source endpoints."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -99,7 +101,7 @@ def _render_sources_preview(rows: List[Dict[str, str]], cols: List[str]) -> None
         st.info("No hay orígenes configurados.")
         return
     frame = pd.DataFrame([{c: r.get(c, "") for c in cols} for r in rows])
-    st.dataframe(frame, use_container_width=True, hide_index=True)
+    st.dataframe(frame, width="stretch", hide_index=True)
 
 
 def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:
@@ -117,9 +119,9 @@ def render(settings: Settings) -> None:
 
         col_a, col_b = st.columns(2)
         with col_a:
-            test_jira = st.button("🔎 Test Jira (todas las fuentes)", key="btn_test_jira_all")
+            test_jira = st.button("🔎 Test Jira", key="btn_test_jira_all")
         with col_b:
-            run_jira = st.button("⬇️ Reingestar Jira (todas las fuentes)", key="btn_run_jira_all")
+            run_jira = st.button("⬇️ Reingestar Jira", key="btn_run_jira_all")
 
         issues_doc = load_issues_doc(settings.DATA_PATH)
 
@@ -170,7 +172,6 @@ def render(settings: Settings) -> None:
             for i in issues_doc.issues
             if str(i.source_type or "").strip().lower() == "jira"
         }
-        st.markdown("---")
         st.markdown("### Última ingesta (Jira)")
         st.json(
             {
@@ -197,9 +198,9 @@ def render(settings: Settings) -> None:
 
         col_h1, col_h2 = st.columns(2)
         with col_h1:
-            test_helix = st.button("🔎 Test Helix (todas las fuentes)", key="btn_test_helix_all")
+            test_helix = st.button("🔎 Test Helix", key="btn_test_helix_all")
         with col_h2:
-            run_helix = st.button("⬇️ Reingestar Helix (todas las fuentes)", key="btn_run_helix_all")
+            run_helix = st.button("⬇️ Reingestar Helix", key="btn_run_helix_all")
 
         if test_helix:
             if not helix_cfg:
@@ -269,7 +270,6 @@ def render(settings: Settings) -> None:
                     st.error("No se pudo ingestar ninguna fuente Helix.")
 
         helix_source_ids = {str(i.source_id or "").strip() for i in stored_helix_doc.items}
-        st.markdown("---")
         st.markdown("### Última ingesta (Helix)")
         st.json(
             {
