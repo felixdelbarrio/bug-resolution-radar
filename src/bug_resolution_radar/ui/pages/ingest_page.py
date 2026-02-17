@@ -117,9 +117,9 @@ def render(settings: Settings) -> None:
 
         col_a, col_b = st.columns(2)
         with col_a:
-            test_jira = st.button("🔎 Test Jira (todas las fuentes)", key="btn_test_jira_all")
+            test_jira = st.button("🔎 Test Jira", key="btn_test_jira_all")
         with col_b:
-            run_jira = st.button("⬇️ Reingestar Jira (todas las fuentes)", key="btn_run_jira_all")
+            run_jira = st.button("⬇️ Reingestar Jira", key="btn_run_jira_all")
 
         issues_doc = load_issues_doc(settings.DATA_PATH)
 
@@ -197,9 +197,9 @@ def render(settings: Settings) -> None:
 
         col_h1, col_h2 = st.columns(2)
         with col_h1:
-            test_helix = st.button("🔎 Test Helix (todas las fuentes)", key="btn_test_helix_all")
+            test_helix = st.button("🔎 Test Helix", key="btn_test_helix_all")
         with col_h2:
-            run_helix = st.button("⬇️ Reingestar Helix (todas las fuentes)", key="btn_run_helix_all")
+            run_helix = st.button("⬇️ Reingestar Helix", key="btn_run_helix_all")
 
         if test_helix:
             if not helix_cfg:

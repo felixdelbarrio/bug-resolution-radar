@@ -44,15 +44,17 @@ def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
-    scoped = df.copy()
     selected_country = str(st.session_state.get("workspace_country") or "").strip()
     selected_source_id = str(st.session_state.get("workspace_source_id") or "").strip()
+    if not selected_country and not selected_source_id:
+        return df
 
-    if selected_country and "country" in scoped.columns:
-        scoped = scoped[scoped["country"].fillna("").astype(str).eq(selected_country)].copy()
-    if selected_source_id and "source_id" in scoped.columns:
-        scoped = scoped[scoped["source_id"].fillna("").astype(str).eq(selected_source_id)].copy()
-    return scoped
+    mask = pd.Series(True, index=df.index)
+    if selected_country and "country" in df.columns:
+        mask &= df["country"].fillna("").astype(str).eq(selected_country)
+    if selected_source_id and "source_id" in df.columns:
+        mask &= df["source_id"].fillna("").astype(str).eq(selected_source_id)
+    return df.loc[mask].copy(deep=False)
 
 
 def render(settings: Settings, *, active_section: str = "overview") -> str:
@@ -77,7 +79,11 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     if section in {"issues", "kanban", "trends"}:
         render_filters(scoped_df, key_prefix="dashboard")
 
-    ctx = build_dashboard_data_context(df_all=scoped_df, settings=settings)
+    ctx = build_dashboard_data_context(
+        df_all=scoped_df,
+        settings=settings,
+        include_kpis=section in {"overview", "trends", "insights"},
+    )
 
     if section == "overview":
         # Summary + matrix + KPIs (KPIs debajo de la matriz).

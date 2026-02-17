@@ -72,8 +72,8 @@ def load_issues_df(path: str) -> pd.DataFrame:
     """
     p = Path(path)
     mtime_ns = p.stat().st_mtime_ns if p.exists() else -1
-    # Defensive copy to avoid accidental mutation of cached base dataframe.
-    return _load_issues_df_cached(str(p.resolve()), mtime_ns).copy(deep=True)
+    # Shallow copy avoids mutating cached structure while reducing rerun memory churn.
+    return _load_issues_df_cached(str(p.resolve()), mtime_ns).copy(deep=False)
 
 
 def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
@@ -89,10 +89,10 @@ def open_issues_only(df: pd.DataFrame | None) -> pd.DataFrame:
     if not isinstance(df, pd.DataFrame):
         return pd.DataFrame()
     if df.empty:
-        return df.copy()
+        return df.copy(deep=False)
     if "resolved" in df.columns:
-        return df[df["resolved"].isna()].copy()
-    return df.copy()
+        return df[df["resolved"].isna()].copy(deep=False)
+    return df.copy(deep=False)
 
 
 def normalize_text_col(series: pd.Series, empty_label: str) -> pd.Series:

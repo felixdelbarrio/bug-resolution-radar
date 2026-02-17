@@ -8,6 +8,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
     neutral_chip_html,
@@ -32,7 +33,6 @@ def render_top_topics_tab(
     - Muestra expander por tópico con lista de issues (key clickable) + estado + prioridad
     - Dentro del expander NO repite summary (redundante), solo status/criticidad
     """
-    st.markdown("### 🔝 Top 10 problemas/funcionalidades (abiertas)")
     inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
@@ -53,12 +53,19 @@ def render_top_topics_tab(
         st.info("Top 10 no tiene columnas esperadas.")
         return
 
+    render_minimal_export_actions(
+        key_prefix="insights::top_topics",
+        filename_prefix="insights_topicos",
+        suffix="top10",
+        csv_df=top_tbl.head(10).copy(deep=False),
+    )
+
     open_df = open_only(dff)
     total_open = int(len(open_df)) if open_df is not None else 0
 
     key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
 
-    tmp_open = open_df.copy()
+    tmp_open = open_df.copy(deep=False)
     tmp_open["status"] = (
         normalize_text_col(tmp_open["status"], "(sin estado)")
         if col_exists(tmp_open, "status")
@@ -71,6 +78,11 @@ def render_top_topics_tab(
     )
     tmp_open["summary"] = (
         tmp_open["summary"].fillna("").astype(str) if col_exists(tmp_open, "summary") else ""
+    )
+    by_summary = (
+        {str(k): g for k, g in tmp_open.groupby("summary", sort=False)}
+        if col_exists(tmp_open, "summary")
+        else {}
     )
 
     for _, r in top_tbl.head(10).iterrows():
@@ -85,7 +97,7 @@ def render_top_topics_tab(
         pct = (cnt / total_open * 100.0) if total_open > 0 else 0.0
         pct_txt = f"{pct:.1f}%"
 
-        sub = tmp_open[tmp_open["summary"] == topic].copy() if topic else pd.DataFrame()
+        sub = by_summary.get(topic, pd.DataFrame()) if topic else pd.DataFrame()
 
         st_dom = (
             sub["status"].value_counts().index[0]

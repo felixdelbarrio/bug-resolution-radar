@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ui.dashboard.downloads import (
+    figures_to_html_bytes,
+    render_minimal_export_actions,
+)
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
-from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 
 def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[str]:
@@ -78,13 +81,47 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
 
     # Siempre intentamos pintar 3 “slots” para que la cabecera se vea estable
     slots: List[str] = (chosen + ["", "", ""])[:3]
+    prepared: List[tuple[str, str, Optional[object]]] = []
+    figures_for_export: List[object] = []
+    titles_for_export: List[str] = []
+
+    for chart_id in slots:
+        if not chart_id:
+            prepared.append(("", "", None))
+            continue
+        spec = registry.get(chart_id)
+        if spec is None:
+            prepared.append((chart_id, chart_id, None))
+            continue
+        fig = spec.render(ctx)
+        if fig is not None:
+            fig.update_layout(
+                title_text="",
+                margin=dict(l=10, r=10, t=35, b=10),
+                height=320,
+                showlegend=False,
+            )
+            figures_for_export.append(fig)
+            titles_for_export.append(spec.title)
+        prepared.append((chart_id, spec.title, fig))
 
     with st.container(border=True):
         st.markdown("### 📌 Resumen visual")
+        export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
+        export_df = ctx.dff[[c for c in export_cols if c in ctx.dff.columns]].copy(deep=False)
+        render_minimal_export_actions(
+            key_prefix="overview::summary",
+            filename_prefix="resumen_visual",
+            suffix="completo",
+            csv_df=export_df,
+            html_bytes=figures_to_html_bytes(
+                figures_for_export, title="Resumen visual", subtitles=titles_for_export
+            ),
+        )
 
         cols = st.columns(3, gap="medium")
 
-        for col, chart_id in zip(cols, slots):
+        for col, (chart_id, chart_title, fig) in zip(cols, prepared):
             with col:
                 with st.container(border=True):
                     if not chart_id:
@@ -92,26 +129,12 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
                         st.info("No configurado")
                         continue
 
-                    spec = registry.get(chart_id)
-                    if spec is None:
-                        st.caption(chart_id)
-                        st.info("Gráfico no disponible.")
-                        continue
-
-                    st.caption(spec.title)
-
-                    fig = spec.render(ctx)
                     if fig is None:
+                        st.caption(chart_title or chart_id)
                         st.info("Sin datos para este gráfico con los filtros actuales.")
                         continue
 
-                    # Ajuste “compacto” (sin tocar estilos globales)
-                    fig = apply_plotly_bbva(fig)
-                    fig.update_layout(
-                        margin=dict(l=10, r=10, t=35, b=10),
-                        height=320,
-                        showlegend=False,
-                    )
+                    st.caption(chart_title or chart_id)
                     st.plotly_chart(fig, use_container_width=True)
 
 

@@ -363,7 +363,7 @@ def render_hero(app_title: str) -> None:
         f"""
         <div class="bbva-hero">
           <div class="bbva-hero-title">{html.escape(app_title)}</div>
-          <div class="bbva-hero-sub">Análisis y seguimiento de incidencias basado en Jira</div>
+          <div class="bbva-hero-sub">Análisis y seguimiento de incidencias</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -373,6 +373,10 @@ def render_hero(app_title: str) -> None:
 def apply_plotly_bbva(fig: Any) -> Any:
     """Apply a consistent Plotly style aligned with BBVA Experience."""
     undefined_tokens = {"undefined", "none", "nan", "null"}
+
+    def _clean_txt(v: object) -> str:
+        txt = str(v or "").strip()
+        return "" if txt.lower() in undefined_tokens else txt
 
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -403,12 +407,34 @@ def apply_plotly_bbva(fig: Any) -> Any:
             selector={"name": series_name},
         )
 
+    # Remove "undefined" from layout-level labels/titles.
+    try:
+        title_obj = getattr(fig.layout, "title", None)
+        title_text = _clean_txt(getattr(title_obj, "text", ""))
+        fig.update_layout(title_text=title_text)
+    except Exception:
+        pass
+
+    try:
+        x_axis = getattr(fig.layout, "xaxis", None)
+        y_axis = getattr(fig.layout, "yaxis", None)
+        x_title = _clean_txt(getattr(getattr(x_axis, "title", None), "text", ""))
+        y_title = _clean_txt(getattr(getattr(y_axis, "title", None), "text", ""))
+        fig.update_xaxes(title_text=x_title)
+        fig.update_yaxes(title_text=y_title)
+    except Exception:
+        pass
+
+    try:
+        for ann in list(getattr(fig.layout, "annotations", []) or []):
+            ann.text = _clean_txt(getattr(ann, "text", ""))
+    except Exception:
+        pass
+
     # Defensive cleanup to avoid "undefined" noise in hover/labels.
     for trace in getattr(fig, "data", []):
         try:
-            name = str(getattr(trace, "name", "") or "").strip()
-            if name.lower() in undefined_tokens:
-                trace.name = ""
+            trace.name = _clean_txt(getattr(trace, "name", ""))
             trace.showlegend = False
         except Exception:
             pass

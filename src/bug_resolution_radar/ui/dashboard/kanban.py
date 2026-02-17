@@ -9,6 +9,7 @@ import streamlit as st
 
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank, status_color
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
 
@@ -78,6 +79,24 @@ def _inject_kanban_header_chip_css(headers: List[tuple[str, str, bool]]) -> None
         st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
+def _inject_kanban_item_css() -> None:
+    st.markdown(
+        """
+        <style>
+          .kan-items { display: grid; gap: 8px; }
+          .kan-item { margin: 2px 0; }
+          .kan-item-key a { font-weight: 700; text-decoration: none; }
+          .kan-item-summary {
+            opacity: 0.85;
+            font-size: 0.85rem;
+            line-height: 1.1rem;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     """
     Kanban siempre desplegado.
@@ -92,7 +111,24 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
             st.info("No hay incidencias abiertas para mostrar.")
             return
 
-        kan = open_df.copy()
+        kan = open_df.copy(deep=False)
+        export_cols = [
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "assignee",
+            "created",
+            "updated",
+            "url",
+        ]
+        export_df = kan[[c for c in export_cols if c in kan.columns]].copy(deep=False)
+        render_minimal_export_actions(
+            key_prefix="kanban::open",
+            filename_prefix="kanban",
+            suffix="abiertas",
+            csv_df=export_df,
+        )
         kan["status"] = normalize_text_col(kan["status"], "(sin estado)")
 
         status_counts = kan["status"].value_counts()
@@ -122,11 +158,12 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
             slug = _status_slug(st_name, i)
             header_meta.append((st_name, slug, st_name in active_filter))
         _inject_kanban_header_chip_css(header_meta)
+        _inject_kanban_item_css()
 
         cols = st.columns(len(selected_statuses))
 
         for i, (col, st_name) in enumerate(zip(cols, selected_statuses)):
-            sub = kan[kan["status"] == st_name].copy()
+            sub = kan[kan["status"] == st_name].copy(deep=False)
             slug = _status_slug(st_name, i)
 
             # Orden: prioridad (rank) y luego updated desc si existe
@@ -151,7 +188,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                         args=(st_name,),
                     )
                 st.caption(f"{len(sub)} issues")
-
+                cards_html: List[str] = []
                 for _, r in sub.iterrows():
                     key = html.escape(str(r.get("key", "") or ""))
                     url = html.escape(str(r.get("url", "") or ""))
@@ -159,10 +196,20 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                     if len(summ) > 80:
                         summ = summ[:77] + "..."
 
+                    key_html = (
+                        f'<a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a>'
+                        if url
+                        else key
+                    )
+                    cards_html.append(
+                        '<article class="kan-item">'
+                        f'<div class="kan-item-key">{key_html}</div>'
+                        f'<div class="kan-item-summary">{summ}</div>'
+                        "</article>"
+                    )
+
+                if cards_html:
                     st.markdown(
-                        f'<div style="margin: 8px 0 10px 0;">'
-                        f'<div><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>'
-                        f'<div style="opacity:0.85; font-size:0.85rem; line-height:1.1rem;">{summ}</div>'
-                        f"</div>",
+                        f'<div class="kan-items">{"".join(cards_html)}</div>',
                         unsafe_allow_html=True,
                     )

@@ -36,6 +36,20 @@ def render(
         st.warning("No hay datos con los filtros actuales.")
         return
 
+    st.markdown(
+        """
+        <style>
+          div[data-testid="stTabs"] div[data-baseweb="tab-panel"] {
+            padding-top: 0.20rem !important;
+          }
+          div[data-testid="stTabs"] div[data-baseweb="tab-border"] {
+            margin-bottom: 0.20rem !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # Tabs internas (no confundir con tabs del dashboard)
     t1, t2, t3, t4 = st.tabs(
         ["🔝 Top tópicos", "🧩 Duplicados", "👤 Personas", "🛠️ Salud operativa"]

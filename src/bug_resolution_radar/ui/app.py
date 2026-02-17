@@ -171,13 +171,14 @@ def _render_workspace_scope(settings: Settings) -> None:
 def main() -> None:
     ensure_env()
     settings = load_settings()
+    hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
+    if hero_title.lower() in {"", "bug resolution radar"}:
+        hero_title = "Cuadro de mando de incidencias"
 
-    st.set_page_config(
-        page_title=settings.APP_TITLE, layout="wide", page_icon="assets/bbva/favicon.png"
-    )
+    st.set_page_config(page_title=hero_title, layout="wide", page_icon="assets/bbva/favicon.png")
 
     inject_bbva_css()
-    render_hero(settings.APP_TITLE)
+    render_hero(hero_title)
     _ensure_scope_state(settings)
     _ensure_nav_state()
     with st.container(key="workspace_scope_bar"):

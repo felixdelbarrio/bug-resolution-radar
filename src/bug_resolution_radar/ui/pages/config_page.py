@@ -199,8 +199,7 @@ def _normalize_helix_rows(
 def render(settings: Settings) -> None:
     countries = supported_countries(settings)
 
-    st.subheader("Configuración (persistente en .env)")
-    st.caption(f"Países habilitados (fijos en .env): {', '.join(countries)}")
+    st.subheader("Configuración")
 
     t_jira, t_helix, t_kpis, t_prefs = st.tabs(
         ["🟦 Jira", "🟩 Helix", "📊 KPIs", "⭐ Preferencias"]
@@ -225,7 +224,7 @@ def render(settings: Settings) -> None:
             )
 
         st.markdown("### Fuentes Jira por país")
-        st.caption("Alias y JQL son obligatorios. No se usa PROJECT_KEY.")
+        st.caption("Alias y JQL son obligatorios.")
         jira_rows = _rows_from_jira_settings(settings, countries)
         jira_df = pd.DataFrame(jira_rows or [{"country": countries[0], "alias": "", "jql": ""}])
         jira_editor = st.data_editor(
@@ -417,4 +416,4 @@ def render(settings: Settings) -> None:
 
         new_settings = _safe_update_settings(settings, update)
         save_settings(new_settings)
-        st.success("Configuración guardada en .env.")
+        st.success("Configuración guardada.")

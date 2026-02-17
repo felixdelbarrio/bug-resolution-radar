@@ -15,6 +15,7 @@ from bug_resolution_radar.ui.common import (
 )
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
+MAX_TABLE_HTML_ROWS = 1200
 
 
 def _safe_cell_text(value: object) -> str:
@@ -58,7 +59,7 @@ def _safe_cell_text(value: object) -> str:
     return txt
 
 
-def _jira_label_from_row(row: pd.Series) -> str:
+def _jira_label_from_row(row: dict[str, object] | pd.Series) -> str:
     key = _safe_cell_text(row.get("key"))
     if key != "—":
         return key
@@ -101,7 +102,8 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
     header_cells.extend([f"<th>{html.escape(title_by_col.get(c, c))}</th>" for c in show_cols])
 
     rows_html: List[str] = []
-    for idx, row in display_df.iterrows():
+    records = display_df[show_cols].to_dict(orient="records")
+    for idx, row in zip(display_df.index.tolist(), records):
         row_cells = [f'<td class="issue-table-index">{html.escape(str(idx))}</td>']
         for col in show_cols:
             if col == "jira":
@@ -241,16 +243,16 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
         "resolved",
         "url",
     ]
-    safe_df = dff.copy()
+    safe_df = dff.copy(deep=False)
     for c in cols:
         if c not in safe_df.columns:
             safe_df[c] = None
 
     now = pd.Timestamp.utcnow()
     open_df = (
-        safe_df[safe_df["resolved"].isna()].copy()
+        safe_df[safe_df["resolved"].isna()].copy(deep=False)
         if "resolved" in safe_df.columns
-        else safe_df.copy()
+        else safe_df.copy(deep=False)
     )
 
     if "created" in open_df.columns:
@@ -272,6 +274,7 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
 
     open_df = open_df.sort_values(by=sort_cols, ascending=asc).head(max_cards)
 
+    cards: List[str] = []
     for row in open_df.itertuples(index=False):
         key = html.escape(str(getattr(row, "key", "") or ""))
         url = html.escape(str(getattr(row, "url", "") or ""))
@@ -296,19 +299,30 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
             badges.append(f'<span class="badge">Assignee: {assignee}</span>')
         badges.append(f'<span class="badge badge-age">Open age: {age:.0f}d</span>')
 
-        st.markdown(
-            f"""
-            <div class="issue-card">
-              <div class="issue-top">
-                <div class="issue-key"><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>
-              </div>
-              <div class="issue-summary">{summary}</div>
-              <div class="badges">{''.join(badges)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        cards.append(
+            (
+                '<article class="issue-card">'
+                '<div class="issue-top">'
+                f'<div class="issue-key"><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>'
+                "</div>"
+                f'<div class="issue-summary">{summary}</div>'
+                f'<div class="badges">{"".join(badges)}</div>'
+                "</article>"
+            )
         )
-        st.write("")
+    st.markdown(
+        f"""
+        <style>
+          .issue-cards-stack {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 12px;
+          }}
+        </style>
+        <div class="issue-cards-stack">{''.join(cards)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_issue_table(dff: pd.DataFrame) -> None:
@@ -317,7 +331,7 @@ def render_issue_table(dff: pd.DataFrame) -> None:
         st.info("No hay issues para mostrar con los filtros actuales.")
         return
 
-    display_df = dff.copy()
+    display_df = dff.copy(deep=False)
 
     # Make a clickable Jira link using stored URL
     if "url" in display_df.columns:
@@ -341,5 +355,12 @@ def render_issue_table(dff: pd.DataFrame) -> None:
     sort_by = "updated" if "updated" in display_df.columns else None
     if sort_by:
         display_df = display_df.sort_values(by=sort_by, ascending=False)
+
+    if len(display_df) > MAX_TABLE_HTML_ROWS:
+        st.caption(
+            f"Tabla optimizada: mostrando {MAX_TABLE_HTML_ROWS}/{len(display_df)} filas. "
+            "Usa CSV para el dataset completo."
+        )
+        display_df = display_df.head(MAX_TABLE_HTML_ROWS).copy(deep=False)
 
     _render_issue_table_html(display_df, show_cols)

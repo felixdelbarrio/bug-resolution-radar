@@ -15,6 +15,7 @@ from bug_resolution_radar.ui.common import (
     status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 
@@ -147,8 +148,18 @@ def _render_trend_chart(
         if fig is None:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return
-        fig.update_layout(title=None)
-        st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
+        fig.update_layout(title_text="")
+        fig = apply_plotly_bbva(fig)
+        export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
+        export_df = dff[[c for c in export_cols if c in dff.columns]].copy(deep=False)
+        render_minimal_export_actions(
+            key_prefix=f"trends::{chart_id}",
+            filename_prefix="tendencias",
+            suffix=chart_id,
+            csv_df=export_df,
+            figure=fig,
+        )
+        st.plotly_chart(fig, use_container_width=True)
         return
 
     if chart_id == "age_buckets":
@@ -208,8 +219,16 @@ def _render_trend_chart(
             category_orders={"bucket": bucket_order, "status": status_order},
             color_discrete_map=status_color_map(status_order),
         )
-        fig.update_layout(title=None, xaxis_title="bucket", yaxis_title="count")
-        st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
+        fig.update_layout(title_text="", xaxis_title="bucket", yaxis_title="count")
+        fig = apply_plotly_bbva(fig)
+        render_minimal_export_actions(
+            key_prefix=f"trends::{chart_id}",
+            filename_prefix="tendencias",
+            suffix=chart_id,
+            csv_df=grp.copy(deep=False),
+            figure=fig,
+        )
+        st.plotly_chart(fig, use_container_width=True)
         return
 
     if chart_id == "resolution_hist":
@@ -238,8 +257,26 @@ def _render_trend_chart(
             x="resolution_days",
             nbins=30,
         )
-        fig.update_layout(title=None)
-        st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
+        fig.update_layout(title_text="")
+        fig = apply_plotly_bbva(fig)
+        export_cols = [
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "created",
+            "resolved",
+            "resolution_days",
+        ]
+        export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
+        render_minimal_export_actions(
+            key_prefix=f"trends::{chart_id}",
+            filename_prefix="tendencias",
+            suffix=chart_id,
+            csv_df=export_df,
+            figure=fig,
+        )
+        st.plotly_chart(fig, use_container_width=True)
         return
 
     if chart_id == "open_priority_pie":
@@ -259,9 +296,18 @@ def _render_trend_chart(
             color="priority",
             color_discrete_map=priority_color_map(),
         )
-        fig.update_layout(title=None)
+        fig.update_layout(title_text="")
         fig.update_traces(sort=False)
-        st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
+        fig = apply_plotly_bbva(fig)
+        pie_export = dff.groupby("priority", dropna=False).size().reset_index(name="count")
+        render_minimal_export_actions(
+            key_prefix=f"trends::{chart_id}",
+            filename_prefix="tendencias",
+            suffix=chart_id,
+            csv_df=pie_export,
+            figure=fig,
+        )
+        st.plotly_chart(fig, use_container_width=True)
         return
 
     if chart_id == "open_status_bar":
@@ -308,8 +354,16 @@ def _render_trend_chart(
             category_orders={"status": status_order, "priority": priority_order},
             color_discrete_map=priority_color_map(),
         )
-        fig.update_layout(title=None)
-        st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
+        fig.update_layout(title_text="")
+        fig = apply_plotly_bbva(fig)
+        render_minimal_export_actions(
+            key_prefix=f"trends::{chart_id}",
+            filename_prefix="tendencias",
+            suffix=chart_id,
+            csv_df=grouped.copy(deep=False),
+            figure=fig,
+        )
+        st.plotly_chart(fig, use_container_width=True)
         return
 
     st.info("Gráfico no reconocido.")

@@ -25,7 +25,10 @@ def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
 
 
 def build_dashboard_data_context(
-    *, df_all: pd.DataFrame, settings: Settings
+    *,
+    df_all: pd.DataFrame,
+    settings: Settings,
+    include_kpis: bool = True,
 ) -> DashboardDataContext:
     """
     Build the canonical dashboard data context once per rerun.
@@ -37,5 +40,5 @@ def build_dashboard_data_context(
     fs = get_filter_state()
     dff = apply_filters(safe_all, fs)
     open_df = open_only(dff)
-    kpis = compute_kpis(dff, settings=settings)
+    kpis = compute_kpis(dff, settings=settings) if include_kpis else {}
     return DashboardDataContext(df_all=safe_all, dff=dff, open_df=open_df, fs=fs, kpis=kpis)

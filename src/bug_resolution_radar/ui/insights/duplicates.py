@@ -9,6 +9,7 @@ import streamlit as st
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.insights import find_similar_issue_clusters
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import inject_insights_chip_css, render_issue_bullet
 from bug_resolution_radar.ui.insights.helpers import build_issue_lookup, col_exists, safe_df
 
@@ -19,7 +20,6 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     - Expander por cluster
     - Dentro: bullets con key clickable + summary + status + priority
     """
-    st.markdown("### 🧩 Incidencias similares (posibles duplicados)")
     st.caption("Agrupado por similitud de texto en el summary (heurístico).")
     inject_insights_chip_css()
 
@@ -32,6 +32,25 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     if not clusters:
         st.info("No se encontraron clusters de incidencias similares (o hay pocos datos).")
         return
+
+    cluster_export = pd.DataFrame(
+        [
+            {
+                "cluster_size": int(getattr(c, "size", 0) or 0),
+                "summary": str(getattr(c, "summary", "") or ""),
+                "keys": ", ".join(
+                    [str(k).strip() for k in list(getattr(c, "keys", []) or []) if str(k).strip()]
+                ),
+            }
+            for c in clusters[:12]
+        ]
+    )
+    render_minimal_export_actions(
+        key_prefix="insights::duplicates",
+        filename_prefix="insights_duplicados",
+        suffix="clusters",
+        csv_df=cluster_export,
+    )
 
     # Normaliza para que status/priority siempre existan como strings (si están)
     df2 = dff.copy()

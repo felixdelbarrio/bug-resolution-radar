@@ -6,6 +6,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import inject_insights_chip_css, render_issue_bullet
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
@@ -22,7 +23,6 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
       - KPIs resumen (issues filtradas, abiertas, prioridad dominante)
       - Top 10 abiertas más antiguas (bullets + key clickable + status/priority/summary)
     """
-    st.markdown("### 🛠️ Salud operativa")
     inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
@@ -31,6 +31,13 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
         return
 
     open_df = open_only(dff)
+    export_cols = ["key", "summary", "status", "priority", "assignee", "created", "updated", "url"]
+    render_minimal_export_actions(
+        key_prefix="insights::ops_health",
+        filename_prefix="insights_salud",
+        suffix="abiertas",
+        csv_df=open_df[[c for c in export_cols if c in open_df.columns]].copy(deep=False),
+    )
 
     # -------------------------
     # KPIs resumen

@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 
-def apply_dashboard_layout(*, title: str = "Bug Resolution Radar") -> None:
+def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> None:
     """
     Configura el layout global del dashboard (page config + estilos).
     Debe llamarse una sola vez al inicio del render de la página.

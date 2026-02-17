@@ -374,7 +374,7 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
     if fs.assignee and "assignee" in df.columns:
         mask &= df["assignee"].isin(fs.assignee)
 
-    dff = df.loc[mask].copy()
+    dff = df.loc[mask].copy(deep=False)
 
     if status_norm is not None:
         dff["status"] = status_norm.loc[mask].to_numpy()

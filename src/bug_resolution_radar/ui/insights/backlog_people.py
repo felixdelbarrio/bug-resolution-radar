@@ -8,6 +8,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -80,7 +81,6 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     - Dentro: desglose por estado (bullets) + KPIs + acciones rápidas
     - Extra: Top 3 más antiguas (si hay created)
     """
-    st.markdown("### 👤 Backlog por persona (abiertas)")
     inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
@@ -108,6 +108,14 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     else:
         df2["priority"] = "(sin priority)"
 
+    export_cols = ["key", "summary", "assignee", "status", "priority", "created", "updated", "url"]
+    render_minimal_export_actions(
+        key_prefix="insights::personas",
+        filename_prefix="insights_personas",
+        suffix="backlog",
+        csv_df=df2[[c for c in export_cols if c in df2.columns]].copy(deep=False),
+    )
+
     # Aging
     has_created = col_exists(df2, "created") and pd.api.types.is_datetime64_any_dtype(
         df2["created"]
@@ -122,6 +130,7 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
 
     total_open = int(len(df2))
     counts = df2.groupby("assignee").size().sort_values(ascending=False).head(12)
+    by_assignee = {str(k): g for k, g in df2.groupby("assignee", sort=False)}
 
     key_to_url, key_to_meta = build_issue_lookup(df2, settings=settings)
 
@@ -130,7 +139,7 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         hdr = f"**{assignee}** · **{n_int}** abiertas · **{pct(n_int, total_open):.1f}%**"
 
         with st.expander(hdr, expanded=False):
-            sub = df2[df2["assignee"] == assignee].copy()
+            sub = by_assignee.get(str(assignee), pd.DataFrame()).copy(deep=False)
 
             # ---------------------------------
             # 1) Bullets: estados (conteo)

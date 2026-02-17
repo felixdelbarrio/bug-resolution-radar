@@ -79,7 +79,7 @@ def build_source_id(source_type: str, country: str, alias: str) -> str:
 
 
 class Settings(BaseModel):
-    APP_TITLE: str = "Bug Resolution Radar"
+    APP_TITLE: str = "Cuadro de mando de incidencias"
     THEME: str = "auto"
     DATA_PATH: str = "data/issues.json"
     NOTES_PATH: str = "data/notes.json"
