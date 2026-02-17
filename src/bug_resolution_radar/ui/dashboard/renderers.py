@@ -1,4 +1,5 @@
-# bug_resolution_radar/ui/dashboard/renderers.py
+"""Visual component renderers for cards, chips and formatted metric blocks."""
+
 from __future__ import annotations
 
 import html
@@ -42,12 +43,12 @@ def _panel(title: str, subtitle: str | None = None) -> st.delta_generator.DeltaG
         """
         <style>
           .bbva-panel {
-            border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--bbva-border);
+            background: var(--bbva-surface-soft);
             border-radius: 16px;
             padding: 18px 18px 14px 18px;
             margin: 10px 0 16px 0;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+            box-shadow: 0 8px 24px color-mix(in srgb, var(--bbva-text) 12%, transparent);
           }
           .bbva-panel h3 {
             margin: 0 0 2px 0;
@@ -62,7 +63,7 @@ def _panel(title: str, subtitle: str | None = None) -> st.delta_generator.DeltaG
             line-height: 1.1rem;
           }
           .bbva-insights {
-            border-top: 1px dashed rgba(255,255,255,0.10);
+            border-top: 1px dashed var(--bbva-border);
             margin-top: 12px;
             padding-top: 10px;
           }
@@ -143,7 +144,7 @@ def render_issues_section(dff: pd.DataFrame) -> None:
                 file_name="issues_filtradas.csv",
                 mime="text/csv",
                 key="issues_download_csv",
-                use_container_width=True,
+                width="stretch",
             )
         with c2:
             st.caption(f"{len(dff_show)} issues (según filtros actuales)")
@@ -243,7 +244,7 @@ def render_kanban(
                 st.button(
                     f"{st_name}",
                     key=f"kanban_hdr::{st_name}",
-                    use_container_width=True,
+                    width="stretch",
                     on_click=_set_status_filter,
                     args=(st_name,),
                 )
@@ -285,7 +286,6 @@ def render_trends(
     """
     # Filters ONLY here (keeps keys unique)
     render_filters(df_all)
-    st.markdown("---")
 
     registry: Dict[str, ChartSpec] = build_trends_registry()
     options = list_trend_chart_options(registry)  # [(id, label), ...]

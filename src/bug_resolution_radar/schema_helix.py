@@ -1,3 +1,5 @@
+"""Typed schema models for Helix issue payload normalization."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

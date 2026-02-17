@@ -1,3 +1,5 @@
+"""Repository access layer for Helix endpoints and query payloads."""
+
 from __future__ import annotations
 
 import json

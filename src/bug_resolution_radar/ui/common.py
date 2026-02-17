@@ -1,3 +1,5 @@
+"""Common data normalization and color mapping helpers for the UI layer."""
+
 from __future__ import annotations
 
 import re
@@ -20,7 +22,11 @@ def _load_issues_doc_cached(path: str, mtime_ns: int) -> IssuesDocument:
     p = Path(path)
     if not p.exists():
         return IssuesDocument.empty()
-    return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
+    try:
+        return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
+    except Exception:
+        # Robust fallback: avoid crashing the UI when the file is temporarily malformed.
+        return IssuesDocument.empty()
 
 
 def load_issues_doc(path: str) -> IssuesDocument:
@@ -72,8 +78,8 @@ def load_issues_df(path: str) -> pd.DataFrame:
     """
     p = Path(path)
     mtime_ns = p.stat().st_mtime_ns if p.exists() else -1
-    # Defensive copy to avoid accidental mutation of cached base dataframe.
-    return _load_issues_df_cached(str(p.resolve()), mtime_ns).copy(deep=True)
+    # Shallow copy avoids mutating cached structure while reducing rerun memory churn.
+    return _load_issues_df_cached(str(p.resolve()), mtime_ns).copy(deep=False)
 
 
 def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
@@ -89,10 +95,10 @@ def open_issues_only(df: pd.DataFrame | None) -> pd.DataFrame:
     if not isinstance(df, pd.DataFrame):
         return pd.DataFrame()
     if df.empty:
-        return df.copy()
+        return df.copy(deep=False)
     if "resolved" in df.columns:
-        return df[df["resolved"].isna()].copy()
-    return df.copy()
+        return df[df["resolved"].isna()].copy(deep=False)
+    return df.copy(deep=False)
 
 
 def normalize_text_col(series: pd.Series, empty_label: str) -> pd.Series:
@@ -199,7 +205,7 @@ def flow_signal_color_map() -> Dict[str, str]:
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     h = hex_color.lstrip("#")
     if len(h) != 6:
-        return f"rgba(17,25,45,{alpha:.3f})"
+        return f"rgba(127,146,178,{alpha:.3f})"
     r = int(h[0:2], 16)
     g = int(h[2:4], 16)
     b = int(h[4:6], 16)
@@ -207,8 +213,8 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 
 
 def chip_style_from_color(hex_color: str) -> str:
-    border = _hex_to_rgba(hex_color, 0.45)
-    bg = _hex_to_rgba(hex_color, 0.12)
+    border = _hex_to_rgba(hex_color, 0.62)
+    bg = _hex_to_rgba(hex_color, 0.16)
     return (
         f"color:{hex_color}; border:1px solid {border}; background:{bg}; "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"

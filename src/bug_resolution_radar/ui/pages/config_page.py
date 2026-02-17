@@ -1,3 +1,5 @@
+"""Configuration page to manage data sources and visualization preferences."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
@@ -199,8 +201,7 @@ def _normalize_helix_rows(
 def render(settings: Settings) -> None:
     countries = supported_countries(settings)
 
-    st.subheader("Configuración (persistente en .env)")
-    st.caption(f"Países habilitados (fijos en .env): {', '.join(countries)}")
+    st.subheader("Configuración")
 
     t_jira, t_helix, t_kpis, t_prefs = st.tabs(
         ["🟦 Jira", "🟩 Helix", "📊 KPIs", "⭐ Preferencias"]
@@ -225,14 +226,14 @@ def render(settings: Settings) -> None:
             )
 
         st.markdown("### Fuentes Jira por país")
-        st.caption("Alias y JQL son obligatorios. No se usa PROJECT_KEY.")
+        st.caption("Alias y JQL son obligatorios.")
         jira_rows = _rows_from_jira_settings(settings, countries)
         jira_df = pd.DataFrame(jira_rows or [{"country": countries[0], "alias": "", "jql": ""}])
         jira_editor = st.data_editor(
             jira_df,
             hide_index=True,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="cfg_jira_sources_editor",
             column_config={
                 "country": st.column_config.SelectboxColumn("country", options=countries),
@@ -293,7 +294,7 @@ def render(settings: Settings) -> None:
             helix_df,
             hide_index=True,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="cfg_helix_sources_editor",
             column_config={
                 "country": st.column_config.SelectboxColumn("country", options=countries),
@@ -385,8 +386,6 @@ def render(settings: Settings) -> None:
                 key="cfg_trend_fav_3",
             )
 
-    st.markdown("---")
-
     if st.button("💾 Guardar configuración", key="cfg_save_btn"):
         jira_clean, jira_errors = _normalize_jira_rows(jira_editor, countries)
         helix_clean, helix_errors = _normalize_helix_rows(helix_editor, countries)
@@ -417,4 +416,4 @@ def render(settings: Settings) -> None:
 
         new_settings = _safe_update_settings(settings, update)
         save_settings(new_settings)
-        st.success("Configuración guardada en .env.")
+        st.success("Configuración guardada.")

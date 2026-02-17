@@ -1,3 +1,5 @@
+"""General date and utility helpers shared by ingestion and UI code."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

@@ -1,3 +1,5 @@
+"""Dataframe-level insight builders used by analytics and narrative summaries."""
+
 from __future__ import annotations
 
 import re

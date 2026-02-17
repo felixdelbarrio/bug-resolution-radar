@@ -1,3 +1,5 @@
+"""Shared visual styling helpers for Streamlit and Plotly rendering."""
+
 from __future__ import annotations
 
 import html
@@ -8,36 +10,70 @@ import streamlit as st
 from bug_resolution_radar.ui.common import flow_signal_color_map
 
 
-def inject_bbva_css() -> None:
-    """Inject BBVA-like CSS styling into Streamlit app."""
-    st.markdown(
-        """
-        <style>
+def inject_bbva_css(*, dark_mode: bool = False) -> None:
+    """Inject global CSS tokens and components for light/dark runtime themes."""
+    if dark_mode:
+        css_vars = """
           :root {
-            --bbva-primary: #0051F1;   /* Electric Blue */
-            --bbva-midnight: #070E46;  /* Midnight Blue */
-            --bbva-text: #11192D;      /* Grey 900 */
+            --bbva-primary: #5F9FFF;
+            --bbva-midnight: #070E46;
+            --bbva-text: #EAF0FF;
+            --bbva-text-muted: rgba(234,240,255,0.90);
+            --bbva-surface: #1A2B47;
+            --bbva-surface-2: #0A1228;
+            --bbva-surface-soft: rgba(26,43,71,0.82);
+            --bbva-surface-elevated: rgba(34,54,89,0.92);
+            --bbva-border: rgba(234,240,255,0.28);
+            --bbva-border-strong: rgba(234,240,255,0.42);
+            --bbva-radius-s: 4px;
+            --bbva-radius-m: 8px;
+            --bbva-radius-l: 12px;
+            --bbva-radius-xl: 16px;
+            --bbva-tab-soft-bg: #203A60;
+            --bbva-tab-soft-border: #5D79A9;
+            --bbva-tab-soft-text: #E6EFFF;
+            --bbva-tab-active-bg: #355A86;
+            --bbva-tab-active-border: #6F92BF;
+            --bbva-tab-active-text: #FFFFFF;
+            --primary-color: var(--bbva-primary);
+            --text-color: var(--bbva-text);
+            --background-color: var(--bbva-surface-2);
+            --secondary-background-color: var(--bbva-surface);
+          }
+        """
+    else:
+        css_vars = """
+          :root {
+            --bbva-primary: #0051F1;
+            --bbva-midnight: #070E46;
+            --bbva-text: #11192D;
+            --bbva-text-muted: rgba(17,25,45,0.72);
             --bbva-surface: #FFFFFF;
-            --bbva-surface-2: #F4F6F9; /* Light neutral */
+            --bbva-surface-2: #F4F6F9;
+            --bbva-surface-soft: rgba(255,255,255,0.58);
+            --bbva-surface-elevated: rgba(255,255,255,0.72);
             --bbva-border: rgba(17,25,45,0.12);
             --bbva-border-strong: rgba(17,25,45,0.18);
             --bbva-radius-s: 4px;
             --bbva-radius-m: 8px;
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
-            --bbva-tab-soft-bg: #E9EEF4;      /* cool grey-blue */
-            --bbva-tab-soft-border: #C7D2DF;  /* muted border */
-            --bbva-tab-soft-text: #44546B;    /* desaturated ink */
-            --bbva-tab-active-bg: #6F839E;    /* muted steel blue */
+            --bbva-tab-soft-bg: #E9EEF4;
+            --bbva-tab-soft-border: #C7D2DF;
+            --bbva-tab-soft-text: #44546B;
+            --bbva-tab-active-bg: #6F839E;
             --bbva-tab-active-border: #657A94;
             --bbva-tab-active-text: #F8FBFF;
-
-            /* Streamlit theme variables (force consistency; avoids odd defaults). */
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
             --background-color: var(--bbva-surface-2);
             --secondary-background-color: var(--bbva-surface);
           }
+        """
+
+    css_template = """
+        <style>
+          __CSS_VARS__
 
           html, body, [class*="stApp"] {
             color: var(--bbva-text);
@@ -118,51 +154,211 @@ def inject_bbva_css() -> None:
           .st-key-workspace_scope_bar [data-testid="stSelectbox"] [data-baseweb="select"] > div {
             min-height: 2.1rem !important;
           }
-          div[data-testid="stSegmentedControl"] {
-            margin-top: 0.02rem;
-            margin-bottom: 0.08rem !important;
+          /* Segmented-control legacy styles removed intentionally:
+             level-1 navigation now uses scoped button-tabs in workspace_nav_tabs. */
+          /* Level-1 nav shell */
+          .st-key-workspace_nav_bar,
+          [class*="st-key-workspace_nav_bar_"] {
+            margin-top: -0.04rem;
+            margin-bottom: -0.76rem;
+            border: 1px solid var(--bbva-border-strong);
+            border-radius: 14px;
+            background: var(--bbva-surface-elevated);
+            padding: 0.22rem 0.38rem 0.16rem 0.38rem;
+            box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 16%, transparent);
           }
-          div[data-testid="stSegmentedControl"] [role="radiogroup"] {
-            gap: 0.22rem !important;
-          }
-          div[data-testid="stSegmentedControl"] label {
-            min-height: 2.15rem !important;
-            padding: 0.35rem 0.78rem !important;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
-            border: 1px solid var(--bbva-tab-soft-border) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            color: var(--bbva-tab-soft-text) !important;
-          }
-          div[data-testid="stSegmentedControl"] label:has(input:checked) {
-            border-color: var(--bbva-tab-active-border) !important;
-            background: var(--bbva-tab-active-bg) !important;
-            color: var(--bbva-tab-active-text) !important;
-          }
-          div[data-testid="stSegmentedControl"] label:hover {
-            filter: brightness(0.99);
-          }
-          div[data-testid="stButton"] > button[aria-label="🛰️"],
-          div[data-testid="stButton"] > button[aria-label="⚙️"] {
-            min-height: 2.2rem !important;
-            padding: 0.25rem 0.25rem !important;
-            border-radius: 11px !important;
-            font-size: 1.05rem !important;
-          }
-          /* Tighten the vertical gap between top tabs and dashboard filters/content */
-          .st-key-workspace_nav_bar {
-            margin-top: -0.06rem;
-            margin-bottom: -0.92rem;
-          }
-          .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"] {
+          .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stHorizontalBlock"] {
             margin-bottom: 0 !important;
             row-gap: 0 !important;
+            align-items: center !important;
           }
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] {
-            margin-bottom: 0 !important;
+
+          /* Level-1 nav tabs (Resumen/Issues/Kanban/...) */
+          .st-key-workspace_nav_tabs div[data-testid="stHorizontalBlock"] {
+            align-items: center !important;
+            gap: 0.30rem !important;
           }
-          .st-key-workspace_dashboard_content {
+          .st-key-workspace_nav_tabs .stButton > button,
+          .st-key-workspace_nav_tabs [data-testid^="baseButton-"] {
+            min-height: 2.02rem !important;
+            padding: 0.22rem 0.78rem !important;
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            color: var(--bbva-tab-soft-text) !important;
+            box-shadow: none !important;
+            font-weight: 700 !important;
+            line-height: 1.10 !important;
+          }
+          .st-key-workspace_nav_tabs .stButton > button *,
+          .st-key-workspace_nav_tabs [data-testid^="baseButton-"] * {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
+          .st-key-workspace_nav_tabs .stButton > button[kind="primary"],
+          .st-key-workspace_nav_tabs [data-testid="baseButton-primary"] {
+            border: 0 !important;
+            border-bottom: 2px solid var(--bbva-primary) !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            color: var(--bbva-primary) !important;
+          }
+          .st-key-workspace_nav_tabs .stButton > button:hover,
+          .st-key-workspace_nav_tabs [data-testid^="baseButton-"]:hover {
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
+          }
+
+          /* Top-right workspace actions (Ingesta, Tema, Configuración) */
+          .st-key-workspace_nav_actions div[data-testid="stHorizontalBlock"] {
+            justify-content: flex-end !important;
+            align-items: center !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"],
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button {
+            min-height: 2.34rem !important;
+            min-width: 2.34rem !important;
+            padding: 0.20rem !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            background-color: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-shadow: none !important;
+            font-size: 1.05rem !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button *,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] *,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button * {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button[kind="primary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"] > button {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            background-color: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button:hover,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:hover {
+            border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+            background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+          }
+          /* Fallback by specific button keys to avoid default Streamlit primary/secondary bleeding */
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"],
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"],
+          .st-key-workspace_btn_config [data-testid^="baseButton-"],
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button {
+            min-height: 2.34rem !important;
+            min-width: 2.34rem !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            background-color: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+            box-shadow: none !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button *,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button *,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button * {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_ingest [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_theme [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_config [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_ingest [data-testid="baseButton-primary"] > button,
+          .st-key-workspace_btn_theme [data-testid="baseButton-primary"] > button,
+          .st-key-workspace_btn_config [data-testid="baseButton-primary"] > button {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            background-color: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_theme div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_config div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button:hover,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button:hover,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button:hover {
+            border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+            background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+          }
+          .st-key-workspace_dashboard_content_overview,
+          .st-key-workspace_dashboard_content_notes {
             margin-top: -0.24rem;
+          }
+          .st-key-workspace_dashboard_content_issues,
+          .st-key-workspace_dashboard_content_kanban,
+          .st-key-workspace_dashboard_content_trends,
+          .st-key-workspace_dashboard_content_insights {
+            margin-top: -0.72rem;
+          }
+          .st-key-dashboard_filters_panel {
+            margin-top: -0.64rem;
+            margin-bottom: -0.44rem;
+          }
+          .st-key-insights_shell {
+            margin-top: -0.64rem;
+          }
+          .st-key-issues_tab_issues_shell,
+          .st-key-kanban_shell,
+          .st-key-trend_chart_shell {
+            margin-top: -0.20rem;
+          }
+          .st-key-dashboard_filters_panel [data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-issues_tab_issues_shell [data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-kanban_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: 0 10px 28px color-mix(in srgb, var(--bbva-text) 12%, transparent) !important;
+          }
+          .st-key-overview_summary_shell [data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-trend_chart_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 92%, #8EB4FF 8%) !important;
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 90%, #0E234C 10%) !important;
+            box-shadow: 0 12px 28px color-mix(in srgb, #02091D 48%, transparent),
+                        inset 0 0 0 1px color-mix(in srgb, #9DC0FF 18%, transparent) !important;
+          }
+          [class*="st-key-overview_summary_chart_"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-trins_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 88%, #97BCFF 12%) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 80%, #0F244B 20%) !important;
+            box-shadow: 0 8px 22px color-mix(in srgb, #02091D 42%, transparent),
+                        inset 0 0 0 1px color-mix(in srgb, #9DC0FF 16%, transparent) !important;
           }
 
           /* Sidebar */
@@ -186,7 +382,7 @@ def inject_bbva_css() -> None:
 
           /* Labels */
           label, [data-testid="stWidgetLabel"] p {
-            color: rgba(17,25,45,0.82) !important;
+            color: var(--bbva-text-muted) !important;
             font-weight: 600 !important;
           }
 
@@ -201,9 +397,90 @@ def inject_bbva_css() -> None:
             color: var(--bbva-text) !important;
             border: 1px solid var(--bbva-border) !important;
           }
+          .stSelectbox [data-baseweb="select"] svg,
+          .stMultiSelect [data-baseweb="select"] svg,
+          div[data-baseweb="select"] svg {
+            color: var(--bbva-text-muted) !important;
+            fill: var(--bbva-text-muted) !important;
+          }
+          div[data-baseweb="popover"] [role="listbox"],
+          div[data-baseweb="popover"] [role="menu"],
+          div[data-baseweb="popover"] ul {
+            background: var(--bbva-surface) !important;
+            border: 1px solid var(--bbva-border) !important;
+            color: var(--bbva-text) !important;
+          }
+          div[data-baseweb="popover"] [role="option"],
+          div[data-baseweb="popover"] li {
+            color: var(--bbva-text) !important;
+            background: transparent !important;
+            position: relative;
+            padding-left: 1.70rem !important;
+            --bbva-opt-dot: color-mix(in srgb, var(--bbva-text) 62%, transparent);
+          }
+          div[data-baseweb="popover"] [role="option"]::before,
+          div[data-baseweb="popover"] li::before {
+            content: "";
+            width: 0.54rem;
+            height: 0.54rem;
+            border-radius: 999px;
+            background: var(--bbva-opt-dot);
+            position: absolute;
+            left: 0.66rem;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+          }
+          div[data-baseweb="popover"] [role="option"]:hover,
+          div[data-baseweb="popover"] li:hover {
+            background: color-mix(in srgb, var(--bbva-primary) 14%, transparent) !important;
+          }
+          div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
+            background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
+            color: var(--bbva-text) !important;
+          }
+          /* Option semáforo en listados (status/priority); el chip seleccionado mantiene solo fondo/borde */
+          div[data-baseweb="popover"] [role="option"][aria-label*="new" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="analysing" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="blocked" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="created" i] {
+            --bbva-opt-dot: #D24756;
+            border-left: 2px solid rgba(210,71,86,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="en progreso" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="in progress" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="to rework" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="test" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="ready to verify" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="open" i] {
+            --bbva-opt-dot: #E08A00;
+            border-left: 2px solid rgba(224,138,0,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="accepted" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="ready to deploy" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="deployed" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="closed" i] {
+            --bbva-opt-dot: #1E9E53;
+            border-left: 2px solid rgba(30,158,83,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="supone un impedimento" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="highest" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="high" i] {
+            --bbva-opt-dot: #B4232A;
+            border-left: 2px solid rgba(180,35,42,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="medium" i] {
+            --bbva-opt-dot: #E08A00;
+            border-left: 2px solid rgba(224,138,0,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="low" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="lowest" i] {
+            --bbva-opt-dot: #1E9E53;
+            border-left: 2px solid rgba(30,158,83,0.72);
+          }
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
-            color: rgba(17,25,45,0.45) !important;
+            color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
           }
           .stTextInput input:focus,
           .stTextArea textarea:focus,
@@ -223,31 +500,43 @@ def inject_bbva_css() -> None:
           .stButton > button[kind="secondary"] {
             background: var(--bbva-surface) !important;
             border-color: var(--bbva-border-strong) !important;
-            color: rgba(17,25,45,0.88) !important;
+            color: color-mix(in srgb, var(--bbva-text) 88%, transparent) !important;
             font-weight: 700 !important;
           }
           .stButton > button[kind="secondary"]:hover {
             border-color: rgba(0,81,241,0.35) !important;
-            background: rgba(0,81,241,0.06) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 12%, transparent) !important;
           }
           .stButton > button:disabled {
             opacity: 0.45 !important;
             cursor: not-allowed !important;
           }
 
-          /* Download button: same quiet language as segmented controls */
+          /* Download button: unified pill style across CSV/HTML exports */
+          .stDownloadButton {
+            width: auto !important;
+          }
           .stDownloadButton > button {
-            min-height: 2.15rem !important;
-            padding: 0.35rem 0.78rem !important;
-            border-radius: 10px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.32rem !important;
+            min-height: 1.96rem !important;
+            min-width: 4.86rem !important; /* keeps "HTML" fully inside */
+            width: auto !important;
+            padding: 0.24rem 0.74rem !important;
+            border-radius: 999px !important;
+            box-sizing: border-box !important;
+            white-space: nowrap !important;
+            line-height: 1.05 !important;
             font-weight: 700 !important;
             border: 1px solid var(--bbva-tab-soft-border) !important;
             background: var(--bbva-tab-soft-bg) !important;
             color: var(--bbva-tab-soft-text) !important;
           }
           .stDownloadButton > button:hover {
-            background: #e2e8ef !important;
-            border-color: #bcc8d6 !important;
+            background: color-mix(in srgb, var(--bbva-primary) 12%, var(--bbva-tab-soft-bg)) !important;
+            border-color: color-mix(in srgb, var(--bbva-primary) 40%, var(--bbva-tab-soft-border)) !important;
           }
           .stDownloadButton > button:disabled {
             opacity: 0.45 !important;
@@ -257,12 +546,12 @@ def inject_bbva_css() -> None:
           div[data-testid="stPills"] button {
             background: var(--bbva-surface) !important;
             border: 1px solid var(--bbva-border) !important;
-            color: rgba(17,25,45,0.88) !important;
+            color: color-mix(in srgb, var(--bbva-text) 88%, transparent) !important;
             border-radius: 999px !important;
           }
           div[data-testid="stPills"] button span,
           div[data-testid="stPills"] button p {
-            color: rgba(17,25,45,0.88) !important;
+            color: color-mix(in srgb, var(--bbva-text) 88%, transparent) !important;
             font-weight: 700 !important;
           }
           div[data-testid="stPills"] button[aria-pressed="true"],
@@ -279,12 +568,34 @@ def inject_bbva_css() -> None:
           div[data-baseweb="tab-list"] {
             gap: 8px;
           }
+          div[data-testid="stTabs"] div[data-baseweb="tab-panel"] {
+            padding-top: 0.08rem !important;
+            margin-top: 0 !important;
+          }
+          div[data-testid="stTabs"] div[data-baseweb="tab-panel"] > div[data-testid="stVerticalBlock"] {
+            row-gap: 0.3rem !important;
+          }
           div[data-baseweb="tab"] button {
-            color: rgba(17,25,45,0.72) !important;
+            color: var(--bbva-tab-soft-text) !important;
             font-weight: 700 !important;
+            background: transparent !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            opacity: 1 !important;
+          }
+          div[data-baseweb="tab"] button *,
+          [role="tablist"] button[role="tab"] * {
+            color: inherit !important;
+            opacity: 1 !important;
           }
           div[data-baseweb="tab"] button[aria-selected="true"] {
             color: var(--bbva-primary) !important;
+            opacity: 1 !important;
+          }
+          div[data-baseweb="tab"] button[aria-selected="false"],
+          [role="tablist"] button[role="tab"][aria-selected="false"] {
+            color: var(--bbva-text-muted) !important;
+            opacity: 1 !important;
           }
           div[data-baseweb="tab-highlight"] {
             background-color: var(--bbva-primary) !important;
@@ -297,9 +608,32 @@ def inject_bbva_css() -> None:
             box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
             border-radius: var(--bbva-radius-m) !important;
           }
+          /* Hide all horizontal dividers and tab borders */
+          hr,
+          [data-testid="stDivider"],
+          div[data-testid="stTabs"] div[data-baseweb="tab-border"] {
+            display: none !important;
+            height: 0 !important;
+            border: 0 !important;
+            margin: 0 !important;
+          }
 
           /* Links */
           a, a:visited { color: var(--bbva-primary); }
+
+          /* Plotly text hardening for dark mode/readability */
+          .js-plotly-plot .legend text,
+          .js-plotly-plot .legendtitletext,
+          .js-plotly-plot .gtitle text,
+          .js-plotly-plot .xtitle text,
+          .js-plotly-plot .ytitle text,
+          .js-plotly-plot .annotation text {
+            fill: var(--bbva-text) !important;
+          }
+          .js-plotly-plot .xtick text,
+          .js-plotly-plot .ytick text {
+            fill: var(--bbva-text-muted) !important;
+          }
 
           /* Issue cards */
           .issue-card {
@@ -322,7 +656,7 @@ def inject_bbva_css() -> None:
             margin-top: 6px;
             font-size: 0.95rem;
             line-height: 1.25rem;
-            opacity: 0.95;
+            color: color-mix(in srgb, var(--bbva-text) 95%, transparent);
           }
           .badges {
             margin-top: 8px;
@@ -351,8 +685,90 @@ def inject_bbva_css() -> None:
             border-color: rgba(0,81,241,0.20);
             background: rgba(0,81,241,0.06);
           }
+
+          [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            background: var(--bbva-surface-elevated) !important;
+          }
+          [data-testid="stDataFrame"] [role="grid"],
+          [data-testid="stDataEditor"] [role="grid"] {
+            background: var(--bbva-surface) !important;
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stDataFrame"] [role="columnheader"],
+          [data-testid="stDataEditor"] [role="columnheader"] {
+            background: color-mix(in srgb, var(--bbva-surface) 70%, var(--bbva-surface-2)) !important;
+            color: var(--bbva-text) !important;
+            border-color: var(--bbva-border) !important;
+          }
+          [data-testid="stDataEditor"] [role="gridcell"],
+          [data-testid="stDataFrame"] [role="gridcell"] {
+            border-color: var(--bbva-border) !important;
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stDataEditor"] input {
+            color: var(--bbva-text) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2)) !important;
+          }
+
+          /* Metrics and expanders for dark/light readability */
+          [data-testid="stMetric"] [data-testid="stMetricLabel"] * {
+            color: var(--bbva-text-muted) !important;
+          }
+          [data-testid="stMetric"] [data-testid="stMetricValue"] * {
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stMetric"] [data-testid="stMetricDelta"] * {
+            color: var(--bbva-text-muted) !important;
+          }
+          [data-testid="stExpander"] {
+            border: 1px solid var(--bbva-border) !important;
+            border-radius: 14px !important;
+            background: var(--bbva-surface-soft) !important;
+          }
+          [data-testid="stExpander"] > details {
+            background: var(--bbva-surface-soft) !important;
+            border-radius: 14px !important;
+          }
+          [data-testid="stExpander"] summary {
+            color: var(--bbva-text) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 78%, transparent) !important;
+            border-radius: 14px !important;
+          }
+          [data-testid="stExpander"] summary * {
+            color: var(--bbva-text) !important;
+            opacity: 1 !important;
+          }
+          [data-testid="stExpander"] details[open] summary {
+            border-bottom: 1px solid var(--bbva-border) !important;
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+          }
+          [data-testid="stExpander"] summary:hover {
+            background: color-mix(in srgb, var(--bbva-primary) 8%, transparent) !important;
+          }
+          [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: 0 8px 24px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+          }
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] p,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] li,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h1,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h2,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h3,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h4 {
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stCaptionContainer"] * {
+            color: var(--bbva-text-muted) !important;
+          }
         </style>
-        """,
+        """
+    st.markdown(
+        css_template.replace("__CSS_VARS__", css_vars),
         unsafe_allow_html=True,
     )
 
@@ -363,23 +779,52 @@ def render_hero(app_title: str) -> None:
         f"""
         <div class="bbva-hero">
           <div class="bbva-hero-title">{html.escape(app_title)}</div>
-          <div class="bbva-hero-sub">Análisis y seguimiento de incidencias basado en Jira</div>
+          <div class="bbva-hero-sub">Análisis y seguimiento de incidencias</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def apply_plotly_bbva(fig: Any) -> Any:
-    """Apply a consistent Plotly style aligned with BBVA Experience."""
+def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
+    """Apply a consistent Plotly style aligned with app design tokens."""
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    text_color = "#EAF0FF" if dark_mode else "#11192D"
+    grid_color = "rgba(234,240,255,0.14)" if dark_mode else "rgba(17,25,45,0.10)"
+    legend_bg = "rgba(21,30,53,0.72)" if dark_mode else "rgba(255,255,255,0.65)"
+    legend_border = "rgba(234,240,255,0.20)" if dark_mode else "rgba(17,25,45,0.12)"
+    legend_bottom_space = 92 if showlegend else 16
     undefined_tokens = {"undefined", "none", "nan", "null"}
+    es_label_map = {
+        "count": "Incidencias",
+        "value": "Valor",
+        "date": "Fecha",
+        "status": "Estado",
+        "priority": "Prioridad",
+        "bucket": "Rango",
+        "created": "Creadas",
+        "closed": "Cerradas",
+        "open_backlog_proxy": "Backlog abierto",
+        "resolution_days": "Dias de resolucion",
+    }
+
+    def _clean_txt(v: object) -> str:
+        txt = str(v or "").strip()
+        return "" if txt.lower() in undefined_tokens else txt
+
+    def _localize(txt: object) -> str:
+        clean = _clean_txt(txt)
+        if not clean:
+            return ""
+        return es_label_map.get(clean.strip().lower(), clean)
 
     fig.update_layout(
+        template="plotly_dark" if dark_mode else "plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
             family='"BBVA Benton Sans","Benton Sans","Inter",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
-            color="#11192D",
+            color=text_color,
         ),
         colorway=[
             "#0051F1",  # Electric Blue (primary)
@@ -390,12 +835,40 @@ def apply_plotly_bbva(fig: Any) -> Any:
             "#D6E9FF",  # Light Blue
             "#070E46",  # Midnight Blue
         ],
-        showlegend=False,
-        legend=dict(bgcolor="rgba(255,255,255,0.65)"),
-        margin=dict(l=16, r=16, t=48, b=16),
+        showlegend=showlegend,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.22,
+            xanchor="right",
+            x=1.0,
+            bgcolor=legend_bg,
+            bordercolor=legend_border,
+            borderwidth=1,
+            font=dict(size=11, color=text_color),
+            title=dict(font=dict(color=text_color), text=""),
+        ),
+        hoverlabel=dict(
+            bgcolor=legend_bg,
+            bordercolor=legend_border,
+            font=dict(color=text_color),
+        ),
+        margin=dict(l=16, r=16, t=48, b=legend_bottom_space),
     )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor=grid_color,
+        zeroline=False,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=grid_color,
+        zeroline=False,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
+    )
     for series_name, color in flow_signal_color_map().items():
         fig.update_traces(
             line=dict(color=color),
@@ -403,13 +876,40 @@ def apply_plotly_bbva(fig: Any) -> Any:
             selector={"name": series_name},
         )
 
+    # Remove "undefined" from layout-level labels/titles.
+    try:
+        title_obj = getattr(fig.layout, "title", None)
+        title_text = _localize(getattr(title_obj, "text", ""))
+        fig.update_layout(title_text=title_text)
+    except Exception:
+        pass
+
+    try:
+        x_axis = getattr(fig.layout, "xaxis", None)
+        y_axis = getattr(fig.layout, "yaxis", None)
+        x_title = _localize(getattr(getattr(x_axis, "title", None), "text", ""))
+        y_title = _localize(getattr(getattr(y_axis, "title", None), "text", ""))
+        fig.update_xaxes(title_text=x_title)
+        fig.update_yaxes(title_text=y_title)
+    except Exception:
+        pass
+
+    try:
+        for ann in list(getattr(fig.layout, "annotations", []) or []):
+            ann.text = _localize(getattr(ann, "text", ""))
+            ann.font = dict(color=text_color)
+    except Exception:
+        pass
+
     # Defensive cleanup to avoid "undefined" noise in hover/labels.
     for trace in getattr(fig, "data", []):
         try:
-            name = str(getattr(trace, "name", "") or "").strip()
-            if name.lower() in undefined_tokens:
-                trace.name = ""
-            trace.showlegend = False
+            trace.name = _localize(getattr(trace, "name", ""))
+            trace.showlegend = bool(showlegend and trace.name)
+            if hasattr(trace, "textfont"):
+                trace.textfont = dict(color=text_color)
+            if hasattr(trace, "legendgrouptitle"):
+                trace.legendgrouptitle = dict(font=dict(color=text_color))
         except Exception:
             pass
 

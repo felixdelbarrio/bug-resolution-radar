@@ -1,3 +1,5 @@
+"""Security helpers for URL validation and safe outbound requests."""
+
 from __future__ import annotations
 
 import ipaddress

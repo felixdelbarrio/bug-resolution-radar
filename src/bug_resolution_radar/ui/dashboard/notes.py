@@ -1,3 +1,5 @@
+"""Notes section rendering and filtered issue linking helpers."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -25,11 +27,9 @@ def render_notes_tab(*, dff: pd.DataFrame, notes: NotesStore) -> None:
     current = notes.get(issue_key) or ""
     new_note = st.text_area("Nota (local)", value=current, height=140, key="notes_text")
 
-    c1, c2 = st.columns([1, 3])
+    c1, _ = st.columns([1, 3])
     with c1:
-        if st.button("💾 Guardar nota", key="notes_save_btn", use_container_width=True):
+        if st.button("💾 Guardar nota", key="notes_save_btn", width="stretch"):
             notes.set(issue_key, new_note)
             notes.save()
             st.success("Nota guardada localmente.")
-    with c2:
-        st.caption("Estas notas se guardan en tu máquina (no se suben a ningún servidor).")

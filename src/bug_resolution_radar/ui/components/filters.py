@@ -1,11 +1,13 @@
-# bug_resolution_radar/ui/components/filters.py
+"""Dashboard filters, matrix interactions and synchronized filter state helpers."""
+
 from __future__ import annotations
 
-import html
+import re
 from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -59,6 +61,11 @@ def _priority_combo_label(priority: str) -> str:
 
 def _hex_with_alpha(hex_color: str, alpha: int) -> str:
     h = (hex_color or "").strip()
+    if bool(st.session_state.get("workspace_dark_mode", False)):
+        if alpha <= 40:
+            alpha = 52
+        elif alpha <= 130:
+            alpha = 178
     if len(h) == 7 and h.startswith("#"):
         return f"{h}{alpha:02X}"
     return h
@@ -76,19 +83,144 @@ def _inject_filters_panel_css() -> None:
           }
           /* Base chips style (neutral / assignee-like); status & priority overrides are injected later */
           [data-testid="stMultiSelect"] [data-baseweb="tag"] {
-            background: #F4F6F9 !important;
-            border: 1px solid rgba(17,25,45,0.12) !important;
-            color: #11192D !important;
+            background: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2)) !important;
+            border: 1px solid var(--bbva-border) !important;
+            color: var(--bbva-text) !important;
           }
           [data-testid="stMultiSelect"] [data-baseweb="tag"] * {
-            color: #11192D !important;
+            color: var(--bbva-text) !important;
           }
           [data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
-            fill: rgba(17,25,45,0.55) !important;
+            fill: var(--bbva-text-muted) !important;
+          }
+          [data-testid="stMultiSelect"] [role="listbox"] {
+            background: var(--bbva-surface) !important;
+            border: 1px solid var(--bbva-border) !important;
+          }
+          [data-testid="stMultiSelect"] [role="option"] {
+            color: var(--bbva-text) !important;
           }
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def _inject_combo_signal_script() -> None:
+    """Apply semantic signal colors to dropdown options/tags when frontend DOM differs by version."""
+    components_html(
+        """
+        <script>
+        (() => {
+          try {
+            const root = window.parent;
+            const doc = root && root.document;
+            if (!doc) return;
+            const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
+            const PAINTER_VERSION = 2;
+
+            const match = (text, keys) => keys.some((k) => text.includes(k));
+            const toRgba = (hex, alpha) => {
+              const h = String(hex || "").replace("#", "");
+              if (h.length !== 6) return "rgba(122,139,173," + alpha + ")";
+              const r = parseInt(h.slice(0, 2), 16);
+              const g = parseInt(h.slice(2, 4), 16);
+              const b = parseInt(h.slice(4, 6), 16);
+              return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+            };
+
+            const signalColor = (raw) => {
+              const t = String(raw || "").trim().toLowerCase();
+              if (!t) return "#7A8BAD";
+              if (match(t, ["new", "analysing", "blocked", "created", "high", "highest", "impedimento"])) return "#B4232A";
+              if (match(t, ["en progreso", "in progress", "to rework", "test", "ready to verify", "open", "medium"])) return "#E08A00";
+              if (match(t, ["accepted", "ready to deploy", "deployed", "closed", "low", "lowest"])) return "#1E9E53";
+              return "#7A8BAD";
+            };
+
+            const optionLabel = (el) => {
+              const a = String(el.getAttribute("aria-label") || "").trim();
+              if (a) return a;
+              const t = String(el.getAttribute("title") || "").trim();
+              if (t) return t;
+              return String(el.textContent || "").replace(/\\s+/g, " ").trim();
+            };
+
+            const paintOption = (el) => {
+              const label = optionLabel(el);
+              if (!label) return;
+              const color = signalColor(label);
+              el.style.setProperty("--bbva-opt-dot", color, "important");
+              el.style.setProperty("border-left", "2px solid " + toRgba(color, 0.75), "important");
+              el.style.setProperty("padding-left", "1.72rem", "important");
+              el.style.setProperty(
+                "background-image",
+                "radial-gradient(circle at 0.68rem 50%, " + color + " 0 0.30rem, transparent 0.31rem)",
+                "important"
+              );
+              el.style.setProperty("background-repeat", "no-repeat", "important");
+            };
+
+            const paintTag = (el) => {
+              const label = optionLabel(el);
+              if (!label) return;
+              const color = signalColor(label);
+              el.style.setProperty("background", toRgba(color, 0.14), "important");
+              el.style.setProperty("border", "1px solid " + toRgba(color, 0.52), "important");
+              el.style.setProperty("color", color, "important");
+              el.style.setProperty("background-image", "none", "important");
+              el.querySelectorAll("*").forEach((n) => {
+                n.style.setProperty("color", color, "important");
+              });
+            };
+
+            const tick = () => {
+              doc
+                .querySelectorAll(
+                  'div[data-baseweb="popover"] [role="option"], ' +
+                  'div[data-baseweb="popover"] li[role="option"], ' +
+                  'div[data-baseweb="popover"] li'
+                )
+                .forEach(paintOption);
+              doc
+                .querySelectorAll('[data-baseweb="select"] [data-baseweb="tag"]')
+                .forEach(paintTag);
+            };
+
+            if (root.__bbvaSignalPainterVersion !== PAINTER_VERSION) {
+              root.__bbvaSignalPainterVersion = PAINTER_VERSION;
+              root.__bbvaSignalPaintQueued = false;
+
+              root.__bbvaScheduleSignalPaint = () => {
+                if (root.__bbvaSignalPaintQueued) return;
+                root.__bbvaSignalPaintQueued = true;
+                raf(() => {
+                  root.__bbvaSignalPaintQueued = false;
+                  try { tick(); } catch (e) {}
+                });
+              };
+
+              if (root.__bbvaSignalObserver) {
+                try { root.__bbvaSignalObserver.disconnect(); } catch (e) {}
+              }
+              root.__bbvaSignalObserver = new MutationObserver(() => {
+                root.__bbvaScheduleSignalPaint();
+              });
+              root.__bbvaSignalObserver.observe(doc.body, { childList: true, subtree: true });
+            }
+            if (typeof root.__bbvaScheduleSignalPaint === "function") {
+              root.__bbvaScheduleSignalPaint();
+            } else {
+              tick();
+            }
+          } catch (e) {
+            // no-op
+          }
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 
@@ -101,21 +233,37 @@ def _inject_colored_multiselect_css(
 ) -> None:
     rules: List[str] = []
 
+    def _opt_sel(v: str) -> str:
+        return (
+            f'[role="option"][aria-label*="{v}" i], '
+            f'[role="option"][title*="{v}" i], '
+            f'[role="option"]:has([title*="{v}" i])'
+        )
+
+    def _tag_sel(v: str) -> str:
+        return (
+            f'[data-baseweb="tag"][title*="{v}" i], ' f'[data-baseweb="tag"]:has([title*="{v}" i])'
+        )
+
     for label in status_labels:
         raw = (label or "").strip()
         c = status_color(raw)
         bg = _hex_with_alpha(c, 24)
         border = _hex_with_alpha(c, 120)
         v = _css_attr_value(label)
+        option_selector = _opt_sel(v)
+        tag_selector = _tag_sel(v)
         rules.append(
             f"""
-            div[role="option"][aria-label="{v}"] {{
+            {option_selector} {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
               padding-left: 1.72rem !important;
+              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
+              background-repeat: no-repeat !important;
             }}
-            div[role="option"][aria-label="{v}"]::before {{
+            {option_selector}::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -126,39 +274,13 @@ def _inject_colored_multiselect_css(
               top: 50%;
               transform: translateY(-50%);
             }}
-            [data-baseweb="tag"][title="{v}"] {{
+            {tag_selector} {{
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
+              background-image: none !important;
             }}
-            div[role="option"]:has(span[title="{v}"]),
-            div[role="option"]:has(div[title="{v}"]),
-            div[role="option"]:has(span:only-child):has(span[title="{v}"]) {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-            }}
-            div[role="option"]:has(span[title="{v}"])::before,
-            div[role="option"]:has(div[title="{v}"])::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]),
-            [data-baseweb="tag"]:has(div[title="{v}"]) {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]) * ,
-            [data-baseweb="tag"]:has(div[title="{v}"]) * {{
+            {tag_selector} * {{
               color: {c} !important;
             }}
             """
@@ -170,15 +292,19 @@ def _inject_colored_multiselect_css(
         bg = _hex_with_alpha(c, 24)
         border = _hex_with_alpha(c, 120)
         v = _css_attr_value(label)
+        option_selector = _opt_sel(v)
+        tag_selector = _tag_sel(v)
         rules.append(
             f"""
-            div[role="option"][aria-label="{v}"] {{
+            {option_selector} {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
               padding-left: 1.72rem !important;
+              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
+              background-repeat: no-repeat !important;
             }}
-            div[role="option"][aria-label="{v}"]::before {{
+            {option_selector}::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -189,39 +315,13 @@ def _inject_colored_multiselect_css(
               top: 50%;
               transform: translateY(-50%);
             }}
-            [data-baseweb="tag"][title="{v}"] {{
+            {tag_selector} {{
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
+              background-image: none !important;
             }}
-            div[role="option"]:has(span[title="{v}"]),
-            div[role="option"]:has(div[title="{v}"]),
-            div[role="option"]:has(span:only-child):has(span[title="{v}"]) {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-            }}
-            div[role="option"]:has(span[title="{v}"])::before,
-            div[role="option"]:has(div[title="{v}"])::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]),
-            [data-baseweb="tag"]:has(div[title="{v}"]) {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]) * ,
-            [data-baseweb="tag"]:has(div[title="{v}"]) * {{
+            {tag_selector} * {{
               color: {c} !important;
             }}
             """
@@ -256,6 +356,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
       so matrix/kanban/insights can still sync by writing those keys.
     """
     _inject_filters_panel_css()
+    _inject_combo_signal_script()
 
     # Normalize empty values so filters + matrix can round-trip selections.
     status_col = (
@@ -292,53 +393,55 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     # Inject option/tag color styles once to avoid per-column layout jitter.
     _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
 
-    c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
+    with st.container(border=True, key=f"{(key_prefix or 'dashboard')}_filters_panel"):
+        c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
 
-    with c_status:
-        selected_ui_status = list(st.session_state.get(ui_status_key) or [])
-        st.session_state[ui_status_key] = [x for x in selected_ui_status if x in status_opts_ui]
-        st.multiselect(
-            "Estado",
-            status_opts_ui,
-            default=list(st.session_state.get(ui_status_key) or []),
-            key=ui_status_key,
-            on_change=_sync_from_ui_to_canonical,
-            args=(ui_status_key, ui_prio_key, ui_assignee_key),
-            placeholder="Estado",
-        )
-
-    with c_prio:
-        if "priority" in df.columns:
-            selected_ui_prio = list(st.session_state.get(ui_prio_key) or [])
-            st.session_state[ui_prio_key] = [x for x in selected_ui_prio if x in prio_opts_ui]
+        with c_status:
+            selected_ui_status = list(st.session_state.get(ui_status_key) or [])
+            st.session_state[ui_status_key] = [x for x in selected_ui_status if x in status_opts_ui]
             st.multiselect(
-                "Priority",
-                prio_opts_ui,
-                default=list(st.session_state.get(ui_prio_key) or []),
-                key=ui_prio_key,
+                "Estado",
+                status_opts_ui,
+                key=ui_status_key,
                 on_change=_sync_from_ui_to_canonical,
                 args=(ui_status_key, ui_prio_key, ui_assignee_key),
-                placeholder="Priority",
+                placeholder="Estado",
             )
-        else:
-            st.session_state[ui_prio_key] = []
-            st.session_state[FILTER_PRIORITY_KEY] = []
 
-    with c_assignee:
-        if "assignee" in df.columns:
-            assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
-            st.multiselect(
-                "Asignado",
-                assignee_opts,
-                default=list(st.session_state.get(ui_assignee_key) or []),
-                key=ui_assignee_key,
-                on_change=_sync_from_ui_to_canonical,
-                args=(ui_status_key, ui_prio_key, ui_assignee_key),
-                placeholder="Asignado",
-            )
-        else:
-            st.session_state[ui_assignee_key] = []
-            st.session_state[FILTER_ASSIGNEE_KEY] = []
+        with c_prio:
+            if "priority" in df.columns:
+                selected_ui_prio = list(st.session_state.get(ui_prio_key) or [])
+                st.session_state[ui_prio_key] = [x for x in selected_ui_prio if x in prio_opts_ui]
+                st.multiselect(
+                    "Priority",
+                    prio_opts_ui,
+                    key=ui_prio_key,
+                    on_change=_sync_from_ui_to_canonical,
+                    args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                    placeholder="Priority",
+                )
+            else:
+                st.session_state[ui_prio_key] = []
+                st.session_state[FILTER_PRIORITY_KEY] = []
+
+        with c_assignee:
+            if "assignee" in df.columns:
+                assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
+                selected_ui_assignee = list(st.session_state.get(ui_assignee_key) or [])
+                st.session_state[ui_assignee_key] = [
+                    x for x in selected_ui_assignee if x in assignee_opts
+                ]
+                st.multiselect(
+                    "Asignado",
+                    assignee_opts,
+                    key=ui_assignee_key,
+                    on_change=_sync_from_ui_to_canonical,
+                    args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                    placeholder="Asignado",
+                )
+            else:
+                st.session_state[ui_assignee_key] = []
+                st.session_state[FILTER_ASSIGNEE_KEY] = []
 
     # Return canonical state (single source of truth)
     fs = FilterState(
@@ -374,11 +477,36 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
     if fs.assignee and "assignee" in df.columns:
         mask &= df["assignee"].isin(fs.assignee)
 
-    dff = df.loc[mask].copy()
-
+    needs_status_write = False
     if status_norm is not None:
-        dff["status"] = status_norm.loc[mask].to_numpy()
+        needs_status_write = bool(fs.status)
+        if not needs_status_write and bool(df["status"].isna().any()):
+            needs_status_write = True
+        if not needs_status_write:
+            try:
+                needs_status_write = bool((df["status"] == "").any())
+            except Exception:
+                needs_status_write = False
+
+    needs_priority_write = False
     if priority_norm is not None:
+        needs_priority_write = bool(fs.priority)
+        if not needs_priority_write and bool(df["priority"].isna().any()):
+            needs_priority_write = True
+        if not needs_priority_write:
+            try:
+                needs_priority_write = bool((df["priority"] == "").any())
+            except Exception:
+                needs_priority_write = False
+
+    if bool(mask.all()) and not (needs_status_write or needs_priority_write):
+        # Fast path: avoid extra frame materialization when no filter narrows results.
+        return df.copy(deep=False)
+
+    dff = df.loc[mask].copy(deep=False)
+    if needs_status_write and status_norm is not None:
+        dff["status"] = status_norm.loc[mask].to_numpy()
+    if needs_priority_write and priority_norm is not None:
         dff["priority"] = priority_norm.loc[mask].to_numpy()
 
     # IMPORTANTE: no filtramos por "type" (se muestra todo lo que entra por ingesta)
@@ -399,20 +527,22 @@ def _matrix_set_filters(st_name: str, prio: str) -> None:
     st.session_state[FILTER_PRIORITY_KEY] = [prio] if statuses else []
 
 
-def _matrix_clear_filters() -> None:
-    st.session_state[FILTER_STATUS_KEY] = []
-    st.session_state[FILTER_PRIORITY_KEY] = []
-    st.session_state[FILTER_ASSIGNEE_KEY] = []
+def _matrix_toggle_status_filter(st_name: str) -> None:
+    statuses = list(st.session_state.get(FILTER_STATUS_KEY) or [])
+    if st_name in statuses:
+        statuses = [s for s in statuses if s != st_name]
+    else:
+        statuses.append(st_name)
+    st.session_state[FILTER_STATUS_KEY] = statuses
 
 
-def _any_filter_active(fs: Optional[FilterState]) -> bool:
-    if fs is None:
-        return False
-    return bool(fs.status or fs.priority or fs.assignee)
+def _matrix_toggle_priority_filter(prio: str) -> None:
+    priorities = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
+    st.session_state[FILTER_PRIORITY_KEY] = [] if priorities == [prio] else [prio]
 
 
 def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
-    color = (hex_color or "#11192D").strip()
+    color = (hex_color or "#8EA2C4").strip()
     border = _hex_with_alpha(color, 150 if selected else 110)
     bg = _hex_with_alpha(color, 48 if selected else 24)
     fw = "800" if selected else "700"
@@ -420,6 +550,43 @@ def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
         f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
         f"border-radius:11px; border:1px solid {border}; background:{bg}; "
         f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
+    )
+
+
+def _matrix_priority_label(priority: str) -> str:
+    p = str(priority or "").strip()
+    if p.lower() == "supone un impedimento":
+        return "Impedimento"
+    return p
+
+
+def _matrix_safe_token(value: str) -> str:
+    tok = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    return tok or "na"
+
+
+def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
+    color = (hex_color or "#8EA2C4").strip()
+    border = _hex_with_alpha(color, 170 if selected else 125)
+    bg = _hex_with_alpha(color, 64 if selected else 28)
+    hover_bg = _hex_with_alpha(color, 76 if selected else 42)
+    ring = _hex_with_alpha(color, 86)
+    glow = _hex_with_alpha(color, 62)
+    fw = "800" if selected else "700"
+    return (
+        f"border:1px solid {border} !important;"
+        f"background:{bg} !important;"
+        f"color:{color} !important;"
+        f"font-weight:{fw} !important;"
+        "border-radius:11px !important;"
+        "min-height:2.18rem !important;"
+        "padding:0.22rem 0.46rem !important;"
+        "line-height:1.16 !important;"
+        "white-space:normal !important;"
+        "word-break:break-word !important;"
+        f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+        f"--mx-hover-bg:{hover_bg};"
+        f"--mx-focus-ring:{ring};"
     )
 
 
@@ -434,6 +601,15 @@ def _inject_matrix_compact_css(scope_key: str) -> None:
             font-size: 0.95rem !important;
             font-weight: 650 !important;
           }}
+          .st-key-{scope_key} div[data-testid="stButton"] > button[kind="primary"] {{
+            border-color: color-mix(in srgb, var(--bbva-primary) 56%, var(--bbva-border-strong)) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 18%, var(--bbva-surface)) !important;
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 30%, transparent) !important;
+            font-weight: 790 !important;
+          }}
+          .st-key-{scope_key} div[data-testid="stButton"] > button[kind="secondary"] {{
+            opacity: 0.98 !important;
+          }}
           .st-key-{scope_key} div[data-testid="stMarkdownContainer"] p {{
             margin-bottom: 0.16rem !important;
           }}
@@ -441,6 +617,37 @@ def _inject_matrix_compact_css(scope_key: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _inject_matrix_header_signal_css(
+    *,
+    row_specs: List[tuple[str, str, bool]],
+    col_specs: List[tuple[str, str, bool]],
+) -> None:
+    rules: List[str] = []
+    for btn_key, color, is_selected in row_specs + col_specs:
+        style = _matrix_header_button_css(color, selected=is_selected)
+        rules.append(
+            f"""
+            .st-key-{btn_key} div[data-testid="stButton"] > button {{
+              {style}
+            }}
+            .st-key-{btn_key} div[data-testid="stButton"] > button:hover {{
+              background: var(--mx-hover-bg) !important;
+              border-color: color-mix(in srgb, {color} 78%, transparent) !important;
+            }}
+            .st-key-{btn_key} div[data-testid="stButton"] > button:focus-visible {{
+              outline: none !important;
+              box-shadow: 0 0 0 3px var(--mx-focus-ring) !important;
+            }}
+            .st-key-{btn_key} div[data-testid="stButton"] > button * {{
+              color: inherit !important;
+              fill: currentColor !important;
+            }}
+            """
+        )
+    if rules:
+        st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
 def render_status_priority_matrix(
@@ -484,23 +691,16 @@ def render_status_priority_matrix(
     selected_priorities = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
 
     has_matrix_sel = bool(selected_statuses or selected_priorities)
-    has_any_filter = _any_filter_active(fs)
-
-    cA, cB = st.columns([3, 1])
-    with cA:
-        if has_matrix_sel:
-            status_txt = ", ".join(selected_statuses) if selected_statuses else "(todos)"
-            prio_txt = ", ".join(selected_priorities) if selected_priorities else "(todas)"
-            st.caption(f"Seleccionado: Estado={status_txt} · Priority={prio_txt}")
-        else:
-            st.caption("Click en una celda: sincroniza Estado/Priority y actualiza la tabla.")
-    with cB:
-        st.button(
-            "Limpiar selección",
-            key=f"{key_prefix}::clear",
-            disabled=not has_any_filter,
-            on_click=_matrix_clear_filters,
+    if has_matrix_sel:
+        status_txt = ", ".join(selected_statuses) if selected_statuses else "(todos)"
+        prio_txt = (
+            ", ".join(_matrix_priority_label(p) for p in selected_priorities)
+            if selected_priorities
+            else "(todas)"
         )
+        st.caption(f"Seleccionado: Estado={status_txt} · Priority={prio_txt}")
+    else:
+        st.caption("Click en cabeceras o celdas para filtrar. Repite click para desmarcar.")
 
     counts = pd.crosstab(mx["status"], mx["priority"])
 
@@ -512,17 +712,31 @@ def render_status_priority_matrix(
     matrix_scope_key = f"{(key_prefix or 'mx')}_matrix_panel"
     _inject_matrix_compact_css(matrix_scope_key)
 
+    row_btn_specs: List[tuple[str, str, bool]] = []
+    col_btn_specs: List[tuple[str, str, bool]] = []
+    for st_name in statuses:
+        row_key = f"{key_prefix}__mx_row__{_matrix_safe_token(st_name)}"
+        row_btn_specs.append((row_key, status_color(st_name), st_name in selected_statuses))
+    for p in priorities:
+        col_key = f"{key_prefix}__mx_col__{_matrix_safe_token(p)}"
+        col_btn_specs.append((col_key, priority_color(p), p in selected_priorities))
+    _inject_matrix_header_signal_css(row_specs=row_btn_specs, col_specs=col_btn_specs)
+
     with st.container(border=True, key=matrix_scope_key):
         # Header row (con totales por columna)
         hdr = st.columns(len(priorities) + 1)
         hdr[0].markdown(f"**Estado ({total_open:,})**")
         for i, p in enumerate(priorities):
-            label = f"{p} ({col_totals.get(p, 0)})"
-            p_color = priority_color(p)
-            hdr[i + 1].markdown(
-                f'<div style="{_matrix_chip_style(p_color, selected=p in selected_priorities)}">'
-                f"{html.escape(label)}</div>",
-                unsafe_allow_html=True,
+            label = f"{_matrix_priority_label(p)} ({col_totals.get(p, 0)})"
+            col_key = f"{key_prefix}__mx_col__{_matrix_safe_token(p)}"
+            hdr[i + 1].button(
+                label,
+                key=col_key,
+                type="primary" if p in selected_priorities else "secondary",
+                width="stretch",
+                disabled=(col_totals.get(p, 0) == 0),
+                on_click=_matrix_toggle_priority_filter,
+                args=(p,),
             )
 
         # Rows (con total por estado)
@@ -531,11 +745,15 @@ def render_status_priority_matrix(
             row = st.columns(len(priorities) + 1)
 
             row_label = f"{st_name} ({total_row})"
-            st_color = status_color(st_name)
-            row[0].markdown(
-                f'<div style="{_matrix_chip_style(st_color, selected=st_name in selected_statuses)}">'
-                f"{html.escape(row_label)}</div>",
-                unsafe_allow_html=True,
+            row_key = f"{key_prefix}__mx_row__{_matrix_safe_token(st_name)}"
+            row[0].button(
+                row_label,
+                key=row_key,
+                type="primary" if st_name in selected_statuses else "secondary",
+                width="stretch",
+                disabled=(total_row == 0),
+                on_click=_matrix_toggle_status_filter,
+                args=(st_name,),
             )
 
             for i, p in enumerate(priorities):
@@ -550,7 +768,7 @@ def render_status_priority_matrix(
                     key=f"{key_prefix}::cell::{st_name}::{p}",
                     disabled=(cnt == 0),
                     type="primary" if is_selected else "secondary",
-                    use_container_width=True,
+                    width="stretch",
                     on_click=_matrix_set_filters,
                     args=(st_name, p),
                 )

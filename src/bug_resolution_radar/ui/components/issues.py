@@ -1,3 +1,5 @@
+"""Issue cards/table renderers and visual formatting helpers."""
+
 from __future__ import annotations
 
 import html
@@ -15,6 +17,18 @@ from bug_resolution_radar.ui.common import (
 )
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
+MAX_TABLE_HTML_ROWS = 3000
+MAX_TABLE_NATIVE_ROWS = 2500
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) != 6:
+        return f"rgba(127,146,178,{alpha:.3f})"
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha:.3f})"
 
 
 def _safe_cell_text(value: object) -> str:
@@ -58,7 +72,7 @@ def _safe_cell_text(value: object) -> str:
     return txt
 
 
-def _jira_label_from_row(row: pd.Series) -> str:
+def _jira_label_from_row(row: dict[str, object] | pd.Series) -> str:
     key = _safe_cell_text(row.get("key"))
     if key != "—":
         return key
@@ -82,6 +96,38 @@ def _chip_html(value: object, *, for_priority: bool) -> str:
     return f'<span class="issue-table-chip" style="{style}">{html.escape(txt)}</span>'
 
 
+def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
+    txt = _safe_cell_text(value)
+    if txt == "—":
+        return (
+            "color: var(--bbva-text-muted) !important; "
+            "font-weight: 700 !important; "
+            "background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important; "
+            "border: 1px solid var(--bbva-border) !important; "
+            "border-radius: 999px !important;"
+        )
+
+    color = priority_color(txt) if for_priority else status_color(txt)
+    if color.upper() == "#E2E6EE":
+        return (
+            "color: var(--bbva-text) !important; "
+            "font-weight: 700 !important; "
+            "background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important; "
+            "border: 1px solid var(--bbva-border) !important; "
+            "border-radius: 999px !important;"
+        )
+
+    border = _hex_to_rgba(color, 0.62)
+    bg = _hex_to_rgba(color, 0.16)
+    return (
+        f"color: {color} !important; "
+        f"background: {bg} !important; "
+        f"border: 1px solid {border} !important; "
+        "border-radius: 999px !important; "
+        "font-weight: 700 !important;"
+    )
+
+
 def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> None:
     title_by_col = {
         "jira": "Jira",
@@ -101,7 +147,8 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
     header_cells.extend([f"<th>{html.escape(title_by_col.get(c, c))}</th>" for c in show_cols])
 
     rows_html: List[str] = []
-    for idx, row in display_df.iterrows():
+    records = display_df[show_cols].to_dict(orient="records")
+    for idx, row in zip(display_df.index.tolist(), records):
         row_cells = [f'<td class="issue-table-index">{html.escape(str(idx))}</td>']
         for col in show_cols:
             if col == "jira":
@@ -136,10 +183,10 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
         f"""
         <style>
           .issue-table-shell {{
-            border: 1px solid rgba(17,25,45,0.12);
+            border: 1px solid var(--bbva-border);
             border-radius: 14px;
             overflow: hidden;
-            background: #ffffff;
+            background: var(--bbva-surface);
           }}
           .issue-table-scroll {{
             max-height: 600px;
@@ -158,25 +205,25 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             z-index: 2;
             text-align: left;
             font-weight: 700;
-            color: rgba(17,25,45,0.60);
-            background: #F6F8FB;
-            border-bottom: 1px solid rgba(17,25,45,0.12);
+            color: var(--bbva-text-muted);
+            background: color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2));
+            border-bottom: 1px solid var(--bbva-border);
             padding: 0.60rem 0.72rem;
             white-space: nowrap;
           }}
           .issue-table td {{
-            border-top: 1px solid rgba(17,25,45,0.10);
+            border-top: 1px solid var(--bbva-border);
             padding: 0.50rem 0.72rem;
             vertical-align: middle;
-            color: #11192D;
+            color: var(--bbva-text);
             white-space: nowrap;
           }}
           .issue-table-index {{
             width: 54px;
             text-align: right !important;
-            color: rgba(17,25,45,0.52) !important;
+            color: var(--bbva-text-muted) !important;
             font-variant-numeric: tabular-nums;
-            background: #FBFCFE;
+            background: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-surface-2));
           }}
           .issue-table-summary {{
             min-width: 480px;
@@ -186,7 +233,7 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             text-overflow: ellipsis;
           }}
           .issue-table-jira {{
-            color: #0051F1 !important;
+            color: var(--bbva-primary) !important;
             font-weight: 700;
             text-decoration: none;
           }}
@@ -199,9 +246,9 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             max-width: 100%;
           }}
           .issue-table-chip-neutral {{
-            color: #44546B;
-            border: 1px solid rgba(17,25,45,0.16);
-            background: #F4F6F9;
+            color: var(--bbva-text-muted);
+            border: 1px solid var(--bbva-border-strong);
+            background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2));
             border-radius: 999px;
             padding: 2px 10px;
             font-weight: 700;
@@ -218,6 +265,39 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
         </div>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -> None:
+    """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
+    df_show = display_df[show_cols].copy(deep=False)
+    col_cfg = {}
+    if "jira" in df_show.columns:
+        col_cfg["jira"] = st.column_config.LinkColumn("Jira", display_text=r".*/browse/([^/?#]+)")
+    if "summary" in df_show.columns:
+        col_cfg["summary"] = st.column_config.TextColumn("summary", width="large")
+    if "status" in df_show.columns:
+        col_cfg["status"] = st.column_config.TextColumn("status", width="medium")
+    if "priority" in df_show.columns:
+        col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
+
+    styler = df_show.style
+    if "status" in df_show.columns:
+        styler = styler.map(
+            lambda x: _native_signal_cell_style(x, for_priority=False),
+            subset=["status"],
+        )
+    if "priority" in df_show.columns:
+        styler = styler.map(
+            lambda x: _native_signal_cell_style(x, for_priority=True),
+            subset=["priority"],
+        )
+
+    st.dataframe(
+        styler,
+        width="stretch",
+        hide_index=False,
+        column_config=col_cfg or None,
     )
 
 
@@ -241,22 +321,21 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
         "resolved",
         "url",
     ]
-    safe_df = dff.copy()
+    safe_df = dff.copy(deep=False)
     for c in cols:
         if c not in safe_df.columns:
             safe_df[c] = None
 
-    now = pd.Timestamp.utcnow()
+    now = pd.Timestamp.now(tz="UTC")
     open_df = (
-        safe_df[safe_df["resolved"].isna()].copy()
+        safe_df[safe_df["resolved"].isna()].copy(deep=False)
         if "resolved" in safe_df.columns
-        else safe_df.copy()
+        else safe_df.copy(deep=False)
     )
 
     if "created" in open_df.columns:
-        open_df["open_age_days"] = ((now - open_df["created"]).dt.total_seconds() / 86400.0).fillna(
-            0.0
-        )
+        created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
+        open_df["open_age_days"] = ((now - created).dt.total_seconds() / 86400.0).fillna(0.0)
     else:
         open_df["open_age_days"] = 0.0
 
@@ -272,6 +351,7 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
 
     open_df = open_df.sort_values(by=sort_cols, ascending=asc).head(max_cards)
 
+    cards: List[str] = []
     for row in open_df.itertuples(index=False):
         key = html.escape(str(getattr(row, "key", "") or ""))
         url = html.escape(str(getattr(row, "url", "") or ""))
@@ -296,19 +376,30 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
             badges.append(f'<span class="badge">Assignee: {assignee}</span>')
         badges.append(f'<span class="badge badge-age">Open age: {age:.0f}d</span>')
 
-        st.markdown(
-            f"""
-            <div class="issue-card">
-              <div class="issue-top">
-                <div class="issue-key"><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>
-              </div>
-              <div class="issue-summary">{summary}</div>
-              <div class="badges">{''.join(badges)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        cards.append(
+            (
+                '<article class="issue-card">'
+                '<div class="issue-top">'
+                f'<div class="issue-key"><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>'
+                "</div>"
+                f'<div class="issue-summary">{summary}</div>'
+                f'<div class="badges">{"".join(badges)}</div>'
+                "</article>"
+            )
         )
-        st.write("")
+    st.markdown(
+        f"""
+        <style>
+          .issue-cards-stack {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 12px;
+          }}
+        </style>
+        <div class="issue-cards-stack">{''.join(cards)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_issue_table(dff: pd.DataFrame) -> None:
@@ -317,7 +408,7 @@ def render_issue_table(dff: pd.DataFrame) -> None:
         st.info("No hay issues para mostrar con los filtros actuales.")
         return
 
-    display_df = dff.copy()
+    display_df = dff.copy(deep=False)
 
     # Make a clickable Jira link using stored URL
     if "url" in display_df.columns:
@@ -341,5 +432,19 @@ def render_issue_table(dff: pd.DataFrame) -> None:
     sort_by = "updated" if "updated" in display_df.columns else None
     if sort_by:
         display_df = display_df.sort_values(by=sort_by, ascending=False)
+
+    if len(display_df) > MAX_TABLE_HTML_ROWS:
+        st.caption(
+            f"Tabla optimizada: vista virtualizada para {len(display_df)} filas "
+            "(mejor rendimiento y menor consumo de memoria)."
+        )
+        if len(display_df) > MAX_TABLE_NATIVE_ROWS:
+            st.caption(
+                f"Mostrando {MAX_TABLE_NATIVE_ROWS}/{len(display_df)} filas en pantalla. "
+                "Usa CSV para el dataset completo."
+            )
+            display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
+        _render_issue_table_native(display_df, show_cols)
+        return
 
     _render_issue_table_html(display_df, show_cols)

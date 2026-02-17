@@ -1,4 +1,5 @@
-# src/bug_resolution_radar/ui/insights/helpers.py
+"""Shared helper functions for insights data preparation and safe rendering."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Tuple

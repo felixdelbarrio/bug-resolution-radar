@@ -1,3 +1,5 @@
+"""Kanban rendering utilities and grouped issue presentation."""
+
 from __future__ import annotations
 
 import html
@@ -7,9 +9,19 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.ui.common import normalize_text_col, priority_rank, status_color
+from bug_resolution_radar.ui.common import (
+    chip_style_from_color,
+    normalize_text_col,
+    priority_color,
+    priority_rank,
+    status_color,
+)
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
+
+MAX_KANBAN_ITEMS_PER_COLUMN = 220
+MAX_KANBAN_TOTAL_ITEMS = 1200
 
 
 def _kanban_set_status_filter(st_name: str) -> None:
@@ -32,7 +44,7 @@ def _order_statuses_canonical(statuses: List[str]) -> List[str]:
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     h = (hex_color or "").strip().lstrip("#")
     if len(h) != 6:
-        return f"rgba(17,25,45,{alpha:.3f})"
+        return f"rgba(127,146,178,{alpha:.3f})"
     r = int(h[0:2], 16)
     g = int(h[2:4], 16)
     b = int(h[4:6], 16)
@@ -78,6 +90,97 @@ def _inject_kanban_header_chip_css(headers: List[tuple[str, str, bool]]) -> None
         st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
+def _inject_kanban_item_css() -> None:
+    st.markdown(
+        """
+        <style>
+          .kan-items { display: grid; gap: 10px; }
+          .kan-item {
+            margin: 2px 0;
+            border: 1px solid var(--bbva-border);
+            border-radius: 12px;
+            background: var(--bbva-surface-soft);
+            padding: 0.50rem 0.58rem;
+            max-width: 100%;
+            overflow: hidden;
+          }
+          .kan-item:hover {
+            border-color: var(--bbva-border-strong);
+            box-shadow: 0 2px 10px color-mix(in srgb, var(--bbva-text) 10%, transparent);
+          }
+          .kan-item-key a {
+            display: block;
+            font-weight: 800;
+            text-decoration: none;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .kan-item-meta {
+            display: flex;
+            gap: 0.30rem;
+            flex-wrap: wrap;
+            margin-top: 0.34rem;
+            min-width: 0;
+          }
+          .kan-chip {
+            display: inline-flex;
+            align-items: center;
+            max-width: 100%;
+            min-width: 0;
+          }
+          .kan-chip-text {
+            display: block;
+            min-width: 0;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .kan-chip-assignee {
+            flex: 1 1 10rem;
+            min-width: 0;
+            max-width: 100%;
+          }
+          .kan-item-summary {
+            margin-top: 0.30rem;
+            color: color-mix(in srgb, var(--bbva-text) 90%, transparent);
+            font-size: 0.90rem;
+            line-height: 1.26rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _neutral_chip_style() -> str:
+    return (
+        "color:var(--bbva-text-muted); border:1px solid var(--bbva-border-strong); "
+        "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
+        "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.78rem;"
+    )
+
+
+def _chip_html(label: str, style: str) -> str:
+    return '<span class="kan-chip" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
+        style, html.escape(label)
+    )
+
+
+def _assignee_chip_html(label: str) -> str:
+    return '<span class="kan-chip kan-chip-assignee" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
+        _neutral_chip_style(),
+        html.escape(label),
+    )
+
+
 def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     """
     Kanban siempre desplegado.
@@ -87,12 +190,32 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     - Maquetado dentro de un contenedor
     - Orden de columnas: SIEMPRE el canónico (el mismo que en Issues)
     """
-    with st.container(border=True):
+    with st.container(border=True, key="kanban_shell"):
         if open_df is None or open_df.empty:
             st.info("No hay incidencias abiertas para mostrar.")
             return
+        if "status" not in open_df.columns:
+            st.info("No hay columna 'status' para construir el tablero Kanban.")
+            return
 
-        kan = open_df.copy()
+        kan = open_df.copy(deep=False)
+        export_cols = [
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "assignee",
+            "created",
+            "updated",
+            "url",
+        ]
+        export_df = kan[[c for c in export_cols if c in kan.columns]].copy(deep=False)
+        render_minimal_export_actions(
+            key_prefix="kanban::open",
+            filename_prefix="kanban",
+            suffix="abiertas",
+            csv_df=export_df,
+        )
         kan["status"] = normalize_text_col(kan["status"], "(sin estado)")
 
         status_counts = kan["status"].value_counts()
@@ -122,11 +245,28 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
             slug = _status_slug(st_name, i)
             header_meta.append((st_name, slug, st_name in active_filter))
         _inject_kanban_header_chip_css(header_meta)
+        _inject_kanban_item_css()
 
         cols = st.columns(len(selected_statuses))
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        if "created" in kan.columns:
+            created_naive = pd.to_datetime(
+                kan["created"], errors="coerce", utc=True
+            ).dt.tz_localize(None)
+            kan["age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(lower=0.0)
+        else:
+            kan["age_days"] = pd.NA
+
+        max_items_per_col = max(
+            60,
+            min(
+                MAX_KANBAN_ITEMS_PER_COLUMN,
+                MAX_KANBAN_TOTAL_ITEMS // max(len(selected_statuses), 1),
+            ),
+        )
 
         for i, (col, st_name) in enumerate(zip(cols, selected_statuses)):
-            sub = kan[kan["status"] == st_name].copy()
+            sub = kan[kan["status"] == st_name].copy(deep=False)
             slug = _status_slug(st_name, i)
 
             # Orden: prioridad (rank) y luego updated desc si existe
@@ -139,6 +279,9 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                 sort_cols.append("updated")
                 sort_asc.append(False)
             sub = sub.sort_values(by=sort_cols, ascending=sort_asc)
+            total_in_col = len(sub)
+            if total_in_col > max_items_per_col:
+                sub = sub.head(max_items_per_col).copy(deep=False)
 
             with col:
                 # Header clickable -> fija el filtro de estado
@@ -146,23 +289,51 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                     st.button(
                         f"{st_name}",
                         key=f"kanban_hdr__{slug}",
-                        use_container_width=True,
+                        width="stretch",
                         on_click=_kanban_set_status_filter,
                         args=(st_name,),
                     )
-                st.caption(f"{len(sub)} issues")
+                if total_in_col > max_items_per_col:
+                    st.caption(f"{len(sub)}/{total_in_col} issues (cap de rendimiento por columna)")
+                else:
+                    st.caption(f"{total_in_col} issues")
+                cards_html: List[str] = []
+                for r in sub.itertuples(index=False):
+                    key = html.escape(str(getattr(r, "key", "") or ""))
+                    url = html.escape(str(getattr(r, "url", "") or ""))
+                    summ = html.escape(str(getattr(r, "summary", "") or ""))
+                    if len(summ) > 120:
+                        summ = summ[:117] + "..."
+                    status = str(getattr(r, "status", "") or "").strip() or "(sin estado)"
+                    prio = str(getattr(r, "priority", "") or "").strip() or "(sin priority)"
+                    assignee = str(getattr(r, "assignee", "") or "").strip()
+                    age_raw = getattr(r, "age_days", pd.NA)
+                    age_days = float(age_raw) if pd.notna(age_raw) else None
 
-                for _, r in sub.iterrows():
-                    key = html.escape(str(r.get("key", "") or ""))
-                    url = html.escape(str(r.get("url", "") or ""))
-                    summ = html.escape(str(r.get("summary", "") or ""))
-                    if len(summ) > 80:
-                        summ = summ[:77] + "..."
+                    key_html = (
+                        f'<a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a>'
+                        if url
+                        else key
+                    )
+                    chips: List[str] = [
+                        _chip_html(status, chip_style_from_color(status_color(status))),
+                        _chip_html(prio, chip_style_from_color(priority_color(prio))),
+                    ]
+                    if assignee:
+                        chips.append(_assignee_chip_html(assignee))
+                    if age_days is not None:
+                        chips.append(_chip_html(f"{age_days:.0f}d", _neutral_chip_style()))
 
+                    cards_html.append(
+                        '<article class="kan-item">'
+                        f'<div class="kan-item-key">{key_html}</div>'
+                        f'<div class="kan-item-meta">{"".join(chips)}</div>'
+                        f'<div class="kan-item-summary">{summ}</div>'
+                        "</article>"
+                    )
+
+                if cards_html:
                     st.markdown(
-                        f'<div style="margin: 8px 0 10px 0;">'
-                        f'<div><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>'
-                        f'<div style="opacity:0.85; font-size:0.85rem; line-height:1.1rem;">{summ}</div>'
-                        f"</div>",
+                        f'<div class="kan-items">{"".join(cards_html)}</div>',
                         unsafe_allow_html=True,
                     )

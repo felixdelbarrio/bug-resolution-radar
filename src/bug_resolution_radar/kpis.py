@@ -1,3 +1,5 @@
+"""KPI computation functions for backlog monitoring views."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -27,12 +29,22 @@ def _ensure_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df, pd.DataFrame):
         return pd.DataFrame()
     if df.empty:
-        return df.copy()
+        return df.copy(deep=False)
+
+    needs_cast = []
+    for col in _DT_COLS:
+        if col not in df.columns:
+            continue
+        col_dtype = df[col].dtype
+        if not isinstance(col_dtype, pd.DatetimeTZDtype):
+            needs_cast.append(col)
+
+    if not needs_cast:
+        return df.copy(deep=False)
 
     out = df.copy(deep=False)
-    for col in _DT_COLS:
-        if col in out.columns:
-            out[col] = pd.to_datetime(out[col], utc=True, errors="coerce")
+    for col in needs_cast:
+        out[col] = pd.to_datetime(out[col], utc=True, errors="coerce")
     return out
 
 
