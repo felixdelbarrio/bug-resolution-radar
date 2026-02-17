@@ -72,7 +72,9 @@ def _render_workspace_header() -> None:
         picked_label = str(picked or "")
         if picked_label in name_by_label:
             st.session_state["workspace_section"] = name_by_label.get(picked_label, "overview")
-            st.session_state["workspace_section_label"] = picked_label
+            # Avoid mutating the same key bound to an already-instantiated widget.
+            if picker_key != "workspace_section_label":
+                st.session_state["workspace_section_label"] = picked_label
             st.session_state["workspace_mode"] = "dashboard"
 
     with right:

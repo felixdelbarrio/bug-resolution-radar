@@ -417,9 +417,29 @@ def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
     bg = _hex_with_alpha(color, 48 if selected else 24)
     fw = "800" if selected else "700"
     return (
-        f"display:block; width:100%; text-align:center; padding:0.52rem 0.62rem; "
-        f"border-radius:12px; border:1px solid {border}; background:{bg}; "
-        f"color:{color}; font-weight:{fw}; line-height:1.25;"
+        f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
+        f"border-radius:11px; border:1px solid {border}; background:{bg}; "
+        f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
+    )
+
+
+def _inject_matrix_compact_css(scope_key: str) -> None:
+    st.markdown(
+        f"""
+        <style>
+          .st-key-{scope_key} div[data-testid="stButton"] > button {{
+            min-height: 2.15rem !important;
+            padding: 0.18rem 0.42rem !important;
+            border-radius: 11px !important;
+            font-size: 0.95rem !important;
+            font-weight: 650 !important;
+          }}
+          .st-key-{scope_key} div[data-testid="stMarkdownContainer"] p {{
+            margin-bottom: 0.16rem !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -487,11 +507,15 @@ def render_status_priority_matrix(
     # Totales: columnas + filas
     col_totals = {p: int(counts[p].sum()) if p in counts.columns else 0 for p in priorities}
     row_totals = counts.sum(axis=1).to_dict()
+    total_open = int(sum(row_totals.values()))
 
-    with st.container(border=True):
+    matrix_scope_key = f"{(key_prefix or 'mx')}_matrix_panel"
+    _inject_matrix_compact_css(matrix_scope_key)
+
+    with st.container(border=True, key=matrix_scope_key):
         # Header row (con totales por columna)
         hdr = st.columns(len(priorities) + 1)
-        hdr[0].markdown("**Estado (total)**")
+        hdr[0].markdown(f"**Estado ({total_open:,})**")
         for i, p in enumerate(priorities):
             label = f"{p} ({col_totals.get(p, 0)})"
             p_color = priority_color(p)

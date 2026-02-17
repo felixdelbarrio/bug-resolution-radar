@@ -9,7 +9,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from bug_resolution_radar.ui.common import normalize_text_col, priority_color_map, status_color_map
+from bug_resolution_radar.ui.common import (
+    normalize_text_col,
+    priority_color_map,
+    priority_rank,
+)
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
@@ -115,6 +119,14 @@ def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
         return order_map.get(v, 10_000)
 
     return values.map(_rank)
+
+
+def _priority_sort_key(priority: object) -> tuple[int, str]:
+    p = str(priority or "").strip()
+    pl = p.lower()
+    if pl == "supone un impedimento":
+        return (-1, pl)
+    return (priority_rank(p), pl)
 
 
 # ---------------------------------------------------------------------
@@ -298,23 +310,42 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
 
     dff = open_df.copy()
     dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
+    if "priority" in dff.columns:
+        dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
+    else:
+        dff["priority"] = "(sin priority)"
 
-    stc = dff["status"].astype(str).value_counts().reset_index()
-    stc.columns = ["status", "count"]
+    # Status order: canonical, then by volume.
+    stc_total = dff["status"].astype(str).value_counts().reset_index()
+    stc_total.columns = ["status", "count"]
 
-    # ✅ Orden canónico (mismo que Issues/Matrix/Kanban)
     status_order = canonical_status_order()
-    stc["__rank"] = _rank_by_canon(stc["status"], status_order)
-    stc = stc.sort_values(["__rank", "count"], ascending=[True, False]).drop(columns="__rank")
+    stc_total["__rank"] = _rank_by_canon(stc_total["status"], status_order)
+    stc_total = stc_total.sort_values(["__rank", "count"], ascending=[True, False]).drop(
+        columns="__rank"
+    )
+    ordered_statuses = stc_total["status"].astype(str).tolist()
+
+    grouped = (
+        dff.groupby(["status", "priority"], dropna=False)
+        .size()
+        .reset_index(name="count")
+        .sort_values(["status", "count"], ascending=[True, False])
+    )
+    priority_order = sorted(
+        grouped["priority"].astype(str).unique().tolist(),
+        key=_priority_sort_key,
+    )
 
     fig = px.bar(
-        stc,
+        grouped,
         x="status",
         y="count",
-        color="status",
+        color="priority",
+        barmode="stack",
         title="Abiertas por Estado",
-        category_orders={"status": status_order},
-        color_discrete_map=status_color_map(stc["status"].tolist()),
+        category_orders={"status": ordered_statuses, "priority": priority_order},
+        color_discrete_map=priority_color_map(),
     )
     return apply_plotly_bbva(fig)
 

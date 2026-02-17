@@ -16,7 +16,7 @@ from bug_resolution_radar.ui.dashboard.issues import render_issues_tab
 from bug_resolution_radar.ui.dashboard.kanban import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
 from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
-from bug_resolution_radar.ui.dashboard.overview import render_overview_tab
+from bug_resolution_radar.ui.dashboard.overview import render_overview_kpis, render_overview_tab
 from bug_resolution_radar.ui.dashboard.trends import render_trends_tab
 from bug_resolution_radar.ui.pages.insights_page import render as render_insights_page
 
@@ -64,10 +64,12 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     ctx = build_dashboard_data_context(df_all=df, settings=settings)
 
     if section == "overview":
-        # Summary + matrix (matrix remains synchronized with canonical filters).
+        # Summary + matrix + KPIs (KPIs debajo de la matriz).
         render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
         st.markdown("---")
         render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
+        st.markdown("---")
+        render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
     elif section == "issues":
         render_issues_tab(dff=ctx.dff)
     elif section == "kanban":

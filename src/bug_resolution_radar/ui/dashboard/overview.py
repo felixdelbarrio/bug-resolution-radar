@@ -135,21 +135,31 @@ def render_overview_tab(
     ctx = ChartContext(dff=dff, open_df=open_df, kpis=kpis)
     _render_summary_charts(settings=settings, ctx=ctx)
 
-    st.markdown("---")
 
-    # 2) KPI básicos (fallback robusto a len(df))
+def render_overview_kpis(
+    *,
+    kpis: Dict[str, Any],
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+) -> None:
+    """Render KPI block in a compact bordered container."""
+    dff = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
+    open_df = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
+    kpis = kpis if isinstance(kpis, dict) else {}
+
     total_issues = int(kpis.get("issues_total", len(dff)))
     open_issues = int(kpis.get("issues_open", len(open_df)))
     closed_issues = int(kpis.get("issues_closed", max(total_issues - open_issues, 0)))
 
-    st.markdown("### KPIs")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Issues filtradas", total_issues)
-    with c2:
-        st.metric("Abiertas filtradas", open_issues)
-    with c3:
-        st.metric("Cerradas filtradas", closed_issues)
+    with st.container(border=True):
+        st.markdown("### KPIs")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Issues filtradas", total_issues)
+        with c2:
+            st.metric("Abiertas filtradas", open_issues)
+        with c3:
+            st.metric("Cerradas filtradas", closed_issues)
 
     # 👉 Si tu Overview tenía secciones (“Nuevas”, “Top X”, etc),
     # pégalas aquí debajo tal cual y NO cambia nada más.
