@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import Final, List
 
+import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
@@ -16,104 +17,84 @@ from bug_resolution_radar.ui.dashboard.issues import render_issues_tab
 from bug_resolution_radar.ui.dashboard.kanban import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
 from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
-from bug_resolution_radar.ui.dashboard.overview import render_overview_tab
+from bug_resolution_radar.ui.dashboard.overview import render_overview_kpis, render_overview_tab
 from bug_resolution_radar.ui.dashboard.trends import render_trends_tab
 from bug_resolution_radar.ui.pages.insights_page import render as render_insights_page
 
-
-def _tab_names() -> List[str]:
-    return ["overview", "issues", "kanban", "trends", "insights", "notes"]
-
-
-def _tab_index_for(name: str) -> int:
-    name = (name or "").strip().lower()
-    names = _tab_names()
-    return names.index(name) if name in names else 0
-
-
-def _consume_jump_tab() -> int:
-    """
-    Allows other pages/components to request a tab jump on next rerun by setting:
-      st.session_state["__jump_to_tab"] = "issues" | "trends" | ...
-    We consume it once to avoid sticky behavior.
-    """
-    jump = st.session_state.get("__jump_to_tab")
-    if jump:
-        try:
-            idx = _tab_index_for(str(jump))
-        finally:
-            # consume
-            st.session_state.pop("__jump_to_tab", None)
-        return idx
-    return 0
+DASHBOARD_SECTIONS: Final[List[str]] = [
+    "overview",
+    "issues",
+    "kanban",
+    "trends",
+    "insights",
+    "notes",
+]
 
 
-def render(settings: Settings) -> None:
-    st.subheader("Dashboard")
+def dashboard_sections() -> List[str]:
+    return list(DASHBOARD_SECTIONS)
 
-    # Layout / styles (wide, spacing, etc.)
+
+def normalize_dashboard_section(section: str | None) -> str:
+    s = (section or "").strip().lower()
+    return s if s in DASHBOARD_SECTIONS else "overview"
+
+
+def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    scoped = df.copy()
+    selected_country = str(st.session_state.get("workspace_country") or "").strip()
+    selected_source_id = str(st.session_state.get("workspace_source_id") or "").strip()
+
+    if selected_country and "country" in scoped.columns:
+        scoped = scoped[scoped["country"].fillna("").astype(str).eq(selected_country)].copy()
+    if selected_source_id and "source_id" in scoped.columns:
+        scoped = scoped[scoped["source_id"].fillna("").astype(str).eq(selected_source_id)].copy()
+    return scoped
+
+
+def render(settings: Settings, *, active_section: str = "overview") -> str:
+    section = normalize_dashboard_section(active_section)
+
+    # Layout / styles
     apply_dashboard_layout()
 
     # Load dataframe (cached by file mtime to minimize rerun cost)
     df = load_issues_df(settings.DATA_PATH)
+    scoped_df = _apply_workspace_source_scope(df)
 
-    if df.empty:
-        st.warning("No hay datos todavía. Ve a la pestaña de Ingesta y ejecuta una ingesta.")
-        return
+    if scoped_df.empty:
+        st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
+        return section
 
     # Notes (local)
     notes = NotesStore(Path(settings.NOTES_PATH))
     notes.load()
 
-    # Single filters bar + single data context for every tab (no per-tab recompute divergence).
-    render_filters(df, key_prefix="dashboard")
-    ctx = build_dashboard_data_context(df_all=df, settings=settings)
+    # Filters only in Issues/Kanban/Trends (single canonical state for all sections).
+    if section in {"issues", "kanban", "trends"}:
+        render_filters(scoped_df, key_prefix="dashboard")
 
-    # Tabs (support jump-to-tab)
-    default_idx = _consume_jump_tab()
-    tabs = st.tabs(
-        ["📌 Resumen", "🧾 Issues", "📋 Kanban", "📈 Tendencias", "🧠 Insights", "🗒️ Notas"]
-    )
+    ctx = build_dashboard_data_context(df_all=scoped_df, settings=settings)
 
-    # If we need a jump, we still render all blocks, but we put the requested tab first for Streamlit focus.
-    # Streamlit doesn't officially support programmatic tab selection; reordering is the practical workaround.
-    # We keep semantics stable by mapping blocks to the right tab object.
-    if default_idx != 0:
-        order = [default_idx] + [i for i in range(len(tabs)) if i != default_idx]
-        tabs = [tabs[i] for i in order]
+    if section == "overview":
+        # Summary + matrix + KPIs (KPIs debajo de la matriz).
+        render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
+        st.markdown("---")
+        render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
+        st.markdown("---")
+        render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
+    elif section == "issues":
+        render_issues_tab(dff=ctx.dff)
+    elif section == "kanban":
+        render_kanban_tab(open_df=ctx.open_df)
+    elif section == "trends":
+        render_trends_tab(dff=ctx.dff, open_df=ctx.open_df, kpis=ctx.kpis)
+    elif section == "insights":
+        render_insights_page(settings, dff_filtered=ctx.dff, kpis=ctx.kpis)
+    elif section == "notes":
+        render_notes_tab(dff=ctx.dff, notes=notes)
 
-        # And map which logical tab each "slot" corresponds to
-        logical = ["overview", "issues", "kanban", "trends", "insights", "notes"]
-        logical = [logical[i] for i in order]
-    else:
-        logical = ["overview", "issues", "kanban", "trends", "insights", "notes"]
-
-    # Render by logical name
-    for tab, name in zip(tabs, logical):
-        with tab:
-            if name == "overview":
-                # 1) Resumen (arriba): los 3 gráficos configurados (dentro de overview_tab)
-                render_overview_tab(
-                    settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df
-                )
-
-                st.markdown("---")
-
-                # 2) Justo debajo: Matriz Estado x Priority (abiertas)
-                # ⚠️ key_prefix distinto para evitar IDs duplicados si en el futuro se vuelve a renderizar en otro tab
-                render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
-
-            elif name == "issues":
-                render_issues_tab(dff=ctx.dff)
-
-            elif name == "kanban":
-                render_kanban_tab(open_df=ctx.open_df)
-
-            elif name == "trends":
-                render_trends_tab(dff=ctx.dff, open_df=ctx.open_df, kpis=ctx.kpis)
-
-            elif name == "insights":
-                render_insights_page(settings, dff_filtered=ctx.dff, kpis=ctx.kpis)
-
-            elif name == "notes":
-                render_notes_tab(dff=ctx.dff, notes=notes)
+    return section

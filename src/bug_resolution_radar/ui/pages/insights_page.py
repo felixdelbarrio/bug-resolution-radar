@@ -31,8 +31,6 @@ def render(
           3) Personas (concentración + modo acción)
           4) Salud operativa (KPIs + top antiguas)
     """
-    st.subheader("Insights")
-
     dff = _safe_df(dff_filtered)
     if dff.empty:
         st.warning("No hay datos con los filtros actuales.")

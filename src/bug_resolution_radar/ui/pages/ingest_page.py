@@ -1,180 +1,284 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Dict, List, Tuple
 
+import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
+from bug_resolution_radar.config import Settings, helix_sources, jira_sources
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
-from bug_resolution_radar.schema_helix import HelixDocument
+from bug_resolution_radar.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
+from bug_resolution_radar.utils import now_iso
 
 
 def _get_helix_path(settings: Settings) -> str:
-    # Prefer config (HELIX_DATA_PATH). Fallback to a sensible default.
     p = (getattr(settings, "HELIX_DATA_PATH", "") or "").strip()
     return p or "data/helix.json"
 
 
-def render(settings: Settings) -> None:
-    st.subheader("Ingesta")
-    st.caption("Las llamadas se hacen directamente desde tu máquina. No hay backend.")
-    st.info(
-        "Consentimiento: Se leerán cookies locales del navegador (Jira/Helix) solo para autenticar tu sesión personal. "
-        "No se envían a terceros."
+def _issue_merge_key(issue: NormalizedIssue) -> str:
+    sid = str(issue.source_id or "").strip().lower()
+    key = str(issue.key or "").strip().upper()
+    if sid:
+        return f"{sid}::{key}"
+    return key
+
+
+def _merge_issues(doc: IssuesDocument, incoming: List[NormalizedIssue]) -> IssuesDocument:
+    merged: Dict[str, NormalizedIssue] = {_issue_merge_key(i): i for i in doc.issues}
+    for issue in incoming:
+        merged[_issue_merge_key(issue)] = issue
+    doc.issues = list(merged.values())
+    return doc
+
+
+def _helix_merge_key(item: HelixWorkItem) -> str:
+    sid = str(item.source_id or "").strip().lower()
+    item_id = str(item.id or "").strip().upper()
+    if sid:
+        return f"{sid}::{item_id}"
+    return item_id
+
+
+def _merge_helix_items(doc: HelixDocument, incoming: List[HelixWorkItem]) -> HelixDocument:
+    merged: Dict[str, HelixWorkItem] = {_helix_merge_key(i): i for i in doc.items}
+    for item in incoming:
+        merged[_helix_merge_key(item)] = item
+    doc.items = list(merged.values())
+    return doc
+
+
+def _is_closed_status(value: str) -> bool:
+    token = (value or "").strip().lower()
+    return token in {
+        "closed",
+        "resolved",
+        "done",
+        "deployed",
+        "accepted",
+        "cancelled",
+        "canceled",
+    }
+
+
+def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
+    status = str(item.status or "").strip() or "Open"
+    created = str(item.target_date or item.last_modified or "").strip() or None
+    updated = str(item.last_modified or item.target_date or "").strip() or None
+    resolved = updated if _is_closed_status(status) else None
+    return NormalizedIssue(
+        key=str(item.id or "").strip(),
+        summary=str(item.summary or "").strip(),
+        status=status,
+        type="Helix",
+        priority=str(item.priority or "").strip(),
+        created=created,
+        updated=updated,
+        resolved=resolved,
+        assignee=str(item.assignee or "").strip(),
+        reporter=str(item.customer_name or "").strip(),
+        labels=[],
+        components=[],
+        resolution="",
+        resolution_type="",
+        url=str(item.url or "").strip(),
+        country=str(item.country or "").strip(),
+        source_type="helix",
+        source_alias=str(item.source_alias or "").strip(),
+        source_id=str(item.source_id or "").strip(),
     )
 
-    # Sub-tabs inside ingestion page
+
+def _render_sources_preview(rows: List[Dict[str, str]], cols: List[str]) -> None:
+    if not rows:
+        st.info("No hay orígenes configurados.")
+        return
+    frame = pd.DataFrame([{c: r.get(c, "") for c in cols} for r in rows])
+    st.dataframe(frame, use_container_width=True, hide_index=True)
+
+
+def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:
+    for ok, msg in messages:
+        (st.success if ok else st.error)(msg)
+
+
+def render(settings: Settings) -> None:
     t_jira, t_helix = st.tabs(["🟦 Jira", "🟩 Helix"])
 
-    # -----------------------------
-    # Jira
-    # -----------------------------
     with t_jira:
-        st.markdown("### Ingesta Jira")
-        st.caption("Fuente: Jira (cookies locales).")
+        jira_cfg = jira_sources(settings)
+        st.caption(f"Fuentes Jira configuradas: {len(jira_cfg)}")
+        _render_sources_preview(jira_cfg, ["country", "alias", "jql"])
 
-        jira_cookie_manual = st.text_input(
-            "Fallback: pegar cookie Jira (header Cookie) manualmente (solo memoria, NO persistente)",
-            value="",
-            type="password",
-            help="Ejemplo: atlassian.xsrf.token=...; cloud.session.token=... (solo si tu entorno lo requiere)",
-            key="jira_cookie_manual",
-        )
+        col_a, col_b = st.columns(2)
+        with col_a:
+            test_jira = st.button("🔎 Test Jira (todas las fuentes)", key="btn_test_jira_all")
+        with col_b:
+            run_jira = st.button("⬇️ Reingestar Jira (todas las fuentes)", key="btn_run_jira_all")
 
-        colA, colB = st.columns([1, 1])
-        with colA:
-            test_jira = st.button("🔎 Test conexión Jira", key="btn_test_jira")
-        with colB:
-            run_jira = st.button("⬇️ Reingestar Jira ahora", key="btn_run_jira")
-
-        doc = load_issues_doc(settings.DATA_PATH)
+        issues_doc = load_issues_doc(settings.DATA_PATH)
 
         if test_jira:
-            with st.spinner("Probando Jira..."):
-                ok, msg, _ = ingest_jira(
-                    settings=settings,
-                    cookie_manual=jira_cookie_manual or None,
-                    dry_run=True,
-                )
-            (st.success if ok else st.error)(msg)
+            if not jira_cfg:
+                st.error("No hay fuentes Jira configuradas.")
+            else:
+                messages: List[Tuple[bool, str]] = []
+                with st.spinner("Probando fuentes Jira..."):
+                    for src in jira_cfg:
+                        ok, msg, _ = ingest_jira(settings=settings, dry_run=True, source=src)
+                        messages.append((ok, msg))
+                _render_batch_messages(messages)
 
         if run_jira:
-            with st.spinner("Ingestando Jira..."):
-                ok, msg, new_jira_doc = ingest_jira(
-                    settings=settings,
-                    cookie_manual=jira_cookie_manual or None,
-                    dry_run=False,
-                    existing_doc=doc,
-                )
-            if ok and new_jira_doc is not None:
-                save_issues_doc(settings.DATA_PATH, new_jira_doc)
-                st.success(f"{msg}. Guardado en {settings.DATA_PATH}")
+            if not jira_cfg:
+                st.error("No hay fuentes Jira configuradas.")
             else:
-                st.error(msg)
+                messages = []
+                work_doc = issues_doc
+                success_count = 0
+                with st.spinner("Ingestando Jira para todas las fuentes configuradas..."):
+                    for src in jira_cfg:
+                        ok, msg, new_doc = ingest_jira(
+                            settings=settings,
+                            dry_run=False,
+                            existing_doc=work_doc,
+                            source=src,
+                        )
+                        messages.append((ok, msg))
+                        if ok and new_doc is not None:
+                            work_doc = new_doc
+                            success_count += 1
 
+                _render_batch_messages(messages)
+                if success_count > 0:
+                    save_issues_doc(settings.DATA_PATH, work_doc)
+                    issues_doc = work_doc
+                    st.success(
+                        f"Reingesta Jira finalizada: {success_count}/{len(jira_cfg)} fuentes OK. "
+                        f"Guardado en {settings.DATA_PATH}."
+                    )
+                else:
+                    st.error("No se pudo ingestar ninguna fuente Jira.")
+
+        jira_source_ids = {
+            str(i.source_id or "").strip()
+            for i in issues_doc.issues
+            if str(i.source_type or "").strip().lower() == "jira"
+        }
         st.markdown("---")
         st.markdown("### Última ingesta (Jira)")
         st.json(
             {
-                "schema_version": doc.schema_version,
-                "ingested_at": doc.ingested_at,
-                "jira_base_url": doc.jira_base_url,
-                "project_key": doc.project_key,
-                "query": doc.query,
-                "issues_count": len(doc.issues),
+                "schema_version": issues_doc.schema_version,
+                "ingested_at": issues_doc.ingested_at,
+                "jira_base_url": issues_doc.jira_base_url,
+                "query": issues_doc.query,
+                "jira_source_count": len([s for s in jira_source_ids if s]),
+                "issues_count": len(issues_doc.issues),
             }
         )
 
-    # -----------------------------
-    # Helix
-    # -----------------------------
     with t_helix:
-        st.markdown("### Ingesta Helix")
-        st.caption("Fuente: Helix/SmartIT (cookies locales).")
-
-        helix_base_url = (getattr(settings, "HELIX_BASE_URL", "") or "").strip()
-        helix_org = (getattr(settings, "HELIX_ORGANIZATION", "") or "").strip()
-        helix_browser = (getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip()
-        helix_proxy = (getattr(settings, "HELIX_PROXY", "") or "").strip()
-        helix_ssl_verify = (getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip()
+        helix_cfg = helix_sources(settings)
+        st.caption(f"Fuentes Helix configuradas: {len(helix_cfg)}")
+        _render_sources_preview(
+            helix_cfg,
+            ["country", "alias", "base_url", "organization", "browser", "proxy", "ssl_verify"],
+        )
 
         helix_path = _get_helix_path(settings)
         helix_repo = HelixRepo(Path(helix_path))
+        stored_helix_doc = helix_repo.load() or HelixDocument.empty()
 
-        helix_doc = helix_repo.load() or HelixDocument.empty()
-
-        # Show current config (read-only hint)
-        with st.expander("Config Helix (desde .env)", expanded=False):
-            st.json(
-                {
-                    "HELIX_BASE_URL": helix_base_url,
-                    "HELIX_ORGANIZATION": helix_org,
-                    "HELIX_BROWSER": helix_browser,
-                    "HELIX_PROXY": helix_proxy,
-                    "HELIX_SSL_VERIFY": helix_ssl_verify,
-                    "HELIX_DATA_PATH": helix_path,
-                }
-            )
-
-        helix_cookie_manual = st.text_input(
-            "Fallback: pegar cookie Helix (header Cookie) manualmente (solo memoria, NO persistente)",
-            value="",
-            type="password",
-            help="Pega aquí el header Cookie si no se puede leer del navegador.",
-            key="helix_cookie_manual",
-        )
-
-        colH1, colH2 = st.columns([1, 1])
-        with colH1:
-            test_helix = st.button("🔎 Test conexión Helix", key="btn_test_helix")
-        with colH2:
-            run_helix = st.button("⬇️ Reingestar Helix ahora", key="btn_run_helix")
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            test_helix = st.button("🔎 Test Helix (todas las fuentes)", key="btn_test_helix_all")
+        with col_h2:
+            run_helix = st.button("⬇️ Reingestar Helix (todas las fuentes)", key="btn_run_helix_all")
 
         if test_helix:
-            with st.spinner("Probando Helix..."):
-                ok, msg, _ = ingest_helix(
-                    helix_base_url=helix_base_url,
-                    browser=helix_browser,
-                    organization=helix_org,
-                    proxy=helix_proxy,
-                    ssl_verify=helix_ssl_verify,
-                    cookie_manual=helix_cookie_manual or None,
-                    dry_run=True,
-                    existing_doc=helix_doc,
-                )
-            (st.success if ok else st.error)(msg)
+            if not helix_cfg:
+                st.error("No hay fuentes Helix configuradas.")
+            else:
+                messages = []
+                with st.spinner("Probando fuentes Helix..."):
+                    for src in helix_cfg:
+                        ok, msg, _ = ingest_helix(
+                            helix_base_url=str(src.get("base_url", "")).strip(),
+                            browser=str(src.get("browser", "chrome")).strip(),
+                            organization=str(src.get("organization", "")).strip(),
+                            country=str(src.get("country", "")).strip(),
+                            source_alias=str(src.get("alias", "")).strip(),
+                            source_id=str(src.get("source_id", "")).strip(),
+                            proxy=str(src.get("proxy", "")).strip(),
+                            ssl_verify=str(src.get("ssl_verify", "true")).strip(),
+                            dry_run=True,
+                            existing_doc=HelixDocument.empty(),
+                        )
+                        messages.append((ok, msg))
+                _render_batch_messages(messages)
 
         if run_helix:
-            with st.spinner("Ingestando Helix... (puede tardar con proxy)"):
-                ok, msg, new_helix_doc = ingest_helix(
-                    helix_base_url=helix_base_url,
-                    browser=helix_browser,
-                    organization=helix_org,
-                    proxy=helix_proxy,
-                    ssl_verify=helix_ssl_verify,
-                    cookie_manual=helix_cookie_manual or None,
-                    dry_run=False,
-                    existing_doc=helix_doc,
-                )
-            if ok and new_helix_doc is not None:
-                helix_repo.save(new_helix_doc)
-                st.success(f"{msg}. Guardado en {helix_path}")
-                helix_doc = new_helix_doc
+            if not helix_cfg:
+                st.error("No hay fuentes Helix configuradas.")
             else:
-                st.error(msg)
+                messages = []
+                success_count = 0
+                merged_helix = stored_helix_doc
+                issues_doc = load_issues_doc(settings.DATA_PATH)
+                with st.spinner("Ingestando Helix para todas las fuentes configuradas..."):
+                    for src in helix_cfg:
+                        ok, msg, new_helix_doc = ingest_helix(
+                            helix_base_url=str(src.get("base_url", "")).strip(),
+                            browser=str(src.get("browser", "chrome")).strip(),
+                            organization=str(src.get("organization", "")).strip(),
+                            country=str(src.get("country", "")).strip(),
+                            source_alias=str(src.get("alias", "")).strip(),
+                            source_id=str(src.get("source_id", "")).strip(),
+                            proxy=str(src.get("proxy", "")).strip(),
+                            ssl_verify=str(src.get("ssl_verify", "true")).strip(),
+                            dry_run=False,
+                            existing_doc=HelixDocument.empty(),
+                        )
+                        messages.append((ok, msg))
+                        if ok and new_helix_doc is not None:
+                            success_count += 1
+                            merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
+                            merged_helix.ingested_at = new_helix_doc.ingested_at
+                            merged_helix.helix_base_url = new_helix_doc.helix_base_url
+                            merged_helix.query = "multi-source"
+                            mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
+                            issues_doc = _merge_issues(issues_doc, mapped)
 
+                _render_batch_messages(messages)
+                if success_count > 0:
+                    issues_doc.ingested_at = now_iso()
+                    helix_repo.save(merged_helix)
+                    save_issues_doc(settings.DATA_PATH, issues_doc)
+                    stored_helix_doc = merged_helix
+                    st.success(
+                        f"Reingesta Helix finalizada: {success_count}/{len(helix_cfg)} fuentes OK. "
+                        f"Guardado en {helix_path} y {settings.DATA_PATH}."
+                    )
+                else:
+                    st.error("No se pudo ingestar ninguna fuente Helix.")
+
+        helix_source_ids = {str(i.source_id or "").strip() for i in stored_helix_doc.items}
         st.markdown("---")
         st.markdown("### Última ingesta (Helix)")
         st.json(
             {
-                "schema_version": helix_doc.schema_version,
-                "ingested_at": helix_doc.ingested_at,
-                "helix_base_url": helix_doc.helix_base_url,
-                "query": helix_doc.query,
-                "items_count": len(helix_doc.items),
+                "schema_version": stored_helix_doc.schema_version,
+                "ingested_at": stored_helix_doc.ingested_at,
+                "helix_base_url": stored_helix_doc.helix_base_url,
+                "query": stored_helix_doc.query,
+                "helix_source_count": len([s for s in helix_source_ids if s]),
+                "items_count": len(stored_helix_doc.items),
                 "data_path": helix_path,
             }
         )

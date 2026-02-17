@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 
@@ -122,14 +123,107 @@ def priority_rank(p: Optional[str]) -> int:
     return 99
 
 
-def priority_color_map() -> Dict[str, str]:
-    """Discrete color map used in charts (traffic-light-ish palette)."""
+def _normalize_token(value: Optional[str]) -> str:
+    txt = (value or "").strip().lower()
+    txt = txt.replace("_", " ").replace("-", " ")
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+_RED_1 = "#B4232A"
+_RED_2 = "#D64550"
+_RED_3 = "#E85D63"
+_ORANGE_1 = "#D97706"
+_ORANGE_2 = "#F59E0B"
+_YELLOW_1 = "#FBBF24"
+_GREEN_1 = "#15803D"
+_GREEN_2 = "#22A447"
+_GREEN_3 = "#4CAF50"
+_NEUTRAL = "#E2E6EE"
+
+
+_STATUS_COLOR_BY_KEY: Dict[str, str] = {
+    "new": _RED_3,
+    "analysing": _RED_2,
+    "blocked": _RED_1,
+    "en progreso": _ORANGE_2,
+    "in progress": _ORANGE_2,
+    "to rework": _ORANGE_1,
+    "rework": _ORANGE_1,
+    "test": _YELLOW_1,
+    "ready to verify": _ORANGE_2,
+    "accepted": _GREEN_3,
+    "ready to deploy": _GREEN_2,
+    "deployed": _GREEN_1,
+    "closed": _GREEN_1,
+    "resolved": _GREEN_1,
+    "done": _GREEN_1,
+    "open": _YELLOW_1,
+    "created": _RED_3,
+}
+
+_PRIORITY_COLOR_BY_KEY: Dict[str, str] = {
+    "supone un impedimento": _RED_1,
+    "highest": _RED_1,
+    "high": _RED_2,
+    "medium": _ORANGE_2,
+    "low": _GREEN_2,
+    "lowest": _GREEN_1,
+}
+
+
+def status_color(status: Optional[str]) -> str:
+    return _STATUS_COLOR_BY_KEY.get(_normalize_token(status), _NEUTRAL)
+
+
+def priority_color(priority: Optional[str]) -> str:
+    return _PRIORITY_COLOR_BY_KEY.get(_normalize_token(priority), _NEUTRAL)
+
+
+def status_color_map(statuses: Optional[Iterable[str]] = None) -> Dict[str, str]:
+    if statuses is None:
+        return {}
+    return {str(s): status_color(str(s)) for s in statuses}
+
+
+def flow_signal_color_map() -> Dict[str, str]:
     return {
-        "Highest": "#FF5252",
-        "High": "#FFB56B",
-        "Medium": "#FFE761",
-        "Low": "#88E783",
-        "Lowest": "#9CE67E",
-        "(sin priority)": "#E2E6EE",
-        "": "#E2E6EE",
+        "created": _RED_3,
+        "closed": _GREEN_2,
+        "resolved": _GREEN_2,
+        "open": _YELLOW_1,
+        "open_backlog_proxy": _YELLOW_1,
+    }
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return f"rgba(17,25,45,{alpha:.3f})"
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha:.3f})"
+
+
+def chip_style_from_color(hex_color: str) -> str:
+    border = _hex_to_rgba(hex_color, 0.45)
+    bg = _hex_to_rgba(hex_color, 0.12)
+    return (
+        f"color:{hex_color}; border:1px solid {border}; background:{bg}; "
+        "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
+    )
+
+
+def priority_color_map() -> Dict[str, str]:
+    """Discrete color map used in charts with semantic traffic-light palette."""
+    return {
+        "Supone un impedimento": _RED_1,
+        "Highest": _RED_1,
+        "High": _RED_2,
+        "Medium": _ORANGE_2,
+        "Low": _GREEN_2,
+        "Lowest": _GREEN_1,
+        "(sin priority)": _NEUTRAL,
+        "": _NEUTRAL,
     }

@@ -8,6 +8,13 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.insights.chips import (
+    inject_insights_chip_css,
+    neutral_chip_html,
+    priority_chip_html,
+    render_issue_bullet,
+    status_chip_html,
+)
 from bug_resolution_radar.ui.insights.helpers import (
     build_issue_lookup,
     col_exists,
@@ -26,6 +33,7 @@ def render_top_topics_tab(
     - Dentro del expander NO repite summary (redundante), solo status/criticidad
     """
     st.markdown("### 🔝 Top 10 problemas/funcionalidades (abiertas)")
+    inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
     if dff.empty:
@@ -94,9 +102,20 @@ def render_top_topics_tab(
         if len(topic_txt) > 180:
             topic_txt = topic_txt[:177] + "..."
 
-        hdr = f"**{cnt} issues** · **{pct_txt}** · *{st_dom}* · *{pr_dom}* · {topic_txt}"
+        hdr = f"**{cnt} issues** · **{pct_txt}** · {topic_txt}"
 
         with st.expander(hdr, expanded=False):
+            st.markdown(
+                (
+                    '<div class="ins-meta-row">'
+                    f"{neutral_chip_html(f'{cnt} issues')}"
+                    f"{neutral_chip_html(pct_txt)}"
+                    f"{status_chip_html(st_dom)}"
+                    f"{priority_chip_html(pr_dom)}"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
             if sub.empty or not col_exists(sub, "key"):
                 st.caption(
                     "No se han podido mapear issues individuales para este tópico (matching por summary)."
@@ -112,9 +131,11 @@ def render_top_topics_tab(
                 url = key_to_url.get(k, "")
 
                 # 👇 sin summary (redundante), solo estado y criticidad
-                if url:
-                    st.markdown(f"- **[{k}]({url})** · *{status}* · *{prio}*")
-                else:
-                    st.markdown(f"- **{k}** · *{status}* · *{prio}*")
+                render_issue_bullet(
+                    key=k,
+                    url=url,
+                    status=status,
+                    priority=prio,
+                )
 
     st.caption("Tip: el % te dice el ‘peso real’ del tópico en el backlog abierto filtrado.")

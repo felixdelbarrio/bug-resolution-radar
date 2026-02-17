@@ -12,8 +12,6 @@ def render_notes_tab(*, dff: pd.DataFrame, notes: NotesStore) -> None:
     - Usa el DF ya filtrado (dff)
     - Persiste en NotesStore
     """
-    st.markdown("### 🗒️ Notas")
-
     if dff is None or dff.empty or "key" not in dff.columns:
         st.info("No hay issues disponibles para notas.")
         return

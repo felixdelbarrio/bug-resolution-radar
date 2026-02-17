@@ -10,6 +10,7 @@ import requests
 from requests.exceptions import SSLError
 from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from ..config import build_source_id
 from ..schema_helix import HelixDocument, HelixWorkItem
 from ..security import sanitize_cookie_header, validate_service_base_url
 from ..utils import now_iso
@@ -290,14 +291,24 @@ def _has_auth_cookie(cookie_names: List[str]) -> bool:
     return any(x in got for x in wanted)
 
 
+def _item_merge_key(item: HelixWorkItem) -> str:
+    sid = str(item.source_id or "").strip().lower()
+    item_id = str(item.id or "").strip().upper()
+    if sid:
+        return f"{sid}::{item_id}"
+    return item_id
+
+
 def ingest_helix(
     helix_base_url: str,
     browser: str,
     organization: str,
+    country: str = "",
+    source_alias: str = "",
+    source_id: str = "",
     proxy: str = "",
     ssl_verify: str = "",
     ca_bundle: str = "",
-    cookie_manual: Optional[str] = None,
     chunk_size: int = 75,
     connect_timeout: Any = None,
     read_timeout: Any = None,
@@ -311,13 +322,20 @@ def ingest_helix(
     dry_run: bool = False,
     existing_doc: Optional[HelixDocument] = None,
 ) -> Tuple[bool, str, Optional[HelixDocument]]:
+    country_value = str(country or "").strip()
+    alias_value = str(source_alias or "").strip() or "Helix principal"
+    source_id_value = str(source_id or "").strip()
+    if not source_id_value:
+        source_id_value = build_source_id("helix", country_value or "default", alias_value)
+    source_label = f"{country_value} · {alias_value}" if country_value else f"Helix · {alias_value}"
+
     if not organization:
-        return False, "Configura el filtro de organización (organization).", None
+        return False, f"{source_label}: configura organization.", None
 
     try:
         base = validate_service_base_url(helix_base_url, service_name="Helix")
     except ValueError as e:
-        return False, str(e), None
+        return False, f"{source_label}: {e}", None
 
     if base.endswith("/app"):
         base = base[:-4]
@@ -366,32 +384,25 @@ def ingest_helix(
         }
     )
 
-    cookie = sanitize_cookie_header(cookie_manual)
-    if not cookie:
-        try:
-            cookie = get_helix_session_cookie(browser=browser, host=host)
-            if not cookie:
-                other = "edge" if browser == "chrome" else "chrome"
-                cookie = get_helix_session_cookie(browser=other, host=host)
-        except Exception as e:
-            return (
-                False,
-                f"No se pudo leer la cookie del navegador. Usa cookie manual. Detalle: {e}",
-                None,
-            )
-
+    try:
+        cookie = get_helix_session_cookie(browser=browser, host=host)
+    except Exception as e:
+        return (
+            False,
+            f"{source_label}: no se pudo leer cookie Helix en '{browser}'. Detalle: {e}",
+            None,
+        )
     cookie = sanitize_cookie_header(cookie)
     if not cookie:
-        return False, "Cookie Helix vacía o inválida. Usa fallback manual.", None
+        return False, f"{source_label}: no se encontró cookie Helix válida en '{browser}'.", None
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
     if not _has_auth_cookie(cookie_names):
         return (
             False,
-            "No se detectaron cookies de sesión Helix/SmartIT válidas. "
+            f"{source_label}: no se detectaron cookies de sesión Helix/SmartIT válidas. "
             f"cookies_cargadas={cookie_names}. "
-            "Abre Helix en el navegador seleccionado y vuelve a autenticarte; "
-            "si persiste, usa cookie manual.",
+            "Abre Helix en el navegador seleccionado y vuelve a autenticarte.",
             None,
         )
 
@@ -461,7 +472,7 @@ def ingest_helix(
             except requests.exceptions.Timeout as e:
                 return (
                     False,
-                    "Timeout en Helix (dry-run rápido): no respondió /app/. "
+                    f"{source_label}: timeout Helix (dry-run rápido) en /app/. "
                     f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
                     f"timeout(connect/read)={probe_connect}/{probe_read}",
                     None,
@@ -469,13 +480,14 @@ def ingest_helix(
             except SSLError as e:
                 return (
                     False,
-                    f"Error SSL en Helix (dry-run rápido): {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                    f"{source_label}: error SSL en Helix (dry-run rápido): {e} | "
+                    f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                     None,
                 )
             except requests.exceptions.RequestException as e:
                 return (
                     False,
-                    "Error de red en Helix (dry-run rápido): "
+                    f"{source_label}: error de red en Helix (dry-run rápido): "
                     f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                     None,
                 )
@@ -483,7 +495,7 @@ def ingest_helix(
         if _looks_like_sso_redirect(preflight):
             return (
                 False,
-                "Helix no autenticado (redirección a SSO detectada en /app/). "
+                f"{source_label}: Helix no autenticado (redirección a SSO en /app/). "
                 f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
@@ -492,7 +504,7 @@ def ingest_helix(
         if preflight.status_code >= 400:
             return (
                 False,
-                "Helix dry-run rápido falló en /app/ "
+                f"{source_label}: Helix dry-run rápido falló en /app/ "
                 f"({preflight.status_code}): {_short_text(preflight.text)} | "
                 f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
@@ -507,7 +519,7 @@ def ingest_helix(
 
         return (
             True,
-            "OK Helix: sesión web accesible y autenticación aparentemente válida (test rápido).",
+            f"{source_label}: OK Helix (sesión web accesible, test rápido).",
             None,
         )
 
@@ -564,7 +576,7 @@ def ingest_helix(
         if elapsed > max_elapsed_seconds:
             return (
                 False,
-                "Ingesta Helix abortada por tiempo máximo excedido "
+                f"{source_label}: ingesta Helix abortada por tiempo máximo excedido "
                 f"({elapsed:.1f}s > {max_elapsed_seconds:.1f}s). "
                 f"Páginas={page}, items_nuevos={len(items)} | "
                 f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
@@ -575,7 +587,7 @@ def ingest_helix(
         if page >= max_pages_limit:
             return (
                 False,
-                "Ingesta Helix abortada: demasiadas páginas (posible paginación ignorada). "
+                f"{source_label}: ingesta Helix abortada por demasiadas páginas. "
                 f"max_pages={max_pages_limit} | páginas={page} | items_nuevos={len(items)} | "
                 f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
@@ -604,14 +616,14 @@ def ingest_helix(
             if "rate limited" in cause.lower():
                 return (
                     False,
-                    "Helix responde con rate limit tras reintentos agotados. "
+                    f"{source_label}: Helix responde con rate limit tras reintentos agotados. "
                     f"Causa: {cause} | endpoint={endpoint} | "
                     f"chunk={current_chunk_size} | timeout(connect/read)={connect_to}/{current_read_to}",
                     None,
                 )
             return (
                 False,
-                "Timeout en Helix (reintentos agotados): el servidor no respondió a tiempo. "
+                f"{source_label}: timeout en Helix (reintentos agotados). "
                 f"Causa: {cause} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
                 f"timeout(connect/read)={connect_to}/{current_read_to} | "
                 f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to} | "
@@ -629,7 +641,7 @@ def ingest_helix(
                 continue
             return (
                 False,
-                "Timeout en Helix: el servidor no respondió a tiempo. "
+                f"{source_label}: timeout en Helix. "
                 f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
                 f"timeout(connect/read)={connect_to}/{current_read_to} | "
                 f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to}",
@@ -638,13 +650,14 @@ def ingest_helix(
         except SSLError as e:
             return (
                 False,
-                f"Error SSL en Helix: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                f"{source_label}: error SSL en Helix: {e} | "
+                f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
         except requests.exceptions.RequestException as e:
             return (
                 False,
-                "Error de red en Helix: "
+                f"{source_label}: error de red en Helix: "
                 f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -654,7 +667,7 @@ def ingest_helix(
         if r.status_code != 200:
             return (
                 False,
-                f"Error Helix ({r.status_code}): {r.text[:800]} | "
+                f"{source_label}: error Helix ({r.status_code}): {r.text[:800]} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -712,6 +725,9 @@ def ingest_helix(
                     target_date=values.get("targetDate"),
                     last_modified=values.get("lastModifiedDate") or values.get("lastModified"),
                     url=f"{base}/app/#/ticket-console",
+                    country=country_value,
+                    source_alias=alias_value,
+                    source_id=source_id_value,
                 )
             )
 
@@ -731,9 +747,13 @@ def ingest_helix(
     doc.helix_base_url = base
     doc.query = f"organizations in [{org}]"
 
-    merged = {i.id: i for i in doc.items}
+    merged = {_item_merge_key(i): i for i in doc.items}
     for i in items:
-        merged[i.id] = i
+        merged[_item_merge_key(i)] = i
     doc.items = list(merged.values())
 
-    return True, f"Ingesta Helix OK: {len(items)} items (merge total {len(doc.items)})", doc
+    return (
+        True,
+        f"{source_label}: ingesta Helix OK ({len(items)} items, merge total {len(doc.items)}).",
+        doc,
+    )
