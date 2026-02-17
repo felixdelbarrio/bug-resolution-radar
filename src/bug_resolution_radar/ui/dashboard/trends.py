@@ -8,7 +8,12 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.ui.common import priority_color_map
+from bug_resolution_radar.ui.common import (
+    normalize_text_col,
+    priority_color_map,
+    priority_rank,
+    status_color_map,
+)
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
@@ -51,6 +56,14 @@ def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
     return values.map(_rank)
 
 
+def _priority_sort_key(priority: object) -> tuple[int, str]:
+    p = str(priority or "").strip()
+    pl = p.lower()
+    if pl == "supone un impedimento":
+        return (-1, pl)
+    return (priority_rank(p), pl)
+
+
 def _age_bucket_from_days(age_days: pd.Series) -> pd.Categorical:
     """
     Buckets canon:
@@ -80,7 +93,6 @@ def available_trend_charts() -> List[Tuple[str, str]]:
 # Public entrypoint
 # -------------------------
 def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -> None:
-    st.markdown("## 📈 Tendencias")
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
     kpis = kpis if isinstance(kpis, dict) else {}
@@ -110,12 +122,11 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
         format_func=lambda x: id_to_label.get(x, x),
         key="trend_chart_single",
         help="Selecciona un único gráfico. Se mostrará 1 por pantalla.",
+        label_visibility="collapsed",
     )
 
-    # 2) Contenedor “pro”
+    # 2) Contenedor del gráfico seleccionado
     with st.container(border=True):
-        st.markdown(f"### {id_to_label.get(selected_chart, selected_chart)}")
-
         _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=open_df)
 
         st.markdown("---")
@@ -136,6 +147,7 @@ def _render_trend_chart(
         if fig is None:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return
+        fig.update_layout(title=None)
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
 
@@ -193,10 +205,10 @@ def _render_trend_chart(
             y="count",
             color="status",
             barmode="stack",
-            title="Antigüedad de abiertas (distribución) — por estado",
             category_orders={"bucket": bucket_order, "status": status_order},
+            color_discrete_map=status_color_map(status_order),
         )
-        fig.update_layout(xaxis_title="bucket", yaxis_title="count")
+        fig.update_layout(title=None, xaxis_title="bucket", yaxis_title="count")
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
 
@@ -225,8 +237,8 @@ def _render_trend_chart(
             closed,
             x="resolution_days",
             nbins=30,
-            title="Histograma: días hasta resolución (cerradas)",
         )
+        fig.update_layout(title=None)
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
 
@@ -237,14 +249,17 @@ def _render_trend_chart(
             )
             return
 
+        dff = open_df.copy()
+        dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
+
         fig = px.pie(
-            open_df,
+            dff,
             names="priority",
             hole=0.55,
             color="priority",
             color_discrete_map=priority_color_map(),
-            title="Abiertas por Priority",
         )
+        fig.update_layout(title=None)
         fig.update_traces(sort=False)
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
@@ -254,21 +269,46 @@ def _render_trend_chart(
             st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
             return
 
-        stc = open_df["status"].astype(str).value_counts().reset_index()
-        stc.columns = ["status", "count"]
+        dff = open_df.copy()
+        dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
+        if "priority" in dff.columns:
+            dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
+        else:
+            dff["priority"] = "(sin priority)"
+
+        # Order statuses canonically by total volume.
+        stc_total = dff["status"].astype(str).value_counts().reset_index()
+        stc_total.columns = ["status", "count"]
 
         # ✅ Orden canónico (mismo que Issues/Matrix/Kanban)
         canon_status_order = canonical_status_order()
-        stc["__rank"] = _rank_by_canon(stc["status"], canon_status_order)
-        stc = stc.sort_values(["__rank", "count"], ascending=[True, False]).drop(columns="__rank")
+        stc_total["__rank"] = _rank_by_canon(stc_total["status"], canon_status_order)
+        stc_total = stc_total.sort_values(["__rank", "count"], ascending=[True, False]).drop(
+            columns="__rank"
+        )
+        status_order = stc_total["status"].astype(str).tolist()
+
+        grouped = (
+            dff.groupby(["status", "priority"], dropna=False)
+            .size()
+            .reset_index(name="count")
+            .sort_values(["status", "count"], ascending=[True, False])
+        )
+        priority_order = sorted(
+            grouped["priority"].astype(str).unique().tolist(),
+            key=_priority_sort_key,
+        )
 
         fig = px.bar(
-            stc,
+            grouped,
             x="status",
             y="count",
-            title="Abiertas por Estado",
-            category_orders={"status": canon_status_order},
+            color="priority",
+            barmode="stack",
+            category_orders={"status": status_order, "priority": priority_order},
+            color_discrete_map=priority_color_map(),
         )
+        fig.update_layout(title=None)
         st.plotly_chart(apply_plotly_bbva(fig), use_container_width=True)
         return
 

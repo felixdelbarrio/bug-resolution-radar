@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import html
+import re
 from typing import List
 
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
+from bug_resolution_radar.ui.common import normalize_text_col, priority_rank, status_color
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
@@ -28,6 +29,55 @@ def _order_statuses_canonical(statuses: List[str]) -> List[str]:
     return [s for _, s in sorted(list(enumerate(statuses)), key=key_fn)]
 
 
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) != 6:
+        return f"rgba(17,25,45,{alpha:.3f})"
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha:.3f})"
+
+
+def _status_slug(status: str, i: int) -> str:
+    base = re.sub(r"[^a-z0-9]+", "_", (status or "").strip().lower()).strip("_")
+    return f"{base or 'status'}_{i}"
+
+
+def _inject_kanban_header_chip_css(headers: List[tuple[str, str, bool]]) -> None:
+    rules: List[str] = []
+    for status_name, slug, is_active in headers:
+        color = status_color(status_name)
+        bg = _hex_to_rgba(color, 0.20 if is_active else 0.12)
+        border = _hex_to_rgba(color, 0.72 if is_active else 0.45)
+        hover_bg = _hex_to_rgba(color, 0.16 if is_active else 0.14)
+        ring = _hex_to_rgba(color, 0.20)
+
+        rules.append(
+            f"""
+            .st-key-kanban_chip_{slug} div[data-testid="stButton"] > button {{
+              background: {bg} !important;
+              border: 1px solid {border} !important;
+              color: {color} !important;
+              border-radius: 999px !important;
+              font-weight: 800 !important;
+              min-height: 2.60rem !important;
+            }}
+            .st-key-kanban_chip_{slug} div[data-testid="stButton"] > button:hover {{
+              background: {hover_bg} !important;
+              border-color: {border} !important;
+            }}
+            .st-key-kanban_chip_{slug} div[data-testid="stButton"] > button:focus-visible {{
+              outline: none !important;
+              box-shadow: 0 0 0 3px {ring} !important;
+            }}
+            """
+        )
+
+    if rules:
+        st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
+
+
 def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     """
     Kanban siempre desplegado.
@@ -38,8 +88,6 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     - Orden de columnas: SIEMPRE el canónico (el mismo que en Issues)
     """
     with st.container(border=True):
-        st.markdown("### Kanban (abiertas por Estado)")
-
         if open_df is None or open_df.empty:
             st.info("No hay incidencias abiertas para mostrar.")
             return
@@ -68,10 +116,18 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
             st.info("No hay estados disponibles para mostrar.")
             return
 
+        active_filter = {str(s) for s in (st.session_state.get(FILTER_STATUS_KEY) or [])}
+        header_meta: List[tuple[str, str, bool]] = []
+        for i, st_name in enumerate(selected_statuses):
+            slug = _status_slug(st_name, i)
+            header_meta.append((st_name, slug, st_name in active_filter))
+        _inject_kanban_header_chip_css(header_meta)
+
         cols = st.columns(len(selected_statuses))
 
-        for col, st_name in zip(cols, selected_statuses):
+        for i, (col, st_name) in enumerate(zip(cols, selected_statuses)):
             sub = kan[kan["status"] == st_name].copy()
+            slug = _status_slug(st_name, i)
 
             # Orden: prioridad (rank) y luego updated desc si existe
             sub["_prio_rank"] = (
@@ -86,13 +142,14 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
 
             with col:
                 # Header clickable -> fija el filtro de estado
-                st.button(
-                    f"{st_name}",
-                    key=f"kanban_hdr::{st_name}",
-                    use_container_width=True,
-                    on_click=_kanban_set_status_filter,
-                    args=(st_name,),
-                )
+                with st.container(key=f"kanban_chip_{slug}"):
+                    st.button(
+                        f"{st_name}",
+                        key=f"kanban_hdr__{slug}",
+                        use_container_width=True,
+                        on_click=_kanban_set_status_filter,
+                        args=(st_name,),
+                    )
                 st.caption(f"{len(sub)} issues")
 
                 for _, r in sub.iterrows():

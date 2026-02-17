@@ -6,6 +6,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.insights.chips import inject_insights_chip_css, render_issue_bullet
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -22,6 +23,7 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
       - Top 10 abiertas más antiguas (bullets + key clickable + status/priority/summary)
     """
     st.markdown("### 🛠️ Salud operativa")
+    inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
     if dff.empty:
@@ -91,7 +93,11 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
                 summ_txt = summ_txt[:117] + "..."
 
             url = key_to_url.get(k, "")
-            if url:
-                st.markdown(f"- **[{k}]({url})** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}")
-            else:
-                st.markdown(f"- **{k}** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}")
+            render_issue_bullet(
+                key=k,
+                url=url,
+                status=status,
+                priority=prio,
+                summary=summ_txt,
+                age_days=age,
+            )

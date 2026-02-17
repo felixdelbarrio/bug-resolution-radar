@@ -64,6 +64,12 @@ class Settings(BaseModel):
     KPI_OPEN_AGE_X_DAYS: str = "7,14,30"
     KPI_AGE_BUCKETS: str = "0-2,3-7,8-14,15-30,>30"
 
+    # -------------------------
+    # Dashboard preferences
+    # -------------------------
+    DASHBOARD_SUMMARY_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
+    TREND_SELECTED_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
+
 
 def ensure_env() -> None:
     if not ENV_PATH.exists():

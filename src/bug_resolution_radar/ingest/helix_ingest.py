@@ -297,7 +297,6 @@ def ingest_helix(
     proxy: str = "",
     ssl_verify: str = "",
     ca_bundle: str = "",
-    cookie_manual: Optional[str] = None,
     chunk_size: int = 75,
     connect_timeout: Any = None,
     read_timeout: Any = None,
@@ -366,23 +365,17 @@ def ingest_helix(
         }
     )
 
-    cookie = sanitize_cookie_header(cookie_manual)
-    if not cookie:
-        try:
-            cookie = get_helix_session_cookie(browser=browser, host=host)
-            if not cookie:
-                other = "edge" if browser == "chrome" else "chrome"
-                cookie = get_helix_session_cookie(browser=other, host=host)
-        except Exception as e:
-            return (
-                False,
-                f"No se pudo leer la cookie del navegador. Usa cookie manual. Detalle: {e}",
-                None,
-            )
-
+    try:
+        cookie = get_helix_session_cookie(browser=browser, host=host)
+    except Exception as e:
+        return (
+            False,
+            f"No se pudo leer la cookie de Helix en el navegador '{browser}'. Detalle: {e}",
+            None,
+        )
     cookie = sanitize_cookie_header(cookie)
     if not cookie:
-        return False, "Cookie Helix vacía o inválida. Usa fallback manual.", None
+        return False, f"No se encontró cookie Helix válida en el navegador '{browser}'.", None
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
     if not _has_auth_cookie(cookie_names):
@@ -390,8 +383,7 @@ def ingest_helix(
             False,
             "No se detectaron cookies de sesión Helix/SmartIT válidas. "
             f"cookies_cargadas={cookie_names}. "
-            "Abre Helix en el navegador seleccionado y vuelve a autenticarte; "
-            "si persiste, usa cookie manual.",
+            "Abre Helix en el navegador seleccionado y vuelve a autenticarte.",
             None,
         )
 
