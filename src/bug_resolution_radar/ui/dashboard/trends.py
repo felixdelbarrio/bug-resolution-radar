@@ -317,19 +317,14 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
         st.info("No hay gráficos configurados.")
         return
 
-    if "trend_chart_single" not in st.session_state:
-        st.session_state["trend_chart_single"] = (
-            "open_status_bar" if "open_status_bar" in all_ids else all_ids[0]
-        )
+    fallback_chart = "open_status_bar" if "open_status_bar" in all_ids else all_ids[0]
+    current_chart = str(st.session_state.get("trend_chart_single") or "").strip()
+    if current_chart not in all_ids:
+        st.session_state["trend_chart_single"] = fallback_chart
 
     selected_chart = st.selectbox(
         "Gráfico",
         options=all_ids,
-        index=(
-            all_ids.index(st.session_state["trend_chart_single"])
-            if st.session_state["trend_chart_single"] in all_ids
-            else 0
-        ),
         format_func=lambda x: id_to_label.get(x, x),
         key="trend_chart_single",
         label_visibility="collapsed",
@@ -738,7 +733,7 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
                         st.button(
                             f"{item.title} ↗",
                             key=f"trins_btn_{key_prefix}_{i}",
-                            use_container_width=True,
+                            width="stretch",
                             on_click=_jump_to_issues,
                             kwargs={
                                 "status_filters": item.status_filters,

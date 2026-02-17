@@ -23,6 +23,38 @@ from bug_resolution_radar.ui.insights.helpers import (
 )
 
 
+def _set_duplicates_view(view_key: str, value: str) -> None:
+    st.session_state[view_key] = value
+
+
+def _inject_duplicates_view_toggle_css(*, scope_key: str) -> None:
+    st.markdown(
+        f"""
+        <style>
+          .st-key-{scope_key} .stButton > button {{
+            min-height: 2.15rem !important;
+            padding: 0.35rem 0.78rem !important;
+            border-radius: 10px !important;
+            font-weight: 700 !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }}
+          .st-key-{scope_key} .stButton > button[kind="primary"] {{
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }}
+          .st-key-{scope_key} .stButton > button * {{
+            color: inherit !important;
+            fill: currentColor !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
     key_to_extra: dict[str, tuple[float | None, str | None]] = {}
 
@@ -182,14 +214,28 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     view_key = "insights_duplicates_view"
     if str(st.session_state.get(view_key) or "") not in {"Por título", "Por heurística"}:
         st.session_state[view_key] = "Por título"
-    picked_view = st.segmented_control(
-        "Vista duplicados",
-        options=["Por título", "Por heurística"],
-        selection_mode="single",
-        key=view_key,
-        label_visibility="collapsed",
-    )
-    active_view = str(picked_view or st.session_state.get(view_key) or "Por título")
+    active_view = str(st.session_state.get(view_key) or "Por título")
+    toggle_scope = "insights_duplicates_view_toggle"
+    _inject_duplicates_view_toggle_css(scope_key=toggle_scope)
+    with st.container(key=toggle_scope):
+        c_title, c_heur = st.columns(2, gap="small")
+        c_title.button(
+            "Por título",
+            key=f"{view_key}::title_btn",
+            type="primary" if active_view == "Por título" else "secondary",
+            width="stretch",
+            on_click=_set_duplicates_view,
+            args=(view_key, "Por título"),
+        )
+        c_heur.button(
+            "Por heurística",
+            key=f"{view_key}::heur_btn",
+            type="primary" if active_view == "Por heurística" else "secondary",
+            width="stretch",
+            on_click=_set_duplicates_view,
+            args=(view_key, "Por heurística"),
+        )
+    active_view = str(st.session_state.get(view_key) or "Por título")
 
     if active_view == "Por título":
         st.caption("Repeticiones exactas por título de incidencia.")

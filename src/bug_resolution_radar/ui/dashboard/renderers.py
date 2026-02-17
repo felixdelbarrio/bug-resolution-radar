@@ -144,7 +144,7 @@ def render_issues_section(dff: pd.DataFrame) -> None:
                 file_name="issues_filtradas.csv",
                 mime="text/csv",
                 key="issues_download_csv",
-                use_container_width=True,
+                width="stretch",
             )
         with c2:
             st.caption(f"{len(dff_show)} issues (según filtros actuales)")
@@ -244,7 +244,7 @@ def render_kanban(
                 st.button(
                     f"{st_name}",
                     key=f"kanban_hdr::{st_name}",
-                    use_container_width=True,
+                    width="stretch",
                     on_click=_set_status_filter,
                     args=(st_name,),
                 )

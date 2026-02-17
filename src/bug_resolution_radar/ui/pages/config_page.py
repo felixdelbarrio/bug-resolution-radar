@@ -233,7 +233,7 @@ def render(settings: Settings) -> None:
             jira_df,
             hide_index=True,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="cfg_jira_sources_editor",
             column_config={
                 "country": st.column_config.SelectboxColumn("country", options=countries),
@@ -294,7 +294,7 @@ def render(settings: Settings) -> None:
             helix_df,
             hide_index=True,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="cfg_helix_sources_editor",
             column_config={
                 "country": st.column_config.SelectboxColumn("country", options=countries),

@@ -126,7 +126,7 @@ def render_slides(
         c_prev, c_next = st.columns(2)
         with c_prev:
             if st.button(
-                "◀︎", key=f"{state_key}__prev", use_container_width=True, disabled=(idx == 0)
+                "◀︎", key=f"{state_key}__prev", width="stretch", disabled=(idx == 0)
             ):
                 _set_slide_index(state_key, idx - 1)
                 st.rerun()
@@ -134,7 +134,7 @@ def render_slides(
             if st.button(
                 "▶︎",
                 key=f"{state_key}__next",
-                use_container_width=True,
+                width="stretch",
                 disabled=(idx >= len(deck) - 1),
             ):
                 _set_slide_index(state_key, idx + 1)

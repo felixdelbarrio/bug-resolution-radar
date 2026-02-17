@@ -66,7 +66,7 @@ def download_button_for_df(
     spec: Optional[CsvDownloadSpec] = None,
     suffix: str = "",
     disabled: Optional[bool] = None,
-    use_container_width: bool = True,
+    width: str = "stretch",
 ) -> None:
     """Render a download button for a dataframe.
 
@@ -94,7 +94,7 @@ def download_button_for_df(
         mime=csv_spec.mime,
         key=key,
         disabled=disabled,
-        use_container_width=use_container_width,
+        width=width,
     )
 
 
@@ -381,7 +381,7 @@ def render_minimal_export_actions(
                     file_name=btn["file_name"],
                     mime=btn["mime"],
                     key=btn["key"],
-                    use_container_width=False,
+                    width="content",
                     disabled=bool(btn.get("disabled", False)),
                     help=btn.get("help"),
                 )

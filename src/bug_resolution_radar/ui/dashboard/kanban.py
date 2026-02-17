@@ -129,9 +129,19 @@ def _inject_kanban_item_css() -> None:
             align-items: center;
             max-width: 100%;
             min-width: 0;
+          }
+          .kan-chip-text {
+            display: block;
+            min-width: 0;
+            max-width: 100%;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+          }
+          .kan-chip-assignee {
+            flex: 1 1 10rem;
+            min-width: 0;
+            max-width: 100%;
           }
           .kan-item-summary {
             margin-top: 0.30rem;
@@ -159,7 +169,20 @@ def _neutral_chip_style() -> str:
 
 
 def _chip_html(label: str, style: str) -> str:
-    return f'<span class="kan-chip" style="{style}">{html.escape(label)}</span>'
+    return (
+        '<span class="kan-chip" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
+            style, html.escape(label)
+        )
+    )
+
+
+def _assignee_chip_html(label: str) -> str:
+    return (
+        '<span class="kan-chip kan-chip-assignee" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
+            _neutral_chip_style(),
+            html.escape(label),
+        )
+    )
 
 
 def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
@@ -270,7 +293,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                     st.button(
                         f"{st_name}",
                         key=f"kanban_hdr__{slug}",
-                        use_container_width=True,
+                        width="stretch",
                         on_click=_kanban_set_status_filter,
                         args=(st_name,),
                     )
@@ -288,8 +311,6 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                     status = str(getattr(r, "status", "") or "").strip() or "(sin estado)"
                     prio = str(getattr(r, "priority", "") or "").strip() or "(sin priority)"
                     assignee = str(getattr(r, "assignee", "") or "").strip()
-                    if len(assignee) > 28:
-                        assignee = assignee[:25] + "..."
                     age_raw = getattr(r, "age_days", pd.NA)
                     age_days = float(age_raw) if pd.notna(age_raw) else None
 
@@ -303,7 +324,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                         _chip_html(prio, chip_style_from_color(priority_color(prio))),
                     ]
                     if assignee:
-                        chips.append(_chip_html(f"Asignado: {assignee}", _neutral_chip_style()))
+                        chips.append(_assignee_chip_html(assignee))
                     if age_days is not None:
                         chips.append(_chip_html(f"{age_days:.0f}d", _neutral_chip_style()))
 

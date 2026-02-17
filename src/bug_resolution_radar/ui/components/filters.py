@@ -117,6 +117,7 @@ def _inject_combo_signal_script() -> None:
             const doc = root && root.document;
             if (!doc) return;
             const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
+            const PAINTER_VERSION = 2;
 
             const match = (text, keys) => keys.some((k) => text.includes(k));
             const toRgba = (hex, alpha) => {
@@ -137,38 +138,57 @@ def _inject_combo_signal_script() -> None:
               return "#7A8BAD";
             };
 
+            const optionLabel = (el) => {
+              const a = String(el.getAttribute("aria-label") || "").trim();
+              if (a) return a;
+              const t = String(el.getAttribute("title") || "").trim();
+              if (t) return t;
+              return String(el.textContent || "").replace(/\\s+/g, " ").trim();
+            };
+
             const paintOption = (el) => {
-              const label = (el.textContent || "").trim();
+              const label = optionLabel(el);
               if (!label) return;
               const color = signalColor(label);
-              el.style.setProperty("--bbva-opt-dot", color);
-              el.style.borderLeft = "2px solid " + toRgba(color, 0.75);
+              el.style.setProperty("--bbva-opt-dot", color, "important");
+              el.style.setProperty("border-left", "2px solid " + toRgba(color, 0.75), "important");
+              el.style.setProperty("padding-left", "1.72rem", "important");
+              el.style.setProperty(
+                "background-image",
+                "radial-gradient(circle at 0.68rem 50%, " + color + " 0 0.30rem, transparent 0.31rem)",
+                "important"
+              );
+              el.style.setProperty("background-repeat", "no-repeat", "important");
             };
 
             const paintTag = (el) => {
-              const label = (el.textContent || "").trim();
+              const label = optionLabel(el);
               if (!label) return;
               const color = signalColor(label);
-              el.style.background = toRgba(color, 0.14);
-              el.style.border = "1px solid " + toRgba(color, 0.52);
-              el.style.color = color;
-              el.style.backgroundImage = "none";
+              el.style.setProperty("background", toRgba(color, 0.14), "important");
+              el.style.setProperty("border", "1px solid " + toRgba(color, 0.52), "important");
+              el.style.setProperty("color", color, "important");
+              el.style.setProperty("background-image", "none", "important");
               el.querySelectorAll("*").forEach((n) => {
-                n.style.color = color;
+                n.style.setProperty("color", color, "important");
               });
             };
 
             const tick = () => {
               doc
-                .querySelectorAll('div[data-baseweb="popover"] [role="option"], div[data-baseweb="popover"] li[role="option"]')
+                .querySelectorAll(
+                  'div[data-baseweb="popover"] [role="option"], ' +
+                  'div[data-baseweb="popover"] li[role="option"], ' +
+                  'div[data-baseweb="popover"] li'
+                )
                 .forEach(paintOption);
               doc
                 .querySelectorAll('[data-baseweb="select"] [data-baseweb="tag"]')
                 .forEach(paintTag);
             };
 
-            if (!root.__bbvaSignalPainterReady) {
-              root.__bbvaSignalPainterReady = true;
+            if (root.__bbvaSignalPainterVersion !== PAINTER_VERSION) {
+              root.__bbvaSignalPainterVersion = PAINTER_VERSION;
               root.__bbvaSignalPaintQueued = false;
 
               root.__bbvaScheduleSignalPaint = () => {
@@ -188,7 +208,11 @@ def _inject_combo_signal_script() -> None:
               });
               root.__bbvaSignalObserver.observe(doc.body, { childList: true, subtree: true });
             }
-            root.__bbvaScheduleSignalPaint();
+            if (typeof root.__bbvaScheduleSignalPaint === "function") {
+              root.__bbvaScheduleSignalPaint();
+            } else {
+              tick();
+            }
           } catch (e) {
             // no-op
           }
@@ -378,7 +402,6 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
             st.multiselect(
                 "Estado",
                 status_opts_ui,
-                default=list(st.session_state.get(ui_status_key) or []),
                 key=ui_status_key,
                 on_change=_sync_from_ui_to_canonical,
                 args=(ui_status_key, ui_prio_key, ui_assignee_key),
@@ -392,7 +415,6 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
                 st.multiselect(
                     "Priority",
                     prio_opts_ui,
-                    default=list(st.session_state.get(ui_prio_key) or []),
                     key=ui_prio_key,
                     on_change=_sync_from_ui_to_canonical,
                     args=(ui_status_key, ui_prio_key, ui_assignee_key),
@@ -405,10 +427,13 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         with c_assignee:
             if "assignee" in df.columns:
                 assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
+                selected_ui_assignee = list(st.session_state.get(ui_assignee_key) or [])
+                st.session_state[ui_assignee_key] = [
+                    x for x in selected_ui_assignee if x in assignee_opts
+                ]
                 st.multiselect(
                     "Asignado",
                     assignee_opts,
-                    default=list(st.session_state.get(ui_assignee_key) or []),
                     key=ui_assignee_key,
                     on_change=_sync_from_ui_to_canonical,
                     args=(ui_status_key, ui_prio_key, ui_assignee_key),
@@ -653,7 +678,7 @@ def render_status_priority_matrix(
                     key=f"{key_prefix}::cell::{st_name}::{p}",
                     disabled=(cnt == 0),
                     type="primary" if is_selected else "secondary",
-                    use_container_width=True,
+                    width="stretch",
                     on_click=_matrix_set_filters,
                     args=(st_name, p),
                 )

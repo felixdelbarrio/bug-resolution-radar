@@ -23,6 +23,39 @@ def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return df.copy()
 
 
+def _set_issues_view(view_key: str, value: str) -> None:
+    st.session_state[view_key] = value
+
+
+def _inject_issues_view_toggle_css(*, scope_key: str) -> None:
+    """Scoped style for Issues Cards/Tabla toggle buttons."""
+    st.markdown(
+        f"""
+        <style>
+          .st-key-{scope_key} .stButton > button {{
+            min-height: 2.15rem !important;
+            padding: 0.35rem 0.78rem !important;
+            border-radius: 10px !important;
+            font-weight: 700 !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }}
+          .st-key-{scope_key} .stButton > button[kind="primary"] {{
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }}
+          .st-key-{scope_key} .stButton > button * {{
+            color: inherit !important;
+            fill: currentColor !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_issues_section(
     dff: pd.DataFrame,
     *,
@@ -46,8 +79,9 @@ def render_issues_section(
 
         # Compact toolbar: CSV + count + view mode (same visual language as top tabs)
         view_key = f"{key_prefix}::view_mode"
-        if view_key not in st.session_state:
+        if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
             st.session_state[view_key] = "Cards"
+        view = str(st.session_state.get(view_key) or "Cards")
 
         # Keep same grid as filters (Estado | Priority | Asignado) for strict visual alignment.
         left, center, right = st.columns([1.35, 1.0, 1.0], gap="small")
@@ -59,21 +93,32 @@ def render_issues_section(
                 spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
                 suffix="issues",
                 disabled=export_df is None or export_df.empty,
-                use_container_width=False,
+                width="content",
             )
         with center:
             n = 0 if export_df is None else int(len(export_df))
             st.caption(f"{n:,} issues filtradas")
         with right:
-            picked = st.segmented_control(
-                "Vista",
-                options=["Cards", "Tabla"],
-                selection_mode="single",
-                key=view_key,
-                label_visibility="collapsed",
-                width="stretch",
-            )
-            view = str(picked or st.session_state.get(view_key) or "Cards")
+            toggle_scope = f"{key_prefix}_view_toggle"
+            _inject_issues_view_toggle_css(scope_key=toggle_scope)
+            with st.container(key=toggle_scope):
+                c_cards, c_table = st.columns(2, gap="small")
+                c_cards.button(
+                    "Cards",
+                    key=f"{view_key}::cards_btn",
+                    type="primary" if view == "Cards" else "secondary",
+                    width="stretch",
+                    on_click=_set_issues_view,
+                    args=(view_key, "Cards"),
+                )
+                c_table.button(
+                    "Tabla",
+                    key=f"{view_key}::table_btn",
+                    type="primary" if view == "Tabla" else "secondary",
+                    width="stretch",
+                    on_click=_set_issues_view,
+                    args=(view_key, "Tabla"),
+                )
 
         if dff_show.empty:
             st.info("No hay issues para mostrar con los filtros actuales.")

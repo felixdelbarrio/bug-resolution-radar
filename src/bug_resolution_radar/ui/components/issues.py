@@ -295,7 +295,7 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
 
     st.dataframe(
         styler,
-        use_container_width=True,
+        width="stretch",
         hide_index=False,
         column_config=col_cfg or None,
     )

@@ -101,7 +101,7 @@ def _render_sources_preview(rows: List[Dict[str, str]], cols: List[str]) -> None
         st.info("No hay orígenes configurados.")
         return
     frame = pd.DataFrame([{c: r.get(c, "") for c in cols} for r in rows])
-    st.dataframe(frame, use_container_width=True, hide_index=True)
+    st.dataframe(frame, width="stretch", hide_index=True)
 
 
 def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:

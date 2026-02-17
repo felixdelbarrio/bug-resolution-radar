@@ -687,7 +687,7 @@ def render_overview_kpis(
                     st.button(
                         f"{focus.title} ↗",
                         key=f"exec_focus_{focus.card_id}_link",
-                        use_container_width=True,
+                        width="stretch",
                         on_click=_jump_to,
                         args=(focus.section,),
                         kwargs={
