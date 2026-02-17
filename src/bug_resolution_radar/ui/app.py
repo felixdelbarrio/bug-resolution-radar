@@ -58,7 +58,9 @@ def _render_workspace_header() -> None:
     left, right = st.columns([5.0, 0.9], gap="small")
 
     with left:
-        picker_key = "workspace_section_label" if mode == "dashboard" else "workspace_section_picker_aux"
+        picker_key = (
+            "workspace_section_label" if mode == "dashboard" else "workspace_section_picker_aux"
+        )
         picked = st.segmented_control(
             "Sección",
             options=section_options,

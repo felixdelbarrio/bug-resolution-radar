@@ -96,7 +96,9 @@ def _css_attr_value(txt: str) -> str:
     return (txt or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _inject_colored_multiselect_css(*, status_labels: List[str], priority_labels: List[str]) -> None:
+def _inject_colored_multiselect_css(
+    *, status_labels: List[str], priority_labels: List[str]
+) -> None:
     rules: List[str] = []
 
     for label in status_labels:
@@ -469,9 +471,7 @@ def render_status_priority_matrix(
         if has_matrix_sel:
             status_txt = ", ".join(selected_statuses) if selected_statuses else "(todos)"
             prio_txt = ", ".join(selected_priorities) if selected_priorities else "(todas)"
-            st.caption(
-                f"Seleccionado: Estado={status_txt} · Priority={prio_txt}"
-            )
+            st.caption(f"Seleccionado: Estado={status_txt} · Priority={prio_txt}")
         else:
             st.caption("Click en una celda: sincroniza Estado/Priority y actualiza la tabla.")
     with cB:

@@ -99,9 +99,7 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
     }
 
     header_cells = ['<th class="issue-table-index"></th>']
-    header_cells.extend(
-        [f"<th>{html.escape(title_by_col.get(c, c))}</th>" for c in show_cols]
-    )
+    header_cells.extend([f"<th>{html.escape(title_by_col.get(c, c))}</th>" for c in show_cols])
 
     rows_html: List[str] = []
     for idx, row in display_df.iterrows():
@@ -112,7 +110,7 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
                 label = _jira_label_from_row(row)
                 if url:
                     row_cells.append(
-                        '<td>'
+                        "<td>"
                         f'<a class="issue-table-jira" href="{html.escape(url)}" '
                         f'target="_blank" rel="noopener noreferrer">{html.escape(label)}</a>'
                         "</td>"
@@ -292,7 +290,9 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
             )
         if status:
             s_style = chip_style_from_color(status_color(status))
-            badges.append(f'<span class="badge badge-status" style="{s_style}">Status: {status}</span>')
+            badges.append(
+                f'<span class="badge badge-status" style="{s_style}">Status: {status}</span>'
+            )
         if assignee:
             badges.append(f'<span class="badge">Assignee: {assignee}</span>')
         badges.append(f'<span class="badge badge-age">Open age: {age:.0f}d</span>')

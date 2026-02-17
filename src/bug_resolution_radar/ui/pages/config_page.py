@@ -205,18 +205,14 @@ def render(settings: Settings) -> None:
             "TREND_FAV_2",
             "TREND_FAVORITE_2",
             default=(
-                stored[1]
-                if len(stored) > 1
-                else (all_ids[1] if len(all_ids) > 1 else all_ids[0])
+                stored[1] if len(stored) > 1 else (all_ids[1] if len(all_ids) > 1 else all_ids[0])
             ),
         )
         fav3_default = _get_first_existing(
             "TREND_FAV_3",
             "TREND_FAVORITE_3",
             default=(
-                stored[2]
-                if len(stored) > 2
-                else (all_ids[2] if len(all_ids) > 2 else all_ids[0])
+                stored[2] if len(stored) > 2 else (all_ids[2] if len(all_ids) > 2 else all_ids[0])
             ),
         )
 
