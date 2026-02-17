@@ -17,7 +17,7 @@ from bug_resolution_radar.ui.common import (
 )
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
-MAX_TABLE_HTML_ROWS = 450
+MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
 
 
