@@ -200,6 +200,32 @@ def _age_days(open_df: pd.DataFrame) -> pd.Series:
     return ages.clip(lower=0.0)
 
 
+def _age_days_aligned(df: pd.DataFrame) -> pd.Series:
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    if df.empty or "created" not in df.columns:
+        return out
+    created = _to_dt_naive(df["created"])
+    valid = created.notna()
+    if not valid.any():
+        return out
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    out.loc[valid] = ((now - created.loc[valid]).dt.total_seconds() / 86400.0).clip(lower=0.0)
+    return out
+
+
+def _stale_days_from_updated(df: pd.DataFrame) -> pd.Series:
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    if df.empty or "updated" not in df.columns:
+        return out
+    updated = _to_dt_naive(df["updated"])
+    valid = updated.notna()
+    if not valid.any():
+        return out
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    out.loc[valid] = ((now - updated.loc[valid]).dt.total_seconds() / 86400.0).clip(lower=0.0)
+    return out
+
+
 def _resolution_days(dff: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
     if dff.empty or "created" not in dff.columns or "resolved" not in dff.columns:
         return pd.Series([], dtype=float), pd.DataFrame()
@@ -271,6 +297,18 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
     net_14 = int(created_14 - closed_14)
     weekly_net = float(daily["net"].tail(28).mean()) * 7.0 if len(daily) >= 7 else float(daily["net"].mean()) * 7.0
     open_now = int(len(open_df))
+    created_tail = daily["created"].tail(30)
+    closed_tail = daily["closed"].tail(30)
+    created_cv = (
+        float(created_tail.std(ddof=0)) / float(created_tail.mean())
+        if float(created_tail.mean()) > 0
+        else 0.0
+    )
+    closed_cv = (
+        float(closed_tail.std(ddof=0)) / float(closed_tail.mean())
+        if float(closed_tail.mean()) > 0
+        else 0.0
+    )
 
     closed_30 = float(daily["closed"].tail(30).sum())
     run_rate = (closed_30 / 30.0) if closed_30 > 0 else 0.0
@@ -404,6 +442,69 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
                 )
             )
 
+    if created_cv >= 1.05 and created_14 >= 8:
+        cards.append(
+            ActionInsight(
+                title="Entrada inestable",
+                body=(
+                    f"La variabilidad de entrada (CV={created_cv:.2f}) es alta en 30 dias. "
+                    "Conviene reforzar prevencion en semanas de release para evitar picos de backlog."
+                ),
+                score=11.0 + (created_cv * 6.0),
+            )
+        )
+
+    if closed_cv >= 1.00 and closed_14 > 0:
+        cards.append(
+            ActionInsight(
+                title="Cierre irregular",
+                body=(
+                    f"El cierre muestra alta oscilacion (CV={closed_cv:.2f}). "
+                    "Estandarizar la capacidad de salida mejora la predictibilidad operativa."
+                ),
+                score=9.0 + (closed_cv * 5.0),
+            )
+        )
+
+    if "summary" in open_df.columns and open_now > 0:
+        summaries = open_df["summary"].fillna("").astype(str).str.strip()
+        summaries = summaries[summaries != ""]
+        if not summaries.empty:
+            dup_vc = summaries.value_counts()
+            dup_groups = int((dup_vc > 1).sum())
+            dup_issues = int(dup_vc[dup_vc > 1].sum())
+            dup_share = (dup_issues / open_now) if open_now else 0.0
+            if dup_share >= 0.12:
+                cards.append(
+                    ActionInsight(
+                        title="Reincidencia funcional",
+                        body=(
+                            f"{dup_issues} incidencias abiertas pertenecen a {dup_groups} grupos repetidos "
+                            f"({_fmt_pct(dup_share)} del backlog). Atacar esta bolsa acelera cierres netos."
+                        ),
+                        score=12.0 + (dup_share * 100.0),
+                    )
+                )
+
+    if "assignee" in open_df.columns and open_now >= 6:
+        assignee = normalize_text_col(open_df["assignee"], "(sin asignar)")
+        own_vc = assignee.value_counts()
+        if not own_vc.empty:
+            top_owner = str(own_vc.index[0])
+            top_owner_share = float(own_vc.iloc[0]) / float(max(int(own_vc.sum()), 1))
+            if top_owner_share >= 0.35:
+                cards.append(
+                    ActionInsight(
+                        title="Concentracion de ownership",
+                        body=(
+                            f"{top_owner} concentra {_fmt_pct(top_owner_share)} del backlog abierto. "
+                            "Repartir carga reduce riesgo de cuello por persona."
+                        ),
+                        assignee_filters=[top_owner],
+                        score=10.0 + (top_owner_share * 100.0),
+                    )
+                )
+
     tip: str | None
     if ratio_close_entry < 1.0:
         tip = (
@@ -523,6 +624,29 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
+        if "status" in open_df.columns:
+            stx = normalize_text_col(open_df["status"], "(sin estado)").astype(str)
+            early_old = int(
+                (
+                    (pr.map(priority_rank) <= 2)
+                    & stx.isin(TRIAGE_STATUS_FILTERS)
+                    & (ages.reindex(pr.index, fill_value=np.nan) > 7)
+                ).sum()
+            )
+            if early_old > 0:
+                cards.append(
+                    ActionInsight(
+                        title="Criticas bloqueadas en entrada",
+                        body=(
+                            f"{early_old} High/Highest llevan mas de 7 dias en estados iniciales. "
+                            "Alinear diagnostico y decision ejecutiva evitara envejecimiento adicional."
+                        ),
+                        priority_filters=list(CRITICAL_PRIORITY_FILTERS),
+                        status_filters=list(TRIAGE_STATUS_FILTERS),
+                        score=18.0 + float(early_old),
+                    )
+                )
+
     if "assignee" in open_df.columns and len(open_df) >= 5:
         assignee = normalize_text_col(open_df["assignee"], "(sin asignar)")
         old_assignee = assignee.loc[ages.index[ages > 30]]
@@ -542,6 +666,22 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                         score=12.0 + float(share * 100.0),
                     )
                 )
+
+    stale_days = _stale_days_from_updated(open_df)
+    if stale_days.notna().any():
+        stale_14 = float((stale_days > 14).mean())
+        stale_21 = float((stale_days > 21).mean())
+        if stale_14 >= 0.20:
+            cards.append(
+                ActionInsight(
+                    title="Backlog sin movimiento reciente",
+                    body=(
+                        f"{_fmt_pct(stale_14)} no se actualiza en >14 dias "
+                        f"(y {_fmt_pct(stale_21)} en >21 dias)."
+                    ),
+                    score=12.0 + (stale_14 * 100.0),
+                )
+            )
 
     return TrendInsightPack(
         metrics=[
@@ -639,6 +779,56 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                     score=18.0 - float(resolved_30),
                 )
             )
+
+        recent = closed[closed["__resolved"] >= (now - pd.Timedelta(days=30))]
+        prev = closed[
+            (closed["__resolved"] >= (now - pd.Timedelta(days=60)))
+            & (closed["__resolved"] < (now - pd.Timedelta(days=30)))
+        ]
+        if len(recent) >= 5 and len(prev) >= 5:
+            med_recent = float(recent["resolution_days"].median())
+            med_prev = float(prev["resolution_days"].median())
+            if med_prev > 0 and med_recent > (med_prev * 1.25):
+                cards.append(
+                    ActionInsight(
+                        title="Degradacion reciente del ciclo",
+                        body=(
+                            f"La mediana de cierre sube de {_fmt_days(med_prev)} a {_fmt_days(med_recent)} "
+                            "en los ultimos 30 dias."
+                        ),
+                        score=14.0 + ((med_recent / max(med_prev, 1.0)) * 4.0),
+                    )
+                )
+            elif med_prev > 0 and med_recent < (med_prev * 0.80):
+                cards.append(
+                    ActionInsight(
+                        title="Mejora reciente del ciclo",
+                        body=(
+                            f"La mediana de cierre baja de {_fmt_days(med_prev)} a {_fmt_days(med_recent)} "
+                            "en los ultimos 30 dias."
+                        ),
+                        score=9.0 + ((med_prev / max(med_recent, 1.0)) * 2.0),
+                    )
+                )
+
+    if "priority" in closed.columns and not closed.empty:
+        pr = normalize_text_col(closed["priority"], "(sin priority)")
+        hi = closed.loc[pr.map(priority_rank) <= 2, "resolution_days"]
+        lo = closed.loc[pr.map(priority_rank) >= 3, "resolution_days"]
+        if len(hi) >= 4 and len(lo) >= 4:
+            med_hi = float(hi.median())
+            med_lo = float(lo.median())
+            if med_hi > (med_lo * 1.30):
+                cards.append(
+                    ActionInsight(
+                        title="Criticas cierran mas lento que el resto",
+                        body=(
+                            f"High/Highest cierran en {_fmt_days(med_hi)} de mediana vs {_fmt_days(med_lo)} en prioridades menores."
+                        ),
+                        priority_filters=list(CRITICAL_PRIORITY_FILTERS),
+                        score=15.0 + (med_hi - med_lo),
+                    )
+                )
 
     return TrendInsightPack(
         metrics=[
@@ -753,10 +943,27 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
+    if "assignee" in df.columns:
+        assignee = normalize_text_col(df["assignee"], "(sin asignar)")
+        crit_unassigned = int(((df["_prio_rank"] <= 2) & assignee.eq("(sin asignar)")).sum())
+        if crit_unassigned > 0:
+            cards.append(
+                ActionInsight(
+                    title="Criticas sin owner",
+                    body=(
+                        f"{crit_unassigned} High/Highest no tienen asignacion explicita. "
+                        "Asignar ownership es la decision con mayor retorno inmediato."
+                    ),
+                    priority_filters=list(CRITICAL_PRIORITY_FILTERS),
+                    assignee_filters=["(sin asignar)"],
+                    score=20.0 + float(crit_unassigned),
+                )
+            )
+
     if "created" in df.columns:
-        ages = _age_days(df)
-        if not ages.empty:
-            crit_old = int(((df["_prio_rank"] <= 2) & (ages.reindex(df.index, fill_value=np.nan) > 14)).sum())
+        ages = _age_days_aligned(df)
+        if ages.notna().any():
+            crit_old = int(((df["_prio_rank"] <= 2) & (ages > 14)).sum())
             if crit_old > 0:
                 cards.append(
                     ActionInsight(
@@ -769,6 +976,21 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                         score=20.0 + float(crit_old),
                     )
                 )
+
+    stale_days = _stale_days_from_updated(df)
+    if stale_days.notna().any():
+        crit_stale = int(((df["_prio_rank"] <= 2) & (stale_days > 7)).sum())
+        if crit_stale > 0:
+            cards.append(
+                ActionInsight(
+                    title="Criticas sin movimiento reciente",
+                    body=(
+                        f"{crit_stale} High/Highest no tienen actualizacion en mas de 7 dias."
+                    ),
+                    priority_filters=list(CRITICAL_PRIORITY_FILTERS),
+                    score=14.0 + float(crit_stale),
+                )
+            )
 
     return TrendInsightPack(
         metrics=[
@@ -866,6 +1088,46 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 score=15.0 + float(blocked_count),
             )
         )
+
+    stale_days = _stale_days_from_updated(df)
+    if stale_days.notna().any() and top_status != "—":
+        dom_mask = df["status"].astype(str).eq(top_status)
+        dom_stale = stale_days.loc[dom_mask]
+        if dom_stale.notna().any():
+            dom_stale_med = float(dom_stale.median())
+            if dom_stale_med >= 10.0:
+                cards.append(
+                    ActionInsight(
+                        title="Estado dominante sin avance",
+                        body=(
+                            f"Las incidencias en {top_status} llevan {_fmt_days(dom_stale_med)} "
+                            "sin actualizacion mediana."
+                        ),
+                        status_filters=[top_status],
+                        score=11.0 + (dom_stale_med / 2.0),
+                    )
+                )
+
+    if "assignee" in df.columns and total >= 8:
+        assignee = normalize_text_col(df["assignee"], "(sin asignar)")
+        active_df = df.loc[active_mask].copy(deep=False)
+        if not active_df.empty:
+            active_assignee = assignee.loc[active_df.index]
+            vc = active_assignee.value_counts()
+            if not vc.empty:
+                top_owner = str(vc.index[0])
+                top_owner_share = float(vc.iloc[0]) / float(max(int(vc.sum()), 1))
+                if top_owner_share >= 0.40 and int(vc.iloc[0]) >= 4:
+                    cards.append(
+                        ActionInsight(
+                            title="Sobrecarga de trabajo activo",
+                            body=(
+                                f"{top_owner} concentra {_fmt_pct(top_owner_share)} de las incidencias en curso."
+                            ),
+                            assignee_filters=[top_owner],
+                            score=10.0 + (top_owner_share * 100.0),
+                        )
+                    )
 
     accepted = int((df["status"].astype(str) == "Accepted").sum())
     ready = int((df["status"].astype(str) == "Ready to deploy").sum())
@@ -982,6 +1244,23 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
         lines.append(
             f"Bloqueadas activas: {blocked} ({_fmt_pct(blocked_pct)}). Requiere circuito de desbloqueo diario."
         )
+
+    if "priority" in safe_open.columns:
+        pr = normalize_text_col(safe_open["priority"], "(sin priority)")
+        critical_share = float((pr.map(priority_rank) <= 2).mean()) if open_total else 0.0
+        if critical_share >= 0.30:
+            lines.append(
+                f"Criticidad elevada: {_fmt_pct(critical_share)} del backlog abierto esta en High/Highest."
+            )
+
+    if "updated" in safe_open.columns:
+        stale_days = _stale_days_from_updated(safe_open)
+        if stale_days.notna().any():
+            stale14 = float((stale_days > 14).mean())
+            if stale14 >= 0.20:
+                lines.append(
+                    f"Estancamiento: {_fmt_pct(stale14)} de abiertas sin actualizacion en >14 dias."
+                )
 
     if not safe_dff.empty and "created" in safe_dff.columns:
         created = _to_dt_naive(safe_dff["created"])

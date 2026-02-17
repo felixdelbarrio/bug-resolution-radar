@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict
 
 import pandas as pd
@@ -9,8 +10,13 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
-from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
+from bug_resolution_radar.ui.dashboard.state import (
+    FILTER_ASSIGNEE_KEY,
+    FILTER_PRIORITY_KEY,
+    FILTER_STATUS_KEY,
+)
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
     issue_card_html,
@@ -26,6 +32,68 @@ from bug_resolution_radar.ui.insights.helpers import (
     open_only,
     safe_df,
 )
+
+_INSIGHT_INTERACTIONS_KEY = "__insights_interactions"
+
+
+def _topic_selection_token(*, topic: str, total_open: int) -> str:
+    status = ",".join(sorted([str(x) for x in list(st.session_state.get(FILTER_STATUS_KEY) or [])]))
+    priority = ",".join(
+        sorted([str(x) for x in list(st.session_state.get(FILTER_PRIORITY_KEY) or [])])
+    )
+    assignee = ",".join(
+        sorted([str(x) for x in list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])])
+    )
+    nonce = int(st.session_state.get(_INSIGHT_INTERACTIONS_KEY, 0) or 0)
+    return f"{topic}|{total_open}|{status}|{priority}|{assignee}|{nonce}"
+
+
+def _rank_topic_candidates(sub: pd.DataFrame) -> pd.DataFrame:
+    work = sub.copy(deep=False)
+    n = len(work)
+    if n == 0:
+        return work
+
+    work["__prio_rank"] = (
+        work["priority"].astype(str).map(priority_rank).fillna(99).astype(int)
+        if col_exists(work, "priority")
+        else 99
+    )
+    age = pd.Series([0.0] * n, index=work.index, dtype=float)
+    if col_exists(work, "__age_days"):
+        age = pd.to_numeric(work["__age_days"], errors="coerce").fillna(0.0).astype(float)
+
+    stale = pd.Series([0.0] * n, index=work.index, dtype=float)
+    if col_exists(work, "updated"):
+        updated_dt = pd.to_datetime(work["updated"], errors="coerce", utc=True)
+        updated_naive = as_naive_utc(updated_dt)
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        stale = ((now - updated_naive).dt.total_seconds() / 86400.0).fillna(0.0).clip(lower=0.0)
+
+    no_owner_bonus = (
+        work["assignee"].astype(str).eq("(sin asignar)").astype(float) * 4.0
+        if col_exists(work, "assignee")
+        else 0.0
+    )
+    critical_bonus = (
+        (work["__prio_rank"] <= 2).astype(float) * 24.0
+        + (work["__prio_rank"] == 3).astype(float) * 10.0
+    )
+    work["__topic_score"] = critical_bonus + (age.clip(upper=180.0) * 0.22) + (
+        stale.clip(upper=90.0) * 0.18
+    ) + no_owner_bonus
+    return work.sort_values(["__topic_score", "__age_days"], ascending=[False, False])
+
+
+def _rotate_topic_tail(df: pd.DataFrame, *, topic: str, total_open: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+    token = _topic_selection_token(topic=topic, total_open=total_open)
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()
+    offset = int(digest[:8], 16) % len(df)
+    if offset == 0:
+        return df
+    return pd.concat([df.iloc[offset:], df.iloc[:offset]], axis=0)
 
 
 def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
@@ -176,19 +244,15 @@ def render_top_topics_tab(
                 st.caption("No se han podido mapear issues individuales para este tema.")
                 continue
 
-            sort_cols: list[str] = []
-            sort_asc: list[bool] = []
-            if col_exists(sub, "__age_days"):
-                sort_cols.append("__age_days")
-                sort_asc.append(False)
-            if col_exists(sub, "updated"):
-                sort_cols.append("updated")
-                sort_asc.append(False)
-            if sort_cols:
-                sub = sub.sort_values(by=sort_cols, ascending=sort_asc)
+            ranked = _rank_topic_candidates(sub)
+            anchor = ranked.head(8)
+            tail = ranked.iloc[8:]
+            if not tail.empty:
+                tail = _rotate_topic_tail(tail, topic=topic, total_open=total_open)
+            sub_view = pd.concat([anchor, tail], axis=0).head(20)
 
             cards: list[str] = []
-            for _, ir in sub.head(20).iterrows():
+            for _, ir in sub_view.iterrows():
                 k = str(ir.get("key", "") or "").strip()
                 if not k:
                     continue
@@ -215,4 +279,6 @@ def render_top_topics_tab(
             if cards:
                 st.markdown("".join(cards), unsafe_allow_html=True)
 
-    st.caption("Tip: el % te dice el peso real de cada tema en el backlog abierto filtrado.")
+    st.caption(
+        "Tip: el % indica el peso real de cada tema y el orden de casos se ajusta segun filtros e interacciones."
+    )

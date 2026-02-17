@@ -72,3 +72,46 @@ def test_duplicates_brief_reports_high_duplicate_pressure() -> None:
         heuristic_clusters=7,
     )
     assert "Presion por duplicidad" in txt
+
+
+def test_priority_pack_flags_unassigned_critical_items() -> None:
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    open_df = pd.DataFrame(
+        {
+            "priority": ["Highest", "High", "Medium", "Low"],
+            "status": ["New", "Analysing", "In Progress", "Test"],
+            "assignee": ["", None, "alice", "bob"],
+            "created": pd.to_datetime(
+                [now - pd.Timedelta(days=20), now - pd.Timedelta(days=12), now, now], utc=True
+            ),
+            "updated": pd.to_datetime(
+                [now - pd.Timedelta(days=10), now - pd.Timedelta(days=8), now, now], utc=True
+            ),
+        }
+    )
+    pack = build_trend_insight_pack("open_priority_pie", dff=pd.DataFrame(), open_df=open_df)
+    titles = {c.title for c in pack.cards}
+    assert "Criticas sin owner" in titles
+
+
+def test_status_pack_flags_stalled_dominant_state() -> None:
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    open_df = pd.DataFrame(
+        {
+            "status": ["In Progress", "In Progress", "In Progress", "Test", "Test"],
+            "priority": ["High", "Medium", "Low", "Low", "Low"],
+            "assignee": ["ana", "ana", "ana", "luis", "maria"],
+            "updated": pd.to_datetime(
+                [
+                    now - pd.Timedelta(days=18),
+                    now - pd.Timedelta(days=14),
+                    now - pd.Timedelta(days=11),
+                    now - pd.Timedelta(days=2),
+                    now - pd.Timedelta(days=1),
+                ],
+                utc=True,
+            ),
+        }
+    )
+    pack = build_trend_insight_pack("open_status_bar", dff=pd.DataFrame(), open_df=open_df)
+    assert any("sin avance" in c.title.lower() for c in pack.cards)

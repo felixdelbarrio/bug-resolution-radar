@@ -18,6 +18,8 @@ Generar mensajes ejecutivos dinamicos, no estaticos, adaptados al estado real de
 - Un insight solo es "accionable" si incluye filtros aplicables (`status`, `priority`, `assignee`).
 - Insights sin filtro se muestran como explicación contextual (sin navegación forzada).
 - Los insights se priorizan por puntuacion de relevancia (`score`) para que cambien con la situacion operativa.
+- Capa de aprendizaje de sesion: la priorizacion se ajusta por interacciones (clicks en insights, cambios de filtro y navegacion entre graficos).
+- Control de fatiga: los insights muy repetidos pierden prioridad y los no vistos ganan peso.
 
 ## Contrato del motor
 `engine.py` expone tres tipos principales:
@@ -29,6 +31,7 @@ Flujo en tendencias:
 1. `build_trend_insight_pack(chart_id, dff, open_df)` calcula metricas y tarjetas segun el grafico seleccionado.
 2. La UI mantiene el formato actual (3 metricas + tarjetas accionables + caption).
 3. Las tarjetas con filtros sincronizan automaticamente la pestaña `Issues`.
+4. La capa de personalizacion reordena tarjetas segun contexto e historico de uso en sesion.
 
 ## Patrones de insights soportados
 - Presión de flujo: entrada vs salida y backlog neto.

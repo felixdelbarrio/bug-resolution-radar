@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -9,6 +10,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -24,6 +26,12 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_STATUS_KEY,
 )
 from bug_resolution_radar.ui.insights.engine import ActionInsight, build_trend_insight_pack
+from bug_resolution_radar.ui.insights.learning_store import (
+    LEARNING_INTERACTIONS_KEY,
+    LEARNING_STATE_KEY,
+    ensure_learning_session_loaded,
+    persist_learning_session,
+)
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 
@@ -45,6 +53,169 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
 
 def _safe_df(df: pd.DataFrame) -> pd.DataFrame:
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+
+def _ensure_learning_state() -> Dict[str, Any]:
+    raw = st.session_state.get(_LEARNING_STATE_KEY)
+    if isinstance(raw, dict):
+        state: Dict[str, Any] = raw
+    else:
+        state = {}
+    if not isinstance(state.get("shown_counts"), dict):
+        state["shown_counts"] = {}
+    if not isinstance(state.get("clicked_counts"), dict):
+        state["clicked_counts"] = {}
+    if not isinstance(state.get("last_click_filters"), dict):
+        state["last_click_filters"] = {"status": [], "priority": [], "assignee": []}
+    if not isinstance(state.get("chart_seen_counts"), dict):
+        state["chart_seen_counts"] = {}
+    if not isinstance(state.get("last_render_token"), str):
+        state["last_render_token"] = ""
+    if not isinstance(state.get("last_context_token"), str):
+        state["last_context_token"] = ""
+    st.session_state[_LEARNING_STATE_KEY] = state
+    return state
+
+
+def _active_filter_snapshot() -> Dict[str, List[str]]:
+    return {
+        "status": list(st.session_state.get(FILTER_STATUS_KEY) or []),
+        "priority": list(st.session_state.get(FILTER_PRIORITY_KEY) or []),
+        "assignee": list(st.session_state.get(FILTER_ASSIGNEE_KEY) or []),
+    }
+
+
+def _dict_any(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _insight_identity(chart_id: str, insight: ActionInsight) -> str:
+    base = f"{chart_id.strip().lower()}|{str(insight.title or '').strip().lower()}"
+    status = ",".join(sorted([str(x).strip().lower() for x in list(insight.status_filters or []) if str(x).strip()]))
+    priority = ",".join(
+        sorted([str(x).strip().lower() for x in list(insight.priority_filters or []) if str(x).strip()])
+    )
+    assignee = ",".join(
+        sorted([str(x).strip().lower() for x in list(insight.assignee_filters or []) if str(x).strip()])
+    )
+    digest = hashlib.sha1(f"{base}|{status}|{priority}|{assignee}".encode("utf-8")).hexdigest()[:12]
+    return f"{chart_id}:{digest}"
+
+
+def _overlap_ratio(active: List[str], candidate: List[str] | None) -> float:
+    cand = [str(x).strip() for x in list(candidate or []) if str(x).strip()]
+    if not active or not cand:
+        return 0.0
+    a = {x.lower() for x in active}
+    c = {x.lower() for x in cand}
+    if not c:
+        return 0.0
+    return float(len(a & c)) / float(len(c))
+
+
+def _personalize_insights(
+    cards: List[ActionInsight], *, chart_id: str, active_filters: Dict[str, List[str]]
+) -> List[ActionInsight]:
+    state = _ensure_learning_state()
+    shown_counts = _dict_any(state.get("shown_counts"))
+    clicked_counts = _dict_any(state.get("clicked_counts"))
+    last_click = _dict_any(state.get("last_click_filters"))
+    out: List[ActionInsight] = []
+
+    for card in cards:
+        iid = _insight_identity(chart_id, card)
+        shown = int(shown_counts.get(iid, 0) or 0)
+        clicked = int(clicked_counts.get(iid, 0) or 0)
+
+        novelty_bonus = 0.0
+        if shown == 0:
+            novelty_bonus = 6.0
+        elif shown == 1:
+            novelty_bonus = 2.5
+        else:
+            novelty_bonus = -min(float(shown - 1), 4.0)
+
+        affinity_bonus = min(float(clicked) * 2.0, 6.0)
+        active_alignment = 0.0
+        active_alignment += 4.0 * _overlap_ratio(
+            active_filters.get("status", []), card.status_filters
+        )
+        active_alignment += 3.5 * _overlap_ratio(
+            active_filters.get("priority", []), card.priority_filters
+        )
+        active_alignment += 3.0 * _overlap_ratio(
+            active_filters.get("assignee", []), card.assignee_filters
+        )
+
+        last_alignment = 0.0
+        last_alignment += 3.0 * _overlap_ratio(
+            list(last_click.get("status", []) or []), card.status_filters
+        )
+        last_alignment += 2.5 * _overlap_ratio(
+            list(last_click.get("priority", []) or []), card.priority_filters
+        )
+        last_alignment += 2.5 * _overlap_ratio(
+            list(last_click.get("assignee", []) or []), card.assignee_filters
+        )
+
+        if not (card.status_filters or card.priority_filters or card.assignee_filters):
+            active_alignment += 0.8
+
+        personalized = ActionInsight(
+            title=card.title,
+            body=card.body,
+            status_filters=list(card.status_filters or []),
+            priority_filters=list(card.priority_filters or []),
+            assignee_filters=list(card.assignee_filters or []),
+            score=float(card.score) + novelty_bonus + affinity_bonus + active_alignment + last_alignment,
+        )
+        out.append(personalized)
+
+    return sorted(out, key=lambda c: float(c.score), reverse=True)
+
+
+def _render_token(
+    *, chart_id: str, dff: pd.DataFrame, open_df: pd.DataFrame, active_filters: Dict[str, List[str]]
+) -> str:
+    status = ",".join(sorted([str(x) for x in active_filters.get("status", [])]))
+    priority = ",".join(sorted([str(x) for x in active_filters.get("priority", [])]))
+    assignee = ",".join(sorted([str(x) for x in active_filters.get("assignee", [])]))
+    return f"{chart_id}|{len(dff)}|{len(open_df)}|{status}|{priority}|{assignee}"
+
+
+def _register_shown_insights(cards: List[ActionInsight], *, chart_id: str, render_token: str) -> None:
+    state = _ensure_learning_state()
+    last_token = str(state.get("last_render_token") or "")
+    if last_token == render_token:
+        return
+
+    shown_counts = _dict_any(state.get("shown_counts"))
+    for card in cards[:6]:
+        iid = _insight_identity(chart_id, card)
+        shown_counts[iid] = int(shown_counts.get(iid, 0) or 0) + 1
+    state["shown_counts"] = shown_counts
+
+    chart_seen = _dict_any(state.get("chart_seen_counts"))
+    chart_seen[chart_id] = int(chart_seen.get(chart_id, 0) or 0) + 1
+    state["chart_seen_counts"] = chart_seen
+    state["last_render_token"] = render_token
+    st.session_state[_LEARNING_STATE_KEY] = state
+
+
+def _track_context_interaction(*, chart_id: str, active_filters: Dict[str, List[str]]) -> None:
+    state = _ensure_learning_state()
+    status = ",".join(sorted([str(x) for x in active_filters.get("status", [])]))
+    priority = ",".join(sorted([str(x) for x in active_filters.get("priority", [])]))
+    assignee = ",".join(sorted([str(x) for x in active_filters.get("assignee", [])]))
+    token = f"{chart_id}|{status}|{priority}|{assignee}"
+    prev = str(state.get("last_context_token") or "")
+    if token == prev:
+        return
+    state["last_context_token"] = token
+    st.session_state[_LEARNING_STATE_KEY] = state
+    st.session_state[_LEARNING_INTERACTIONS_KEY] = int(
+        st.session_state.get(_LEARNING_INTERACTIONS_KEY, 0) or 0
+    ) + 1
 
 
 def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
@@ -659,8 +830,26 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
             with col:
                 st.metric(metric.label, metric.value)
 
+    active_filters = _active_filter_snapshot()
+    _track_context_interaction(chart_id=str(chart_id), active_filters=active_filters)
+    personalized_cards = _personalize_insights(
+        pack.cards, chart_id=str(chart_id), active_filters=active_filters
+    )
     key_prefix = str(chart_id or "chart").strip().replace("-", "_")
-    _render_insight_cards(pack.cards, key_prefix=key_prefix)
+    _render_insight_cards(personalized_cards, key_prefix=key_prefix, chart_id=str(chart_id))
+    _register_shown_insights(
+        personalized_cards,
+        chart_id=str(chart_id),
+        render_token=_render_token(
+            chart_id=str(chart_id), dff=dff, open_df=open_df, active_filters=active_filters
+        ),
+    )
+
+    interactions = int(st.session_state.get(_LEARNING_INTERACTIONS_KEY, 0) or 0)
+    if interactions > 0:
+        st.caption(
+            f"Priorizacion adaptativa activa: {interactions} interacciones consideradas en esta sesion."
+        )
     if pack.executive_tip:
         st.caption(pack.executive_tip)
 
@@ -670,15 +859,30 @@ def _jump_to_issues(
     status_filters: List[str] | None = None,
     priority_filters: List[str] | None = None,
     assignee_filters: List[str] | None = None,
+    insight_id: str | None = None,
 ) -> None:
     """Open Issues tab and sync filters derived from an actionable insight."""
     st.session_state["__jump_to_tab"] = "issues"
     st.session_state[FILTER_STATUS_KEY] = list(status_filters or [])
     st.session_state[FILTER_PRIORITY_KEY] = list(priority_filters or [])
     st.session_state[FILTER_ASSIGNEE_KEY] = list(assignee_filters or [])
+    if insight_id:
+        state = _ensure_learning_state()
+        clicked_counts = _dict_any(state.get("clicked_counts"))
+        clicked_counts[insight_id] = int(clicked_counts.get(insight_id, 0) or 0) + 1
+        state["clicked_counts"] = clicked_counts
+        state["last_click_filters"] = {
+            "status": list(status_filters or []),
+            "priority": list(priority_filters or []),
+            "assignee": list(assignee_filters or []),
+        }
+        st.session_state[_LEARNING_STATE_KEY] = state
+        st.session_state[_LEARNING_INTERACTIONS_KEY] = int(
+            st.session_state.get(_LEARNING_INTERACTIONS_KEY, 0) or 0
+        ) + 1
 
 
-def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str) -> None:
+def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str, chart_id: str) -> None:
     """Render insight cards; only cards with filters are shown as actionable links."""
     items = [c for c in cards if str(c.title or "").strip() and str(c.body or "").strip()]
     items = sorted(items, key=lambda c: float(c.score), reverse=True)
@@ -714,6 +918,7 @@ def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str) -> Non
     cols = st.columns(2, gap="small")
     for i, item in enumerate(items[:6]):
         has_action = bool(item.status_filters or item.priority_filters or item.assignee_filters)
+        insight_id = _insight_identity(chart_id, item)
         with cols[i % 2]:
             with st.container(border=True, key=f"trins_card_{key_prefix}_{i}"):
                 if has_action:
@@ -727,6 +932,7 @@ def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str) -> Non
                                 "status_filters": item.status_filters,
                                 "priority_filters": item.priority_filters,
                                 "assignee_filters": item.assignee_filters,
+                                "insight_id": insight_id,
                             },
                         )
                 else:

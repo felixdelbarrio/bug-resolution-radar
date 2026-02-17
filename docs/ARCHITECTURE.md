@@ -26,6 +26,7 @@ Aplicación Streamlit para gestión operativa de incidencias multi-fuente, con f
 - Scope: `workspace_country`, `workspace_source_id`.
 - Filtros canónicos: `FILTER_STATUS_KEY`, `FILTER_PRIORITY_KEY`, `FILTER_ASSIGNEE_KEY`.
 - Deep-linking interno: `__jump_to_tab`, `__jump_to_insights_tab`.
+- Aprendizaje de insights: `__insights_learning_state`, `__insights_interactions`.
 
 ## Principios de diseño técnico
 - Fuente única de verdad para filtros (evita desalineación entre pestañas).
