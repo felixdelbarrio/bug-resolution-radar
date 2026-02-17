@@ -286,7 +286,6 @@ def render_trends(
     """
     # Filters ONLY here (keeps keys unique)
     render_filters(df_all)
-    st.markdown("---")
 
     registry: Dict[str, ChartSpec] = build_trends_registry()
     options = list_trend_chart_options(registry)  # [(id, label), ...]

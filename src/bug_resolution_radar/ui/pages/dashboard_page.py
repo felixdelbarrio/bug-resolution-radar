@@ -66,15 +66,22 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
 
     apply_dashboard_layout()
 
-    df = load_issues_df(settings.DATA_PATH)
+    try:
+        df = load_issues_df(settings.DATA_PATH)
+    except Exception as exc:
+        st.error("No se pudieron cargar las incidencias. Revisa el archivo de datos o ejecuta Ingesta.")
+        st.caption(f"Detalle técnico: {exc}")
+        return section
     scoped_df = _apply_workspace_source_scope(df)
 
     if scoped_df.empty:
         st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
         return section
 
-    notes = NotesStore(Path(settings.NOTES_PATH))
-    notes.load()
+    notes: NotesStore | None = None
+    if section == "notes":
+        notes = NotesStore(Path(settings.NOTES_PATH))
+        notes.load()
 
     if section in {"issues", "kanban", "trends"}:
         render_filters(scoped_df, key_prefix="dashboard")
@@ -87,9 +94,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
 
     if section == "overview":
         render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
-        st.markdown("---")
         render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
-        st.markdown("---")
         render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
     elif section == "issues":
         render_issues_tab(dff=ctx.dff)
@@ -100,6 +105,9 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     elif section == "insights":
         render_insights_page(settings, dff_filtered=ctx.dff, kpis=ctx.kpis)
     elif section == "notes":
+        if notes is None:
+            notes = NotesStore(Path(settings.NOTES_PATH))
+            notes.load()
         render_notes_tab(dff=ctx.dff, notes=notes)
 
     return section

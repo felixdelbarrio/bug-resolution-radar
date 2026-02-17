@@ -57,7 +57,7 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.7rem;
             margin-top: 0.2rem;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.65rem;
           }
           .ops-kpi-card {
             border: 1px solid var(--bbva-border);
@@ -88,6 +88,9 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
           }
           @media (max-width: 980px) {
             .ops-kpi-grid { grid-template-columns: 1fr; }
+          }
+          .st-key-ops_health_top10_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            margin-top: 0.34rem !important;
           }
         </style>
         """,
@@ -127,8 +130,6 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
         unsafe_allow_html=True,
     )
 
-    st.markdown("---")
-
     # -------------------------
     # Top 10 abiertas más antiguas
     # -------------------------
@@ -156,7 +157,7 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     # Lookup (links + meta)
     key_to_url, key_to_meta = build_issue_lookup(tmp, settings=settings)
 
-    with st.container(border=True):
+    with st.container(border=True, key="ops_health_top10_shell"):
         st.markdown("#### Top 10 abiertas más antiguas (según filtros)")
         cards: list[str] = []
         for _, rr in tmp.iterrows():

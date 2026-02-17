@@ -172,7 +172,6 @@ def render(settings: Settings) -> None:
             for i in issues_doc.issues
             if str(i.source_type or "").strip().lower() == "jira"
         }
-        st.markdown("---")
         st.markdown("### Última ingesta (Jira)")
         st.json(
             {
@@ -271,7 +270,6 @@ def render(settings: Settings) -> None:
                     st.error("No se pudo ingestar ninguna fuente Helix.")
 
         helix_source_ids = {str(i.source_id or "").strip() for i in stored_helix_doc.items}
-        st.markdown("---")
         st.markdown("### Última ingesta (Helix)")
         st.json(
             {

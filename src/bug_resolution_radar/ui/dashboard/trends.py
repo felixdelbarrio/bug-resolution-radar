@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
@@ -124,10 +125,10 @@ def _add_bar_totals(
     fig.update_yaxes(range=[0, ymax + (offset * 2.4)])
 
 
-def _build_timeseries_from_filtered(dff: pd.DataFrame) -> Any | None:
-    """Build the evolution chart from the currently filtered dataframe."""
+def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
+    """Build daily aggregates for timeseries chart from the filtered dataframe."""
     if dff.empty:
-        return None
+        return pd.DataFrame()
 
     created = (
         _to_dt_naive(dff["created"])
@@ -143,7 +144,7 @@ def _build_timeseries_from_filtered(dff: pd.DataFrame) -> Any | None:
     created_notna = created.notna()
     resolved_notna = resolved.notna()
     if not created_notna.any() and not resolved_notna.any():
-        return None
+        return pd.DataFrame()
 
     end_candidates = []
     if created_notna.any():
@@ -166,15 +167,129 @@ def _build_timeseries_from_filtered(dff: pd.DataFrame) -> Any | None:
 
     all_dates = created_daily.index.union(closed_daily.index).sort_values()
     if all_dates.empty:
-        return None
+        return pd.DataFrame()
 
     daily = pd.DataFrame({"date": all_dates})
     daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
     daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
     # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
     daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
+    return daily
 
-    return px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
+
+def _age_bucket_grouped(open_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate open issues by age bucket and status."""
+    if open_df.empty or "created" not in open_df.columns:
+        return pd.DataFrame()
+
+    df = open_df.copy(deep=False)
+    df["__created_dt"] = _to_dt_naive(df["created"])
+    df = df[df["__created_dt"].notna()].copy(deep=False)
+    if df.empty:
+        return pd.DataFrame()
+
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
+    df["__age_days"] = df["__age_days"].clip(lower=0.0)
+
+    if "status" not in df.columns:
+        df["status"] = "(sin estado)"
+    else:
+        df["status"] = df["status"].astype(str)
+
+    df["bucket"] = _age_bucket_from_days(df["__age_days"])
+    return (
+        df.groupby(["bucket", "status"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+        .sort_values(["bucket", "count"], ascending=[True, False])
+    )
+
+
+def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Build grouped resolution distribution plus export-ready closed subset."""
+    empty_grouped = pd.DataFrame(columns=["resolution_bucket", "priority", "count"])
+    empty_closed = pd.DataFrame(
+        columns=[
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "created",
+            "resolved",
+            "resolution_days",
+            "resolution_bucket",
+        ]
+    )
+    if "resolved" not in dff.columns or "created" not in dff.columns:
+        return {"grouped": empty_grouped, "closed": empty_closed}
+
+    created = _to_dt_naive(dff["created"])
+    resolved = _to_dt_naive(dff["resolved"])
+
+    closed = dff.copy(deep=False)
+    closed["__created"] = created
+    closed["__resolved"] = resolved
+    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    if closed.empty:
+        return {"grouped": empty_grouped, "closed": empty_closed}
+
+    closed["resolution_days"] = (
+        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+    ).clip(lower=0.0)
+    if "priority" in closed.columns:
+        closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
+    else:
+        closed["priority"] = "(sin priority)"
+
+    closed["resolution_bucket"] = _resolution_bucket(closed["resolution_days"])
+    grouped_res = (
+        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+    )
+    export_cols = [
+        "key",
+        "summary",
+        "status",
+        "priority",
+        "created",
+        "resolved",
+        "resolution_days",
+        "resolution_bucket",
+    ]
+    export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
+    return {"grouped": grouped_res, "closed": export_df}
+
+
+def _open_status_payload(open_df: pd.DataFrame) -> dict[str, Any]:
+    """Build grouped open-by-status data and canonical ordered categories."""
+    if open_df.empty or "status" not in open_df.columns:
+        return {"grouped": pd.DataFrame(), "status_order": []}
+
+    dff = open_df.copy(deep=False)
+    dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
+    if "priority" in dff.columns:
+        dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
+    else:
+        dff["priority"] = "(sin priority)"
+
+    stc_total = dff["status"].astype(str).value_counts().reset_index()
+    stc_total.columns = ["status", "count"]
+    canon_status_order = canonical_status_order()
+    stc_total["__rank"] = _rank_by_canon(stc_total["status"], canon_status_order)
+    stc_total = stc_total.sort_values(["__rank", "count"], ascending=[True, False]).drop(
+        columns="__rank"
+    )
+    status_order = stc_total["status"].astype(str).tolist()
+
+    grouped = (
+        dff.groupby(["status", "priority"], dropna=False)
+        .size()
+        .reset_index(name="count")
+        .sort_values(["status", "count"], ascending=[True, False])
+    )
+    return {"grouped": grouped, "status_order": status_order}
 
 
 def available_trend_charts() -> List[Tuple[str, str]]:
@@ -244,8 +359,6 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
     # 2) Contenedor del gráfico seleccionado
     with st.container(border=True, key="trend_chart_shell"):
         _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=open_df)
-
-        st.markdown("---")
         _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=open_df)
 
 
@@ -259,10 +372,21 @@ def _render_trend_chart(
     open_df = _safe_df(open_df)
 
     if chart_id == "timeseries":
-        fig = _build_timeseries_from_filtered(dff)
-        if fig is None:
+        ts_sig = dataframe_signature(
+            dff,
+            columns=("created", "resolved"),
+            salt="trends.timeseries.v1",
+        )
+        daily, _ = cached_by_signature(
+            "trends.timeseries.daily",
+            ts_sig,
+            lambda: _timeseries_daily_from_filtered(dff),
+            max_entries=10,
+        )
+        if not isinstance(daily, pd.DataFrame) or daily.empty:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return
+        fig = px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
         fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
@@ -283,35 +407,18 @@ def _render_trend_chart(
             st.info("No hay datos suficientes (created) para antigüedad con los filtros actuales.")
             return
 
-        df = open_df.copy()
-        df["__created_dt"] = _to_dt_naive(df["created"])
-        df = df[df["__created_dt"].notna()].copy()
-        if df.empty:
-            st.info(
-                "No hay fechas válidas (created) para calcular antigüedad con los filtros actuales."
-            )
-            return
-
-        now = pd.Timestamp.utcnow().tz_localize(None)
-        df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
-        df["__age_days"] = df["__age_days"].clip(lower=0.0)
-
-        # status puede no existir; si no, ponemos un placeholder
-        if "status" not in df.columns:
-            df["status"] = "(sin estado)"
-        else:
-            df["status"] = df["status"].astype(str)
-
-        df["bucket"] = _age_bucket_from_days(df["__age_days"])
-
-        # Agregado: bucket x status
-        grp = (
-            df.groupby(["bucket", "status"], dropna=False)
-            .size()
-            .reset_index(name="count")
-            .sort_values(["bucket", "count"], ascending=[True, False])
+        age_sig = dataframe_signature(
+            open_df,
+            columns=("created", "status"),
+            salt="trends.age_buckets.v1",
         )
-        if grp.empty:
+        grp, _ = cached_by_signature(
+            "trends.age_buckets.grouped",
+            age_sig,
+            lambda: _age_bucket_grouped(open_df),
+            max_entries=10,
+        )
+        if not isinstance(grp, pd.DataFrame) or grp.empty:
             st.info("No hay datos suficientes para este gráfico con los filtros actuales.")
             return
 
@@ -365,32 +472,26 @@ def _render_trend_chart(
             st.info("No hay fechas suficientes (created/resolved) para calcular resolución.")
             return
 
-        created = _to_dt_naive(dff["created"])
-        resolved = _to_dt_naive(dff["resolved"])
+        res_sig = dataframe_signature(
+            dff,
+            columns=("key", "summary", "status", "priority", "created", "resolved"),
+            salt="trends.resolution_hist.v1",
+        )
+        res_payload, _ = cached_by_signature(
+            "trends.resolution_hist.payload",
+            res_sig,
+            lambda: _resolution_payload(dff),
+            max_entries=10,
+        )
+        grouped_res = res_payload.get("grouped") if isinstance(res_payload, dict) else None
+        closed = res_payload.get("closed") if isinstance(res_payload, dict) else None
 
-        closed = dff.copy()
-        closed["__created"] = created
-        closed["__resolved"] = resolved
-        closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy()
-
-        if closed.empty:
+        if not isinstance(grouped_res, pd.DataFrame) or grouped_res.empty:
             st.info("No hay incidencias cerradas con fechas suficientes para este filtro.")
             return
+        if not isinstance(closed, pd.DataFrame):
+            closed = pd.DataFrame()
 
-        closed["resolution_days"] = (
-            (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
-        ).clip(lower=0.0)
-        if "priority" in closed.columns:
-            closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
-        else:
-            closed["priority"] = "(sin priority)"
-
-        closed["resolution_bucket"] = _resolution_bucket(closed["resolution_days"])
-        grouped_res = (
-            closed.groupby(["resolution_bucket", "priority"], dropna=False)
-            .size()
-            .reset_index(name="count")
-        )
         priority_order = sorted(
             grouped_res["priority"].astype(str).unique().tolist(),
             key=_priority_sort_key,
@@ -442,17 +543,7 @@ def _render_trend_chart(
             font_size=12,
         )
         fig = apply_plotly_bbva(fig, showlegend=True)
-        export_cols = [
-            "key",
-            "summary",
-            "status",
-            "priority",
-            "created",
-            "resolved",
-            "resolution_days",
-            "resolution_bucket",
-        ]
-        export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
+        export_df = closed.copy(deep=False)
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
@@ -499,31 +590,26 @@ def _render_trend_chart(
             st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
             return
 
-        dff = open_df.copy()
-        dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
-        if "priority" in dff.columns:
-            dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
-        else:
-            dff["priority"] = "(sin priority)"
-
-        # Order statuses canonically by total volume.
-        stc_total = dff["status"].astype(str).value_counts().reset_index()
-        stc_total.columns = ["status", "count"]
-
-        # ✅ Orden canónico (mismo que Issues/Matrix/Kanban)
-        canon_status_order = canonical_status_order()
-        stc_total["__rank"] = _rank_by_canon(stc_total["status"], canon_status_order)
-        stc_total = stc_total.sort_values(["__rank", "count"], ascending=[True, False]).drop(
-            columns="__rank"
+        status_sig = dataframe_signature(
+            open_df,
+            columns=("status", "priority"),
+            salt="trends.open_status_bar.v1",
         )
-        status_order = stc_total["status"].astype(str).tolist()
-
-        grouped = (
-            dff.groupby(["status", "priority"], dropna=False)
-            .size()
-            .reset_index(name="count")
-            .sort_values(["status", "count"], ascending=[True, False])
+        status_payload, _ = cached_by_signature(
+            "trends.open_status_bar.payload",
+            status_sig,
+            lambda: _open_status_payload(open_df),
+            max_entries=10,
         )
+        grouped = status_payload.get("grouped") if isinstance(status_payload, dict) else None
+        status_order_raw = (
+            status_payload.get("status_order") if isinstance(status_payload, dict) else []
+        )
+        if not isinstance(grouped, pd.DataFrame) or grouped.empty:
+            st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
+            return
+        status_order = status_order_raw if isinstance(status_order_raw, list) else []
+
         priority_order = sorted(
             grouped["priority"].astype(str).unique().tolist(),
             key=_priority_sort_key,

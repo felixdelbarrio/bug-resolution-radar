@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import (
@@ -27,31 +28,34 @@ from bug_resolution_radar.ui.insights.helpers import (
     safe_df,
 )
 
+_THEME_RULES: list[tuple[str, list[str]]] = [
+    ("Softoken", ["softoken", "token", "firma", "otp"]),
+    ("Crédito", ["credito", "crédito", "cvv", "tarjeta", "tdc"]),
+    ("Monetarias", ["monetarias", "saldo", "nomina", "nómina"]),
+    ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
+    ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
+    ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
+    ("Login y acceso", ["login", "acceso", "face id", "biometr", "password", "tokenbnc"]),
+    ("Notificaciones", ["notificacion", "notificación", "push", "mensaje"]),
+]
 
-def render_top_topics_tab(
-    *, settings: Settings, dff_filtered: pd.DataFrame, kpis: Dict[str, Any]
-) -> None:
-    """
-    Tab: Top temas funcionales (abiertas)
-    - Agrupa por macro-tema (Softoken, Crédito, Monetarias, Tareas, ...)
-    - Muestra expander por tema con lista de issues (key clickable) + estado + prioridad
-    """
-    _ = kpis  # maintained in signature for compatibility with caller
-    inject_insights_chip_css()
 
-    dff = safe_df(dff_filtered)
-    if dff.empty:
-        st.info("No hay datos con los filtros actuales.")
-        return
+def _norm(s: object) -> str:
+    txt = str(s or "").strip().lower()
+    txt = unicodedata.normalize("NFKD", txt)
+    return "".join(ch for ch in txt if not unicodedata.combining(ch))
 
-    open_df = open_only(dff)
-    total_open = int(len(open_df)) if open_df is not None else 0
-    if total_open == 0:
-        st.info("No hay incidencias abiertas para analizar temas.")
-        return
 
-    key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
+def _theme_for_summary(summary: str) -> str:
+    s = _norm(summary)
+    for theme, keys in _THEME_RULES:
+        for kw in keys:
+            if re.search(rf"\b{re.escape(_norm(kw))}\b", s):
+                return theme
+    return "Otros"
 
+
+def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
     tmp_open = open_df.copy(deep=False)
     tmp_open["status"] = (
         normalize_text_col(tmp_open["status"], "(sin estado)")
@@ -82,45 +86,22 @@ def render_top_topics_tab(
         tmp_open["__age_days"] = pd.NA
 
     if not col_exists(tmp_open, "summary"):
-        st.info("No hay columna `summary` para construir temas.")
-        return
-
-    theme_rules: list[tuple[str, list[str]]] = [
-        ("Softoken", ["softoken", "token", "firma", "otp"]),
-        ("Crédito", ["credito", "crédito", "cvv", "tarjeta", "tdc"]),
-        ("Monetarias", ["monetarias", "saldo", "nomina", "nómina"]),
-        ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
-        ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
-        ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
-        ("Login y acceso", ["login", "acceso", "face id", "biometr", "password", "tokenbnc"]),
-        ("Notificaciones", ["notificacion", "notificación", "push", "mensaje"]),
-    ]
-
-    def _norm(s: object) -> str:
-        txt = str(s or "").strip().lower()
-        txt = unicodedata.normalize("NFKD", txt)
-        return "".join(ch for ch in txt if not unicodedata.combining(ch))
-
-    def _theme_for_summary(summary: str) -> str:
-        s = _norm(summary)
-        for theme, keys in theme_rules:
-            for kw in keys:
-                if re.search(rf"\b{re.escape(_norm(kw))}\b", s):
-                    return theme
-        return "Otros"
+        empty_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
+        return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
 
     tmp_open["__theme"] = tmp_open["summary"].map(_theme_for_summary)
     theme_counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
     non_otros = [t for t in theme_counts.index.tolist() if str(t) != "Otros"]
     has_otros = "Otros" in theme_counts.index
     if has_otros:
-        # "Otros" siempre al final, aunque tenga mayor volumen.
         if len(non_otros) >= 9:
             top_themes = non_otros[:9] + ["Otros"]
         else:
             top_themes = non_otros + ["Otros"]
     else:
         top_themes = non_otros[:10]
+
+    total_open = int(len(tmp_open))
     top_tbl = pd.DataFrame(
         {
             "tema": top_themes,
@@ -131,6 +112,54 @@ def render_top_topics_tab(
             ],
         }
     )
+    return {"tmp_open": tmp_open, "top_tbl": top_tbl}
+
+
+def render_top_topics_tab(
+    *, settings: Settings, dff_filtered: pd.DataFrame, kpis: Dict[str, Any]
+) -> None:
+    """
+    Tab: Top temas funcionales (abiertas)
+    - Agrupa por macro-tema (Softoken, Crédito, Monetarias, Tareas, ...)
+    - Muestra expander por tema con lista de issues (key clickable) + estado + prioridad
+    """
+    _ = kpis  # maintained in signature for compatibility with caller
+    inject_insights_chip_css()
+
+    dff = safe_df(dff_filtered)
+    if dff.empty:
+        st.info("No hay datos con los filtros actuales.")
+        return
+
+    open_df = open_only(dff)
+    total_open = int(len(open_df)) if open_df is not None else 0
+    if total_open == 0:
+        st.info("No hay incidencias abiertas para analizar temas.")
+        return
+
+    today = pd.Timestamp.utcnow().tz_localize(None).strftime("%Y-%m-%d")
+    sig = dataframe_signature(
+        open_df,
+        columns=("key", "summary", "status", "priority", "assignee", "created", "updated"),
+        salt=f"insights.top_topics.v1:{today}",
+    )
+    payload, _ = cached_by_signature(
+        "insights.top_topics",
+        sig,
+        lambda: _prepare_top_topics_payload(open_df),
+        max_entries=12,
+    )
+    tmp_open = payload.get("tmp_open")
+    top_tbl = payload.get("top_tbl")
+    if not isinstance(tmp_open, pd.DataFrame):
+        tmp_open = pd.DataFrame()
+    if not isinstance(top_tbl, pd.DataFrame):
+        top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
+    if top_tbl.empty:
+        st.info("No hay columna `summary` para construir temas.")
+        return
+
+    key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
     render_minimal_export_actions(
         key_prefix="insights::top_topics",
         filename_prefix="insights_temas",

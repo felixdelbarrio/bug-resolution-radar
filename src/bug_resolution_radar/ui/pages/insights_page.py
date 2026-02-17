@@ -36,49 +36,15 @@ def render(
     if dff.empty:
         st.warning("No hay datos con los filtros actuales.")
         return
+    st.session_state.pop("__jump_to_insights_tab", None)
 
-    st.markdown(
-        """
-        <style>
-          div[data-testid="stTabs"] div[data-baseweb="tab-panel"] {
-            padding-top: 0.20rem !important;
-          }
-          div[data-testid="stTabs"] div[data-baseweb="tab-border"] {
-            margin-bottom: 0.20rem !important;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    t1, t2, t3, t4 = st.tabs(["Top tópicos", "Duplicados", "Personas", "Salud operativa"])
 
-    views = {
-        "top_topics": "Top tópicos",
-        "duplicates": "Duplicados",
-        "people": "Personas",
-        "ops_health": "Salud operativa",
-    }
-    default_view = "top_topics"
-    jump_view = str(st.session_state.pop("__jump_to_insights_tab", "") or "").strip()
-    if jump_view in views:
-        st.session_state["insights_inner_tab"] = jump_view
-    if str(st.session_state.get("insights_inner_tab") or "") not in views:
-        st.session_state["insights_inner_tab"] = default_view
-
-    picked = st.segmented_control(
-        "Vista Insights",
-        options=list(views.keys()),
-        format_func=lambda k: views.get(str(k), str(k)),
-        key="insights_inner_tab",
-        selection_mode="single",
-        label_visibility="collapsed",
-    )
-    view = str(picked or st.session_state.get("insights_inner_tab") or default_view)
-
-    if view == "top_topics":
+    with t1:
         render_top_topics_tab(settings=settings, dff_filtered=dff, kpis=kpis)
-    elif view == "duplicates":
+    with t2:
         render_duplicates_tab(settings=settings, dff_filtered=dff)
-    elif view == "people":
+    with t3:
         render_backlog_people_tab(settings=settings, dff_filtered=dff)
-    else:
+    with t4:
         render_ops_health_tab(settings=settings, dff_filtered=dff)

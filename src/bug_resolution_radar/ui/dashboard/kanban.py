@@ -20,6 +20,9 @@ from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_ma
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
+MAX_KANBAN_ITEMS_PER_COLUMN = 220
+MAX_KANBAN_TOTAL_ITEMS = 1200
+
 
 def _kanban_set_status_filter(st_name: str) -> None:
     # sincroniza con filtros/matriz: status = [st_name]
@@ -172,6 +175,9 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
         if open_df is None or open_df.empty:
             st.info("No hay incidencias abiertas para mostrar.")
             return
+        if "status" not in open_df.columns:
+            st.info("No hay columna 'status' para construir el tablero Kanban.")
+            return
 
         kan = open_df.copy(deep=False)
         export_cols = [
@@ -224,6 +230,18 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
 
         cols = st.columns(len(selected_statuses))
         now = pd.Timestamp.utcnow().tz_localize(None)
+        if "created" in kan.columns:
+            created_naive = pd.to_datetime(kan["created"], errors="coerce", utc=True).dt.tz_localize(
+                None
+            )
+            kan["age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(lower=0.0)
+        else:
+            kan["age_days"] = pd.NA
+
+        max_items_per_col = max(
+            60,
+            min(MAX_KANBAN_ITEMS_PER_COLUMN, MAX_KANBAN_TOTAL_ITEMS // max(len(selected_statuses), 1)),
+        )
 
         for i, (col, st_name) in enumerate(zip(cols, selected_statuses)):
             sub = kan[kan["status"] == st_name].copy(deep=False)
@@ -239,15 +257,9 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                 sort_cols.append("updated")
                 sort_asc.append(False)
             sub = sub.sort_values(by=sort_cols, ascending=sort_asc)
-            if "created" in sub.columns:
-                created_naive = pd.to_datetime(
-                    sub["created"], errors="coerce", utc=True
-                ).dt.tz_localize(None)
-                sub["_age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(
-                    lower=0.0
-                )
-            else:
-                sub["_age_days"] = pd.NA
+            total_in_col = len(sub)
+            if total_in_col > max_items_per_col:
+                sub = sub.head(max_items_per_col).copy(deep=False)
 
             with col:
                 # Header clickable -> fija el filtro de estado
@@ -259,20 +271,25 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                         on_click=_kanban_set_status_filter,
                         args=(st_name,),
                     )
-                st.caption(f"{len(sub)} issues")
+                if total_in_col > max_items_per_col:
+                    st.caption(
+                        f"{len(sub)}/{total_in_col} issues (cap de rendimiento por columna)"
+                    )
+                else:
+                    st.caption(f"{total_in_col} issues")
                 cards_html: List[str] = []
-                for _, r in sub.iterrows():
-                    key = html.escape(str(r.get("key", "") or ""))
-                    url = html.escape(str(r.get("url", "") or ""))
-                    summ = html.escape(str(r.get("summary", "") or ""))
+                for r in sub.itertuples(index=False):
+                    key = html.escape(str(getattr(r, "key", "") or ""))
+                    url = html.escape(str(getattr(r, "url", "") or ""))
+                    summ = html.escape(str(getattr(r, "summary", "") or ""))
                     if len(summ) > 120:
                         summ = summ[:117] + "..."
-                    status = str(r.get("status", "") or "").strip() or "(sin estado)"
-                    prio = str(r.get("priority", "") or "").strip() or "(sin priority)"
-                    assignee = str(r.get("assignee", "") or "").strip()
+                    status = str(getattr(r, "status", "") or "").strip() or "(sin estado)"
+                    prio = str(getattr(r, "priority", "") or "").strip() or "(sin priority)"
+                    assignee = str(getattr(r, "assignee", "") or "").strip()
                     if len(assignee) > 28:
                         assignee = assignee[:25] + "..."
-                    age_raw = r.get("_age_days", pd.NA)
+                    age_raw = getattr(r, "age_days", pd.NA)
                     age_days = float(age_raw) if pd.notna(age_raw) else None
 
                     key_html = (

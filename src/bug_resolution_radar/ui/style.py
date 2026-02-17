@@ -309,117 +309,96 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
           }
-          /* Tighten the vertical gap between top tabs and dashboard filters/content */
-          .st-key-workspace_nav_bar {
+          /* Level-1 nav (Resumen/Issues/...) rendered as tabs, not buttons */
+          .st-key-workspace_nav_bar,
+          [class*="st-key-workspace_nav_bar_"] {
             margin-top: -0.04rem;
             margin-bottom: -0.76rem;
             border: 1px solid var(--bbva-border-strong);
             border-radius: 14px;
             background: var(--bbva-surface-elevated);
-            padding: 0.32rem 0.42rem 0.26rem 0.42rem;
+            padding: 0.22rem 0.38rem 0.16rem 0.38rem;
             box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 16%, transparent);
           }
-          .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"] {
+          .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stHorizontalBlock"] {
             margin-bottom: 0 !important;
             row-gap: 0 !important;
             align-items: center !important;
           }
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] {
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] {
             margin-bottom: 0 !important;
           }
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radiogroup"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [role="radiogroup"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] {
+            gap: 0.36rem !important;
+            border: 0 !important;
+            background: transparent !important;
+          }
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button,
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radio"],
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *,
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button {
-            background: var(--bbva-tab-soft-bg) !important;
-            border-color: var(--bbva-tab-soft-border) !important;
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] label,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] button,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [role="radio"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button {
+            min-height: 2.02rem !important;
+            padding: 0.22rem 0.78rem !important;
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            border-radius: 0 !important;
+            background: transparent !important;
             color: var(--bbva-tab-soft-text) !important;
+            box-shadow: none !important;
           }
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [role="radio"][aria-checked="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [data-baseweb="button-group"] > *[aria-pressed="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [data-baseweb="button-group"] > *[aria-selected="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [data-baseweb="button-group"] > *[data-selected="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [data-baseweb="button-group"] > * > button[aria-pressed="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [data-baseweb="button-group"] > * > button[aria-selected="true"],
-          .st-key-workspace_nav_bar
-            div[data-testid="stSegmentedControl"]
-            [data-baseweb="button-group"] > * > button[data-selected="true"],
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label:has(input:checked) {
-            background: var(--bbva-tab-active-bg) !important;
-            border-color: var(--bbva-tab-active-border) !important;
-            color: var(--bbva-tab-active-text) !important;
-          }
-          /* Fallback robusto: resalta la pestaña activa principal por posición */
-          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(1),
-          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(1) > button,
-          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(2),
-          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(2) > button,
-          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(3),
-          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(3) > button,
-          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(4),
-          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(4) > button,
-          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(5),
-          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(5) > button,
-          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(6),
-          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:nth-child(6) > button {
-            background: var(--bbva-tab-active-bg) !important;
-            border-color: var(--bbva-tab-active-border) !important;
-            color: var(--bbva-tab-active-text) !important;
-          }
-          .st-key-workspace_nav_bar .bbva-force-active,
-          [class*="st-key-workspace_nav_bar_"] .bbva-force-active {
-            background: var(--bbva-tab-active-bg) !important;
-            border-color: var(--bbva-tab-active-border) !important;
-            color: var(--bbva-tab-active-text) !important;
-          }
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label *,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button *,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radio"] *,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] label *,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] button *,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [role="radio"] *,
           .st-key-workspace_nav_bar .bbva-force-active-text,
           [class*="st-key-workspace_nav_bar_"] .bbva-force-active-text {
-            color: var(--bbva-tab-active-text) !important;
+            color: inherit !important;
           }
-          /* Extra robust selectors for Streamlit segmented-control DOM variants */
-          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] button:nth-of-type(1),
-          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] button:nth-of-type(2),
-          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] button:nth-of-type(3),
-          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] button:nth-of-type(4),
-          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] button:nth-of-type(5),
-          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] button:nth-of-type(6),
-          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(1),
-          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(2),
-          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(3),
-          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(4),
-          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(5),
-          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] [role="radio"]:nth-of-type(6),
-          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] label:nth-of-type(1),
-          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] label:nth-of-type(2),
-          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] label:nth-of-type(3),
-          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] label:nth-of-type(4),
-          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] label:nth-of-type(5),
-          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] label:nth-of-type(6) {
-            background: var(--bbva-tab-active-bg) !important;
-            border-color: var(--bbva-tab-active-border) !important;
-            color: var(--bbva-tab-active-text) !important;
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-pressed="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-selected="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[data-selected="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-pressed="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-selected="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[data-selected="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label:has(input:checked),
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-pressed="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-selected="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[data-selected="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-pressed="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-selected="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[data-selected="true"],
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] label:has(input:checked),
+          .st-key-workspace_nav_bar .bbva-force-active,
+          [class*="st-key-workspace_nav_bar_"] .bbva-force-active {
+            border: 0 !important;
+            border-bottom: 2px solid var(--bbva-primary) !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            color: var(--bbva-primary) !important;
           }
-          .st-key-workspace_nav_bar_overview div[data-testid="stSegmentedControl"] button:nth-of-type(1) *,
-          .st-key-workspace_nav_bar_issues div[data-testid="stSegmentedControl"] button:nth-of-type(2) *,
-          .st-key-workspace_nav_bar_kanban div[data-testid="stSegmentedControl"] button:nth-of-type(3) *,
-          .st-key-workspace_nav_bar_trends div[data-testid="stSegmentedControl"] button:nth-of-type(4) *,
-          .st-key-workspace_nav_bar_insights div[data-testid="stSegmentedControl"] button:nth-of-type(5) *,
-          .st-key-workspace_nav_bar_notes div[data-testid="stSegmentedControl"] button:nth-of-type(6) * {
-            color: var(--bbva-tab-active-text) !important;
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button:hover,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label:hover,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] button:hover,
+          [class*="st-key-workspace_nav_bar_"] div[data-testid="stSegmentedControl"] label:hover {
+            background: transparent !important;
+            color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
           }
           .st-key-workspace_dashboard_content {
             margin-top: -0.24rem;
@@ -642,52 +621,54 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="tab-list"] {
             gap: 8px;
           }
-          [role="tablist"] [role="tab"],
-          div[data-baseweb="tab-list"] [role="tab"] {
+          div[data-testid="stTabs"] div[data-baseweb="tab-panel"] {
+            padding-top: 0.08rem !important;
+            margin-top: 0 !important;
+          }
+          div[data-testid="stTabs"] div[data-baseweb="tab-panel"] > div[data-testid="stVerticalBlock"] {
+            row-gap: 0.3rem !important;
+          }
+          div[data-baseweb="tab"] button {
             color: var(--bbva-tab-soft-text) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            border: 1px solid var(--bbva-tab-soft-border) !important;
-            border-radius: 10px !important;
-            min-height: 2.08rem !important;
-            padding: 0.28rem 0.80rem !important;
             font-weight: 700 !important;
+            background: transparent !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            opacity: 1 !important;
           }
-          [role="tablist"] [role="tab"] *,
-          div[data-baseweb="tab-list"] [role="tab"] * {
+          div[data-baseweb="tab"] button *,
+          [role="tablist"] button[role="tab"] * {
             color: inherit !important;
+            opacity: 1 !important;
           }
-          [role="tablist"] [role="tab"][aria-selected="true"],
-          div[data-baseweb="tab-list"] [role="tab"][aria-selected="true"] {
-            color: var(--bbva-tab-active-text) !important;
-            background: var(--bbva-tab-active-bg) !important;
-            border-color: var(--bbva-tab-active-border) !important;
+          div[data-baseweb="tab"] button[aria-selected="true"] {
+            color: var(--bbva-primary) !important;
+            opacity: 1 !important;
           }
-          [role="tablist"] [role="tab"][aria-selected="false"],
-          div[data-baseweb="tab-list"] [role="tab"][aria-selected="false"] {
-            color: var(--bbva-tab-soft-text) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            border-color: var(--bbva-tab-soft-border) !important;
+          div[data-baseweb="tab"] button[aria-selected="false"],
+          [role="tablist"] button[role="tab"][aria-selected="false"] {
+            color: var(--bbva-text-muted) !important;
+            opacity: 1 !important;
           }
           div[data-baseweb="tab-highlight"] {
-            background-color: transparent !important;
+            background-color: var(--bbva-primary) !important;
+          }
+          [role="tablist"] button[role="tab"][aria-selected="true"] {
+            color: var(--bbva-primary) !important;
           }
           [role="tablist"] button[role="tab"]:focus-visible {
             outline: none !important;
             box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
             border-radius: var(--bbva-radius-m) !important;
           }
-          div[data-baseweb="tab-list"] button,
-          div[data-testid="stTabs"] [role="tablist"] button {
-            color: var(--bbva-tab-soft-text) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            border: 1px solid var(--bbva-tab-soft-border) !important;
-            border-radius: 10px !important;
-          }
-          div[data-baseweb="tab-list"] button[aria-selected="true"],
-          div[data-testid="stTabs"] [role="tablist"] button[aria-selected="true"] {
-            color: var(--bbva-tab-active-text) !important;
-            background: var(--bbva-tab-active-bg) !important;
-            border-color: var(--bbva-tab-active-border) !important;
+          /* Hide all horizontal dividers and tab borders */
+          hr,
+          [data-testid="stDivider"],
+          div[data-testid="stTabs"] div[data-baseweb="tab-border"] {
+            display: none !important;
+            height: 0 !important;
+            border: 0 !important;
+            margin: 0 !important;
           }
 
           /* Links */

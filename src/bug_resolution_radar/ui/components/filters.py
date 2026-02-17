@@ -116,6 +116,7 @@ def _inject_combo_signal_script() -> None:
             const root = window.parent;
             const doc = root && root.document;
             if (!doc) return;
+            const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
 
             const match = (text, keys) => keys.some((k) => text.includes(k));
             const toRgba = (hex, alpha) => {
@@ -166,17 +167,28 @@ def _inject_combo_signal_script() -> None:
                 .forEach(paintTag);
             };
 
-            tick();
-            if (root.__bbvaSignalTimer) {
-              clearInterval(root.__bbvaSignalTimer);
-            }
-            const started = Date.now();
-            root.__bbvaSignalTimer = setInterval(() => {
-              tick();
-              if (Date.now() - started > 7000) {
-                clearInterval(root.__bbvaSignalTimer);
+            if (!root.__bbvaSignalPainterReady) {
+              root.__bbvaSignalPainterReady = true;
+              root.__bbvaSignalPaintQueued = false;
+
+              root.__bbvaScheduleSignalPaint = () => {
+                if (root.__bbvaSignalPaintQueued) return;
+                root.__bbvaSignalPaintQueued = true;
+                raf(() => {
+                  root.__bbvaSignalPaintQueued = false;
+                  try { tick(); } catch (e) {}
+                });
+              };
+
+              if (root.__bbvaSignalObserver) {
+                try { root.__bbvaSignalObserver.disconnect(); } catch (e) {}
               }
-            }, 250);
+              root.__bbvaSignalObserver = new MutationObserver(() => {
+                root.__bbvaScheduleSignalPaint();
+              });
+              root.__bbvaSignalObserver.observe(doc.body, { childList: true, subtree: true });
+            }
+            root.__bbvaScheduleSignalPaint();
           } catch (e) {
             // no-op
           }
@@ -440,11 +452,36 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
     if fs.assignee and "assignee" in df.columns:
         mask &= df["assignee"].isin(fs.assignee)
 
-    dff = df.loc[mask].copy(deep=False)
-
+    needs_status_write = False
     if status_norm is not None:
-        dff["status"] = status_norm.loc[mask].to_numpy()
+        needs_status_write = bool(fs.status)
+        if not needs_status_write and bool(df["status"].isna().any()):
+            needs_status_write = True
+        if not needs_status_write:
+            try:
+                needs_status_write = bool((df["status"] == "").any())
+            except Exception:
+                needs_status_write = False
+
+    needs_priority_write = False
     if priority_norm is not None:
+        needs_priority_write = bool(fs.priority)
+        if not needs_priority_write and bool(df["priority"].isna().any()):
+            needs_priority_write = True
+        if not needs_priority_write:
+            try:
+                needs_priority_write = bool((df["priority"] == "").any())
+            except Exception:
+                needs_priority_write = False
+
+    if bool(mask.all()) and not (needs_status_write or needs_priority_write):
+        # Fast path: avoid extra frame materialization when no filter narrows results.
+        return df.copy(deep=False)
+
+    dff = df.loc[mask].copy(deep=False)
+    if needs_status_write and status_norm is not None:
+        dff["status"] = status_norm.loc[mask].to_numpy()
+    if needs_priority_write and priority_norm is not None:
         dff["priority"] = priority_norm.loc[mask].to_numpy()
 
     # IMPORTANTE: no filtramos por "type" (se muestra todo lo que entra por ingesta)

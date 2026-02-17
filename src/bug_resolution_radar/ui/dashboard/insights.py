@@ -67,6 +67,14 @@ def _safe_dt(s: pd.Series) -> pd.Series:
     if s is None:
         return pd.Series([], dtype="datetime64[ns]")
     out = pd.to_datetime(s, errors="coerce")
+    try:
+        if hasattr(out.dt, "tz") and out.dt.tz is not None:
+            out = out.dt.tz_localize(None)
+    except Exception:
+        try:
+            out = out.dt.tz_localize(None)
+        except Exception:
+            pass
     return out
 
 
@@ -279,7 +287,6 @@ def build_chart_insights(
             ]
 
         p50 = float(np.nanpercentile(ages, 50))
-        p75 = float(np.nanpercentile(ages, 75))
         p90 = float(np.nanpercentile(ages, 90))
         tail30 = float((ages > 30).mean())
         tail60 = float((ages > 60).mean())
@@ -332,7 +339,6 @@ def build_chart_insights(
             ]
 
         median = float(np.nanmedian(res))
-        p75 = float(np.nanpercentile(res, 75))
         p90 = float(np.nanpercentile(res, 90))
 
         out.append(

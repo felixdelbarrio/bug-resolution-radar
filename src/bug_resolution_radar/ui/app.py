@@ -65,22 +65,33 @@ def _ensure_scope_state(settings: Settings) -> None:
 def _ensure_nav_state() -> None:
     """Initialize and keep navigation state consistent across reruns and jumps."""
     labels = _dashboard_labels()
+    name_by_label = {label: name for name, label in labels.items()}
     section_names: List[str] = dashboard_page.dashboard_sections()
-    default_section = "overview"
+    default_section = "overview" if "overview" in section_names else section_names[0]
+    allowed_modes = {"dashboard", "ingest", "config"}
 
     if "workspace_mode" not in st.session_state:
         st.session_state["workspace_mode"] = "dashboard"
-    if "workspace_section" not in st.session_state:
-        st.session_state["workspace_section"] = default_section
-    if "workspace_section_label" not in st.session_state:
-        st.session_state["workspace_section_label"] = labels[default_section]
+    mode = str(st.session_state.get("workspace_mode") or "dashboard").strip().lower()
+    st.session_state["workspace_mode"] = mode if mode in allowed_modes else "dashboard"
+
+    section = str(st.session_state.get("workspace_section") or default_section).strip().lower()
+    if section not in section_names:
+        section = default_section
+
+    selected_label = str(st.session_state.get("workspace_section_label") or "").strip()
+    selected_from_label = name_by_label.get(selected_label)
+    if selected_from_label in section_names:
+        section = str(selected_from_label)
 
     jump = st.session_state.pop("__jump_to_tab", None)
     if isinstance(jump, str) and jump.strip().lower() in section_names:
         sec = jump.strip().lower()
         st.session_state["workspace_mode"] = "dashboard"
-        st.session_state["workspace_section"] = sec
-        st.session_state["workspace_section_label"] = labels.get(sec, labels[default_section])
+        section = sec
+
+    st.session_state["workspace_section"] = section
+    st.session_state["workspace_section_label"] = labels.get(section, labels[default_section])
 
 
 def _toggle_dark_mode() -> None:
@@ -96,8 +107,8 @@ def _render_workspace_header() -> None:
     name_by_label = {v: k for k, v in labels.items()}
     section_options = [labels[s] for s in dashboard_page.dashboard_sections()]
     mode = str(st.session_state.get("workspace_mode") or "dashboard")
-    current_label = str(st.session_state.get("workspace_section_label") or section_options[0])
     is_dark = bool(st.session_state.get("workspace_dark_mode", False))
+    active_label = str(st.session_state.get("workspace_section_label") or section_options[0])
 
     left, right = st.columns([5.0, 0.9], gap="small")
 
@@ -113,6 +124,8 @@ def _render_workspace_header() -> None:
             label_visibility="collapsed",
         )
         picked_label = str(picked or "")
+        if picked_label in section_options:
+            active_label = picked_label
         if picked_label in name_by_label:
             st.session_state["workspace_section"] = name_by_label.get(picked_label, "overview")
             # Avoid mutating the same key bound to an already-instantiated widget.
@@ -149,31 +162,34 @@ def _render_workspace_header() -> None:
             args=("config",),
         )
 
-    # Force a clear active state on the main segmented nav (same behavior perceived in tabs).
     components_html(
         f"""
         <script>
           (function() {{
-            const activeLabel = {json.dumps(current_label)};
-            const doc = window.parent.document;
-            const navRoot =
-              doc.querySelector('[class*="st-key-workspace_nav_bar_"]') ||
-              doc.querySelector('.st-key-workspace_nav_bar');
-            if (!navRoot) return;
-            const seg = navRoot.querySelector('[data-testid="stSegmentedControl"]');
-            if (!seg) return;
-
-            seg.querySelectorAll('.bbva-force-active').forEach((el) => el.classList.remove('bbva-force-active'));
-            seg.querySelectorAll('.bbva-force-active-text').forEach((el) => el.classList.remove('bbva-force-active-text'));
-
-            const nodes = Array.from(
-              seg.querySelectorAll('button, label, [role="radio"], [data-baseweb="button-group"] > *')
+            const activeLabel = {json.dumps(active_label)};
+            const doc = window.parent && window.parent.document;
+            if (!doc || !activeLabel) return;
+            const navRoots = Array.from(
+              doc.querySelectorAll('[class*="st-key-workspace_nav_bar_"], .st-key-workspace_nav_bar')
             );
-            const best = nodes.find((el) => ((el.innerText || '').trim() === activeLabel));
-            if (!best) return;
-
-            best.classList.add('bbva-force-active');
-            best.querySelectorAll('*').forEach((child) => child.classList.add('bbva-force-active-text'));
+            if (!navRoots.length) return;
+            navRoots.forEach((root) => {{
+              root.querySelectorAll('.bbva-force-active').forEach((el) => el.classList.remove('bbva-force-active'));
+              root.querySelectorAll('.bbva-force-active-text').forEach((el) => el.classList.remove('bbva-force-active-text'));
+              const candidates = Array.from(
+                root.querySelectorAll(
+                  '[data-testid="stSegmentedControl"] button, ' +
+                  '[data-testid="stSegmentedControl"] label, ' +
+                  '[data-testid="stSegmentedControl"] [role="radio"], ' +
+                  '[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *, ' +
+                  '[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button'
+                )
+              );
+              const selected = candidates.find((el) => ((el.innerText || '').trim() === activeLabel));
+              if (!selected) return;
+              selected.classList.add('bbva-force-active');
+              selected.querySelectorAll('*').forEach((child) => child.classList.add('bbva-force-active-text'));
+            }});
           }})();
         </script>
         """,
@@ -239,15 +255,20 @@ def main() -> None:
     render_hero(hero_title)
     _ensure_scope_state(settings)
     _ensure_nav_state()
-    section = dashboard_page.normalize_dashboard_section(
+    section_before_header = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
     with st.container(key="workspace_scope_bar"):
         _render_workspace_scope(settings)
-    with st.container(key=f"workspace_nav_bar_{section}"):
+    with st.container(key=f"workspace_nav_bar_{section_before_header}"):
         _render_workspace_header()
 
     mode = str(st.session_state.get("workspace_mode") or "dashboard")
+    section = dashboard_page.normalize_dashboard_section(
+        str(st.session_state.get("workspace_section") or "overview")
+    )
+    if mode == "dashboard" and section != section_before_header:
+        st.rerun()
 
     if mode == "ingest":
         ingest_page.render(settings)

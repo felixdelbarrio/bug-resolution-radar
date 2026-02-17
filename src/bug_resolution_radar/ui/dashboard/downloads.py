@@ -287,9 +287,21 @@ def _inject_minimal_export_css(scope_key: str) -> None:
     st.markdown(
         f"""
         <style>
-          .st-key-{scope_key} [data-testid="column"] {{
+          .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
+            justify-content: flex-end !important;
+            align-items: flex-end !important;
+            gap: 0.3rem !important;
+          }}
+          .st-key-{scope_key} [data-testid="stColumn"] {{
             display: flex;
             justify-content: flex-end;
+            align-items: flex-end;
+            flex: 0 0 auto !important;
+          }}
+          .st-key-{scope_key} [data-testid="stColumn"] > div {{
+            display: flex;
+            justify-content: flex-end;
+            align-items: flex-end;
           }}
           .st-key-{scope_key} .stDownloadButton > button {{
             min-height: 1.52rem !important;
@@ -372,16 +384,14 @@ def render_minimal_export_actions(
         )
 
     with st.container(key=scope_key):
-        _, right = st.columns([8.4, 1.6], gap="small")
-        with right:
-            cols = st.columns(len(buttons), gap="small")
-            for col, btn in zip(cols, buttons):
-                with col:
-                    st.download_button(
-                        label=btn["label"],
-                        data=btn["data"],
-                        file_name=btn["file_name"],
-                        mime=btn["mime"],
-                        key=btn["key"],
-                        use_container_width=False,
-                    )
+        cols = st.columns(len(buttons), gap="small")
+        for col, btn in zip(cols, buttons):
+            with col:
+                st.download_button(
+                    label=btn["label"],
+                    data=btn["data"],
+                    file_name=btn["file_name"],
+                    mime=btn["mime"],
+                    key=btn["key"],
+                    use_container_width=False,
+                )

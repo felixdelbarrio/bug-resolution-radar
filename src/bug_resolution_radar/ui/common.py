@@ -22,7 +22,11 @@ def _load_issues_doc_cached(path: str, mtime_ns: int) -> IssuesDocument:
     p = Path(path)
     if not p.exists():
         return IssuesDocument.empty()
-    return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
+    try:
+        return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
+    except Exception:
+        # Robust fallback: avoid crashing the UI when the file is temporarily malformed.
+        return IssuesDocument.empty()
 
 
 def load_issues_doc(path: str) -> IssuesDocument:

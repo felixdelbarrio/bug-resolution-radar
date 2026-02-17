@@ -17,7 +17,8 @@ from bug_resolution_radar.ui.common import (
 )
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
-MAX_TABLE_HTML_ROWS = 1200
+MAX_TABLE_HTML_ROWS = 450
+MAX_TABLE_NATIVE_ROWS = 2500
 
 
 def _safe_cell_text(value: object) -> str:
@@ -225,6 +226,29 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
     )
 
 
+def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -> None:
+    """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
+    df_show = display_df[show_cols].copy(deep=False)
+    col_cfg = {}
+    if "jira" in df_show.columns:
+        col_cfg["jira"] = st.column_config.LinkColumn(
+            "Jira", display_text=r".*/browse/([^/?#]+)"
+        )
+    if "summary" in df_show.columns:
+        col_cfg["summary"] = st.column_config.TextColumn("summary", width="large")
+    if "status" in df_show.columns:
+        col_cfg["status"] = st.column_config.TextColumn("status", width="medium")
+    if "priority" in df_show.columns:
+        col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
+
+    st.dataframe(
+        df_show,
+        use_container_width=True,
+        hide_index=False,
+        column_config=col_cfg or None,
+    )
+
+
 def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None:
     """Render issues as BBVA-styled cards (open issues prioritized)."""
     if title:
@@ -250,7 +274,7 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
         if c not in safe_df.columns:
             safe_df[c] = None
 
-    now = pd.Timestamp.utcnow()
+    now = pd.Timestamp.now(tz="UTC")
     open_df = (
         safe_df[safe_df["resolved"].isna()].copy(deep=False)
         if "resolved" in safe_df.columns
@@ -258,9 +282,8 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
     )
 
     if "created" in open_df.columns:
-        open_df["open_age_days"] = ((now - open_df["created"]).dt.total_seconds() / 86400.0).fillna(
-            0.0
-        )
+        created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
+        open_df["open_age_days"] = ((now - created).dt.total_seconds() / 86400.0).fillna(0.0)
     else:
         open_df["open_age_days"] = 0.0
 
@@ -360,9 +383,16 @@ def render_issue_table(dff: pd.DataFrame) -> None:
 
     if len(display_df) > MAX_TABLE_HTML_ROWS:
         st.caption(
-            f"Tabla optimizada: mostrando {MAX_TABLE_HTML_ROWS}/{len(display_df)} filas. "
-            "Usa CSV para el dataset completo."
+            f"Tabla optimizada: vista virtualizada para {len(display_df)} filas "
+            "(mejor rendimiento y menor consumo de memoria)."
         )
-        display_df = display_df.head(MAX_TABLE_HTML_ROWS).copy(deep=False)
+        if len(display_df) > MAX_TABLE_NATIVE_ROWS:
+            st.caption(
+                f"Mostrando {MAX_TABLE_NATIVE_ROWS}/{len(display_df)} filas en pantalla. "
+                "Usa CSV para el dataset completo."
+            )
+            display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
+        _render_issue_table_native(display_df, show_cols)
+        return
 
     _render_issue_table_html(display_df, show_cols)

@@ -386,8 +386,6 @@ def render(settings: Settings) -> None:
                 key="cfg_trend_fav_3",
             )
 
-    st.markdown("---")
-
     if st.button("💾 Guardar configuración", key="cfg_save_btn"):
         jira_clean, jira_errors = _normalize_jira_rows(jira_editor, countries)
         helix_clean, helix_errors = _normalize_helix_rows(helix_editor, countries)
