@@ -220,8 +220,28 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
         label_visibility="collapsed",
     )
 
+    st.markdown(
+        """
+        <style>
+          .st-key-trend_chart_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: 0 10px 24px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+          }
+          [class*="st-key-trins_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
+          }
+          [class*="st-key-trins_card_"] [data-testid="stMarkdownContainer"] p {
+            color: var(--bbva-text) !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # 2) Contenedor del gráfico seleccionado
-    with st.container(border=True):
+    with st.container(border=True, key="trend_chart_shell"):
         _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=open_df)
 
         st.markdown("---")
@@ -625,7 +645,7 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
     for i, item in enumerate(items[:6]):
         has_action = bool(item.status_filters or item.priority_filters or item.assignee_filters)
         with cols[i % 2]:
-            with st.container(border=True):
+            with st.container(border=True, key=f"trins_card_{key_prefix}_{i}"):
                 if has_action:
                     with st.container(key=f"trins_{key_prefix}_{i}"):
                         st.button(

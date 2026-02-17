@@ -18,22 +18,22 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-primary: #5F9FFF;
             --bbva-midnight: #070E46;
             --bbva-text: #EAF0FF;
-            --bbva-text-muted: rgba(234,240,255,0.84);
-            --bbva-surface: #182640;
+            --bbva-text-muted: rgba(234,240,255,0.90);
+            --bbva-surface: #1A2B47;
             --bbva-surface-2: #0A1228;
-            --bbva-surface-soft: rgba(24,38,64,0.64);
-            --bbva-surface-elevated: rgba(31,49,80,0.78);
-            --bbva-border: rgba(234,240,255,0.20);
-            --bbva-border-strong: rgba(234,240,255,0.30);
+            --bbva-surface-soft: rgba(26,43,71,0.82);
+            --bbva-surface-elevated: rgba(34,54,89,0.92);
+            --bbva-border: rgba(234,240,255,0.28);
+            --bbva-border-strong: rgba(234,240,255,0.42);
             --bbva-radius-s: 4px;
             --bbva-radius-m: 8px;
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
-            --bbva-tab-soft-bg: #1B2C49;
-            --bbva-tab-soft-border: #3A5076;
-            --bbva-tab-soft-text: #D8E5F9;
-            --bbva-tab-active-bg: #2A4B75;
-            --bbva-tab-active-border: #4D78AC;
+            --bbva-tab-soft-bg: #1D2F4D;
+            --bbva-tab-soft-border: #4A6290;
+            --bbva-tab-soft-text: #E6EFFF;
+            --bbva-tab-active-bg: #284A73;
+            --bbva-tab-active-border: #6793C7;
             --bbva-tab-active-text: #F3F8FF;
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
@@ -162,7 +162,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             gap: 0.22rem !important;
           }
           div[data-testid="stSegmentedControl"] label,
-          div[data-testid="stSegmentedControl"] button {
+          div[data-testid="stSegmentedControl"] button,
+          div[data-testid="stSegmentedControl"] [role="radio"] {
             min-height: 2.15rem !important;
             padding: 0.35rem 0.78rem !important;
             border-radius: 10px !important;
@@ -171,14 +172,22 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: var(--bbva-tab-soft-bg) !important;
             color: var(--bbva-tab-soft-text) !important;
           }
+          div[data-testid="stSegmentedControl"] label *,
+          div[data-testid="stSegmentedControl"] button *,
+          div[data-testid="stSegmentedControl"] [role="radio"] * {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
           div[data-testid="stSegmentedControl"] label:has(input:checked),
-          div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+          div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+          div[data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"] {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
           }
           div[data-testid="stSegmentedControl"] label:hover,
-          div[data-testid="stSegmentedControl"] button:hover {
+          div[data-testid="stSegmentedControl"] button:hover,
+          div[data-testid="stSegmentedControl"] [role="radio"]:hover {
             filter: brightness(0.99);
           }
           div[data-testid="stSegmentedControl"] [aria-disabled="true"] {
@@ -196,11 +205,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_nav_bar {
             margin-top: -0.04rem;
             margin-bottom: -0.76rem;
-            border: 1px solid var(--bbva-border);
+            border: 1px solid var(--bbva-border-strong);
             border-radius: 14px;
-            background: color-mix(in srgb, var(--bbva-surface) 68%, transparent);
+            background: color-mix(in srgb, var(--bbva-surface) 84%, transparent);
             padding: 0.32rem 0.42rem 0.26rem 0.42rem;
-            box-shadow: 0 1px 6px color-mix(in srgb, var(--bbva-text) 8%, transparent);
+            box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 16%, transparent);
           }
           .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"] {
             margin-bottom: 0 !important;
@@ -209,6 +218,22 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] {
             margin-bottom: 0 !important;
+          }
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radio"] {
+            background: var(--bbva-tab-soft-bg) !important;
+            border-color: var(--bbva-tab-soft-border) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [role="radio"][aria-checked="true"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label:has(input:checked) {
+            background: var(--bbva-tab-active-bg) !important;
+            border-color: var(--bbva-tab-active-border) !important;
+            color: var(--bbva-tab-active-text) !important;
           }
           .st-key-workspace_dashboard_content {
             margin-top: -0.24rem;
@@ -354,27 +379,61 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="tab-list"] {
             gap: 8px;
           }
-          div[data-baseweb="tab"] button {
-            color: var(--bbva-text-muted) !important;
+          [role="tablist"] button[role="tab"] {
+            color: var(--bbva-tab-soft-text) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            border-radius: 10px !important;
+            min-height: 2.08rem !important;
+            padding: 0.28rem 0.80rem !important;
             font-weight: 700 !important;
           }
-          div[data-baseweb="tab"] button[aria-selected="true"] {
-            color: var(--bbva-primary) !important;
-          }
-          div[data-baseweb="tab-highlight"] {
-            background-color: var(--bbva-primary) !important;
+          [role="tablist"] button[role="tab"] * {
+            color: inherit !important;
           }
           [role="tablist"] button[role="tab"][aria-selected="true"] {
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-tab-active-text) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            border-color: var(--bbva-tab-active-border) !important;
+          }
+          div[data-baseweb="tab-highlight"] {
+            background-color: transparent !important;
           }
           [role="tablist"] button[role="tab"]:focus-visible {
             outline: none !important;
             box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
             border-radius: var(--bbva-radius-m) !important;
           }
+          div[data-baseweb="tab-list"] button,
+          div[data-testid="stTabs"] [role="tablist"] button {
+            color: var(--bbva-tab-soft-text) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            border-radius: 10px !important;
+          }
+          div[data-baseweb="tab-list"] button[aria-selected="true"],
+          div[data-testid="stTabs"] [role="tablist"] button[aria-selected="true"] {
+            color: var(--bbva-tab-active-text) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            border-color: var(--bbva-tab-active-border) !important;
+          }
 
           /* Links */
           a, a:visited { color: var(--bbva-primary); }
+
+          /* Plotly text hardening for dark mode/readability */
+          .js-plotly-plot .legend text,
+          .js-plotly-plot .legendtitletext,
+          .js-plotly-plot .gtitle text,
+          .js-plotly-plot .xtitle text,
+          .js-plotly-plot .ytitle text,
+          .js-plotly-plot .annotation text {
+            fill: var(--bbva-text) !important;
+          }
+          .js-plotly-plot .xtick text,
+          .js-plotly-plot .ytick text {
+            fill: var(--bbva-text-muted) !important;
+          }
 
           /* Issue cards */
           .issue-card {
@@ -427,6 +486,33 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: rgba(0,81,241,0.06);
           }
 
+          [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            background: var(--bbva-surface-elevated) !important;
+          }
+          [data-testid="stDataFrame"] [role="grid"],
+          [data-testid="stDataEditor"] [role="grid"] {
+            background: var(--bbva-surface) !important;
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stDataFrame"] [role="columnheader"],
+          [data-testid="stDataEditor"] [role="columnheader"] {
+            background: color-mix(in srgb, var(--bbva-surface) 70%, var(--bbva-surface-2)) !important;
+            color: var(--bbva-text) !important;
+            border-color: var(--bbva-border) !important;
+          }
+          [data-testid="stDataEditor"] [role="gridcell"],
+          [data-testid="stDataFrame"] [role="gridcell"] {
+            border-color: var(--bbva-border) !important;
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stDataEditor"] input {
+            color: var(--bbva-text) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2)) !important;
+          }
+
           /* Metrics and expanders for dark/light readability */
           [data-testid="stMetric"] [data-testid="stMetricLabel"] * {
             color: var(--bbva-text-muted) !important;
@@ -464,8 +550,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: color-mix(in srgb, var(--bbva-primary) 8%, transparent) !important;
           }
           [data-testid="stVerticalBlockBorderWrapper"] {
-            border-color: var(--bbva-border) !important;
-            background: var(--bbva-surface-soft) !important;
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: 0 8px 24px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
           }
         </style>
         """
@@ -546,12 +633,30 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
             bgcolor=legend_bg,
             bordercolor=legend_border,
             borderwidth=1,
-            font=dict(size=11),
+            font=dict(size=11, color=text_color),
+            title=dict(font=dict(color=text_color)),
+        ),
+        hoverlabel=dict(
+            bgcolor=legend_bg,
+            bordercolor=legend_border,
+            font=dict(color=text_color),
         ),
         margin=dict(l=16, r=16, t=48, b=legend_bottom_space),
     )
-    fig.update_xaxes(showgrid=True, gridcolor=grid_color, zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor=grid_color, zeroline=False)
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor=grid_color,
+        zeroline=False,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=grid_color,
+        zeroline=False,
+        tickfont=dict(color=text_color),
+        title_font=dict(color=text_color),
+    )
     for series_name, color in flow_signal_color_map().items():
         fig.update_traces(
             line=dict(color=color),
@@ -589,6 +694,8 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
         try:
             trace.name = _localize(getattr(trace, "name", ""))
             trace.showlegend = bool(showlegend and trace.name)
+            if hasattr(trace, "textfont"):
+                trace.textfont = dict(color=text_color)
         except Exception:
             pass
 

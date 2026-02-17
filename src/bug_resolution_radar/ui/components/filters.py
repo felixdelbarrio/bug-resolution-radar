@@ -122,13 +122,15 @@ def _inject_colored_multiselect_css(
         v = _css_attr_value(label)
         rules.append(
             f"""
-            div[role="option"][aria-label="{v}"] {{
+            [role="option"][aria-label="{v}"] {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
               padding-left: 1.72rem !important;
+              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
+              background-repeat: no-repeat !important;
             }}
-            div[role="option"][aria-label="{v}"]::before {{
+            [role="option"][aria-label="{v}"]::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -143,17 +145,20 @@ def _inject_colored_multiselect_css(
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
+              background-image: none !important;
             }}
-            div[role="option"]:has(span[title="{v}"]),
-            div[role="option"]:has(div[title="{v}"]),
-            div[role="option"]:has(span:only-child):has(span[title="{v}"]) {{
+            [role="option"]:has(span[title="{v}"]),
+            [role="option"]:has(div[title="{v}"]),
+            [role="option"]:has(span:only-child):has(span[title="{v}"]) {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
               padding-left: 1.72rem !important;
+              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
+              background-repeat: no-repeat !important;
             }}
-            div[role="option"]:has(span[title="{v}"])::before,
-            div[role="option"]:has(div[title="{v}"])::before {{
+            [role="option"]:has(span[title="{v}"])::before,
+            [role="option"]:has(div[title="{v}"])::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -169,6 +174,7 @@ def _inject_colored_multiselect_css(
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
+              background-image: none !important;
             }}
             [data-baseweb="tag"]:has(span[title="{v}"]) * ,
             [data-baseweb="tag"]:has(div[title="{v}"]) * {{
@@ -185,13 +191,15 @@ def _inject_colored_multiselect_css(
         v = _css_attr_value(label)
         rules.append(
             f"""
-            div[role="option"][aria-label="{v}"] {{
+            [role="option"][aria-label="{v}"] {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
               padding-left: 1.72rem !important;
+              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
+              background-repeat: no-repeat !important;
             }}
-            div[role="option"][aria-label="{v}"]::before {{
+            [role="option"][aria-label="{v}"]::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -206,17 +214,20 @@ def _inject_colored_multiselect_css(
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
+              background-image: none !important;
             }}
-            div[role="option"]:has(span[title="{v}"]),
-            div[role="option"]:has(div[title="{v}"]),
-            div[role="option"]:has(span:only-child):has(span[title="{v}"]) {{
+            [role="option"]:has(span[title="{v}"]),
+            [role="option"]:has(div[title="{v}"]),
+            [role="option"]:has(span:only-child):has(span[title="{v}"]) {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
               padding-left: 1.72rem !important;
+              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
+              background-repeat: no-repeat !important;
             }}
-            div[role="option"]:has(span[title="{v}"])::before,
-            div[role="option"]:has(div[title="{v}"])::before {{
+            [role="option"]:has(span[title="{v}"])::before,
+            [role="option"]:has(div[title="{v}"])::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -232,6 +243,7 @@ def _inject_colored_multiselect_css(
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
+              background-image: none !important;
             }}
             [data-baseweb="tag"]:has(span[title="{v}"]) * ,
             [data-baseweb="tag"]:has(div[title="{v}"]) * {{

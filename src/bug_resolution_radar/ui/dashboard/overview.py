@@ -100,7 +100,24 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
             titles_for_export.append(spec.title)
         prepared.append((chart_id, spec.title, fig))
 
-    with st.container(border=True):
+    st.markdown(
+        """
+        <style>
+          .st-key-overview_summary_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: 0 10px 24px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+          }
+          [class*="st-key-overview_summary_chart_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 94%, var(--bbva-surface-2)) !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.container(border=True, key="overview_summary_shell"):
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
         export_df = ctx.dff[[c for c in export_cols if c in ctx.dff.columns]].copy(deep=False)
         render_minimal_export_actions(
@@ -115,9 +132,9 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
 
         cols = st.columns(3, gap="medium")
 
-        for col, (chart_id, chart_title, fig) in zip(cols, prepared):
+        for idx, (col, (chart_id, chart_title, fig)) in enumerate(zip(cols, prepared)):
             with col:
-                with st.container(border=True):
+                with st.container(border=True, key=f"overview_summary_chart_{idx}"):
                     if not chart_id:
                         st.caption("—")
                         st.info("No configurado")
@@ -285,7 +302,7 @@ def render_overview_kpis(
           .exec-wrap {
             border: 1px solid var(--bbva-border);
             border-radius: 16px;
-            background: color-mix(in srgb, var(--bbva-surface) 62%, transparent);
+            background: var(--bbva-surface-elevated);
             padding: 0.46rem 0.62rem;
           }
           .exec-kpi-grid {
@@ -297,7 +314,7 @@ def render_overview_kpis(
           .exec-kpi {
             border: 1px solid var(--bbva-border);
             border-radius: 12px;
-            background: color-mix(in srgb, var(--bbva-surface) 75%, transparent);
+            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2));
             padding: 0.40rem 0.52rem;
           }
           .exec-kpi-lbl {
@@ -347,6 +364,14 @@ def render_overview_kpis(
           [class*="st-key-exec_focus_"] div[data-testid="stButton"] > button:focus-visible {
             outline: none !important;
             box-shadow: 0 0 0 2px rgba(0,81,241,0.16) !important;
+          }
+          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
+            box-shadow: 0 6px 18px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+          }
+          [class*="st-key-exec_focus_card_"] [data-testid="stMarkdownContainer"] p {
+            color: var(--bbva-text) !important;
           }
           @media (max-width: 1020px) {
             .exec-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -539,7 +564,7 @@ def render_overview_kpis(
     focus_cols = st.columns(4, gap="small")
     for col, focus in zip(focus_cols, focus_cards):
         with col:
-            with st.container(border=True):
+            with st.container(border=True, key=f"exec_focus_card_{focus.card_id}"):
                 with st.container(key=f"exec_focus_{focus.card_id}"):
                     st.button(
                         focus.title,
