@@ -8,10 +8,17 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
-from bug_resolution_radar.ui.insights.helpers import build_issue_lookup, col_exists, open_only, safe_df
+from bug_resolution_radar.ui.insights.helpers import (
+    build_issue_lookup,
+    col_exists,
+    open_only,
+    safe_df,
+)
 
 
-def render_top_topics_tab(*, settings: Settings, dff_filtered: pd.DataFrame, kpis: Dict[str, Any]) -> None:
+def render_top_topics_tab(
+    *, settings: Settings, dff_filtered: pd.DataFrame, kpis: Dict[str, Any]
+) -> None:
     """
     Tab: Top 10 problemas/funcionalidades (abiertas)
     - Usa kpis["top_open_table"]
@@ -45,14 +52,18 @@ def render_top_topics_tab(*, settings: Settings, dff_filtered: pd.DataFrame, kpi
 
     tmp_open = open_df.copy()
     tmp_open["status"] = (
-        normalize_text_col(tmp_open["status"], "(sin estado)") if col_exists(tmp_open, "status") else "(sin estado)"
+        normalize_text_col(tmp_open["status"], "(sin estado)")
+        if col_exists(tmp_open, "status")
+        else "(sin estado)"
     )
     tmp_open["priority"] = (
         normalize_text_col(tmp_open["priority"], "(sin priority)")
         if col_exists(tmp_open, "priority")
         else "(sin priority)"
     )
-    tmp_open["summary"] = tmp_open["summary"].fillna("").astype(str) if col_exists(tmp_open, "summary") else ""
+    tmp_open["summary"] = (
+        tmp_open["summary"].fillna("").astype(str) if col_exists(tmp_open, "summary") else ""
+    )
 
     for _, r in top_tbl.head(10).iterrows():
         topic = str(r.get(summary_col, "") or "").strip()
@@ -68,8 +79,16 @@ def render_top_topics_tab(*, settings: Settings, dff_filtered: pd.DataFrame, kpi
 
         sub = tmp_open[tmp_open["summary"] == topic].copy() if topic else pd.DataFrame()
 
-        st_dom = sub["status"].value_counts().index[0] if (not sub.empty and "status" in sub.columns) else "-"
-        pr_dom = sub["priority"].value_counts().index[0] if (not sub.empty and "priority" in sub.columns) else "-"
+        st_dom = (
+            sub["status"].value_counts().index[0]
+            if (not sub.empty and "status" in sub.columns)
+            else "-"
+        )
+        pr_dom = (
+            sub["priority"].value_counts().index[0]
+            if (not sub.empty and "priority" in sub.columns)
+            else "-"
+        )
 
         topic_txt = topic
         if len(topic_txt) > 180:
@@ -79,7 +98,9 @@ def render_top_topics_tab(*, settings: Settings, dff_filtered: pd.DataFrame, kpi
 
         with st.expander(hdr, expanded=False):
             if sub.empty or not col_exists(sub, "key"):
-                st.caption("No se han podido mapear issues individuales para este tópico (matching por summary).")
+                st.caption(
+                    "No se han podido mapear issues individuales para este tópico (matching por summary)."
+                )
                 continue
 
             for _, ir in sub.iterrows():

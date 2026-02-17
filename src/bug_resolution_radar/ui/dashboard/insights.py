@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,7 @@ def _now_utc() -> pd.Timestamp:
     return pd.Timestamp(datetime.now(timezone.utc).replace(tzinfo=None))
 
 
-def _fmt_int(x: object, default: str = "—") -> str:
+def _fmt_int(x: Any, default: str = "—") -> str:
     try:
         if x is None or (isinstance(x, float) and np.isnan(x)):
             return default
@@ -39,7 +39,7 @@ def _fmt_int(x: object, default: str = "—") -> str:
         return default
 
 
-def _fmt_days(x: object, default: str = "—") -> str:
+def _fmt_days(x: Any, default: str = "—") -> str:
     try:
         if x is None or (isinstance(x, float) and np.isnan(x)):
             return default
@@ -53,7 +53,7 @@ def _fmt_days(x: object, default: str = "—") -> str:
         return default
 
 
-def _fmt_pct(x: object, default: str = "—") -> str:
+def _fmt_pct(x: Any, default: str = "—") -> str:
     try:
         if x is None or (isinstance(x, float) and np.isnan(x)):
             return default
@@ -162,7 +162,9 @@ def _hhi(shares: pd.Series) -> float:
 # ---------------------------------------------------------------------
 # Insight generators per chart
 # ---------------------------------------------------------------------
-def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[Insight]:
+def build_chart_insights(
+    chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFrame
+) -> List[Insight]:
     """
     Build "non-obvious but actionable" insights for a given chart.
     All computations are derived from filtered dataframes.
@@ -173,12 +175,17 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
     if chart_id == "timeseries":
         ts, stats = _daily_flow(dff, days=90)
         if ts.empty:
-            return [Insight("info", "Sin serie temporal suficiente", "Faltan fechas de creación/resolución para este análisis.")]
+            return [
+                Insight(
+                    "info",
+                    "Sin serie temporal suficiente",
+                    "Faltan fechas de creación/resolución para este análisis.",
+                )
+            ]
 
         created_14 = stats.get("created_14d", 0.0)
         resolved_14 = stats.get("resolved_14d", 0.0)
         net_14 = stats.get("net_14d", 0.0)
-        created_30 = stats.get("created_30d", 0.0)
         resolved_30 = stats.get("resolved_30d", 0.0)
 
         # 1) Inflow vs outflow
@@ -239,7 +246,11 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
         try:
             tmp = ts.copy()
             tmp["dow"] = pd.to_datetime(tmp["date"]).dt.day_name()
-            by_dow = tmp.groupby("dow")[["created", "resolved"]].mean().sort_values("created", ascending=False)
+            by_dow = (
+                tmp.groupby("dow")[["created", "resolved"]]
+                .mean()
+                .sort_values("created", ascending=False)
+            )
             if not by_dow.empty:
                 top_dow = by_dow.index[0]
                 out.append(
@@ -258,7 +269,13 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
     if chart_id == "age_buckets":
         ages = _age_days(open_df)
         if ages.empty:
-            return [Insight("info", "Sin datos de antigüedad", "Faltan fechas de creación en issues abiertas para calcular antigüedad.")]
+            return [
+                Insight(
+                    "info",
+                    "Sin datos de antigüedad",
+                    "Faltan fechas de creación en issues abiertas para calcular antigüedad.",
+                )
+            ]
 
         p50 = float(np.nanpercentile(ages, 50))
         p75 = float(np.nanpercentile(ages, 75))
@@ -304,7 +321,13 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
     if chart_id == "resolution_hist":
         res = _resolution_days(dff)
         if res.empty:
-            return [Insight("info", "Sin cierres con fechas suficientes", "Faltan created/resolved en cerradas para estimar tiempos de resolución.")]
+            return [
+                Insight(
+                    "info",
+                    "Sin cierres con fechas suficientes",
+                    "Faltan created/resolved en cerradas para estimar tiempos de resolución.",
+                )
+            ]
 
         median = float(np.nanmedian(res))
         p75 = float(np.nanpercentile(res, 75))
@@ -338,7 +361,9 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
             mask = closed["created"].notna() & closed["resolved"].notna()
             closed = closed[mask].copy()
             if not closed.empty:
-                closed["resolution_days"] = ((closed["resolved"] - closed["created"]).dt.total_seconds() / 86400.0).clip(lower=0.0)
+                closed["resolution_days"] = (
+                    (closed["resolved"] - closed["created"]).dt.total_seconds() / 86400.0
+                ).clip(lower=0.0)
                 closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
                 g = closed.groupby("priority")["resolution_days"].median().sort_values()
                 if len(g) >= 2:
@@ -356,7 +381,13 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
 
     if chart_id == "open_priority_pie":
         if open_df is None or open_df.empty or "priority" not in open_df.columns:
-            return [Insight("info", "Sin datos de prioridad", "No hay columna priority o no hay abiertas con los filtros actuales.")]
+            return [
+                Insight(
+                    "info",
+                    "Sin datos de prioridad",
+                    "No hay columna priority o no hay abiertas con los filtros actuales.",
+                )
+            ]
 
         pr = normalize_text_col(open_df["priority"], "(sin priority)")
         vc = pr.value_counts()
@@ -408,7 +439,13 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
 
     if chart_id == "open_status_bar":
         if open_df is None or open_df.empty or "status" not in open_df.columns:
-            return [Insight("info", "Sin estados", "No hay columna status o no hay abiertas con los filtros actuales.")]
+            return [
+                Insight(
+                    "info",
+                    "Sin estados",
+                    "No hay columna status o no hay abiertas con los filtros actuales.",
+                )
+            ]
 
         stc = normalize_text_col(open_df["status"], "(sin estado)")
         vc = stc.value_counts()
@@ -418,7 +455,11 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
         ages = _age_days(open_df)
         if not ages.empty:
             tmp = pd.DataFrame({"status": stc, "age": ages})
-            g = tmp.groupby("status").agg(count=("age", "size"), mean_age=("age", "mean")).sort_values(["count", "mean_age"], ascending=[False, False])
+            g = (
+                tmp.groupby("status")
+                .agg(count=("age", "size"), mean_age=("age", "mean"))
+                .sort_values(["count", "mean_age"], ascending=[False, False])
+            )
             if not g.empty:
                 cand = g.index[0]
                 out.append(
@@ -455,7 +496,9 @@ def build_chart_insights(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFr
         return out[:4]
 
     # Fallback
-    return [Insight("info", "Sin insights específicos", "No hay insights definidos para este gráfico.")]
+    return [
+        Insight("info", "Sin insights específicos", "No hay insights definidos para este gráfico.")
+    ]
 
 
 # ---------------------------------------------------------------------

@@ -63,14 +63,14 @@ def render(settings: Settings) -> None:
 
         if run_jira:
             with st.spinner("Ingestando Jira..."):
-                ok, msg, new_doc = ingest_jira(
+                ok, msg, new_jira_doc = ingest_jira(
                     settings=settings,
                     cookie_manual=jira_cookie_manual or None,
                     dry_run=False,
                     existing_doc=doc,
                 )
-            if ok and new_doc is not None:
-                save_issues_doc(settings.DATA_PATH, new_doc)
+            if ok and new_jira_doc is not None:
+                save_issues_doc(settings.DATA_PATH, new_jira_doc)
                 st.success(f"{msg}. Guardado en {settings.DATA_PATH}")
             else:
                 st.error(msg)
@@ -149,7 +149,7 @@ def render(settings: Settings) -> None:
 
         if run_helix:
             with st.spinner("Ingestando Helix... (puede tardar con proxy)"):
-                ok, msg, new_doc = ingest_helix(
+                ok, msg, new_helix_doc = ingest_helix(
                     helix_base_url=helix_base_url,
                     browser=helix_browser,
                     organization=helix_org,
@@ -159,10 +159,10 @@ def render(settings: Settings) -> None:
                     dry_run=False,
                     existing_doc=helix_doc,
                 )
-            if ok and new_doc is not None:
-                helix_repo.save(new_doc)
+            if ok and new_helix_doc is not None:
+                helix_repo.save(new_helix_doc)
                 st.success(f"{msg}. Guardado en {helix_path}")
-                helix_doc = new_doc
+                helix_doc = new_helix_doc
             else:
                 st.error(msg)
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.ui.components.filters import apply_filters, render_filters
 from bug_resolution_radar.ui.components.issues import render_issue_cards, render_issue_table
 from bug_resolution_radar.ui.dashboard.downloads import make_table_export_df, render_download_bar
-from bug_resolution_radar.ui.dashboard.state import get_filter_state
+
+MAX_CARDS_RENDER = 250
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -25,7 +25,8 @@ def render_issues_section(
 ) -> None:
     """Render the Issues section with:
     - Default view: Cards
-    - Always shows ALL filtered issues (no 'max issues' slider)
+    - Table always includes all filtered issues
+    - Cards are capped for render performance on large datasets
     - CSV download always enabled (both Cards & Table), using the Table export format
     """
     st.markdown(f"### {title}")
@@ -58,9 +59,15 @@ def render_issues_section(
         return
 
     if view == "Cards":
+        max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
+        if len(dff_show) > MAX_CARDS_RENDER:
+            st.caption(
+                f"Vista Cards optimizada: mostrando {max_cards}/{len(dff_show)}."
+                " Usa Tabla para ver todo el dataset."
+            )
         render_issue_cards(
             dff_show,
-            max_cards=int(len(dff_show)),
+            max_cards=max_cards,
             title="Issues (prioridad + última actualización)",
         )
         return
@@ -72,41 +79,19 @@ def render_issues_section(
 def render_issues_tab(
     dff: pd.DataFrame | None = None,
     *,
-    df_all: pd.DataFrame | None = None,
     key_prefix: str = "issues_tab",
 ) -> None:
     """
     Issues tab:
-    - Mismos filtros que en Tendencias (widgets reutilizados)
-    - Sin matriz (ahora está en Resumen)
-    - Renderiza Cards/Tabla sobre el dataframe filtrado por esos filtros
-
-    IMPORTANT:
-    - Para no “encoger” opciones de filtros, renderiza widgets sobre df_all (dataset completo).
-      Si no se proporciona df_all, cae a dff (compatibilidad con llamadas antiguas).
-    - render_filters usa key_prefix namespaced y sincroniza a keys canónicas:
-        filter_status / filter_priority / filter_assignee
-      para que get_filter_state() funcione y otros módulos (matriz/kanban) puedan escribir ahí.
+    - Consume el dataframe ya filtrado por el dashboard (single source of truth).
+    - Sin filtros locales para evitar doble cómputo/incoherencias entre tabs.
     """
     st.markdown("## 🧾 Issues")
 
-    base_df = (
-        df_all
-        if isinstance(df_all, pd.DataFrame)
-        else (dff if isinstance(dff, pd.DataFrame) else pd.DataFrame())
-    )
-    if base_df.empty:
+    dff_filtered = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
+    if dff_filtered.empty:
         st.info("No hay datos para mostrar.")
         return
 
-    # 1) Filtros (mismo componente que Tendencias), con keys namespaced para evitar duplicados
-    render_filters(base_df, key_prefix="issues")
-
-    st.markdown("---")
-
-    # 2) Aplicar filtros actuales (estado global canónico en session_state)
-    fs = get_filter_state()
-    dff_filtered = apply_filters(base_df, fs)
-
-    # 3) Render sección (export + cards/tabla)
+    # Render sección (export + cards/tabla)
     render_issues_section(dff_filtered, title="Issues (filtradas)", key_prefix=key_prefix)

@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+from typing import Any, List, Optional, Tuple
 from urllib.parse import urlparse
-from typing import Dict, List, Optional, Tuple
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import Settings
 from ..schema import IssuesDocument, NormalizedIssue
+from ..security import sanitize_cookie_header, validate_service_base_url
 from ..utils import now_iso
 from .jira_session import get_jira_session_cookie
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
-def _request(session: requests.Session, method: str, url: str, **kwargs) -> requests.Response:
+def _request(session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
     r = session.request(method, url, timeout=30, **kwargs)
     if r.status_code in (429, 503):
         raise RuntimeError("rate limited")
@@ -26,14 +27,18 @@ def ingest_jira(
     dry_run: bool = False,
     existing_doc: Optional[IssuesDocument] = None,
 ) -> Tuple[bool, str, Optional[IssuesDocument]]:
-    if not settings.JIRA_BASE_URL or not settings.JIRA_PROJECT_KEY:
-        return False, "Configura JIRA_BASE_URL y JIRA_PROJECT_KEY.", None
+    if not settings.JIRA_PROJECT_KEY:
+        return False, "Configura JIRA_PROJECT_KEY.", None
+
+    try:
+        base = validate_service_base_url(settings.JIRA_BASE_URL, service_name="Jira")
+    except ValueError as e:
+        return False, str(e), None
 
     jql = (settings.JIRA_JQL or "").strip()
     # Jira accepts whitespace, but sending a single-line JQL avoids issues with env/UI formatting.
     jql = jql.replace("\r", " ").replace("\n", " ")
     jql = jql or f'project = "{settings.JIRA_PROJECT_KEY}" ORDER BY updated DESC'
-    base = settings.JIRA_BASE_URL.rstrip("/")
     session = requests.Session()
     session.headers.update({"Accept": "application/json"})
 
@@ -41,7 +46,7 @@ def ingest_jira(
     if not base.endswith("/jira"):
         base_candidates.append(base + "/jira")
 
-    cookie = cookie_manual
+    cookie = sanitize_cookie_header(cookie_manual)
     if not cookie:
         try:
             host = urlparse(base).hostname or ""
@@ -50,10 +55,15 @@ def ingest_jira(
                 other = "edge" if settings.JIRA_BROWSER == "chrome" else "chrome"
                 cookie = get_jira_session_cookie(browser=other, host=host)
         except Exception as e:
-            return False, f"No se pudo leer cookie del navegador. Usa fallback manual. Detalle: {e}", None
+            return (
+                False,
+                f"No se pudo leer cookie del navegador. Usa fallback manual. Detalle: {e}",
+                None,
+            )
 
+    cookie = sanitize_cookie_header(cookie)
     if not cookie:
-        return False, "Cookie Jira vacía. Usa fallback manual.", None
+        return False, "Cookie Jira vacía o inválida. Usa fallback manual.", None
 
     session.headers.update({"Cookie": cookie})
 
@@ -71,7 +81,12 @@ def ingest_jira(
                 # 404 often means wrong API version or missing context path; keep trying.
                 if r.status_code == 404:
                     continue
-        return False, f"Error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. " f"Detalle: {r.text[:200]}", None
+        return (
+            False,
+            f"Error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. "
+            f"Detalle: {r.text[:200]}",
+            None,
+        )
 
     start_at = 0
     max_results = 100
@@ -88,8 +103,18 @@ def ingest_jira(
             "startAt": start_at,
             "maxResults": max_results,
             "fields": [
-                "summary","status","issuetype","priority","created","updated","resolutiondate",
-                "assignee","reporter","labels","components","resolution",
+                "summary",
+                "status",
+                "issuetype",
+                "priority",
+                "created",
+                "updated",
+                "resolutiondate",
+                "assignee",
+                "reporter",
+                "labels",
+                "components",
+                "resolution",
             ],
         }
         r = _request(session, "POST", f"{api_base}/search", json=payload)
@@ -113,24 +138,36 @@ def ingest_jira(
 
         for it in data.get("issues", []):
             fields = it.get("fields") or {}
-            priority = ((fields.get("priority") or {}).get("name", "") if fields.get("priority") else "").strip()
+            priority = (
+                (fields.get("priority") or {}).get("name", "") if fields.get("priority") else ""
+            ).strip()
             labels = fields.get("labels") or []
-            components = [c.get("name","") for c in (fields.get("components") or [])]
-            resolution = (fields.get("resolution") or {}).get("name", "") if fields.get("resolution") else ""
+            components = [c.get("name", "") for c in (fields.get("components") or [])]
+            resolution = (
+                (fields.get("resolution") or {}).get("name", "") if fields.get("resolution") else ""
+            )
             res_type = resolution
 
             issues.append(
                 NormalizedIssue(
-                    key=it.get("key",""),
-                    summary=fields.get("summary",""),
-                    status=((fields.get("status") or {}).get("name","") or "").strip(),
-                    type=((fields.get("issuetype") or {}).get("name","") or "").strip(),
+                    key=it.get("key", ""),
+                    summary=fields.get("summary", ""),
+                    status=((fields.get("status") or {}).get("name", "") or "").strip(),
+                    type=((fields.get("issuetype") or {}).get("name", "") or "").strip(),
                     priority=priority,
                     created=fields.get("created"),
                     updated=fields.get("updated"),
                     resolved=fields.get("resolutiondate"),
-                    assignee=(fields.get("assignee") or {}).get("displayName","") if fields.get("assignee") else "",
-                    reporter=(fields.get("reporter") or {}).get("displayName","") if fields.get("reporter") else "",
+                    assignee=(
+                        (fields.get("assignee") or {}).get("displayName", "")
+                        if fields.get("assignee")
+                        else ""
+                    ),
+                    reporter=(
+                        (fields.get("reporter") or {}).get("displayName", "")
+                        if fields.get("reporter")
+                        else ""
+                    ),
                     labels=labels,
                     components=components,
                     resolution=resolution,

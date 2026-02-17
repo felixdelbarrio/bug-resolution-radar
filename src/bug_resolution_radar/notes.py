@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, Optional
 
+
 class NotesStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -17,7 +18,9 @@ class NotesStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._notes, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.path.write_text(
+            json.dumps(self._notes, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def get(self, key: str) -> Optional[str]:
         return self._notes.get(key)

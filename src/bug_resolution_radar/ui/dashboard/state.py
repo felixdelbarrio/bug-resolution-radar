@@ -6,6 +6,13 @@ from typing import List, Optional
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.ui.common import open_issues_only
+
+# Canonical keys shared across dashboard modules/components.
+FILTER_STATUS_KEY = "filter_status"
+FILTER_PRIORITY_KEY = "filter_priority"
+FILTER_ASSIGNEE_KEY = "filter_assignee"
+
 
 # -------------------------
 # Types
@@ -14,7 +21,6 @@ import streamlit as st
 class FilterState:
     status: List[str]
     priority: List[str]
-    itype: List[str]
     assignee: List[str]
 
 
@@ -27,10 +33,9 @@ def get_filter_state() -> FilterState:
     NO renderiza widgets (eso lo hace render_filters en components/filters.py).
     """
     return FilterState(
-        status=list(st.session_state.get("filter_status") or []),
-        priority=list(st.session_state.get("filter_priority") or []),
-        itype=list(st.session_state.get("filter_type") or []),
-        assignee=list(st.session_state.get("filter_assignee") or []),
+        status=list(st.session_state.get(FILTER_STATUS_KEY) or []),
+        priority=list(st.session_state.get(FILTER_PRIORITY_KEY) or []),
+        assignee=list(st.session_state.get(FILTER_ASSIGNEE_KEY) or []),
     )
 
 
@@ -41,15 +46,14 @@ def has_any_filter_active(fs: Optional[FilterState] = None) -> bool:
     """
     if fs is None:
         fs = get_filter_state()
-    return bool(fs.status or fs.priority or fs.itype or fs.assignee)
+    return bool(fs.status or fs.priority or fs.assignee)
 
 
 def clear_all_filters() -> None:
     """Limpia TODOS los filtros globales (session_state)."""
-    st.session_state["filter_status"] = []
-    st.session_state["filter_priority"] = []
-    st.session_state["filter_type"] = []
-    st.session_state["filter_assignee"] = []
+    st.session_state[FILTER_STATUS_KEY] = []
+    st.session_state[FILTER_PRIORITY_KEY] = []
+    st.session_state[FILTER_ASSIGNEE_KEY] = []
 
 
 # -------------------------
@@ -60,8 +64,4 @@ def open_only(df: pd.DataFrame) -> pd.DataFrame:
     Devuelve solo abiertas si existe columna 'resolved' (resolved isna()).
     Si no existe, devuelve copia del df.
     """
-    if df is None:
-        return df
-    if "resolved" in df.columns:
-        return df[df["resolved"].isna()].copy()
-    return df.copy()
+    return open_issues_only(df)

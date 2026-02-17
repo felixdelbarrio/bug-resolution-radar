@@ -24,7 +24,13 @@ def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[s
     # Fallback por orden recomendado
     fallback = [
         x
-        for x in ["timeseries", "age_buckets", "open_status_bar", "open_priority_pie", "resolution_hist"]
+        for x in [
+            "timeseries",
+            "age_buckets",
+            "open_status_bar",
+            "open_priority_pie",
+            "resolution_hist",
+        ]
         if x in registry_ids
     ]
 
@@ -81,7 +87,9 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
                     fig.update_layout(
                         margin=dict(l=10, r=10, t=35, b=10),
                         height=320,
-                        legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="left", x=0),
+                        legend=dict(
+                            orientation="h", yanchor="bottom", y=-0.25, xanchor="left", x=0
+                        ),
                     )
                     st.plotly_chart(fig, use_container_width=True)
 

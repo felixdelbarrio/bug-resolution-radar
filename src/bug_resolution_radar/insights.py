@@ -3,10 +3,8 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Iterable, Optional
 
 import pandas as pd
-
 
 _WORD_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
@@ -111,21 +109,33 @@ def find_similar_issue_clusters(
     if df.empty or "summary" not in df.columns or "key" not in df.columns:
         return []
 
-    work = df.copy()
-    if only_open and "resolved" in work.columns:
-        work = work[work["resolved"].isna()]
+    cols = ["summary", "key"]
+    if "priority" in df.columns:
+        cols.append("priority")
+    if "status" in df.columns:
+        cols.append("status")
 
-    work = work.dropna(subset=["summary", "key"]).head(max_issues)
+    work = df.loc[:, cols]
+    if only_open and "resolved" in df.columns:
+        work = work.loc[df["resolved"].isna()]
+
+    work = work.dropna(subset=["summary", "key"])
+    if len(work) > max_issues:
+        work = work.head(max_issues)
     if work.empty:
         return []
 
     summaries = work["summary"].astype(str).tolist()
     keys = work["key"].astype(str).tolist()
     priorities = (
-        work["priority"].astype(str).fillna("").tolist() if "priority" in work.columns else [""] * len(work)
+        work["priority"].fillna("").astype(str).tolist()
+        if "priority" in work.columns
+        else [""] * len(work)
     )
     statuses = (
-        work["status"].astype(str).fillna("").tolist() if "status" in work.columns else [""] * len(work)
+        work["status"].fillna("").astype(str).tolist()
+        if "status" in work.columns
+        else [""] * len(work)
     )
 
     toksets = [_tokenize_summary(s) for s in summaries]
@@ -191,4 +201,3 @@ def find_similar_issue_clusters(
 
     clusters.sort(key=lambda c: c.size, reverse=True)
     return clusters
-

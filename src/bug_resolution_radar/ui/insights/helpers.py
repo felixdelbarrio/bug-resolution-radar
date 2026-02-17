@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple
 import pandas as pd
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.common import normalize_text_col, open_issues_only
 
 
 # -------------------------
@@ -21,9 +21,7 @@ def col_exists(df: pd.DataFrame, col: str) -> bool:
 
 
 def open_only(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
-    return df[df["resolved"].isna()].copy() if "resolved" in df.columns else df.copy()
+    return open_issues_only(df)
 
 
 def as_naive_utc(ts: pd.Series) -> pd.Series:
@@ -60,63 +58,63 @@ def build_issue_lookup(
     """
     key_to_url: Dict[str, str] = {}
     key_to_meta: Dict[str, Tuple[str, str, str]] = {}
+    jira_base = (getattr(settings, "JIRA_BASE_URL", "") or "").strip().rstrip("/")
 
     if dff is None or dff.empty or not col_exists(dff, "key"):
-        # aun así devolvemos jira_base si existe
-        jira_base = (getattr(settings, "JIRA_BASE_URL", "") or "").strip().rstrip("/")
         if jira_base:
             key_to_url["__JIRA_BASE__"] = jira_base
         return key_to_url, key_to_meta
 
-    df2 = dff.copy()
+    cols = ["key"]
+    for c in ("url", "status", "priority", "summary"):
+        if c in dff.columns:
+            cols.append(c)
 
-    if col_exists(df2, "status"):
-        df2["status"] = normalize_text_col(df2["status"], "(sin estado)")
-    if col_exists(df2, "priority"):
-        df2["priority"] = normalize_text_col(df2["priority"], "(sin priority)")
-    if col_exists(df2, "summary"):
-        df2["summary"] = df2["summary"].fillna("").astype(str)
+    df2 = dff.loc[:, cols].copy(deep=False)
+    keys = df2["key"].fillna("").astype(str).str.strip()
+    valid = keys != ""
+    if not bool(valid.any()):
+        if jira_base:
+            key_to_url["__JIRA_BASE__"] = jira_base
+        return key_to_url, key_to_meta
 
-    # url mapping (si existe url en ingest)
-    if col_exists(df2, "url"):
-        tmp = df2[["key", "url"]].dropna()
-        if not tmp.empty:
-            for _, r in tmp.iterrows():
-                k = str(r.get("key", "")).strip()
-                u = str(r.get("url", "")).strip()
-                if k and u:
-                    key_to_url[k] = u
+    df2 = df2.loc[valid].copy()
+    df2["key"] = keys.loc[valid]
+    df2 = df2.drop_duplicates(subset=["key"], keep="first")
 
-    # meta mapping (status, priority, summary)
-    meta_cols = ["key"]
-    if col_exists(df2, "status"):
-        meta_cols.append("status")
-    if col_exists(df2, "priority"):
-        meta_cols.append("priority")
-    if col_exists(df2, "summary"):
-        meta_cols.append("summary")
+    n = len(df2)
+    status = (
+        normalize_text_col(df2["status"], "(sin estado)").astype(str)
+        if "status" in df2.columns
+        else pd.Series(["(sin estado)"] * n, index=df2.index, dtype=str)
+    )
+    priority = (
+        normalize_text_col(df2["priority"], "(sin priority)").astype(str)
+        if "priority" in df2.columns
+        else pd.Series(["(sin priority)"] * n, index=df2.index, dtype=str)
+    )
+    summary = (
+        df2["summary"].fillna("").astype(str)
+        if "summary" in df2.columns
+        else pd.Series([""] * n, index=df2.index, dtype=str)
+    )
 
-    tmpm = df2[meta_cols].dropna(subset=["key"])
-    if not tmpm.empty:
-        tmpm = tmpm.drop_duplicates(subset=["key"], keep="first")
-        for _, r in tmpm.iterrows():
-            k = str(r.get("key", "")).strip()
-            if not k:
-                continue
-            stt = str(r.get("status", "(sin estado)")) if "status" in tmpm.columns else "(sin estado)"
-            pr = str(r.get("priority", "(sin priority)")) if "priority" in tmpm.columns else "(sin priority)"
-            summ = str(r.get("summary", "")) if "summary" in tmpm.columns else ""
-            key_to_meta[k] = (stt, pr, summ)
+    key_vals = df2["key"].to_list()
+    key_to_meta = {
+        k: (stt, pr, summ)
+        for k, stt, pr, summ in zip(
+            key_vals, status.to_list(), priority.to_list(), summary.to_list()
+        )
+    }
 
-    jira_base = (getattr(settings, "JIRA_BASE_URL", "") or "").strip().rstrip("/")
+    if "url" in df2.columns:
+        urls = df2["url"].fillna("").astype(str).str.strip()
+        key_to_url.update({k: u for k, u in zip(key_vals, urls.to_list()) if u})
+
     if jira_base:
         key_to_url["__JIRA_BASE__"] = jira_base
-
-        # backfill URLs si no vinieron en ingest
-        # (no pisa urls existentes)
         for k in key_to_meta.keys():
-            if k not in key_to_url:
-                key_to_url[k] = f"{jira_base}/browse/{k}"
+            key_to_url.setdefault(k, f"{jira_base}/browse/{k}")
 
     return key_to_url, key_to_meta
 
