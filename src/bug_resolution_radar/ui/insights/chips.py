@@ -11,7 +11,6 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 
-
 _NEUTRAL_CHIP_STYLE = (
     "color:#44546B; border:1px solid rgba(17,25,45,0.16); background:#F4F6F9; "
     "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"

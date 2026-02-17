@@ -104,6 +104,20 @@ def inject_bbva_css() -> None:
           }
 
           /* Top nav compact spacing */
+          .st-key-workspace_scope_bar {
+            margin-top: -0.02rem;
+            margin-bottom: -0.34rem;
+          }
+          .st-key-workspace_scope_bar [data-testid="stHorizontalBlock"] {
+            align-items: end !important;
+          }
+          .st-key-workspace_scope_bar [data-testid="stWidgetLabel"] p {
+            font-size: 0.84rem !important;
+            margin-bottom: 0.12rem !important;
+          }
+          .st-key-workspace_scope_bar [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+            min-height: 2.1rem !important;
+          }
           div[data-testid="stSegmentedControl"] {
             margin-top: 0.02rem;
             margin-bottom: 0.08rem !important;

@@ -75,8 +75,8 @@ El proyecto usa `.env` (puedes partir de `.env.example`).
 Variables más relevantes:
 
 - App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`.
-- Jira: `JIRA_BASE_URL`, `JIRA_PROJECT_KEY`, `JIRA_JQL`, `JIRA_BROWSER`.
-- Helix: `HELIX_BASE_URL`, `HELIX_ORGANIZATION`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
+- Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_BROWSER`.
+- Helix: `HELIX_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
 - KPIs: `KPI_FORTNIGHT_DAYS`, `KPI_OPEN_AGE_X_DAYS`, `KPI_AGE_BUCKETS`.
 
 ## Calidad de código y cobertura
@@ -120,4 +120,3 @@ Nota: el workflow de CodeQL está configurado para no fallar si el repositorio n
 - Issues: `data/issues.json`
 - Dump Helix: `data/helix_dump.json`
 - Notas: `data/notes.json`
-

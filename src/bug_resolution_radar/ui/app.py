@@ -4,7 +4,13 @@ from typing import Dict, List
 
 import streamlit as st
 
-from bug_resolution_radar.config import ensure_env, load_settings
+from bug_resolution_radar.config import (
+    Settings,
+    all_configured_sources,
+    ensure_env,
+    load_settings,
+    supported_countries,
+)
 from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
@@ -26,6 +32,29 @@ def _dashboard_labels() -> Dict[str, str]:
         "insights": "Insights",
         "notes": "Notas",
     }
+
+
+def _ensure_scope_state(settings: Settings) -> None:
+    countries = supported_countries(settings)
+    default_country = countries[0] if countries else "México"
+
+    if "workspace_country" not in st.session_state:
+        st.session_state["workspace_country"] = default_country
+    if str(st.session_state.get("workspace_country") or "") not in countries:
+        st.session_state["workspace_country"] = default_country
+
+    selected_country = str(st.session_state.get("workspace_country") or default_country)
+    source_rows = all_configured_sources(settings, country=selected_country)
+    source_ids = [
+        str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
+    ]
+
+    if "workspace_source_id" not in st.session_state:
+        st.session_state["workspace_source_id"] = source_ids[0] if source_ids else ""
+    if source_ids and str(st.session_state.get("workspace_source_id") or "") not in source_ids:
+        st.session_state["workspace_source_id"] = source_ids[0]
+    if not source_ids:
+        st.session_state["workspace_source_id"] = ""
 
 
 def _ensure_nav_state() -> None:
@@ -99,6 +128,46 @@ def _render_workspace_header() -> None:
         )
 
 
+def _render_workspace_scope(settings: Settings) -> None:
+    countries = supported_countries(settings)
+    if not countries:
+        return
+
+    c_country, c_source = st.columns([1.0, 2.0], gap="small")
+    with c_country:
+        selected_country = st.selectbox("País", options=countries, key="workspace_country")
+    source_rows = all_configured_sources(settings, country=selected_country)
+    source_ids = [
+        str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
+    ]
+    source_label_by_id: Dict[str, str] = {}
+    for src in source_rows:
+        sid = str(src.get("source_id") or "").strip()
+        alias = str(src.get("alias") or "").strip()
+        source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
+        if sid:
+            source_label_by_id[sid] = f"{alias} · {source_type}"
+
+    with c_source:
+        if source_ids:
+            if str(st.session_state.get("workspace_source_id") or "") not in source_ids:
+                st.session_state["workspace_source_id"] = source_ids[0]
+            st.selectbox(
+                "Origen",
+                options=source_ids,
+                key="workspace_source_id",
+                format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+            )
+        else:
+            st.selectbox(
+                "Origen",
+                options=["__none__"],
+                key="workspace_source_id_aux",
+                format_func=lambda _: "Sin orígenes configurados",
+                disabled=True,
+            )
+
+
 def main() -> None:
     ensure_env()
     settings = load_settings()
@@ -109,7 +178,10 @@ def main() -> None:
 
     inject_bbva_css()
     render_hero(settings.APP_TITLE)
+    _ensure_scope_state(settings)
     _ensure_nav_state()
+    with st.container(key="workspace_scope_bar"):
+        _render_workspace_scope(settings)
     with st.container(key="workspace_nav_bar"):
         _render_workspace_header()
 

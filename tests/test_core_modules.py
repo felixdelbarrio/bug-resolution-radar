@@ -98,3 +98,27 @@ def test_semantic_color_maps_include_flow_signals() -> None:
     assert smap["created"] == "#E85D63"
     assert smap["open"] == "#FBBF24"
     assert smap["closed"] == "#22A447"
+
+
+def test_multi_country_sources_parsing_and_ids() -> None:
+    settings = cfg.Settings(
+        SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
+        JIRA_SOURCES_JSON='[{"country":"Mexico","alias":"Core MX","jql":"status = Open"}]',
+        HELIX_SOURCES_JSON=(
+            '[{"country":"España","alias":"SmartIT ES","base_url":"https://helix.example.com",'
+            '"organization":"ORG-ES","browser":"edge","proxy":"","ssl_verify":"true"}]'
+        ),
+    )
+
+    countries = cfg.supported_countries(settings)
+    assert countries == ["México", "España", "Peru", "Colombia", "Argentina"]
+
+    jira_cfg = cfg.jira_sources(settings)
+    helix_cfg = cfg.helix_sources(settings)
+    assert len(jira_cfg) == 1
+    assert len(helix_cfg) == 1
+
+    assert jira_cfg[0]["country"] == "México"
+    assert jira_cfg[0]["source_id"] == "jira:mexico:core-mx"
+    assert helix_cfg[0]["country"] == "España"
+    assert helix_cfg[0]["source_id"] == "helix:espana:smartit-es"

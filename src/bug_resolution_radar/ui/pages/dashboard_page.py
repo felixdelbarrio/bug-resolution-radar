@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final, List
 
+import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
@@ -19,7 +20,6 @@ from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
 from bug_resolution_radar.ui.dashboard.overview import render_overview_kpis, render_overview_tab
 from bug_resolution_radar.ui.dashboard.trends import render_trends_tab
 from bug_resolution_radar.ui.pages.insights_page import render as render_insights_page
-
 
 DASHBOARD_SECTIONS: Final[List[str]] = [
     "overview",
@@ -40,6 +40,21 @@ def normalize_dashboard_section(section: str | None) -> str:
     return s if s in DASHBOARD_SECTIONS else "overview"
 
 
+def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    scoped = df.copy()
+    selected_country = str(st.session_state.get("workspace_country") or "").strip()
+    selected_source_id = str(st.session_state.get("workspace_source_id") or "").strip()
+
+    if selected_country and "country" in scoped.columns:
+        scoped = scoped[scoped["country"].fillna("").astype(str).eq(selected_country)].copy()
+    if selected_source_id and "source_id" in scoped.columns:
+        scoped = scoped[scoped["source_id"].fillna("").astype(str).eq(selected_source_id)].copy()
+    return scoped
+
+
 def render(settings: Settings, *, active_section: str = "overview") -> str:
     section = normalize_dashboard_section(active_section)
 
@@ -48,8 +63,9 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
 
     # Load dataframe (cached by file mtime to minimize rerun cost)
     df = load_issues_df(settings.DATA_PATH)
+    scoped_df = _apply_workspace_source_scope(df)
 
-    if df.empty:
+    if scoped_df.empty:
         st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
         return section
 
@@ -59,9 +75,9 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
 
     # Filters only in Issues/Kanban/Trends (single canonical state for all sections).
     if section in {"issues", "kanban", "trends"}:
-        render_filters(df, key_prefix="dashboard")
+        render_filters(scoped_df, key_prefix="dashboard")
 
-    ctx = build_dashboard_data_context(df_all=df, settings=settings)
+    ctx = build_dashboard_data_context(df_all=scoped_df, settings=settings)
 
     if section == "overview":
         # Summary + matrix + KPIs (KPIs debajo de la matriz).

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from ..config import Settings
+from ..config import Settings, build_source_id, supported_countries
 from ..schema import IssuesDocument, NormalizedIssue
 from ..security import sanitize_cookie_header, validate_service_base_url
 from ..utils import now_iso
@@ -21,23 +21,55 @@ def _request(session: requests.Session, method: str, url: str, **kwargs: Any) ->
     return r
 
 
+def _resolve_source_scope(
+    settings: Settings, source: Optional[Dict[str, str]]
+) -> Tuple[str, str, str, str]:
+    countries = supported_countries(settings)
+    fallback_country = countries[0] if countries else "México"
+
+    if source:
+        country = str(source.get("country") or "").strip() or fallback_country
+        alias = str(source.get("alias") or "").strip() or "Jira principal"
+        jql = str(source.get("jql") or "").strip()
+        source_id = str(source.get("source_id") or "").strip() or build_source_id(
+            "jira", country, alias
+        )
+        return country, alias, source_id, jql
+
+    alias = "Jira principal"
+    country = fallback_country
+    jql = str(settings.JIRA_JQL or "").strip()
+    source_id = build_source_id("jira", country, alias)
+    return country, alias, source_id, jql
+
+
+def _merge_key(issue: NormalizedIssue) -> str:
+    sid = str(issue.source_id or "").strip().lower()
+    key = str(issue.key or "").strip().upper()
+    if sid:
+        return f"{sid}::{key}"
+    return key
+
+
 def ingest_jira(
     settings: Settings,
     dry_run: bool = False,
     existing_doc: Optional[IssuesDocument] = None,
+    source: Optional[Dict[str, str]] = None,
 ) -> Tuple[bool, str, Optional[IssuesDocument]]:
-    if not settings.JIRA_PROJECT_KEY:
-        return False, "Configura JIRA_PROJECT_KEY.", None
+    country, alias, source_id, jql = _resolve_source_scope(settings, source)
+    source_label = f"{country} · {alias}"
+
+    if not jql:
+        return False, f"{source_label}: configura JQL obligatorio para la fuente Jira.", None
 
     try:
         base = validate_service_base_url(settings.JIRA_BASE_URL, service_name="Jira")
     except ValueError as e:
-        return False, str(e), None
+        return False, f"{source_label}: {e}", None
 
-    jql = (settings.JIRA_JQL or "").strip()
     # Jira accepts whitespace, but sending a single-line JQL avoids issues with env/UI formatting.
     jql = jql.replace("\r", " ").replace("\n", " ")
-    jql = jql or f'project = "{settings.JIRA_PROJECT_KEY}" ORDER BY updated DESC'
     session = requests.Session()
     session.headers.update({"Accept": "application/json"})
 
@@ -51,14 +83,14 @@ def ingest_jira(
     except Exception as e:
         return (
             False,
-            f"No se pudo leer cookie de Jira en el navegador '{settings.JIRA_BROWSER}'. Detalle: {e}",
+            f"{source_label}: no se pudo leer cookie de Jira en '{settings.JIRA_BROWSER}'. Detalle: {e}",
             None,
         )
     cookie = sanitize_cookie_header(cookie)
     if not cookie:
         return (
             False,
-            f"No se encontró una cookie Jira válida en el navegador '{settings.JIRA_BROWSER}'.",
+            f"{source_label}: no se encontró cookie Jira válida en '{settings.JIRA_BROWSER}'.",
             None,
         )
 
@@ -73,14 +105,14 @@ def ingest_jira(
                 if r.status_code == 200:
                     me = r.json()
                     who = me.get("displayName") or me.get("name") or "(unknown)"
-                    return True, f"OK Jira: autenticado como {who}", None
+                    return True, f"{source_label}: OK Jira autenticado como {who}", None
                 attempts.append(f"{api_ver}@{b} => {r.status_code}")
                 # 404 often means wrong API version or missing context path; keep trying.
                 if r.status_code == 404:
                     continue
         return (
             False,
-            f"Error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. "
+            f"{source_label}: error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. "
             f"Detalle: {r.text[:200]}",
             None,
         )
@@ -130,7 +162,11 @@ def ingest_jira(
                 if found:
                     break
         if r.status_code != 200:
-            return False, f"Error Jira search ({r.status_code}): {r.text[:200]}", None
+            return (
+                False,
+                f"{source_label}: error Jira search ({r.status_code}): {r.text[:200]}",
+                None,
+            )
         data = r.json()
 
         for it in data.get("issues", []):
@@ -170,6 +206,10 @@ def ingest_jira(
                     resolution=resolution,
                     resolution_type=res_type,
                     url=f"{base}/browse/{it.get('key','')}",
+                    country=country,
+                    source_type="jira",
+                    source_alias=alias,
+                    source_id=source_id,
                 )
             )
 
@@ -181,12 +221,15 @@ def ingest_jira(
     doc.schema_version = "1.0"
     doc.ingested_at = now_iso()
     doc.jira_base_url = base
-    doc.project_key = settings.JIRA_PROJECT_KEY
     doc.query = jql
 
-    merged = {i.key: i for i in doc.issues}
+    merged = {_merge_key(i): i for i in doc.issues}
     for i in issues:
-        merged[i.key] = i
+        merged[_merge_key(i)] = i
     doc.issues = list(merged.values())
 
-    return True, f"Ingesta Jira OK: {len(issues)} issues (merge total {len(doc.issues)})", doc
+    return (
+        True,
+        f"{source_label}: ingesta Jira OK ({len(issues)} issues, merge total {len(doc.issues)}).",
+        doc,
+    )

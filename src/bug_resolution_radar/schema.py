@@ -27,6 +27,10 @@ class NormalizedIssue(BaseModel):
     resolution: str = ""
     resolution_type: str = ""
     url: str = ""
+    country: str = ""
+    source_type: str = "jira"
+    source_alias: str = ""
+    source_id: str = ""
 
 
 class IssuesDocument(BaseModel):
@@ -35,7 +39,6 @@ class IssuesDocument(BaseModel):
     schema_version: str = "1.0"
     ingested_at: str = ""
     jira_base_url: str = ""
-    project_key: str = ""
     query: str = ""
     issues: List[NormalizedIssue] = Field(default_factory=list)
 
@@ -45,7 +48,6 @@ class IssuesDocument(BaseModel):
             schema_version="1.0",
             ingested_at=datetime.now(timezone.utc).isoformat(),
             jira_base_url="",
-            project_key="",
             query="",
             issues=[],
         )
@@ -66,6 +68,9 @@ class HelixWorkItem(BaseModel):
     target_date: Optional[str] = None
     last_modified: Optional[str] = None
     url: str = ""
+    country: str = ""
+    source_alias: str = ""
+    source_id: str = ""
 
 
 class HelixDocument(BaseModel):
