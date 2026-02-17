@@ -18,6 +18,9 @@ class HelixWorkItem(BaseModel):
     target_date: Optional[str] = None
     last_modified: Optional[str] = None
     url: str = ""
+    country: str = ""
+    source_alias: str = ""
+    source_id: str = ""
 
 
 class HelixDocument(BaseModel):

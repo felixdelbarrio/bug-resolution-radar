@@ -14,7 +14,6 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 
-
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
 
 

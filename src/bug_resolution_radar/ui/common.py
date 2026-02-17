@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
-import re
 from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
