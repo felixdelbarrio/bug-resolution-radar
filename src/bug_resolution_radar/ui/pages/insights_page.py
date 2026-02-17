@@ -50,19 +50,34 @@ def render(
         unsafe_allow_html=True,
     )
 
-    # Tabs internas (no confundir con tabs del dashboard)
-    t1, t2, t3, t4 = st.tabs(
-        ["🔝 Top tópicos", "🧩 Duplicados", "👤 Personas", "🛠️ Salud operativa"]
+    views = {
+        "top_topics": "Top tópicos",
+        "duplicates": "Duplicados",
+        "people": "Personas",
+        "ops_health": "Salud operativa",
+    }
+    default_view = "top_topics"
+    jump_view = str(st.session_state.pop("__jump_to_insights_tab", "") or "").strip()
+    if jump_view in views:
+        st.session_state["insights_inner_tab"] = jump_view
+    if str(st.session_state.get("insights_inner_tab") or "") not in views:
+        st.session_state["insights_inner_tab"] = default_view
+
+    picked = st.segmented_control(
+        "Vista Insights",
+        options=list(views.keys()),
+        format_func=lambda k: views.get(str(k), str(k)),
+        key="insights_inner_tab",
+        selection_mode="single",
+        label_visibility="collapsed",
     )
+    view = str(picked or st.session_state.get("insights_inner_tab") or default_view)
 
-    with t1:
+    if view == "top_topics":
         render_top_topics_tab(settings=settings, dff_filtered=dff, kpis=kpis)
-
-    with t2:
+    elif view == "duplicates":
         render_duplicates_tab(settings=settings, dff_filtered=dff)
-
-    with t3:
+    elif view == "people":
         render_backlog_people_tab(settings=settings, dff_filtered=dff)
-
-    with t4:
+    else:
         render_ops_health_tab(settings=settings, dff_filtered=dff)

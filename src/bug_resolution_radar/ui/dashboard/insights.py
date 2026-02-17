@@ -202,7 +202,7 @@ def build_chart_insights(
                 msg += "La entrada supera a la salida: si esto se mantiene, el backlog crecerá."
             out.append(Insight(level, "Balance entrada/salida (14d)", msg))
 
-        # 2) Runway / days-to-clear at current pace (30d)
+        # 2) Tiempo estimado para vaciar abiertas al ritmo actual (30d)
         open_now = int(len(open_df)) if open_df is not None else 0
         daily_close = (resolved_30 / 30.0) if resolved_30 > 0 else 0.0
         if daily_close > 0:
@@ -211,10 +211,10 @@ def build_chart_insights(
             out.append(
                 Insight(
                     level,
-                    "Runway estimado del backlog",
+                    "Tiempo estimado para vaciar abiertas",
                     f"Al ritmo de cierre de los últimos 30 días (~{daily_close:.2f}/día), "
                     f"el backlog abierto actual ({open_now}) tardaría ~{_fmt_days(runway)} en vaciarse si no entrara nada nuevo. "
-                    "Útil para negociar capacidad / WIP y expectativas.",
+                    "Útil para planificar capacidad y expectativas con negocio.",
                 )
             )
         else:
@@ -222,8 +222,8 @@ def build_chart_insights(
                 Insight(
                     "warn",
                     "Ritmo de cierre insuficiente",
-                    "No hay cierres suficientes en 30 días para estimar runway. "
-                    "Esto suele indicar falta de throughput o bien que el filtro actual deja pocos cerrados.",
+                    "No hay cierres suficientes en 30 días para estimar el tiempo de vaciado. "
+                    "Esto suele indicar poco ritmo de cierre o que el filtro actual deja muy pocas cerradas.",
                 )
             )
 
@@ -286,9 +286,10 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "Edad típica vs cola larga",
-                f"Mediana: {_fmt_days(p50)} · P75: {_fmt_days(p75)} · P90: {_fmt_days(p90)}. "
-                "El P90 te dice cuánto tiempo tardan en moverse el 10% más estancado: perfecto para poner foco en bloqueos reales.",
+                "Antigüedad normal vs antigüedad atascada",
+                f"La mitad de los casos tarda alrededor de {_fmt_days(p50)} en moverse, "
+                f"pero los más atascados llegan a {_fmt_days(p90)}. "
+                "Este tramo final suele concentrar bloqueos reales.",
             )
         )
         out.append(
@@ -336,9 +337,9 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "SLA real (estadísticos robustos)",
-                f"Mediana: {_fmt_days(median)} · P75: {_fmt_days(p75)} · P90: {_fmt_days(p90)}. "
-                "Para gestión, P75 suele ser mejor objetivo que la media (menos sensible a outliers).",
+                "Tiempo real de resolución",
+                f"Resolución habitual: {_fmt_days(median)} · casos lentos: {_fmt_days(p90)}. "
+                "Si bajas el tiempo de los casos lentos, la experiencia del cliente mejora más rápido.",
             )
         )
 
@@ -347,8 +348,8 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "Cola de resolución (donde se pierde el tiempo)",
-                f"El {_fmt_pct(very_slow)} de los cierres está por encima del P90; ahí suelen vivir dependencias externas, falta de ownership o tickets mal definidos. "
+                "Casos de cierre lento",
+                f"El {_fmt_pct(very_slow)} de los cierres está en el tramo más lento; ahí suelen vivir dependencias externas, falta de ownership o tickets mal definidos. "
                 "Acción: etiqueta esos casos y crea una categoría de causa raíz (blocked/dependency/spec).",
             )
         )
@@ -373,8 +374,8 @@ def build_chart_insights(
                         Insight(
                             "warn" if priority_rank(slowest) <= priority_rank(fastest) else "info",
                             "Diferencial por prioridad",
-                            f"Mediana más rápida: **{fastest}** ({_fmt_days(g.iloc[0])}) · más lenta: **{slowest}** ({_fmt_days(g.iloc[-1])}). "
-                            "Si una prioridad alta está entre las más lentas, indica fricción (dependencias, falta de definición o WIP excesivo).",
+                            f"La prioridad más rápida es **{fastest}** ({_fmt_days(g.iloc[0])}) y la más lenta **{slowest}** ({_fmt_days(g.iloc[-1])}). "
+                            "Si una prioridad alta está entre las más lentas, indica fricción (dependencias, falta de definición o demasiados casos en curso).",
                         )
                     )
         return out[:4]
@@ -476,9 +477,9 @@ def build_chart_insights(
             out.append(
                 Insight(
                     "warn" if share >= 0.45 else "info",
-                    "WIP concentrado",
+                    "Carga concentrada en un estado",
                     f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
-                    "Si un estado supera ~45%, suele ser síntoma de WIP sin límite o de un paso del flujo que no escala.",
+                    "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
                 )
             )
 
@@ -493,6 +494,32 @@ def build_chart_insights(
                 "Buen equilibrio: 6–10 estados que representen decisiones, no micro-tareas.",
             )
         )
+
+        accepted_cnt = int((stc == "Accepted").sum())
+        rtd_cnt = int((stc == "Ready to deploy").sum())
+        deployed_cnt = int((stc == "Deployed").sum())
+        if accepted_cnt > 0:
+            rtd_conv = float(rtd_cnt) / float(accepted_cnt)
+            if rtd_conv < 0.35:
+                out.append(
+                    Insight(
+                        "warn",
+                        "Atasco de Accepted a Ready to deploy",
+                        f"Hay {_fmt_int(accepted_cnt)} en **Accepted** y {_fmt_int(rtd_cnt)} en **Ready to deploy** "
+                        f"(conversión {_fmt_pct(rtd_conv)}). Acción: define tiempo máximo de salida de Accepted y revisión diaria de bloqueos.",
+                    )
+                )
+        if rtd_cnt > 0:
+            dep_conv = float(deployed_cnt) / float(rtd_cnt)
+            if dep_conv < 0.70:
+                out.append(
+                    Insight(
+                        "warn",
+                        "Embudo en despliegue",
+                        f"Hay {_fmt_int(rtd_cnt)} en **Ready to deploy** y {_fmt_int(deployed_cnt)} en **Deployed** "
+                        f"(conversión {_fmt_pct(dep_conv)}). Acción: revisar capacidad de release y ventanas de despliegue.",
+                    )
+                )
         return out[:4]
 
     # Fallback

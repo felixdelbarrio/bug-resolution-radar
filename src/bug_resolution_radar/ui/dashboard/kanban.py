@@ -7,7 +7,13 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.ui.common import normalize_text_col, priority_rank, status_color
+from bug_resolution_radar.ui.common import (
+    chip_style_from_color,
+    normalize_text_col,
+    priority_color,
+    priority_rank,
+    status_color,
+)
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
@@ -83,18 +89,71 @@ def _inject_kanban_item_css() -> None:
     st.markdown(
         """
         <style>
-          .kan-items { display: grid; gap: 8px; }
-          .kan-item { margin: 2px 0; }
-          .kan-item-key a { font-weight: 700; text-decoration: none; }
+          .kan-items { display: grid; gap: 10px; }
+          .kan-item {
+            margin: 2px 0;
+            border: 1px solid rgba(17,25,45,0.12);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.56);
+            padding: 0.50rem 0.58rem;
+            max-width: 100%;
+            overflow: hidden;
+          }
+          .kan-item:hover {
+            border-color: rgba(17,25,45,0.18);
+            box-shadow: 0 2px 10px rgba(17,25,45,0.05);
+          }
+          .kan-item-key a {
+            display: block;
+            font-weight: 800;
+            text-decoration: none;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .kan-item-meta {
+            display: flex;
+            gap: 0.30rem;
+            flex-wrap: wrap;
+            margin-top: 0.34rem;
+            min-width: 0;
+          }
+          .kan-chip {
+            display: inline-flex;
+            align-items: center;
+            max-width: 100%;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
           .kan-item-summary {
-            opacity: 0.85;
-            font-size: 0.85rem;
-            line-height: 1.1rem;
+            margin-top: 0.30rem;
+            opacity: 0.90;
+            font-size: 0.90rem;
+            line-height: 1.26rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
           }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _neutral_chip_style() -> str:
+    return (
+        "color:#44546B; border:1px solid rgba(17,25,45,0.16); background:#F4F6F9; "
+        "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.78rem;"
+    )
+
+
+def _chip_html(label: str, style: str) -> str:
+    return f'<span class="kan-chip" style="{style}">{html.escape(label)}</span>'
 
 
 def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
@@ -161,6 +220,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
         _inject_kanban_item_css()
 
         cols = st.columns(len(selected_statuses))
+        now = pd.Timestamp.utcnow().tz_localize(None)
 
         for i, (col, st_name) in enumerate(zip(cols, selected_statuses)):
             sub = kan[kan["status"] == st_name].copy(deep=False)
@@ -176,6 +236,15 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                 sort_cols.append("updated")
                 sort_asc.append(False)
             sub = sub.sort_values(by=sort_cols, ascending=sort_asc)
+            if "created" in sub.columns:
+                created_naive = pd.to_datetime(
+                    sub["created"], errors="coerce", utc=True
+                ).dt.tz_localize(None)
+                sub["_age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(
+                    lower=0.0
+                )
+            else:
+                sub["_age_days"] = pd.NA
 
             with col:
                 # Header clickable -> fija el filtro de estado
@@ -193,17 +262,34 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                     key = html.escape(str(r.get("key", "") or ""))
                     url = html.escape(str(r.get("url", "") or ""))
                     summ = html.escape(str(r.get("summary", "") or ""))
-                    if len(summ) > 80:
-                        summ = summ[:77] + "..."
+                    if len(summ) > 120:
+                        summ = summ[:117] + "..."
+                    status = str(r.get("status", "") or "").strip() or "(sin estado)"
+                    prio = str(r.get("priority", "") or "").strip() or "(sin priority)"
+                    assignee = str(r.get("assignee", "") or "").strip()
+                    if len(assignee) > 28:
+                        assignee = assignee[:25] + "..."
+                    age_raw = r.get("_age_days", pd.NA)
+                    age_days = float(age_raw) if pd.notna(age_raw) else None
 
                     key_html = (
                         f'<a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a>'
                         if url
                         else key
                     )
+                    chips: List[str] = [
+                        _chip_html(status, chip_style_from_color(status_color(status))),
+                        _chip_html(prio, chip_style_from_color(priority_color(prio))),
+                    ]
+                    if assignee:
+                        chips.append(_chip_html(f"Asignado: {assignee}", _neutral_chip_style()))
+                    if age_days is not None:
+                        chips.append(_chip_html(f"{age_days:.0f}d", _neutral_chip_style()))
+
                     cards_html.append(
                         '<article class="kan-item">'
                         f'<div class="kan-item-key">{key_html}</div>'
+                        f'<div class="kan-item-meta">{"".join(chips)}</div>'
                         f'<div class="kan-item-summary">{summ}</div>'
                         "</article>"
                     )

@@ -86,12 +86,12 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     )
 
     if section == "overview":
-        # Summary + matrix + KPIs (KPIs debajo de la matriz).
+        # Orden ejecutivo: KPIs -> resumen visual -> matriz.
+        render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
+        st.markdown("---")
         render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
         st.markdown("---")
         render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
-        st.markdown("---")
-        render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
     elif section == "issues":
         render_issues_tab(dff=ctx.dff)
     elif section == "kanban":

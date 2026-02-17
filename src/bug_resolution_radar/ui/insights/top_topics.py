@@ -1,6 +1,8 @@
 # src/bug_resolution_radar/ui/insights/top_topics.py
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any, Dict
 
 import pandas as pd
@@ -11,12 +13,13 @@ from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
+    issue_card_html,
     neutral_chip_html,
     priority_chip_html,
-    render_issue_bullet,
     status_chip_html,
 )
 from bug_resolution_radar.ui.insights.helpers import (
+    as_naive_utc,
     build_issue_lookup,
     col_exists,
     open_only,
@@ -28,11 +31,11 @@ def render_top_topics_tab(
     *, settings: Settings, dff_filtered: pd.DataFrame, kpis: Dict[str, Any]
 ) -> None:
     """
-    Tab: Top 10 problemas/funcionalidades (abiertas)
-    - Usa kpis["top_open_table"]
-    - Muestra expander por tópico con lista de issues (key clickable) + estado + prioridad
-    - Dentro del expander NO repite summary (redundante), solo status/criticidad
+    Tab: Top temas funcionales (abiertas)
+    - Agrupa por macro-tema (Softoken, Crédito, Monetarias, Tareas, ...)
+    - Muestra expander por tema con lista de issues (key clickable) + estado + prioridad
     """
+    _ = kpis  # maintained in signature for compatibility with caller
     inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
@@ -40,28 +43,11 @@ def render_top_topics_tab(
         st.info("No hay datos con los filtros actuales.")
         return
 
-    top_tbl = kpis.get("top_open_table")
-    if not isinstance(top_tbl, pd.DataFrame) or top_tbl.empty:
-        st.info("No hay tabla de Top 10 disponible (kpis['top_open_table']).")
-        return
-
-    cols = list(top_tbl.columns)
-    summary_col = "summary" if "summary" in cols else (cols[0] if cols else None)
-    count_col = "open_count" if "open_count" in cols else ("count" if "count" in cols else None)
-
-    if not summary_col:
-        st.info("Top 10 no tiene columnas esperadas.")
-        return
-
-    render_minimal_export_actions(
-        key_prefix="insights::top_topics",
-        filename_prefix="insights_topicos",
-        suffix="top10",
-        csv_df=top_tbl.head(10).copy(deep=False),
-    )
-
     open_df = open_only(dff)
     total_open = int(len(open_df)) if open_df is not None else 0
+    if total_open == 0:
+        st.info("No hay incidencias abiertas para analizar temas.")
+        return
 
     key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
 
@@ -79,25 +65,83 @@ def render_top_topics_tab(
     tmp_open["summary"] = (
         tmp_open["summary"].fillna("").astype(str) if col_exists(tmp_open, "summary") else ""
     )
-    by_summary = (
-        {str(k): g for k, g in tmp_open.groupby("summary", sort=False)}
-        if col_exists(tmp_open, "summary")
-        else {}
+    tmp_open["assignee"] = (
+        normalize_text_col(tmp_open["assignee"], "(sin asignar)")
+        if col_exists(tmp_open, "assignee")
+        else "(sin asignar)"
+    )
+    if col_exists(tmp_open, "created"):
+        created_dt = pd.to_datetime(tmp_open["created"], errors="coerce", utc=True)
+        created_naive = as_naive_utc(created_dt)
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        tmp_open["__age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(
+            lower=0.0
+        )
+    else:
+        tmp_open["__age_days"] = pd.NA
+
+    if not col_exists(tmp_open, "summary"):
+        st.info("No hay columna `summary` para construir temas.")
+        return
+
+    theme_rules: list[tuple[str, list[str]]] = [
+        ("Softoken", ["softoken", "token", "firma", "otp"]),
+        ("Crédito", ["credito", "crédito", "cvv", "tarjeta", "tdc"]),
+        ("Monetarias", ["monetarias", "saldo", "nomina", "nómina"]),
+        ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
+        ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
+        ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
+        ("Login y acceso", ["login", "acceso", "face id", "biometr", "password", "tokenbnc"]),
+        ("Notificaciones", ["notificacion", "notificación", "push", "mensaje"]),
+    ]
+
+    def _norm(s: object) -> str:
+        txt = str(s or "").strip().lower()
+        txt = unicodedata.normalize("NFKD", txt)
+        return "".join(ch for ch in txt if not unicodedata.combining(ch))
+
+    def _theme_for_summary(summary: str) -> str:
+        s = _norm(summary)
+        for theme, keys in theme_rules:
+            for kw in keys:
+                if re.search(rf"\b{re.escape(_norm(kw))}\b", s):
+                    return theme
+        return "Otros"
+
+    tmp_open["__theme"] = tmp_open["summary"].map(_theme_for_summary)
+    theme_counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
+    non_otros = [t for t in theme_counts.index.tolist() if str(t) != "Otros"]
+    has_otros = "Otros" in theme_counts.index
+    if has_otros:
+        # "Otros" siempre al final, aunque tenga mayor volumen.
+        if len(non_otros) >= 9:
+            top_themes = non_otros[:9] + ["Otros"]
+        else:
+            top_themes = non_otros + ["Otros"]
+    else:
+        top_themes = non_otros[:10]
+    top_tbl = pd.DataFrame(
+        {
+            "tema": top_themes,
+            "open_count": [int(theme_counts[t]) for t in top_themes],
+            "pct_open": [
+                (float(theme_counts[t]) / float(total_open) * 100.0 if total_open else 0.0)
+                for t in top_themes
+            ],
+        }
+    )
+    render_minimal_export_actions(
+        key_prefix="insights::top_topics",
+        filename_prefix="insights_temas",
+        suffix="top_temas",
+        csv_df=top_tbl.copy(deep=False),
     )
 
-    for _, r in top_tbl.head(10).iterrows():
-        topic = str(r.get(summary_col, "") or "").strip()
-        cnt_val = r.get(count_col, None)
-
-        try:
-            cnt = int(cnt_val) if pd.notna(cnt_val) else 0
-        except Exception:
-            cnt = 0
-
-        pct = (cnt / total_open * 100.0) if total_open > 0 else 0.0
-        pct_txt = f"{pct:.1f}%"
-
-        sub = by_summary.get(topic, pd.DataFrame()) if topic else pd.DataFrame()
+    for _, r in top_tbl.iterrows():
+        topic = str(r.get("tema", "") or "").strip()
+        cnt = int(r.get("open_count", 0) or 0)
+        pct_txt = f"{float(r.get('pct_open', 0.0) or 0.0):.1f}%"
+        sub = tmp_open[tmp_open["__theme"] == topic].copy(deep=False)
 
         st_dom = (
             sub["status"].value_counts().index[0]
@@ -110,11 +154,7 @@ def render_top_topics_tab(
             else "-"
         )
 
-        topic_txt = topic
-        if len(topic_txt) > 180:
-            topic_txt = topic_txt[:177] + "..."
-
-        hdr = f"**{cnt} issues** · **{pct_txt}** · {topic_txt}"
+        hdr = f"**{cnt} issues** · **{pct_txt}** · {topic}"
 
         with st.expander(hdr, expanded=False):
             st.markdown(
@@ -129,25 +169,46 @@ def render_top_topics_tab(
                 unsafe_allow_html=True,
             )
             if sub.empty or not col_exists(sub, "key"):
-                st.caption(
-                    "No se han podido mapear issues individuales para este tópico (matching por summary)."
-                )
+                st.caption("No se han podido mapear issues individuales para este tema.")
                 continue
 
-            for _, ir in sub.iterrows():
+            sort_cols: list[str] = []
+            sort_asc: list[bool] = []
+            if col_exists(sub, "__age_days"):
+                sort_cols.append("__age_days")
+                sort_asc.append(False)
+            if col_exists(sub, "updated"):
+                sort_cols.append("updated")
+                sort_asc.append(False)
+            if sort_cols:
+                sub = sub.sort_values(by=sort_cols, ascending=sort_asc)
+
+            cards: list[str] = []
+            for _, ir in sub.head(20).iterrows():
                 k = str(ir.get("key", "") or "").strip()
                 if not k:
                     continue
 
                 status, prio, _ = key_to_meta.get(k, ("(sin estado)", "(sin priority)", ""))
                 url = key_to_url.get(k, "")
-
-                # 👇 sin summary (redundante), solo estado y criticidad
-                render_issue_bullet(
+                age_raw = ir.get("__age_days", pd.NA)
+                age_days = float(age_raw) if pd.notna(age_raw) else None
+                assignee = str(ir.get("assignee", "") or "").strip() or "(sin asignar)"
+                summ_txt = str(ir.get("summary", "") or "").strip()
+                if len(summ_txt) > 160:
+                    summ_txt = summ_txt[:157] + "..."
+                card = issue_card_html(
                     key=k,
                     url=url,
                     status=status,
                     priority=prio,
+                    age_days=age_days,
+                    assignee=assignee,
+                    summary=summ_txt,
                 )
+                if card:
+                    cards.append(card)
+            if cards:
+                st.markdown("".join(cards), unsafe_allow_html=True)
 
-    st.caption("Tip: el % te dice el ‘peso real’ del tópico en el backlog abierto filtrado.")
+    st.caption("Tip: el % te dice el peso real de cada tema en el backlog abierto filtrado.")

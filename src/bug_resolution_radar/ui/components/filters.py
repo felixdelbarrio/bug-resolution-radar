@@ -292,53 +292,54 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     # Inject option/tag color styles once to avoid per-column layout jitter.
     _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
 
-    c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
+    with st.container(border=True):
+        c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
 
-    with c_status:
-        selected_ui_status = list(st.session_state.get(ui_status_key) or [])
-        st.session_state[ui_status_key] = [x for x in selected_ui_status if x in status_opts_ui]
-        st.multiselect(
-            "Estado",
-            status_opts_ui,
-            default=list(st.session_state.get(ui_status_key) or []),
-            key=ui_status_key,
-            on_change=_sync_from_ui_to_canonical,
-            args=(ui_status_key, ui_prio_key, ui_assignee_key),
-            placeholder="Estado",
-        )
-
-    with c_prio:
-        if "priority" in df.columns:
-            selected_ui_prio = list(st.session_state.get(ui_prio_key) or [])
-            st.session_state[ui_prio_key] = [x for x in selected_ui_prio if x in prio_opts_ui]
+        with c_status:
+            selected_ui_status = list(st.session_state.get(ui_status_key) or [])
+            st.session_state[ui_status_key] = [x for x in selected_ui_status if x in status_opts_ui]
             st.multiselect(
-                "Priority",
-                prio_opts_ui,
-                default=list(st.session_state.get(ui_prio_key) or []),
-                key=ui_prio_key,
+                "Estado",
+                status_opts_ui,
+                default=list(st.session_state.get(ui_status_key) or []),
+                key=ui_status_key,
                 on_change=_sync_from_ui_to_canonical,
                 args=(ui_status_key, ui_prio_key, ui_assignee_key),
-                placeholder="Priority",
+                placeholder="Estado",
             )
-        else:
-            st.session_state[ui_prio_key] = []
-            st.session_state[FILTER_PRIORITY_KEY] = []
 
-    with c_assignee:
-        if "assignee" in df.columns:
-            assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
-            st.multiselect(
-                "Asignado",
-                assignee_opts,
-                default=list(st.session_state.get(ui_assignee_key) or []),
-                key=ui_assignee_key,
-                on_change=_sync_from_ui_to_canonical,
-                args=(ui_status_key, ui_prio_key, ui_assignee_key),
-                placeholder="Asignado",
-            )
-        else:
-            st.session_state[ui_assignee_key] = []
-            st.session_state[FILTER_ASSIGNEE_KEY] = []
+        with c_prio:
+            if "priority" in df.columns:
+                selected_ui_prio = list(st.session_state.get(ui_prio_key) or [])
+                st.session_state[ui_prio_key] = [x for x in selected_ui_prio if x in prio_opts_ui]
+                st.multiselect(
+                    "Priority",
+                    prio_opts_ui,
+                    default=list(st.session_state.get(ui_prio_key) or []),
+                    key=ui_prio_key,
+                    on_change=_sync_from_ui_to_canonical,
+                    args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                    placeholder="Priority",
+                )
+            else:
+                st.session_state[ui_prio_key] = []
+                st.session_state[FILTER_PRIORITY_KEY] = []
+
+        with c_assignee:
+            if "assignee" in df.columns:
+                assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
+                st.multiselect(
+                    "Asignado",
+                    assignee_opts,
+                    default=list(st.session_state.get(ui_assignee_key) or []),
+                    key=ui_assignee_key,
+                    on_change=_sync_from_ui_to_canonical,
+                    args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                    placeholder="Asignado",
+                )
+            else:
+                st.session_state[ui_assignee_key] = []
+                st.session_state[FILTER_ASSIGNEE_KEY] = []
 
     # Return canonical state (single source of truth)
     fs = FilterState(

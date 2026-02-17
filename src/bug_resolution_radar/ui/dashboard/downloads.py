@@ -185,6 +185,21 @@ def fig_to_html_bytes(fig: Any) -> bytes:
     return str(html_doc).encode("utf-8", errors="replace")
 
 
+def fig_to_svg_bytes(fig: Any) -> bytes:
+    if fig is None:
+        return b""
+    to_image = getattr(fig, "to_image", None)
+    if not callable(to_image):
+        return b""
+    try:
+        svg = to_image(format="svg")
+    except Exception:
+        return b""
+    if isinstance(svg, bytes):
+        return svg
+    return str(svg).encode("utf-8", errors="replace")
+
+
 def figures_to_html_bytes(
     figures: Sequence[Any],
     *,
@@ -309,60 +324,63 @@ def render_minimal_export_actions(
     figure: Any = None,
     html_bytes: Optional[bytes] = None,
 ) -> None:
-    """Minimal right-aligned exports (CSV + chart HTML when available)."""
+    """Minimal right-aligned exports (CSV + chart HTML/SVG when available)."""
     csv_safe = csv_df if isinstance(csv_df, pd.DataFrame) else pd.DataFrame()
     fig_html = html_bytes if html_bytes else fig_to_html_bytes(figure)
+    fig_svg = fig_to_svg_bytes(figure)
 
     has_csv = not csv_safe.empty
     has_html = bool(fig_html)
-    if not has_csv and not has_html:
+    has_svg = bool(fig_svg)
+    if not has_csv and not has_html and not has_svg:
         return
 
     scope_key = f"{_safe_filename(key_prefix)}_mini_export"
     _inject_minimal_export_css(scope_key)
 
-    with st.container(key=scope_key):
-        if has_csv and has_html:
-            _, right = st.columns([8.8, 1.2], gap="small")
-            with right:
-                c_csv, c_html = st.columns([1, 1], gap="small")
-                with c_csv:
-                    st.download_button(
-                        label="CSV",
-                        data=df_to_csv_bytes(csv_safe),
-                        file_name=_build_filename(filename_prefix, suffix=suffix, ext="csv"),
-                        mime="text/csv",
-                        key=f"{key_prefix}::dl_csv_min",
-                        use_container_width=False,
-                    )
-                with c_html:
-                    st.download_button(
-                        label="HTML",
-                        data=fig_html,
-                        file_name=_build_filename(filename_prefix, suffix=suffix, ext="html"),
-                        mime="text/html",
-                        key=f"{key_prefix}::dl_html_min",
-                        use_container_width=False,
-                    )
-            return
+    buttons: list[dict[str, Any]] = []
+    if has_csv:
+        buttons.append(
+            {
+                "label": "CSV",
+                "data": df_to_csv_bytes(csv_safe),
+                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="csv"),
+                "mime": "text/csv",
+                "key": f"{key_prefix}::dl_csv_min",
+            }
+        )
+    if has_svg:
+        buttons.append(
+            {
+                "label": "SVG",
+                "data": fig_svg,
+                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="svg"),
+                "mime": "image/svg+xml",
+                "key": f"{key_prefix}::dl_svg_min",
+            }
+        )
+    if has_html:
+        buttons.append(
+            {
+                "label": "HTML",
+                "data": fig_html,
+                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="html"),
+                "mime": "text/html",
+                "key": f"{key_prefix}::dl_html_min",
+            }
+        )
 
-        _, right = st.columns([9.2, 0.8], gap="small")
+    with st.container(key=scope_key):
+        _, right = st.columns([8.4, 1.6], gap="small")
         with right:
-            if has_csv:
-                st.download_button(
-                    label="CSV",
-                    data=df_to_csv_bytes(csv_safe),
-                    file_name=_build_filename(filename_prefix, suffix=suffix, ext="csv"),
-                    mime="text/csv",
-                    key=f"{key_prefix}::dl_csv_min",
-                    use_container_width=False,
-                )
-            elif has_html:
-                st.download_button(
-                    label="HTML",
-                    data=fig_html,
-                    file_name=_build_filename(filename_prefix, suffix=suffix, ext="html"),
-                    mime="text/html",
-                    key=f"{key_prefix}::dl_html_min",
-                    use_container_width=False,
-                )
+            cols = st.columns(len(buttons), gap="small")
+            for col, btn in zip(cols, buttons):
+                with col:
+                    st.download_button(
+                        label=btn["label"],
+                        data=btn["data"],
+                        file_name=btn["file_name"],
+                        mime=btn["mime"],
+                        key=btn["key"],
+                        use_container_width=False,
+                    )

@@ -141,18 +141,18 @@ def _render_timeseries(ctx: ChartContext) -> Optional[go.Figure]:
 
 
 def _insights_timeseries(ctx: ChartContext) -> List[str]:
-    # Heuristics: compare last 7 vs previous 7 in intake (created)
+    # Heuristics: compare last 7 vs previous 7 in nuevas incidencias (created)
     dff = ctx.dff
     if dff is None or dff.empty or "created" not in dff.columns:
         return [
             "Si ves picos de nuevas incidencias, suele correlacionar con releases o cambios de configuración: cruza esos días con despliegues para encontrar el driver real.",
-            "Consejo de gestión: si el backlog no baja aunque cierres, probablemente el throughput (cierres) está por debajo del intake (altas). Revisa capacidad o criterios de entrada.",
+            "Consejo de gestión: si el backlog no baja aunque cierres, el ritmo de cierre está por debajo de la entrada de nuevas incidencias. Revisa capacidad o criterios de entrada.",
         ]
 
     created = _to_dt_naive(dff["created"]).dropna()
     if created.empty:
         return [
-            "Si el backlog no baja aunque cierres, probablemente el throughput está por debajo del intake. Revisa capacidad o criterios de entrada.",
+            "Si el backlog no baja aunque cierres, el ritmo de cierre está por debajo de la entrada. Revisa capacidad o criterios de entrada.",
             "Tip: compara semanas con picos frente a releases/incidentes para identificar fuentes recurrentes de deuda.",
         ]
 
@@ -166,7 +166,7 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
     trend = "sube" if delta > 0 else "baja" if delta < 0 else "se mantiene"
     msg1 = (
-        f"Intake (altas) última semana: **{new_last7}** vs semana anterior: **{new_prev7}** → {trend}. "
+        f"Nuevas incidencias última semana: **{new_last7}** vs semana anterior: **{new_prev7}** → {trend}. "
         "Úsalo como señal temprana para ajustar capacidad antes de que crezca el backlog."
     )
 
@@ -194,7 +194,7 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
     if "created" not in open_df.columns:
         return [
             "La cola de antigüedad es el ‘interés’ de la deuda técnica: una cola larga suele indicar bloqueos de producto o falta de ownership.",
-            "Acción: define un SLA diferente por prioridad y revisa semanalmente solo el percentil 90 de antigüedad (te da el mayor impacto con menos ruido).",
+            "Acción: define un tiempo objetivo por prioridad y revisa semanalmente los casos más antiguos (son los que más impacto tienen).",
         ]
 
     created = _to_dt_naive(open_df["created"]).dropna()
@@ -217,8 +217,8 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
     msgs: List[str] = []
     if p90 is not None and p50 is not None and p95 is not None:
         msgs.append(
-            f"Antigüedad típica (P50): **{p50:.0f}d** · cola (P90): **{p90:.0f}d** (P95: {p95:.0f}d). "
-            "La cola es donde se esconde el riesgo reputacional."
+            f"Antigüedad habitual: **{p50:.0f}d** · casos más atascados: **{p90:.0f}d** (extremos: {p95:.0f}d). "
+            "En los casos atascados es donde se concentra el riesgo reputacional."
         )
     msgs.append(
         "Acción ‘WOW’: crea un ‘war room’ de 45 min/semana solo para el **top 10% más antiguo**. "
@@ -246,7 +246,7 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     if days.empty:
         return [
             "No hay suficientes cierres con fechas para analizar tiempos de resolución.",
-            "Tip: asegura ‘created’ y ‘resolved’ en la ingesta y empieza a medir P50/P90 como KPI operativo (mejor que la media).",
+            "Tip: asegura ‘created’ y ‘resolved’ en la ingesta y mide tiempo habitual vs casos lentos (mejor que mirar solo la media).",
         ]
 
     p50 = float(days.quantile(0.5))
@@ -254,10 +254,10 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     mean = float(days.mean())
 
     return [
-        f"Tiempo de resolución: media **{mean:.1f}d** · P50 **{p50:.0f}d** · P90 **{p90:.0f}d**. "
-        "Si la media ≫ P50, tienes ‘casos extremos’ que te distorsionan el KPI.",
-        "Acción: clasifica el top 10% (P90+) por causa raíz (bloqueo externo, falta de reproducibilidad, dependencias) "
-        "y ataca la causa, no el síntoma. Reducir cola suele mejorar satisfacción más que subir throughput.",
+        f"Tiempo de resolución: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
+        "Si la media queda muy por encima del tiempo habitual, hay pocos casos muy lentos que distorsionan el resultado.",
+        "Acción: clasifica el 10% más lento por causa raíz (bloqueo externo, falta de reproducibilidad, dependencias) "
+        "y ataca la causa, no el síntoma. Reducir los casos lentos suele mejorar satisfacción más que cerrar más casos fáciles.",
     ]
 
 
@@ -355,7 +355,8 @@ def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
     if open_df is None or open_df.empty or "status" not in open_df.columns:
         return ["No hay datos de estado para generar insights con los filtros actuales."]
 
-    counts = open_df["status"].astype(str).value_counts()
+    stc = normalize_text_col(open_df["status"], "(sin estado)").astype(str)
+    counts = stc.value_counts()
     total = int(counts.sum())
     if total == 0:
         return ["No hay issues abiertas para este análisis."]
@@ -364,12 +365,33 @@ def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
     top_cnt = int(counts.iloc[0])
     share = float(top_cnt) / float(total)
 
-    return [
+    insights = [
         f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del backlog abierto "
         f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
-        "Acción ‘WOW’: define una política WIP para ese estado (límite + revisión diaria de bloqueos). "
-        "Reducir WIP en el cuello suele acelerar el flujo sin aumentar capacidad.",
+        "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
+        "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",
     ]
+
+    accepted_cnt = int((stc == "Accepted").sum())
+    rtd_cnt = int((stc == "Ready to deploy").sum())
+    deployed_cnt = int((stc == "Deployed").sum())
+
+    if accepted_cnt > 0:
+        rtd_conv = (rtd_cnt / accepted_cnt) * 100.0
+        if rtd_conv < 35.0:
+            insights.append(
+                f"Flujo final con fricción: **Accepted={accepted_cnt}** vs **Ready to deploy={rtd_cnt}** "
+                f"(conversión {rtd_conv:.1f}%). Revisa criterio de salida y fija un tiempo máximo para pasar a Ready to deploy."
+            )
+    if rtd_cnt > 0:
+        dep_conv = (deployed_cnt / rtd_cnt) * 100.0
+        if dep_conv < 70.0:
+            insights.append(
+                f"Embudo de despliegue: **Ready to deploy={rtd_cnt}** vs **Deployed={deployed_cnt}** "
+                f"(conversión {dep_conv:.1f}%). Revisa capacidad/ventana de release."
+            )
+
+    return insights[:4]
 
 
 # ---------------------------------------------------------------------
@@ -397,7 +419,7 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ChartSpec(
             chart_id="resolution_hist",
             title="Tiempos de resolución",
-            subtitle="Más importante la cola (P90) que la media",
+            subtitle="Más importante reducir los casos lentos que solo la media",
             group="Calidad",
             render=_render_resolution_hist,
             insights=_insights_resolution_hist,

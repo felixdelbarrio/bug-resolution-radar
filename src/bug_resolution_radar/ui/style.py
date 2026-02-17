@@ -151,12 +151,18 @@ def inject_bbva_css() -> None:
           }
           /* Tighten the vertical gap between top tabs and dashboard filters/content */
           .st-key-workspace_nav_bar {
-            margin-top: -0.06rem;
-            margin-bottom: -0.92rem;
+            margin-top: -0.04rem;
+            margin-bottom: -0.76rem;
+            border: 1px solid var(--bbva-border);
+            border-radius: 14px;
+            background: rgba(255,255,255,0.56);
+            padding: 0.32rem 0.42rem 0.26rem 0.42rem;
+            box-shadow: 0 1px 6px rgba(17,25,45,0.035);
           }
           .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"] {
             margin-bottom: 0 !important;
             row-gap: 0 !important;
+            align-items: center !important;
           }
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] {
             margin-bottom: 0 !important;
@@ -370,13 +376,32 @@ def render_hero(app_title: str) -> None:
     )
 
 
-def apply_plotly_bbva(fig: Any) -> Any:
+def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
     """Apply a consistent Plotly style aligned with BBVA Experience."""
+    legend_bottom_space = 92 if showlegend else 16
     undefined_tokens = {"undefined", "none", "nan", "null"}
+    es_label_map = {
+        "count": "Incidencias",
+        "value": "Valor",
+        "date": "Fecha",
+        "status": "Estado",
+        "priority": "Prioridad",
+        "bucket": "Rango",
+        "created": "Creadas",
+        "closed": "Cerradas",
+        "open_backlog_proxy": "Backlog abierto",
+        "resolution_days": "Dias de resolucion",
+    }
 
     def _clean_txt(v: object) -> str:
         txt = str(v or "").strip()
         return "" if txt.lower() in undefined_tokens else txt
+
+    def _localize(txt: object) -> str:
+        clean = _clean_txt(txt)
+        if not clean:
+            return ""
+        return es_label_map.get(clean.strip().lower(), clean)
 
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -394,9 +419,19 @@ def apply_plotly_bbva(fig: Any) -> Any:
             "#D6E9FF",  # Light Blue
             "#070E46",  # Midnight Blue
         ],
-        showlegend=False,
-        legend=dict(bgcolor="rgba(255,255,255,0.65)"),
-        margin=dict(l=16, r=16, t=48, b=16),
+        showlegend=showlegend,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.22,
+            xanchor="right",
+            x=1.0,
+            bgcolor="rgba(255,255,255,0.65)",
+            bordercolor="rgba(17,25,45,0.12)",
+            borderwidth=1,
+            font=dict(size=11),
+        ),
+        margin=dict(l=16, r=16, t=48, b=legend_bottom_space),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
     fig.update_yaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
@@ -410,7 +445,7 @@ def apply_plotly_bbva(fig: Any) -> Any:
     # Remove "undefined" from layout-level labels/titles.
     try:
         title_obj = getattr(fig.layout, "title", None)
-        title_text = _clean_txt(getattr(title_obj, "text", ""))
+        title_text = _localize(getattr(title_obj, "text", ""))
         fig.update_layout(title_text=title_text)
     except Exception:
         pass
@@ -418,8 +453,8 @@ def apply_plotly_bbva(fig: Any) -> Any:
     try:
         x_axis = getattr(fig.layout, "xaxis", None)
         y_axis = getattr(fig.layout, "yaxis", None)
-        x_title = _clean_txt(getattr(getattr(x_axis, "title", None), "text", ""))
-        y_title = _clean_txt(getattr(getattr(y_axis, "title", None), "text", ""))
+        x_title = _localize(getattr(getattr(x_axis, "title", None), "text", ""))
+        y_title = _localize(getattr(getattr(y_axis, "title", None), "text", ""))
         fig.update_xaxes(title_text=x_title)
         fig.update_yaxes(title_text=y_title)
     except Exception:
@@ -427,15 +462,15 @@ def apply_plotly_bbva(fig: Any) -> Any:
 
     try:
         for ann in list(getattr(fig.layout, "annotations", []) or []):
-            ann.text = _clean_txt(getattr(ann, "text", ""))
+            ann.text = _localize(getattr(ann, "text", ""))
     except Exception:
         pass
 
     # Defensive cleanup to avoid "undefined" noise in hover/labels.
     for trace in getattr(fig, "data", []):
         try:
-            trace.name = _clean_txt(getattr(trace, "name", ""))
-            trace.showlegend = False
+            trace.name = _localize(getattr(trace, "name", ""))
+            trace.showlegend = bool(showlegend and trace.name)
         except Exception:
             pass
 

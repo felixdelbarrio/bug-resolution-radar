@@ -1,7 +1,8 @@
 # bug_resolution_radar/ui/dashboard/trends.py
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,6 +17,11 @@ from bug_resolution_radar.ui.common import (
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
+from bug_resolution_radar.ui.dashboard.state import (
+    FILTER_ASSIGNEE_KEY,
+    FILTER_PRIORITY_KEY,
+    FILTER_STATUS_KEY,
+)
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 
@@ -77,6 +83,104 @@ def _age_bucket_from_days(age_days: pd.Series) -> pd.Categorical:
     return cat
 
 
+def _resolution_band(days: pd.Series) -> pd.Categorical:
+    """Semaforo para tiempos de resolucion."""
+    bins = [-np.inf, 7, 30, np.inf]
+    labels = ["Rapida (0-7d)", "Media (8-30d)", "Lenta (>30d)"]
+    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
+
+
+def _resolution_bucket(days: pd.Series) -> pd.Categorical:
+    """Buckets operativos para evitar confusión en ejes continuos."""
+    bins = [-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, np.inf]
+    labels = [
+        "Mismo dia (0d)",
+        "1-2d",
+        "3-7d",
+        "8-14d",
+        "15-30d",
+        "31-60d",
+        "61-90d",
+        ">90d",
+    ]
+    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
+
+
+def _add_bar_totals(
+    fig: Any, *, x_values: list[str], y_totals: list[float], font_size: int = 12
+) -> None:
+    """Add a total label above each bar column (stack/group safe)."""
+    if not x_values or not y_totals:
+        return
+    ymax = max(float(v) for v in y_totals) if y_totals else 0.0
+    offset = max(1.0, ymax * 0.035)
+    fig.add_scatter(
+        x=x_values,
+        y=[float(v) + offset for v in y_totals],
+        mode="text",
+        text=[f"{int(v)}" for v in y_totals],
+        textposition="top center",
+        textfont=dict(size=font_size, color="#11192D"),
+        hoverinfo="skip",
+        showlegend=False,
+        cliponaxis=False,
+    )
+    fig.update_yaxes(range=[0, ymax + (offset * 2.4)])
+
+
+def _build_timeseries_from_filtered(dff: pd.DataFrame) -> Any | None:
+    """Build the evolution chart from the currently filtered dataframe."""
+    if dff.empty:
+        return None
+
+    created = (
+        _to_dt_naive(dff["created"])
+        if "created" in dff.columns
+        else pd.Series(pd.NaT, index=dff.index)
+    )
+    resolved = (
+        _to_dt_naive(dff["resolved"])
+        if "resolved" in dff.columns
+        else pd.Series(pd.NaT, index=dff.index)
+    )
+
+    created_notna = created.notna()
+    resolved_notna = resolved.notna()
+    if not created_notna.any() and not resolved_notna.any():
+        return None
+
+    end_candidates = []
+    if created_notna.any():
+        end_candidates.append(created.loc[created_notna].max())
+    if resolved_notna.any():
+        end_candidates.append(resolved.loc[resolved_notna].max())
+    end_ts = (
+        pd.Timestamp(max(end_candidates)).normalize()
+        if end_candidates
+        else pd.Timestamp.utcnow().normalize()
+    )
+    start_ts = end_ts - pd.Timedelta(days=90)
+
+    created_daily = (
+        created.loc[created_notna & (created >= start_ts)].dt.floor("D").value_counts(sort=False)
+    )
+    closed_daily = (
+        resolved.loc[resolved_notna & (resolved >= start_ts)].dt.floor("D").value_counts(sort=False)
+    )
+
+    all_dates = created_daily.index.union(closed_daily.index).sort_values()
+    if all_dates.empty:
+        return None
+
+    daily = pd.DataFrame({"date": all_dates})
+    daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
+    daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
+    # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
+    daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
+
+    return px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
+
+
 # -------------------------
 # Charts catalog
 # -------------------------
@@ -109,7 +213,7 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
     # 1) Selector único ARRIBA
     if "trend_chart_single" not in st.session_state:
         st.session_state["trend_chart_single"] = (
-            "timeseries" if "timeseries" in all_ids else all_ids[0]
+            "open_status_bar" if "open_status_bar" in all_ids else all_ids[0]
         )
 
     selected_chart = st.selectbox(
@@ -122,7 +226,6 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
         ),
         format_func=lambda x: id_to_label.get(x, x),
         key="trend_chart_single",
-        help="Selecciona un único gráfico. Se mostrará 1 por pantalla.",
         label_visibility="collapsed",
     )
 
@@ -144,12 +247,12 @@ def _render_trend_chart(
     open_df = _safe_df(open_df)
 
     if chart_id == "timeseries":
-        fig = kpis.get("timeseries_chart")
+        fig = _build_timeseries_from_filtered(dff)
         if fig is None:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return
-        fig.update_layout(title_text="")
-        fig = apply_plotly_bbva(fig)
+        fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
+        fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
         export_df = dff[[c for c in export_cols if c in dff.columns]].copy(deep=False)
         render_minimal_export_actions(
@@ -214,13 +317,24 @@ def _render_trend_chart(
             grp,
             x="bucket",
             y="count",
+            text="count",
             color="status",
             barmode="stack",
             category_orders={"bucket": bucket_order, "status": status_order},
             color_discrete_map=status_color_map(status_order),
         )
-        fig.update_layout(title_text="", xaxis_title="bucket", yaxis_title="count")
-        fig = apply_plotly_bbva(fig)
+        fig.update_layout(
+            title_text="", xaxis_title="Rango de antiguedad", yaxis_title="Incidencias"
+        )
+        fig.update_traces(textposition="inside", textfont=dict(size=10, color="#11192D"))
+        age_totals = grp.groupby("bucket", dropna=False)["count"].sum()
+        _add_bar_totals(
+            fig,
+            x_values=bucket_order,
+            y_totals=[float(age_totals.get(b, 0)) for b in bucket_order],
+            font_size=12,
+        )
+        fig = apply_plotly_bbva(fig, showlegend=True)
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
@@ -251,14 +365,68 @@ def _render_trend_chart(
         closed["resolution_days"] = (
             (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
         ).clip(lower=0.0)
+        if "priority" in closed.columns:
+            closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
+        else:
+            closed["priority"] = "(sin priority)"
 
-        fig = px.histogram(
-            closed,
-            x="resolution_days",
-            nbins=30,
+        closed["resolution_bucket"] = _resolution_bucket(closed["resolution_days"])
+        grouped_res = (
+            closed.groupby(["resolution_bucket", "priority"], dropna=False)
+            .size()
+            .reset_index(name="count")
         )
-        fig.update_layout(title_text="")
-        fig = apply_plotly_bbva(fig)
+        priority_order = sorted(
+            grouped_res["priority"].astype(str).unique().tolist(),
+            key=_priority_sort_key,
+        )
+        fig = px.bar(
+            grouped_res,
+            x="resolution_bucket",
+            y="count",
+            text="count",
+            color="priority",
+            barmode="stack",
+            category_orders={
+                "resolution_bucket": [
+                    "Mismo dia (0d)",
+                    "1-2d",
+                    "3-7d",
+                    "8-14d",
+                    "15-30d",
+                    "31-60d",
+                    "61-90d",
+                    ">90d",
+                ],
+                "priority": priority_order,
+            },
+            color_discrete_map=priority_color_map(),
+        )
+        fig.update_layout(
+            title_text="",
+            xaxis_title="Tiempo de resolucion",
+            yaxis_title="Incidencias",
+            bargap=0.10,
+        )
+        fig.update_traces(textposition="inside", textfont=dict(size=10))
+        res_order = [
+            "Mismo dia (0d)",
+            "1-2d",
+            "3-7d",
+            "8-14d",
+            "15-30d",
+            "31-60d",
+            "61-90d",
+            ">90d",
+        ]
+        res_totals = grouped_res.groupby("resolution_bucket", dropna=False)["count"].sum()
+        _add_bar_totals(
+            fig,
+            x_values=res_order,
+            y_totals=[float(res_totals.get(b, 0)) for b in res_order],
+            font_size=12,
+        )
+        fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = [
             "key",
             "summary",
@@ -267,6 +435,7 @@ def _render_trend_chart(
             "created",
             "resolved",
             "resolution_days",
+            "resolution_bucket",
         ]
         export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
         render_minimal_export_actions(
@@ -298,7 +467,7 @@ def _render_trend_chart(
         )
         fig.update_layout(title_text="")
         fig.update_traces(sort=False)
-        fig = apply_plotly_bbva(fig)
+        fig = apply_plotly_bbva(fig, showlegend=True)
         pie_export = dff.groupby("priority", dropna=False).size().reset_index(name="count")
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
@@ -349,13 +518,22 @@ def _render_trend_chart(
             grouped,
             x="status",
             y="count",
+            text="count",
             color="priority",
             barmode="stack",
             category_orders={"status": status_order, "priority": priority_order},
             color_discrete_map=priority_color_map(),
         )
-        fig.update_layout(title_text="")
-        fig = apply_plotly_bbva(fig)
+        fig.update_layout(title_text="", xaxis_title="Estado", yaxis_title="Incidencias")
+        fig.update_traces(textposition="inside", textfont=dict(size=10))
+        st_totals = grouped.groupby("status", dropna=False)["count"].sum()
+        _add_bar_totals(
+            fig,
+            x_values=status_order,
+            y_totals=[float(st_totals.get(s, 0)) for s in status_order],
+            font_size=12,
+        )
+        fig = apply_plotly_bbva(fig, showlegend=True)
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
@@ -395,6 +573,81 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
     if chart_id == "open_status_bar":
         _insights_status(open_df)
         return
+
+
+@dataclass(frozen=True)
+class _TrendActionInsight:
+    title: str
+    body: str
+    status_filters: List[str] | None = None
+    priority_filters: List[str] | None = None
+    assignee_filters: List[str] | None = None
+
+
+def _jump_to_issues(
+    *,
+    status_filters: List[str] | None = None,
+    priority_filters: List[str] | None = None,
+    assignee_filters: List[str] | None = None,
+) -> None:
+    st.session_state["__jump_to_tab"] = "issues"
+    st.session_state[FILTER_STATUS_KEY] = list(status_filters or [])
+    st.session_state[FILTER_PRIORITY_KEY] = list(priority_filters or [])
+    st.session_state[FILTER_ASSIGNEE_KEY] = list(assignee_filters or [])
+
+
+def _render_premium_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) -> None:
+    items = [c for c in cards if str(c.title or "").strip() and str(c.body or "").strip()]
+    if not items:
+        return
+
+    st.markdown(
+        """
+        <style>
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button {
+            justify-content: flex-start !important;
+            width: 100% !important;
+            min-height: 1.65rem !important;
+            padding: 0 !important;
+            border: 0 !important;
+            background: transparent !important;
+            color: #11192D !important;
+            font-size: 0.98rem !important;
+            font-weight: 800 !important;
+            border-radius: 8px !important;
+            text-align: left !important;
+            box-shadow: none !important;
+          }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover {
+            color: #0051F1 !important;
+            transform: translateX(1px);
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns(2, gap="small")
+    for i, item in enumerate(items[:6]):
+        has_action = bool(item.status_filters or item.priority_filters or item.assignee_filters)
+        with cols[i % 2]:
+            with st.container(border=True):
+                if has_action:
+                    with st.container(key=f"trins_{key_prefix}_{i}"):
+                        st.button(
+                            f"{item.title} ↗",
+                            key=f"trins_btn_{key_prefix}_{i}",
+                            use_container_width=True,
+                            on_click=_jump_to_issues,
+                            kwargs={
+                                "status_filters": item.status_filters,
+                                "priority_filters": item.priority_filters,
+                                "assignee_filters": item.assignee_filters,
+                            },
+                        )
+                else:
+                    st.markdown(f"**{item.title}**")
+                st.markdown(item.body)
 
 
 def _insights_timeseries(dff: pd.DataFrame) -> None:
@@ -465,49 +718,86 @@ def _insights_timeseries(dff: pd.DataFrame) -> None:
     with c3:
         st.metric("Ratio creación/cierre", "∞" if flow_ratio == np.inf else f"{flow_ratio:.2f}")
 
-    bullets: List[str] = []
+    cards: List[_TrendActionInsight] = []
 
     if slope_last > 0 and (prev14 is None or slope_last > slope_prev):
-        bullets.append(
-            f"📈 **Aceleración de backlog**: en los últimos 14 días el backlog proxy sube **+{int(slope_last)}** "
-            f"(vs **+{int(slope_prev)}** en los 14 días anteriores). Señal de saturación del flujo."
+        cards.append(
+            _TrendActionInsight(
+                title="Aceleración de backlog",
+                body=(
+                    f"En los últimos 14 días el backlog proxy sube **+{int(slope_last)}** "
+                    f"(vs **+{int(slope_prev)}** en los 14 días anteriores). Señal de saturación del flujo."
+                ),
+            )
         )
     elif slope_last > 0:
-        bullets.append(
-            f"📈 **Backlog creciendo**: el backlog proxy sube **+{int(slope_last)}** en 14 días. "
-            "Prioriza cerrar antes de seguir abriendo."
+        cards.append(
+            _TrendActionInsight(
+                title="Backlog creciendo",
+                body=(
+                    f"El backlog proxy sube **+{int(slope_last)}** en 14 días. "
+                    "Prioriza cerrar antes de seguir abriendo."
+                ),
+            )
         )
     elif slope_last < 0:
-        bullets.append(
-            f"✅ **Backlog bajando**: el backlog proxy cae **{int(abs(slope_last))}** en 14 días. "
-            "Buen momento para atacar deuda técnica/causas raíz."
+        cards.append(
+            _TrendActionInsight(
+                title="Backlog bajando",
+                body=(
+                    f"El backlog proxy cae **{int(abs(slope_last))}** en 14 días. "
+                    "Buen momento para atacar deuda técnica/causas raíz."
+                ),
+            )
         )
     else:
-        bullets.append("⚖️ **Backlog estable** en los últimos 14 días (señal de equilibrio).")
+        cards.append(
+            _TrendActionInsight(
+                title="Backlog estable",
+                body="Se mantiene estable en los últimos 14 días (señal de equilibrio).",
+            )
+        )
 
     if flow_ratio == np.inf:
-        bullets.append(
-            "🚨 **Cierre a cero** en 14 días: revisa bloqueos (QA, releases) o colas de validación."
+        cards.append(
+            _TrendActionInsight(
+                title="Cierre a cero",
+                body="No hay cierres en 14 días: revisa bloqueos (QA, releases) o colas de validación.",
+            )
         )
     elif flow_ratio >= 1.2:
-        bullets.append(
-            "🧯 **Capacidad insuficiente**: estás abriendo bastante más de lo que cierras. "
-            "Acción: fija un objetivo semanal de cierre y limita WIP (por estado/equipo)."
+        cards.append(
+            _TrendActionInsight(
+                title="Capacidad insuficiente",
+                body=(
+                    "Estás abriendo bastante más de lo que cierras. "
+                    "Acción: fija un objetivo semanal de cierre y limita casos en curso."
+                ),
+            )
         )
     elif flow_ratio <= 0.9:
-        bullets.append(
-            "🧹 **Ventana de limpieza**: cierras más de lo que abres. "
-            "Acción: usa el margen para eliminar reincidencias (top componentes/causas) y automatizar pruebas."
+        cards.append(
+            _TrendActionInsight(
+                title="Ventana de limpieza",
+                body=(
+                    "Cierras más de lo que abres. Usa el margen para eliminar reincidencias "
+                    "y automatizar pruebas."
+                ),
+            )
         )
 
     if risk_flag:
-        bullets.append(
-            f"⏳ **Tendencia semanal neta positiva** (~{weekly_net:.1f} issues/semana): "
-            "si se mantiene, el backlog seguirá creciendo aunque hoy parezca controlado."
+        cards.append(
+            _TrendActionInsight(
+                title="Tendencia semanal neta positiva",
+                body=(
+                    f"~**{weekly_net:.1f}** issues/semana. "
+                    "Si se mantiene, el backlog seguirá creciendo."
+                ),
+            )
         )
 
-    for b in bullets[:5]:
-        st.write("• " + b)
+    _render_premium_insight_cards(cards[:5], key_prefix="timeseries")
 
     st.caption(
         "Tip de gestión: si el ratio creación/cierre > 1 de forma sostenida, cualquier mejora visual será temporal. "
@@ -539,22 +829,32 @@ def _insights_age(open_df: pd.DataFrame) -> None:
     st.markdown("#### Insights accionables")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Mediana antigüedad", f"{p50:.0f} días")
+        st.metric("Antigüedad típica", f"{p50:.0f} días")
     with c2:
-        st.metric("P90 antigüedad", f"{p90:.0f} días")
+        st.metric("Casos más atascados", f"{p90:.0f} días")
     with c3:
         st.metric(">30 días", f"{pct_over30:.1f}%")
 
-    bullets: List[str] = []
-    bullets.append(
-        "🧠 **Cola larga = coste oculto**: un P90 alto suele indicar issues “difíciles” o bloqueadas. "
-        "Separarlas del flujo normal evita que contaminen la velocidad del equipo."
+    cards: List[_TrendActionInsight] = []
+    cards.append(
+        _TrendActionInsight(
+            title="Atasco en casos antiguos",
+            body=(
+                "Cuando los casos más lentos tardan mucho, el equipo pierde foco y velocidad. "
+                "Separar esos casos en revisión específica mejora el ritmo general."
+            ),
+        )
     )
 
     if pct_over30 >= 25:
-        bullets.append(
-            f"⚠️ **Backlog envejecido**: {pct_over30:.1f}% supera 30 días. "
-            "Acción: crea una “clínica de envejecidos” semanal (60–90 min) para decidir: cerrar, re-priorizar o descomponer."
+        cards.append(
+            _TrendActionInsight(
+                title="Backlog envejecido",
+                body=(
+                    f"**{pct_over30:.1f}%** supera 30 días. "
+                    "Acción: clínica semanal para cerrar, re-priorizar o descomponer."
+                ),
+            )
         )
 
     if "priority" in df.columns:
@@ -562,18 +862,29 @@ def _insights_age(open_df: pd.DataFrame) -> None:
         if not tail.empty:
             pr = tail["priority"].astype(str).value_counts().head(3)
             top_prios = ", ".join([f"{k} ({int(v)})" for k, v in pr.items()])
-            bullets.append(
-                f"🎯 **Dónde duele la cola**: en >30 días dominan: **{top_prios}**. "
-                "Acción: si High/Highest aparecen, hay riesgo de SLA/impacto cliente: forzar plan de cierre con dueño y fecha."
+            cards.append(
+                _TrendActionInsight(
+                    title="Dónde duele la cola",
+                    body=(
+                        f"En >30 días dominan: **{top_prios}**. "
+                        "Si High/Highest aparecen, hay riesgo de impacto cliente."
+                    ),
+                    priority_filters=[str(p) for p in pr.index.tolist()],
+                )
             )
 
-    bullets.append(
-        "📌 **Política útil**: para evitar envejecimiento, limita WIP por estado (Accepted/En progreso) "
-        "y exige criterio de salida (Definition of Done + verificación)."
+    cards.append(
+        _TrendActionInsight(
+            title="Política útil de flujo",
+            body=(
+                "Para evitar envejecimiento, limita cuántos casos caben por estado "
+                "y exige criterio de salida."
+            ),
+            status_filters=["En progreso", "In Progress", "To Rework", "Test", "Ready To Verify"],
+        )
     )
 
-    for b in bullets[:5]:
-        st.write("• " + b)
+    _render_premium_insight_cards(cards[:5], key_prefix="age")
 
 
 def _insights_resolution(dff: pd.DataFrame) -> None:
@@ -601,22 +912,32 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
     st.markdown("#### Insights accionables")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Mediana resolución", f"{med:.1f} d")
+        st.metric("Resolución habitual", f"{med:.1f} d")
     with c2:
-        st.metric("P90 resolución", f"{p90:.1f} d")
+        st.metric("Resolución lenta", f"{p90:.1f} d")
     with c3:
-        st.metric("P95 resolución", f"{p95:.1f} d")
+        st.metric("Casos muy lentos", f"{p95:.1f} d")
 
-    bullets: List[str] = []
-    bullets.append(
-        "🧠 **P90/P95 mandan**: la experiencia de negocio la determinan los casos lentos, no la mediana. "
-        "Si mejoras el P90, el sistema se siente “mucho más rápido”."
+    cards: List[_TrendActionInsight] = []
+    cards.append(
+        _TrendActionInsight(
+            title="Impacto de casos lentos",
+            body=(
+                "No basta con cerrar rápido los fáciles; si mejoras los más atascados, "
+                "la percepción del cliente mejora de verdad."
+            ),
+        )
     )
 
     if p95 > med * 3:
-        bullets.append(
-            "🧯 **Cola pesada** detectada: el P95 es >3x la mediana. "
-            "Acción: clasifica cierres lentos por causa (dependencias, QA, release, acceso, datos) y pon owners."
+        cards.append(
+            _TrendActionInsight(
+                title="Cola de casos muy lentos",
+                body=(
+                    "Algunos casos tardan mucho más que el promedio. "
+                    "Clasifica por causa y asigna responsable."
+                ),
+            )
         )
 
     if "priority" in closed.columns:
@@ -627,18 +948,25 @@ def _insights_resolution(dff: pd.DataFrame) -> None:
         )
         if not grp.empty:
             worst = str(grp.index[0])
-            bullets.append(
-                f"🎯 **Dónde se atasca**: la mediana peor está en **{worst}** ({grp.iloc[0]:.1f} d). "
-                "Acción: revisa si esa prioridad tiene ‘hand-offs’ extra (validación, comités) que alargan el ciclo."
+            cards.append(
+                _TrendActionInsight(
+                    title="Dónde se atasca",
+                    body=(
+                        f"La mediana peor está en **{worst}** (**{grp.iloc[0]:.1f} d**). "
+                        "Revisa pasos extra que alargan el ciclo."
+                    ),
+                    priority_filters=[worst],
+                )
             )
 
-    bullets.append(
-        "📌 Palanca práctica: crea una vía rápida para incidentes con plantilla + checklist de evidencias "
-        "(logs, pasos, device, build). Reduce rebotes y acelera diagnóstico."
+    cards.append(
+        _TrendActionInsight(
+            title="Vía rápida de incidentes",
+            body=("Plantilla + checklist de evidencias reduce rebotes y acelera diagnóstico."),
+        )
     )
 
-    for b in bullets[:5]:
-        st.write("• " + b)
+    _render_premium_insight_cards(cards[:5], key_prefix="resolution")
 
 
 def _insights_priority(open_df: pd.DataFrame) -> None:
@@ -666,37 +994,57 @@ def _insights_priority(open_df: pd.DataFrame) -> None:
     with c3:
         st.metric("Riesgo ponderado", risk_score)
 
-    bullets: List[str] = []
+    cards: List[_TrendActionInsight] = []
     if top:
         pct = (int(counts.iloc[0]) / total * 100.0) if total else 0.0
-        bullets.append(
-            f"📌 **Concentración**: **{top}** representa **{pct:.1f}%** del backlog. "
-            "Acción: si es Medium/Low y crece, puede ocultar deuda que se convertirá en incidentes."
+        cards.append(
+            _TrendActionInsight(
+                title="Concentración de prioridad",
+                body=(
+                    f"**{top}** representa **{pct:.1f}%** del backlog. "
+                    "Si es Medium/Low y crece, puede ocultar deuda."
+                ),
+                priority_filters=[top],
+            )
         )
 
-    bullets.append(
-        "🧠 **Riesgo ponderado**: no basta contar issues; una sola High puede equivaler a muchas Low en impacto. "
-        "Usa este score para decidir si necesitas ‘modo incidente’ (swarming) esta semana."
+    cards.append(
+        _TrendActionInsight(
+            title="Riesgo ponderado",
+            body=(
+                "No basta contar issues; una High puede equivaler a varias Low en impacto. "
+                "Usa este score para decidir si activar modo incidente."
+            ),
+        )
     )
 
     if "status" in df.columns:
-        early = {"New", "Accepted", "Analysing", "Analyzing"}
+        early = {"New", "Analysing", "Analyzing"}
         crit = df[df["_prio_rank"] <= 2]
         if not crit.empty:
             crit_early = crit[crit["status"].astype(str).isin(early)]
             if len(crit_early) > 0:
-                bullets.append(
-                    f"🚨 **Críticas sin arrancar**: {len(crit_early)} issues High/Highest siguen en estados iniciales. "
-                    "Acción: asigna owner hoy y fuerza primer diagnóstico (no más de 24–48h)."
+                cards.append(
+                    _TrendActionInsight(
+                        title="Críticas sin arrancar",
+                        body=(
+                            f"**{len(crit_early)}** issues High/Highest siguen en estados iniciales. "
+                            "Asigna owner hoy y fuerza primer diagnóstico."
+                        ),
+                        priority_filters=["Supone un impedimento", "Highest", "High"],
+                        status_filters=["New", "Analysing", "Analyzing"],
+                    )
                 )
 
-    bullets.append(
-        "📌 Consejo: limita el número de prioridades ‘altas’ activas. Si todo es High, nada es High. "
-        "Mantén un cupo y exige justificación."
+    cards.append(
+        _TrendActionInsight(
+            title="Gobierno de prioridades",
+            body=("Si todo es High, nada es High. Mantén cupo de prioridades altas activas."),
+            priority_filters=["Supone un impedimento", "Highest", "High"],
+        )
     )
 
-    for b in bullets[:5]:
-        st.write("• " + b)
+    _render_premium_insight_cards(cards[:5], key_prefix="priority")
 
 
 def _insights_status(open_df: pd.DataFrame) -> None:
@@ -705,6 +1053,7 @@ def _insights_status(open_df: pd.DataFrame) -> None:
         return
 
     df = open_df.copy()
+    df["status"] = normalize_text_col(df["status"], "(sin estado)")
     counts = df["status"].astype(str).value_counts()
     total = int(len(df))
     top_status = str(counts.index[0]) if not counts.empty else None
@@ -719,11 +1068,17 @@ def _insights_status(open_df: pd.DataFrame) -> None:
     with c3:
         st.metric("Concentración top estado", f"{top_share:.1f}%")
 
-    bullets: List[str] = []
+    cards: List[_TrendActionInsight] = []
     if top_status:
-        bullets.append(
-            f"🧠 **Cuello de botella probable**: {top_share:.1f}% del backlog está en **{top_status}**. "
-            "Acción: revisa qué condición de salida está fallando (QA, aprobación, dependencias, releases)."
+        cards.append(
+            _TrendActionInsight(
+                title="Cuello de botella probable",
+                body=(
+                    f"**{top_share:.1f}%** del backlog está en **{top_status}**. "
+                    "Revisa la condición de salida que está fallando."
+                ),
+                status_filters=[top_status],
+            )
         )
 
     active_states = {
@@ -738,24 +1093,83 @@ def _insights_status(open_df: pd.DataFrame) -> None:
     active = df[df["status"].astype(str).isin(active_states)]
     active_pct = (len(active) / total * 100.0) if total else 0.0
 
-    bullets.append(
-        f"📌 **WIP activo estimado**: {active_pct:.1f}% está en estados “activos”. "
-        "Si es alto, suele indicar multitarea y cambios de contexto; limitar WIP sube throughput."
+    cards.append(
+        _TrendActionInsight(
+            title="Carga activa estimada",
+            body=(
+                f"**{active_pct:.1f}%** está en estados activos. "
+                "Si es alto, suele indicar multitarea y cambios de contexto."
+            ),
+            status_filters=[
+                s for s in active_states if s in df["status"].astype(str).unique().tolist()
+            ],
+        )
     )
 
-    triage_states = {"New", "Accepted"}
+    triage_states = {"New", "Analysing", "Analyzing"}
     triage = df[df["status"].astype(str).isin(triage_states)]
     triage_pct = (len(triage) / total * 100.0) if total else 0.0
     if triage_pct >= 40:
-        bullets.append(
-            f"🧯 **Deuda de triage**: {triage_pct:.1f}% en New/Accepted. "
-            "Acción: sesión diaria de 15 min para convertir New→(descartar/planificar/asignar) y evitar ‘pila infinita’."
+        cards.append(
+            _TrendActionInsight(
+                title="Deuda de triage",
+                body=(
+                    f"**{triage_pct:.1f}%** en New/Analysing. "
+                    "Haz sesión diaria breve para convertir entrada en decisiones."
+                ),
+                status_filters=["New", "Analysing", "Analyzing"],
+            )
         )
 
-    bullets.append(
-        "🎯 Recomendación: define SLAs internos por estado (p.ej. ‘Accepted max 3 días’). "
-        "Los cuellos se vuelven visibles sin mirar cada issue."
+    # Flujo final: Accepted -> Ready to deploy -> Deployed
+    accepted_cnt = int((df["status"].astype(str) == "Accepted").sum())
+    rtd_cnt = int((df["status"].astype(str) == "Ready to deploy").sum())
+    deployed_cnt = int((df["status"].astype(str) == "Deployed").sum())
+
+    if accepted_cnt > 0:
+        rtd_conv = (rtd_cnt / accepted_cnt) * 100.0
+        if rtd_conv < 35.0:
+            cards.append(
+                _TrendActionInsight(
+                    title="Atasco post-Accepted",
+                    body=(
+                        f"Hay **{accepted_cnt}** en Accepted y solo **{rtd_cnt}** en Ready to deploy "
+                        f"(conversión **{rtd_conv:.1f}%**)."
+                    ),
+                    status_filters=["Accepted", "Ready to deploy"],
+                )
+            )
+
+    if rtd_cnt > 0:
+        dep_conv = (deployed_cnt / rtd_cnt) * 100.0
+        if dep_conv < 70.0:
+            cards.append(
+                _TrendActionInsight(
+                    title="Cuello en release",
+                    body=(
+                        f"Hay **{rtd_cnt}** en Ready to deploy y **{deployed_cnt}** en Deployed "
+                        f"(conversión **{dep_conv:.1f}%**)."
+                    ),
+                    status_filters=["Ready to deploy", "Deployed"],
+                )
+            )
+    elif accepted_cnt > 0 and deployed_cnt == 0:
+        cards.append(
+            _TrendActionInsight(
+                title="Flujo detenido al final",
+                body="Existen Accepted pero no llegan a Ready to deploy ni a Deployed.",
+                status_filters=["Accepted", "Ready to deploy"],
+            )
+        )
+
+    cards.append(
+        _TrendActionInsight(
+            title="Política de tiempos por estado",
+            body=(
+                "Define tiempos máximos por estado para hacer visibles los cuellos "
+                "sin revisar caso por caso."
+            ),
+        )
     )
 
-    for b in bullets[:5]:
-        st.write("• " + b)
+    _render_premium_insight_cards(cards[:5], key_prefix="status")
