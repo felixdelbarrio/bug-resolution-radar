@@ -230,6 +230,7 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
           }
           [class*="st-key-trins_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface) !important;
             background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
           }
           [class*="st-key-trins_card_"] [data-testid="stMarkdownContainer"] p {

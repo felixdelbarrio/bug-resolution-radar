@@ -114,15 +114,29 @@ def _inject_colored_multiselect_css(
 ) -> None:
     rules: List[str] = []
 
+    def _opt_sel(v: str) -> str:
+        return (
+            f'[role="option"][aria-label*="{v}" i], '
+            f'[role="option"][title*="{v}" i], '
+            f'[role="option"]:has([title*="{v}" i])'
+        )
+
+    def _tag_sel(v: str) -> str:
+        return (
+            f'[data-baseweb="tag"][title*="{v}" i], ' f'[data-baseweb="tag"]:has([title*="{v}" i])'
+        )
+
     for label in status_labels:
         raw = (label or "").strip()
         c = status_color(raw)
         bg = _hex_with_alpha(c, 24)
         border = _hex_with_alpha(c, 120)
         v = _css_attr_value(label)
+        option_selector = _opt_sel(v)
+        tag_selector = _tag_sel(v)
         rules.append(
             f"""
-            [role="option"][aria-label*="{v}"] {{
+            {option_selector} {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
@@ -130,7 +144,7 @@ def _inject_colored_multiselect_css(
               background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
               background-repeat: no-repeat !important;
             }}
-            [role="option"][aria-label*="{v}"]::before {{
+            {option_selector}::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -141,43 +155,13 @@ def _inject_colored_multiselect_css(
               top: 50%;
               transform: translateY(-50%);
             }}
-            [data-baseweb="tag"][title="{v}"] {{
+            {tag_selector} {{
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
               background-image: none !important;
             }}
-            [role="option"]:has(span[title="{v}"]),
-            [role="option"]:has(div[title="{v}"]),
-            [role="option"]:has(span:only-child):has(span[title="{v}"]) {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            [role="option"]:has(span[title="{v}"])::before,
-            [role="option"]:has(div[title="{v}"])::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]),
-            [data-baseweb="tag"]:has(div[title="{v}"]) {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]) * ,
-            [data-baseweb="tag"]:has(div[title="{v}"]) * {{
+            {tag_selector} * {{
               color: {c} !important;
             }}
             """
@@ -189,9 +173,11 @@ def _inject_colored_multiselect_css(
         bg = _hex_with_alpha(c, 24)
         border = _hex_with_alpha(c, 120)
         v = _css_attr_value(label)
+        option_selector = _opt_sel(v)
+        tag_selector = _tag_sel(v)
         rules.append(
             f"""
-            [role="option"][aria-label*="{v}"] {{
+            {option_selector} {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
@@ -199,7 +185,7 @@ def _inject_colored_multiselect_css(
               background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
               background-repeat: no-repeat !important;
             }}
-            [role="option"][aria-label*="{v}"]::before {{
+            {option_selector}::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -210,43 +196,13 @@ def _inject_colored_multiselect_css(
               top: 50%;
               transform: translateY(-50%);
             }}
-            [data-baseweb="tag"][title="{v}"] {{
+            {tag_selector} {{
               background: {bg} !important;
               border: 1px solid {border} !important;
               color: {c} !important;
               background-image: none !important;
             }}
-            [role="option"]:has(span[title="{v}"]),
-            [role="option"]:has(div[title="{v}"]),
-            [role="option"]:has(span:only-child):has(span[title="{v}"]) {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            [role="option"]:has(span[title="{v}"])::before,
-            [role="option"]:has(div[title="{v}"])::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]),
-            [data-baseweb="tag"]:has(div[title="{v}"]) {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            [data-baseweb="tag"]:has(span[title="{v}"]) * ,
-            [data-baseweb="tag"]:has(div[title="{v}"]) * {{
+            {tag_selector} * {{
               color: {c} !important;
             }}
             """
@@ -317,7 +273,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     # Inject option/tag color styles once to avoid per-column layout jitter.
     _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
 
-    with st.container(border=True):
+    with st.container(border=True, key=f"{(key_prefix or 'dashboard')}_filters_panel"):
         c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
 
         with c_status:

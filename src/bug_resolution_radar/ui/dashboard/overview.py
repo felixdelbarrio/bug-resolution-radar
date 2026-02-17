@@ -110,6 +110,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
           }
           [class*="st-key-overview_summary_chart_"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface) !important;
             background: color-mix(in srgb, var(--bbva-surface) 94%, var(--bbva-surface-2)) !important;
           }
         </style>
@@ -367,6 +368,7 @@ def render_overview_kpis(
           }
           [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface) !important;
             background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
             box-shadow: 0 6px 18px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
           }

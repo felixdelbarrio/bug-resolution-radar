@@ -168,7 +168,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     - Maquetado dentro de un contenedor
     - Orden de columnas: SIEMPRE el canónico (el mismo que en Issues)
     """
-    with st.container(border=True):
+    with st.container(border=True, key="kanban_shell"):
         if open_df is None or open_df.empty:
             st.info("No hay incidencias abiertas para mostrar.")
             return

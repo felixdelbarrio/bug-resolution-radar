@@ -158,12 +158,19 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             margin-top: 0.02rem;
             margin-bottom: 0.08rem !important;
           }
-          div[data-testid="stSegmentedControl"] [role="radiogroup"] {
+          div[data-testid="stSegmentedControl"] [role="radiogroup"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] {
             gap: 0.22rem !important;
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
           }
           div[data-testid="stSegmentedControl"] label,
           div[data-testid="stSegmentedControl"] button,
-          div[data-testid="stSegmentedControl"] [role="radio"] {
+          div[data-testid="stSegmentedControl"] [role="radio"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *,
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button,
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > label {
             min-height: 2.15rem !important;
             padding: 0.35rem 0.78rem !important;
             border-radius: 10px !important;
@@ -174,24 +181,69 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           div[data-testid="stSegmentedControl"] label *,
           div[data-testid="stSegmentedControl"] button *,
-          div[data-testid="stSegmentedControl"] [role="radio"] * {
+          div[data-testid="stSegmentedControl"] [role="radio"] *,
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * *,
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button * {
             color: inherit !important;
             fill: currentColor !important;
           }
           div[data-testid="stSegmentedControl"] label:has(input:checked),
           div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
-          div[data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"] {
+          div[data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-pressed="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[aria-selected="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *[data-selected="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-pressed="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[aria-selected="true"],
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button[data-selected="true"] {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
           }
           div[data-testid="stSegmentedControl"] label:hover,
           div[data-testid="stSegmentedControl"] button:hover,
-          div[data-testid="stSegmentedControl"] [role="radio"]:hover {
+          div[data-testid="stSegmentedControl"] [role="radio"]:hover,
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *:hover,
+          div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button:hover {
             filter: brightness(0.99);
           }
           div[data-testid="stSegmentedControl"] [aria-disabled="true"] {
             opacity: 0.72 !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          /* Fallback for Streamlit versions that render segmented controls without stSegmentedControl testid */
+          [role="radiogroup"] > *,
+          [role="radiogroup"] > * > button,
+          [role="radiogroup"] > button,
+          [data-baseweb="button-group"] > *,
+          [data-baseweb="button-group"] > * > button {
+            min-height: 2.12rem !important;
+            border-radius: 10px !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          [role="radiogroup"] > * *,
+          [role="radiogroup"] > * > button *,
+          [data-baseweb="button-group"] > * *,
+          [data-baseweb="button-group"] > * > button * {
+            color: inherit !important;
+          }
+          [role="radiogroup"] > *[aria-pressed="true"],
+          [role="radiogroup"] > *[aria-selected="true"],
+          [role="radiogroup"] > *[data-selected="true"],
+          [role="radiogroup"] > * > button[aria-pressed="true"],
+          [role="radiogroup"] > * > button[aria-selected="true"],
+          [role="radiogroup"] > * > button[data-selected="true"],
+          [data-baseweb="button-group"] > *[aria-pressed="true"],
+          [data-baseweb="button-group"] > *[aria-selected="true"],
+          [data-baseweb="button-group"] > *[data-selected="true"],
+          [data-baseweb="button-group"] > * > button[aria-pressed="true"],
+          [data-baseweb="button-group"] > * > button[aria-selected="true"],
+          [data-baseweb="button-group"] > * > button[data-selected="true"] {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
           }
           div[data-testid="stButton"] > button[aria-label="🛰️"],
           div[data-testid="stButton"] > button[aria-label="◐"],
@@ -207,7 +259,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             margin-bottom: -0.76rem;
             border: 1px solid var(--bbva-border-strong);
             border-radius: 14px;
-            background: color-mix(in srgb, var(--bbva-surface) 84%, transparent);
+            background: var(--bbva-surface-elevated);
             padding: 0.32rem 0.42rem 0.26rem 0.42rem;
             box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 16%, transparent);
           }
@@ -221,7 +273,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] button,
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label,
-          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radio"] {
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [role="radio"],
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *,
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button {
             background: var(--bbva-tab-soft-bg) !important;
             border-color: var(--bbva-tab-soft-border) !important;
             color: var(--bbva-tab-soft-text) !important;
@@ -230,6 +284,24 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_nav_bar
             div[data-testid="stSegmentedControl"]
             [role="radio"][aria-checked="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [data-baseweb="button-group"] > *[aria-pressed="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [data-baseweb="button-group"] > *[aria-selected="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [data-baseweb="button-group"] > *[data-selected="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [data-baseweb="button-group"] > * > button[aria-pressed="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [data-baseweb="button-group"] > * > button[aria-selected="true"],
+          .st-key-workspace_nav_bar
+            div[data-testid="stSegmentedControl"]
+            [data-baseweb="button-group"] > * > button[data-selected="true"],
           .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] label:has(input:checked) {
             background: var(--bbva-tab-active-bg) !important;
             border-color: var(--bbva-tab-active-border) !important;
@@ -237,6 +309,13 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           .st-key-workspace_dashboard_content {
             margin-top: -0.24rem;
+          }
+          .st-key-dashboard_filters_panel [data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-issues_tab_issues_shell [data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-kanban_shell [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: 0 10px 28px color-mix(in srgb, var(--bbva-text) 12%, transparent) !important;
           }
 
           /* Sidebar */
@@ -292,6 +371,22 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="popover"] li {
             color: var(--bbva-text) !important;
             background: transparent !important;
+            position: relative;
+            padding-left: 1.70rem !important;
+            --bbva-opt-dot: color-mix(in srgb, var(--bbva-text) 62%, transparent);
+          }
+          div[data-baseweb="popover"] [role="option"]::before,
+          div[data-baseweb="popover"] li::before {
+            content: "";
+            width: 0.54rem;
+            height: 0.54rem;
+            border-radius: 999px;
+            background: var(--bbva-opt-dot);
+            position: absolute;
+            left: 0.66rem;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
           }
           div[data-baseweb="popover"] [role="option"]:hover,
           div[data-baseweb="popover"] li:hover {
@@ -300,6 +395,45 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
             background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
             color: var(--bbva-text) !important;
+          }
+          /* Option semáforo en listados (status/priority); el chip seleccionado mantiene solo fondo/borde */
+          div[data-baseweb="popover"] [role="option"][aria-label*="new" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="analysing" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="blocked" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="created" i] {
+            --bbva-opt-dot: #D24756;
+            border-left: 2px solid rgba(210,71,86,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="en progreso" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="in progress" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="to rework" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="test" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="ready to verify" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="open" i] {
+            --bbva-opt-dot: #E08A00;
+            border-left: 2px solid rgba(224,138,0,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="accepted" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="ready to deploy" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="deployed" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="closed" i] {
+            --bbva-opt-dot: #1E9E53;
+            border-left: 2px solid rgba(30,158,83,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="supone un impedimento" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="highest" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="high" i] {
+            --bbva-opt-dot: #B4232A;
+            border-left: 2px solid rgba(180,35,42,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="medium" i] {
+            --bbva-opt-dot: #E08A00;
+            border-left: 2px solid rgba(224,138,0,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"][aria-label*="low" i],
+          div[data-baseweb="popover"] [role="option"][aria-label*="lowest" i] {
+            --bbva-opt-dot: #1E9E53;
+            border-left: 2px solid rgba(30,158,83,0.72);
           }
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
@@ -379,7 +513,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="tab-list"] {
             gap: 8px;
           }
-          [role="tablist"] button[role="tab"] {
+          [role="tablist"] [role="tab"],
+          div[data-baseweb="tab-list"] [role="tab"] {
             color: var(--bbva-tab-soft-text) !important;
             background: var(--bbva-tab-soft-bg) !important;
             border: 1px solid var(--bbva-tab-soft-border) !important;
@@ -388,13 +523,21 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 0.28rem 0.80rem !important;
             font-weight: 700 !important;
           }
-          [role="tablist"] button[role="tab"] * {
+          [role="tablist"] [role="tab"] *,
+          div[data-baseweb="tab-list"] [role="tab"] * {
             color: inherit !important;
           }
-          [role="tablist"] button[role="tab"][aria-selected="true"] {
+          [role="tablist"] [role="tab"][aria-selected="true"],
+          div[data-baseweb="tab-list"] [role="tab"][aria-selected="true"] {
             color: var(--bbva-tab-active-text) !important;
             background: var(--bbva-tab-active-bg) !important;
             border-color: var(--bbva-tab-active-border) !important;
+          }
+          [role="tablist"] [role="tab"][aria-selected="false"],
+          div[data-baseweb="tab-list"] [role="tab"][aria-selected="false"] {
+            color: var(--bbva-tab-soft-text) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            border-color: var(--bbva-tab-soft-border) !important;
           }
           div[data-baseweb="tab-highlight"] {
             background-color: transparent !important;
@@ -553,6 +696,17 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             border: 1px solid var(--bbva-border-strong) !important;
             background: var(--bbva-surface-elevated) !important;
             box-shadow: 0 8px 24px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+          }
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] p,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] li,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h1,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h2,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h3,
+          [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] h4 {
+            color: var(--bbva-text) !important;
+          }
+          [data-testid="stCaptionContainer"] * {
+            color: var(--bbva-text-muted) !important;
           }
         </style>
         """
