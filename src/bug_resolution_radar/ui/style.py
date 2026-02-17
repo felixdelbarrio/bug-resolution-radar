@@ -608,6 +608,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
         return es_label_map.get(clean.strip().lower(), clean)
 
     fig.update_layout(
+        template="plotly_dark" if dark_mode else "plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
@@ -634,7 +635,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
             bordercolor=legend_border,
             borderwidth=1,
             font=dict(size=11, color=text_color),
-            title=dict(font=dict(color=text_color)),
+            title=dict(font=dict(color=text_color), text=""),
         ),
         hoverlabel=dict(
             bgcolor=legend_bg,
@@ -696,6 +697,8 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
             trace.showlegend = bool(showlegend and trace.name)
             if hasattr(trace, "textfont"):
                 trace.textfont = dict(color=text_color)
+            if hasattr(trace, "legendgrouptitle"):
+                trace.legendgrouptitle = dict(font=dict(color=text_color))
         except Exception:
             pass
 

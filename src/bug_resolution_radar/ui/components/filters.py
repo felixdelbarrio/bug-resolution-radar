@@ -122,7 +122,7 @@ def _inject_colored_multiselect_css(
         v = _css_attr_value(label)
         rules.append(
             f"""
-            [role="option"][aria-label="{v}"] {{
+            [role="option"][aria-label*="{v}"] {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
@@ -130,7 +130,7 @@ def _inject_colored_multiselect_css(
               background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
               background-repeat: no-repeat !important;
             }}
-            [role="option"][aria-label="{v}"]::before {{
+            [role="option"][aria-label*="{v}"]::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
@@ -191,7 +191,7 @@ def _inject_colored_multiselect_css(
         v = _css_attr_value(label)
         rules.append(
             f"""
-            [role="option"][aria-label="{v}"] {{
+            [role="option"][aria-label*="{v}"] {{
               background: {bg} !important;
               border-left: 3px solid {c} !important;
               position: relative;
@@ -199,7 +199,7 @@ def _inject_colored_multiselect_css(
               background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
               background-repeat: no-repeat !important;
             }}
-            [role="option"][aria-label="{v}"]::before {{
+            [role="option"][aria-label*="{v}"]::before {{
               content: "";
               width: 0.56rem;
               height: 0.56rem;
