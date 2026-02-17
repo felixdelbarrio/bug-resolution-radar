@@ -169,19 +169,15 @@ def _neutral_chip_style() -> str:
 
 
 def _chip_html(label: str, style: str) -> str:
-    return (
-        '<span class="kan-chip" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
-            style, html.escape(label)
-        )
+    return '<span class="kan-chip" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
+        style, html.escape(label)
     )
 
 
 def _assignee_chip_html(label: str) -> str:
-    return (
-        '<span class="kan-chip kan-chip-assignee" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
-            _neutral_chip_style(),
-            html.escape(label),
-        )
+    return '<span class="kan-chip kan-chip-assignee" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
+        _neutral_chip_style(),
+        html.escape(label),
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import html
+import re
 from typing import List, Optional
 
 import pandas as pd
@@ -527,6 +527,20 @@ def _matrix_set_filters(st_name: str, prio: str) -> None:
     st.session_state[FILTER_PRIORITY_KEY] = [prio] if statuses else []
 
 
+def _matrix_toggle_status_filter(st_name: str) -> None:
+    statuses = list(st.session_state.get(FILTER_STATUS_KEY) or [])
+    if st_name in statuses:
+        statuses = [s for s in statuses if s != st_name]
+    else:
+        statuses.append(st_name)
+    st.session_state[FILTER_STATUS_KEY] = statuses
+
+
+def _matrix_toggle_priority_filter(prio: str) -> None:
+    priorities = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
+    st.session_state[FILTER_PRIORITY_KEY] = [] if priorities == [prio] else [prio]
+
+
 def _matrix_clear_filters() -> None:
     st.session_state[FILTER_STATUS_KEY] = []
     st.session_state[FILTER_PRIORITY_KEY] = []
@@ -551,6 +565,41 @@ def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
     )
 
 
+def _matrix_priority_label(priority: str) -> str:
+    p = str(priority or "").strip()
+    if p.lower() == "supone un impedimento":
+        return "Impedimento"
+    return p
+
+
+def _matrix_safe_token(value: str) -> str:
+    tok = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    return tok or "na"
+
+
+def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
+    color = (hex_color or "#8EA2C4").strip()
+    border = _hex_with_alpha(color, 170 if selected else 125)
+    bg = _hex_with_alpha(color, 64 if selected else 28)
+    hover_bg = _hex_with_alpha(color, 76 if selected else 42)
+    ring = _hex_with_alpha(color, 86)
+    fw = "800" if selected else "700"
+    return (
+        f"border:1px solid {border} !important;"
+        f"background:{bg} !important;"
+        f"color:{color} !important;"
+        f"font-weight:{fw} !important;"
+        "border-radius:11px !important;"
+        "min-height:2.18rem !important;"
+        "padding:0.22rem 0.46rem !important;"
+        "line-height:1.16 !important;"
+        "white-space:normal !important;"
+        "word-break:break-word !important;"
+        f"--mx-hover-bg:{hover_bg};"
+        f"--mx-focus-ring:{ring};"
+    )
+
+
 def _inject_matrix_compact_css(scope_key: str) -> None:
     st.markdown(
         f"""
@@ -569,6 +618,37 @@ def _inject_matrix_compact_css(scope_key: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _inject_matrix_header_signal_css(
+    *,
+    row_specs: List[tuple[str, str, bool]],
+    col_specs: List[tuple[str, str, bool]],
+) -> None:
+    rules: List[str] = []
+    for btn_key, color, is_selected in row_specs + col_specs:
+        style = _matrix_header_button_css(color, selected=is_selected)
+        rules.append(
+            f"""
+            .st-key-{btn_key} div[data-testid="stButton"] > button {{
+              {style}
+            }}
+            .st-key-{btn_key} div[data-testid="stButton"] > button:hover {{
+              background: var(--mx-hover-bg) !important;
+              border-color: color-mix(in srgb, {color} 78%, transparent) !important;
+            }}
+            .st-key-{btn_key} div[data-testid="stButton"] > button:focus-visible {{
+              outline: none !important;
+              box-shadow: 0 0 0 3px var(--mx-focus-ring) !important;
+            }}
+            .st-key-{btn_key} div[data-testid="stButton"] > button * {{
+              color: inherit !important;
+              fill: currentColor !important;
+            }}
+            """
+        )
+    if rules:
+        st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
 def render_status_priority_matrix(
@@ -618,10 +698,16 @@ def render_status_priority_matrix(
     with cA:
         if has_matrix_sel:
             status_txt = ", ".join(selected_statuses) if selected_statuses else "(todos)"
-            prio_txt = ", ".join(selected_priorities) if selected_priorities else "(todas)"
+            prio_txt = (
+                ", ".join(_matrix_priority_label(p) for p in selected_priorities)
+                if selected_priorities
+                else "(todas)"
+            )
             st.caption(f"Seleccionado: Estado={status_txt} · Priority={prio_txt}")
         else:
-            st.caption("Click en una celda: sincroniza Estado/Priority y actualiza la tabla.")
+            st.caption(
+                "Click en cabeceras o celdas: sincroniza Estado/Priority y actualiza la tabla."
+            )
     with cB:
         st.button(
             "Limpiar selección",
@@ -640,17 +726,31 @@ def render_status_priority_matrix(
     matrix_scope_key = f"{(key_prefix or 'mx')}_matrix_panel"
     _inject_matrix_compact_css(matrix_scope_key)
 
+    row_btn_specs: List[tuple[str, str, bool]] = []
+    col_btn_specs: List[tuple[str, str, bool]] = []
+    for st_name in statuses:
+        row_key = f"{key_prefix}__mx_row__{_matrix_safe_token(st_name)}"
+        row_btn_specs.append((row_key, status_color(st_name), st_name in selected_statuses))
+    for p in priorities:
+        col_key = f"{key_prefix}__mx_col__{_matrix_safe_token(p)}"
+        col_btn_specs.append((col_key, priority_color(p), p in selected_priorities))
+    _inject_matrix_header_signal_css(row_specs=row_btn_specs, col_specs=col_btn_specs)
+
     with st.container(border=True, key=matrix_scope_key):
         # Header row (con totales por columna)
         hdr = st.columns(len(priorities) + 1)
         hdr[0].markdown(f"**Estado ({total_open:,})**")
         for i, p in enumerate(priorities):
-            label = f"{p} ({col_totals.get(p, 0)})"
-            p_color = priority_color(p)
-            hdr[i + 1].markdown(
-                f'<div style="{_matrix_chip_style(p_color, selected=p in selected_priorities)}">'
-                f"{html.escape(label)}</div>",
-                unsafe_allow_html=True,
+            label = f"{_matrix_priority_label(p)} ({col_totals.get(p, 0)})"
+            col_key = f"{key_prefix}__mx_col__{_matrix_safe_token(p)}"
+            hdr[i + 1].button(
+                label,
+                key=col_key,
+                type="primary" if p in selected_priorities else "secondary",
+                width="stretch",
+                disabled=(col_totals.get(p, 0) == 0),
+                on_click=_matrix_toggle_priority_filter,
+                args=(p,),
             )
 
         # Rows (con total por estado)
@@ -659,11 +759,15 @@ def render_status_priority_matrix(
             row = st.columns(len(priorities) + 1)
 
             row_label = f"{st_name} ({total_row})"
-            st_color = status_color(st_name)
-            row[0].markdown(
-                f'<div style="{_matrix_chip_style(st_color, selected=st_name in selected_statuses)}">'
-                f"{html.escape(row_label)}</div>",
-                unsafe_allow_html=True,
+            row_key = f"{key_prefix}__mx_row__{_matrix_safe_token(st_name)}"
+            row[0].button(
+                row_label,
+                key=row_key,
+                type="primary" if st_name in selected_statuses else "secondary",
+                width="stretch",
+                disabled=(total_row == 0),
+                on_click=_matrix_toggle_status_filter,
+                args=(st_name,),
             )
 
             for i, p in enumerate(priorities):

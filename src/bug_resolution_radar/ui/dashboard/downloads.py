@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, Literal, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -66,7 +66,7 @@ def download_button_for_df(
     spec: Optional[CsvDownloadSpec] = None,
     suffix: str = "",
     disabled: Optional[bool] = None,
-    width: str = "stretch",
+    width: Literal["stretch", "content"] | int = "stretch",
 ) -> None:
     """Render a download button for a dataframe.
 

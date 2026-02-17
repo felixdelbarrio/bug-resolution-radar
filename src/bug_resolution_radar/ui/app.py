@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import Dict, List
 
 import streamlit as st
-from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.config import (
     Settings,
@@ -22,8 +20,6 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 def _set_workspace_mode(mode: str) -> None:
     """Switch top-level workspace mode and reset transient dashboard picker state."""
     st.session_state["workspace_mode"] = mode
-    if mode in {"ingest", "config"}:
-        st.session_state.pop("workspace_section_picker_aux", None)
 
 
 def _dashboard_labels() -> Dict[str, str]:
@@ -101,100 +97,84 @@ def _toggle_dark_mode() -> None:
     )
 
 
+def _set_workspace_section(section: str) -> None:
+    """Activate a dashboard section from top-level workspace navigation."""
+    labels = _dashboard_labels()
+    section_names: List[str] = dashboard_page.dashboard_sections()
+    if not section_names:
+        return
+    normalized = str(section or "").strip().lower()
+    if normalized not in section_names:
+        normalized = "overview" if "overview" in section_names else section_names[0]
+    st.session_state["workspace_mode"] = "dashboard"
+    st.session_state["workspace_section"] = normalized
+    st.session_state["workspace_section_label"] = labels.get(
+        normalized, labels.get(section_names[0], "Resumen")
+    )
+
+
 def _render_workspace_header() -> None:
     """Render top navigation bar and action icons."""
     labels = _dashboard_labels()
     name_by_label = {v: k for k, v in labels.items()}
     section_options = [labels[s] for s in dashboard_page.dashboard_sections()]
+    if not section_options:
+        return
     mode = str(st.session_state.get("workspace_mode") or "dashboard")
     is_dark = bool(st.session_state.get("workspace_dark_mode", False))
-    active_label = str(st.session_state.get("workspace_section_label") or section_options[0])
+    current_section = dashboard_page.normalize_dashboard_section(
+        str(st.session_state.get("workspace_section") or "overview")
+    )
 
     left, right = st.columns([5.0, 0.9], gap="small")
 
     with left:
-        picker_key = (
-            "workspace_section_label" if mode == "dashboard" else "workspace_section_picker_aux"
-        )
-        picked = st.segmented_control(
-            "Sección",
-            options=section_options,
-            selection_mode="single",
-            key=picker_key,
-            label_visibility="collapsed",
-        )
-        picked_label = str(picked or "")
-        if picked_label in section_options:
-            active_label = picked_label
-        if picked_label in name_by_label:
-            st.session_state["workspace_section"] = name_by_label.get(picked_label, "overview")
-            # Avoid mutating the same key bound to an already-instantiated widget.
-            if picker_key != "workspace_section_label":
-                st.session_state["workspace_section_label"] = picked_label
-            st.session_state["workspace_mode"] = "dashboard"
+        with st.container(key="workspace_nav_tabs"):
+            tab_cols = st.columns(len(section_options), gap="small")
+            for idx, label in enumerate(section_options):
+                section_name = name_by_label.get(label, "overview")
+                tab_cols[idx].button(
+                    label,
+                    key=f"workspace_tab_{section_name}",
+                    type=(
+                        "primary"
+                        if mode == "dashboard" and section_name == current_section
+                        else "secondary"
+                    ),
+                    width="stretch",
+                    on_click=_set_workspace_section,
+                    args=(section_name,),
+                )
 
     with right:
-        b_ing, b_theme, b_cfg = st.columns(3, gap="small")
-        b_ing.button(
-            "🛰️",
-            key="workspace_btn_ingest",
-            type="primary" if mode == "ingest" else "secondary",
-            width="stretch",
-            help="Ingesta",
-            on_click=_set_workspace_mode,
-            args=("ingest",),
-        )
-        b_theme.button(
-            "◐",
-            key="workspace_btn_theme",
-            type="primary" if is_dark else "secondary",
-            width="stretch",
-            help="Tema oscuro",
-            on_click=_toggle_dark_mode,
-        )
-        b_cfg.button(
-            "⚙️",
-            key="workspace_btn_config",
-            type="primary" if mode == "config" else "secondary",
-            width="stretch",
-            help="Configuración",
-            on_click=_set_workspace_mode,
-            args=("config",),
-        )
-
-    components_html(
-        f"""
-        <script>
-          (function() {{
-            const activeLabel = {json.dumps(active_label)};
-            const doc = window.parent && window.parent.document;
-            if (!doc || !activeLabel) return;
-            const navRoots = Array.from(
-              doc.querySelectorAll('[class*="st-key-workspace_nav_bar_"], .st-key-workspace_nav_bar')
-            );
-            if (!navRoots.length) return;
-            navRoots.forEach((root) => {{
-              root.querySelectorAll('.bbva-force-active').forEach((el) => el.classList.remove('bbva-force-active'));
-              root.querySelectorAll('.bbva-force-active-text').forEach((el) => el.classList.remove('bbva-force-active-text'));
-              const candidates = Array.from(
-                root.querySelectorAll(
-                  '[data-testid="stSegmentedControl"] button, ' +
-                  '[data-testid="stSegmentedControl"] label, ' +
-                  '[data-testid="stSegmentedControl"] [role="radio"], ' +
-                  '[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > *, ' +
-                  '[data-testid="stSegmentedControl"] [data-baseweb="button-group"] > * > button'
-                )
-              );
-              const selected = candidates.find((el) => ((el.innerText || '').trim() === activeLabel));
-              if (!selected) return;
-              selected.classList.add('bbva-force-active');
-              selected.querySelectorAll('*').forEach((child) => child.classList.add('bbva-force-active-text'));
-            }});
-          }})();
-        </script>
-        """,
-        height=0,
-    )
+        with st.container(key="workspace_nav_actions"):
+            b_ing, b_theme, b_cfg = st.columns(3, gap="small")
+            b_ing.button(
+                "🛰️",
+                key="workspace_btn_ingest",
+                type="primary" if mode == "ingest" else "secondary",
+                width="stretch",
+                help="Ingesta",
+                on_click=_set_workspace_mode,
+                args=("ingest",),
+            )
+            b_theme.button(
+                "◐",
+                key="workspace_btn_theme",
+                type="primary" if is_dark else "secondary",
+                width="stretch",
+                help="Tema oscuro",
+                on_click=_toggle_dark_mode,
+            )
+            b_cfg.button(
+                "⚙️",
+                key="workspace_btn_config",
+                type="primary" if mode == "config" else "secondary",
+                width="stretch",
+                help="Configuración",
+                on_click=_set_workspace_mode,
+                args=("config",),
+            )
 
 
 def _render_workspace_scope(settings: Settings) -> None:
@@ -277,5 +257,5 @@ def main() -> None:
         config_page.render(settings)
         return
 
-    with st.container(key="workspace_dashboard_content"):
+    with st.container(key=f"workspace_dashboard_content_{section}"):
         dashboard_page.render(settings, active_section=section)
