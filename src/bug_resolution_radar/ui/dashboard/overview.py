@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -126,6 +127,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
             filename_prefix="resumen_visual",
             suffix="completo",
             csv_df=export_df,
+            figure=figures_for_export[0] if figures_for_export else None,
             html_bytes=figures_to_html_bytes(
                 figures_for_export, title="Resumen visual", subtitles=titles_for_export
             ),
@@ -185,11 +187,13 @@ def render_overview_kpis(
     class FocusCard:
         card_id: str
         title: str
-        body: str
+        metric: str
+        detail: str
         score: float
         section: str
         trend_chart: str | None = None
         insights_tab: str | None = None
+        tone: str = "neutral"
 
     def _jump_to(
         section: str,
@@ -338,42 +342,77 @@ def render_overview_kpis(
             line-height: 1.1;
           }
           .exec-focus-title {
-            margin: 0.05rem 0 0.28rem 0;
+            margin: 0.06rem 0 0.34rem 0;
             font-weight: 800;
             color: var(--bbva-text);
-            font-size: 0.90rem;
+            font-size: 0.96rem;
+            letter-spacing: -0.01em;
           }
-          [class*="st-key-exec_focus_"] div[data-testid="stButton"] > button {
+          .exec-focus-accent {
+            width: 4.20rem;
+            height: 0.22rem;
+            border-radius: 999px;
+            margin-bottom: 0.10rem;
+          }
+          .exec-focus-kicker {
+            font-size: 0.70rem;
+            font-weight: 800;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+          }
+          .exec-focus-metric {
+            font-size: 2.02rem;
+            font-weight: 800;
+            line-height: 1.02;
+            letter-spacing: -0.02em;
+          }
+          .exec-focus-detail {
+            color: var(--bbva-text-muted);
+            font-size: 0.92rem;
+            line-height: 1.3;
+            min-height: 2.34rem;
+          }
+          [class*="st-key-exec_focus_card_"] {
+            border: 1px solid var(--bbva-border) !important;
+            border-radius: 12px !important;
+            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
+            box-shadow: none !important;
+            padding: 0.54rem 0.64rem !important;
+          }
+          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlock"] {
+            gap: 0.45rem !important;
+          }
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button {
             justify-content: flex-start !important;
             width: 100% !important;
-            min-height: 1.80rem !important;
+            min-height: 1.66rem !important;
             padding: 0 !important;
             border: 0 !important;
             background: transparent !important;
             color: var(--bbva-text) !important;
-            font-size: 1.03rem !important;
+            font-size: 0.98rem !important;
             font-weight: 800 !important;
-            letter-spacing: -0.01em !important;
+            letter-spacing: 0 !important;
             border-radius: 8px !important;
             text-align: left !important;
             box-shadow: none !important;
           }
-          [class*="st-key-exec_focus_"] div[data-testid="stButton"] > button:hover {
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:hover {
             color: var(--bbva-primary) !important;
             transform: translateX(1px);
           }
-          [class*="st-key-exec_focus_"] div[data-testid="stButton"] > button:focus-visible {
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:focus-visible {
             outline: none !important;
-            box-shadow: 0 0 0 2px rgba(0,81,241,0.16) !important;
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 34%, transparent) !important;
           }
           [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid var(--bbva-border-strong) !important;
-            background: var(--bbva-surface) !important;
-            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
-            box-shadow: 0 6px 18px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+            border: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
           }
-          [class*="st-key-exec_focus_card_"] [data-testid="stMarkdownContainer"] p {
-            color: var(--bbva-text) !important;
+          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] > div {
+            padding-top: 0 !important;
           }
           @media (max-width: 1020px) {
             .exec-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -418,39 +457,76 @@ def render_overview_kpis(
 
     st.markdown('<div class="exec-focus-title">Focos accionables</div>', unsafe_allow_html=True)
 
+    trend_target_labels = {
+        "timeseries": "Evolución",
+        "age_buckets": "Antigüedad",
+        "open_status_bar": "Estado",
+        "open_priority_pie": "Prioridad",
+    }
+    insights_target_labels = {
+        "top_topics": "Top tópicos",
+        "duplicates": "Duplicados",
+        "people": "Personas",
+        "ops_health": "Salud operativa",
+    }
+
+    def _focus_scope_label(focus: FocusCard) -> str:
+        if focus.section == "trends":
+            detail = trend_target_labels.get(str(focus.trend_chart or ""), "Detalle")
+            return f"Tendencias · {detail}"
+        if focus.section == "insights":
+            detail = insights_target_labels.get(str(focus.insights_tab or ""), "Detalle")
+            return f"Insights · {detail}"
+        return "Operación"
+
+    def _focus_tone_color(focus: FocusCard) -> str:
+        return {
+            "risk": "#D24756",
+            "warning": "#D07D10",
+            "flow": "#0F7A58",
+            "quality": "#2E67C7",
+            "opportunity": "#1A8A5E",
+        }.get(str(focus.tone or "").strip().lower(), "var(--bbva-primary)")
+
     focus_candidates: list[FocusCard] = []
     if aged_30_count > 0:
         focus_candidates.append(
             FocusCard(
                 card_id="age",
-                title="Cola envejecida ↗",
-                body=f"**{aged_30_count:,}** abiertas >30d (**{aged_30_pct:.1f}%**).",
+                title="Cola envejecida",
+                metric=f"{aged_30_count:,}",
+                detail=f"abiertas con más de 30 días ({aged_30_pct:.1f}% del backlog abierto).",
                 score=float(aged_30_pct),
                 section="trends",
                 trend_chart="age_buckets",
+                tone="risk",
             )
         )
     if exit_buffer > 0:
         focus_candidates.append(
             FocusCard(
                 card_id="exit",
-                title="Embudo de salida ↗",
-                body=f"**{exit_buffer:,}** en salida (**{exit_buffer_pct:.1f}%**): Accepted + Ready.",
+                title="Embudo de salida",
+                metric=f"{exit_buffer:,}",
+                detail=f"issues en Accepted + Ready ({exit_buffer_pct:.1f}% del backlog abierto).",
                 score=float(exit_buffer_pct)
                 + (8.0 if accepted_count > (ready_deploy_count * 1.5) else 0.0),
                 section="trends",
                 trend_chart="open_status_bar",
+                tone="flow",
             )
         )
     if blocked_count > 0:
         focus_candidates.append(
             FocusCard(
                 card_id="blocked",
-                title="Bloqueos activos ↗",
-                body=f"**{blocked_count:,}** bloqueadas (**{blocked_pct:.1f}%** de abiertas).",
+                title="Bloqueos activos",
+                metric=f"{blocked_count:,}",
+                detail=f"incidencias bloqueadas ({blocked_pct:.1f}% del backlog abierto).",
                 score=float(blocked_pct) + (10.0 if blocked_count >= 10 else 0.0),
                 section="insights",
                 insights_tab="people",
+                tone="warning",
             )
         )
     if dup_issues > 0 or top_theme_count > 0:
@@ -458,14 +534,16 @@ def render_overview_kpis(
         focus_candidates.append(
             FocusCard(
                 card_id="hygiene",
-                title="Higiene de backlog ↗",
-                body=(
-                    f"Duplicadas: **{dup_issues:,}** en **{dup_groups:,}** grupos. "
-                    f"Tema líder: **{top_theme} ({top_theme_count:,})**."
+                title="Higiene de backlog",
+                metric=f"{dup_issues:,}",
+                detail=(
+                    f"duplicadas en {dup_groups:,} grupos. "
+                    f"Tema líder: {top_theme} ({top_theme_count:,})."
                 ),
                 score=float(dup_pct) + (6.0 if dup_groups >= 20 else 0.0),
                 section="insights",
                 insights_tab="top_topics",
+                tone="quality",
             )
         )
     if dominant_priority.lower() in {"supone un impedimento", "highest", "high"}:
@@ -473,11 +551,13 @@ def render_overview_kpis(
         focus_candidates.append(
             FocusCard(
                 card_id="critical_mix",
-                title="Presión de criticidad ↗",
-                body=f"Predomina **{dominant_priority}** con **{dominant_priority_count:,}** issues (**{dom_pct:.1f}%**).",
+                title="Presión de criticidad",
+                metric=f"{dominant_priority_count:,}",
+                detail=f"issues con prioridad dominante {dominant_priority} ({dom_pct:.1f}% de abiertas).",
                 score=float(dom_pct) + 12.0,
                 section="trends",
                 trend_chart="open_priority_pie",
+                tone="risk",
             )
         )
     if created_14 > 0 or resolved_14 > 0:
@@ -486,11 +566,13 @@ def render_overview_kpis(
             focus_candidates.append(
                 FocusCard(
                     card_id="flow_pressure",
-                    title="Entrada superior a salida ↗",
-                    body=f"Últimos 14 días: creadas **{created_14:,}** vs cerradas **{resolved_14:,}**.",
+                    title="Entrada superior a salida",
+                    metric=f"{created_14:,} vs {resolved_14:,}",
+                    detail="creadas vs cerradas en los últimos 14 días.",
                     score=float(ratio) + 10.0,
                     section="trends",
                     trend_chart="timeseries",
+                    tone="warning",
                 )
             )
         else:
@@ -498,11 +580,13 @@ def render_overview_kpis(
             focus_candidates.append(
                 FocusCard(
                     card_id="flow_opportunity",
-                    title="Oportunidad de limpieza ↗",
-                    body=f"Últimos 14 días: cerradas **{resolved_14:,}** vs creadas **{created_14:,}**.",
+                    title="Oportunidad de limpieza",
+                    metric=f"{resolved_14:,} vs {created_14:,}",
+                    detail="cerradas vs creadas en los últimos 14 días.",
                     score=float(ratio),
                     section="trends",
                     trend_chart="timeseries",
+                    tone="opportunity",
                 )
             )
 
@@ -510,11 +594,13 @@ def render_overview_kpis(
         focus_candidates = [
             FocusCard(
                 card_id="baseline",
-                title="Seguimiento operativo ↗",
-                body=f"Backlog abierto actual: **{open_issues:,}** incidencias.",
+                title="Seguimiento operativo",
+                metric=f"{open_issues:,}",
+                detail="incidencias en el backlog abierto actual.",
                 score=0.0,
                 section="trends",
                 trend_chart="timeseries",
+                tone="neutral",
             )
         ]
 
@@ -522,36 +608,44 @@ def render_overview_kpis(
     if len(focus_cards) < 4:
         fallback = [
             FocusCard(
-                "age_f",
-                "Cola envejecida ↗",
-                f"**{aged_30_count:,}** abiertas >30d.",
-                0.0,
-                "trends",
-                "age_buckets",
+                card_id="age_f",
+                title="Cola envejecida",
+                metric=f"{aged_30_count:,}",
+                detail="abiertas con más de 30 días.",
+                score=0.0,
+                section="trends",
+                trend_chart="age_buckets",
+                tone="risk",
             ),
             FocusCard(
-                "exit_f",
-                "Embudo de salida ↗",
-                f"**{exit_buffer:,}** en salida.",
-                0.0,
-                "trends",
-                "open_status_bar",
+                card_id="exit_f",
+                title="Embudo de salida",
+                metric=f"{exit_buffer:,}",
+                detail="issues actualmente en Accepted + Ready.",
+                score=0.0,
+                section="trends",
+                trend_chart="open_status_bar",
+                tone="flow",
             ),
             FocusCard(
-                "topic_f",
-                "Higiene de backlog ↗",
-                f"Tema líder: **{top_theme} ({top_theme_count:,})**.",
-                0.0,
-                "insights",
+                card_id="topic_f",
+                title="Higiene de backlog",
+                metric=f"{top_theme_count:,}",
+                detail=f"issues del tema líder: {top_theme}.",
+                score=0.0,
+                section="insights",
                 insights_tab="top_topics",
+                tone="quality",
             ),
             FocusCard(
-                "block_f",
-                "Bloqueos activos ↗",
-                f"**{blocked_count:,}** bloqueadas.",
-                0.0,
-                "insights",
+                card_id="block_f",
+                title="Bloqueos activos",
+                metric=f"{blocked_count:,}",
+                detail="incidencias bloqueadas actualmente.",
+                score=0.0,
+                section="insights",
                 insights_tab="people",
+                tone="warning",
             ),
         ]
         used_ids = {c.card_id for c in focus_cards}
@@ -566,11 +660,33 @@ def render_overview_kpis(
     focus_cols = st.columns(4, gap="small")
     for col, focus in zip(focus_cols, focus_cards):
         with col:
-            with st.container(border=True, key=f"exec_focus_card_{focus.card_id}"):
-                with st.container(key=f"exec_focus_{focus.card_id}"):
+            with st.container(key=f"exec_focus_card_{focus.card_id}"):
+                tone_color = _focus_tone_color(focus)
+                st.markdown(
+                    (
+                        '<div class="exec-focus-accent" '
+                        f'style="background: color-mix(in srgb, {tone_color} 82%, var(--bbva-primary) 18%);"></div>'
+                        '<div class="exec-focus-kicker" '
+                        f'style="color: color-mix(in srgb, {tone_color} 76%, var(--bbva-text-muted) 24%);">'
+                        f"{html.escape(_focus_scope_label(focus))}"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    (
+                        '<div class="exec-focus-metric" '
+                        f'style="color: color-mix(in srgb, {tone_color} 62%, var(--bbva-text) 38%);">'
+                        f"{html.escape(focus.metric)}"
+                        "</div>"
+                        f'<div class="exec-focus-detail">{html.escape(focus.detail)}</div>'
+                    ),
+                    unsafe_allow_html=True,
+                )
+                with st.container(key=f"exec_focus_link_{focus.card_id}"):
                     st.button(
-                        focus.title,
-                        key=f"exec_focus_{focus.card_id}_title",
+                        f"{focus.title} ↗",
+                        key=f"exec_focus_{focus.card_id}_link",
                         use_container_width=True,
                         on_click=_jump_to,
                         args=(focus.section,),
@@ -579,7 +695,6 @@ def render_overview_kpis(
                             "insights_tab": focus.insights_tab,
                         },
                     )
-                st.markdown(focus.body)
 
     # 👉 Si tu Overview tenía secciones (“Nuevas”, “Top X”, etc),
     # pégalas aquí debajo tal cual y NO cambia nada más.

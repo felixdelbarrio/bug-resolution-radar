@@ -403,6 +403,14 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_dashboard_content {
             margin-top: -0.24rem;
           }
+          .st-key-dashboard_filters_panel {
+            margin-bottom: -0.44rem;
+          }
+          .st-key-issues_tab_issues_shell,
+          .st-key-kanban_shell,
+          .st-key-trend_chart_shell {
+            margin-top: -0.20rem;
+          }
           .st-key-dashboard_filters_panel [data-testid="stVerticalBlockBorderWrapper"],
           .st-key-issues_tab_issues_shell [data-testid="stVerticalBlockBorderWrapper"],
           .st-key-kanban_shell [data-testid="stVerticalBlockBorderWrapper"] {
@@ -418,7 +426,6 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
                         inset 0 0 0 1px color-mix(in srgb, #9DC0FF 18%, transparent) !important;
           }
           [class*="st-key-overview_summary_chart_"] [data-testid="stVerticalBlockBorderWrapper"],
-          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-trins_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 88%, #97BCFF 12%) !important;
             background: color-mix(in srgb, var(--bbva-surface) 80%, #0F244B 20%) !important;

@@ -296,14 +296,20 @@ def _inject_minimal_export_css(scope_key: str) -> None:
             display: flex;
             justify-content: flex-end;
             align-items: flex-end;
-            flex: 0 0 auto !important;
           }}
           .st-key-{scope_key} [data-testid="stColumn"] > div {{
             display: flex;
             justify-content: flex-end;
             align-items: flex-end;
+            width: 100%;
+          }}
+          .st-key-{scope_key} .stDownloadButton {{
+            width: 100%;
+            display: flex;
+            justify-content: flex-end;
           }}
           .st-key-{scope_key} .stDownloadButton > button {{
+            width: 100% !important;
             min-height: 1.52rem !important;
             min-width: 3.9rem !important;
             padding: 0.12rem 0.44rem !important;
@@ -337,15 +343,13 @@ def render_minimal_export_actions(
     figure: Any = None,
     html_bytes: Optional[bytes] = None,
 ) -> None:
-    """Minimal right-aligned exports (CSV + chart HTML/SVG when available)."""
+    """Minimal right-aligned exports (CSV + chart HTML when available)."""
     csv_safe = csv_df if isinstance(csv_df, pd.DataFrame) else pd.DataFrame()
     fig_html = html_bytes if html_bytes else fig_to_html_bytes(figure)
-    fig_svg = fig_to_svg_bytes(figure)
 
     has_csv = not csv_safe.empty
     has_html = bool(fig_html)
-    has_svg = bool(fig_svg)
-    if not has_csv and not has_html and not has_svg:
+    if not has_csv and not has_html:
         return
 
     scope_key = f"{_safe_filename(key_prefix)}_mini_export"
@@ -360,16 +364,8 @@ def render_minimal_export_actions(
                 "file_name": _build_filename(filename_prefix, suffix=suffix, ext="csv"),
                 "mime": "text/csv",
                 "key": f"{key_prefix}::dl_csv_min",
-            }
-        )
-    if has_svg:
-        buttons.append(
-            {
-                "label": "SVG",
-                "data": fig_svg,
-                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="svg"),
-                "mime": "image/svg+xml",
-                "key": f"{key_prefix}::dl_svg_min",
+                "disabled": False,
+                "help": None,
             }
         )
     if has_html:
@@ -380,12 +376,15 @@ def render_minimal_export_actions(
                 "file_name": _build_filename(filename_prefix, suffix=suffix, ext="html"),
                 "mime": "text/html",
                 "key": f"{key_prefix}::dl_html_min",
+                "disabled": False,
+                "help": None,
             }
         )
 
     with st.container(key=scope_key):
-        cols = st.columns(len(buttons), gap="small")
-        for col, btn in zip(cols, buttons):
+        layout = [max(10, len(buttons) * 6)] + [1] * len(buttons)
+        cols = st.columns(layout, gap="small")
+        for col, btn in zip(cols[1:], buttons):
             with col:
                 st.download_button(
                     label=btn["label"],
@@ -393,5 +392,7 @@ def render_minimal_export_actions(
                     file_name=btn["file_name"],
                     mime=btn["mime"],
                     key=btn["key"],
-                    use_container_width=False,
+                    use_container_width=True,
+                    disabled=bool(btn.get("disabled", False)),
+                    help=btn.get("help"),
                 )

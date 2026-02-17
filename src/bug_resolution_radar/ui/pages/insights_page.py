@@ -38,13 +38,36 @@ def render(
         return
     st.session_state.pop("__jump_to_insights_tab", None)
 
-    t1, t2, t3, t4 = st.tabs(["Top tópicos", "Duplicados", "Personas", "Salud operativa"])
+    st.markdown(
+        """
+        <style>
+          .st-key-insights_shell div[data-baseweb="tab-list"] {
+            margin-bottom: 0.34rem !important;
+          }
+          .st-key-insights_shell div[data-testid="stTabs"] div[data-baseweb="tab-panel"] {
+            padding-top: 0.56rem !important;
+          }
+          .st-key-insights_shell div[data-testid="stTabs"] div[data-baseweb="tab-panel"] > div[data-testid="stVerticalBlock"] {
+            row-gap: 0.44rem !important;
+          }
+          @media (max-width: 860px) {
+            .st-key-insights_shell div[data-testid="stTabs"] div[data-baseweb="tab-panel"] {
+              padding-top: 0.42rem !important;
+            }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with t1:
-        render_top_topics_tab(settings=settings, dff_filtered=dff, kpis=kpis)
-    with t2:
-        render_duplicates_tab(settings=settings, dff_filtered=dff)
-    with t3:
-        render_backlog_people_tab(settings=settings, dff_filtered=dff)
-    with t4:
-        render_ops_health_tab(settings=settings, dff_filtered=dff)
+    with st.container(key="insights_shell"):
+        t1, t2, t3, t4 = st.tabs(["Top tópicos", "Duplicados", "Personas", "Salud operativa"])
+
+        with t1:
+            render_top_topics_tab(settings=settings, dff_filtered=dff, kpis=kpis)
+        with t2:
+            render_duplicates_tab(settings=settings, dff_filtered=dff)
+        with t3:
+            render_backlog_people_tab(settings=settings, dff_filtered=dff)
+        with t4:
+            render_ops_health_tab(settings=settings, dff_filtered=dff)
