@@ -23,7 +23,6 @@ def _request(session: requests.Session, method: str, url: str, **kwargs: Any) ->
 
 def ingest_jira(
     settings: Settings,
-    cookie_manual: Optional[str],
     dry_run: bool = False,
     existing_doc: Optional[IssuesDocument] = None,
 ) -> Tuple[bool, str, Optional[IssuesDocument]]:
@@ -46,24 +45,22 @@ def ingest_jira(
     if not base.endswith("/jira"):
         base_candidates.append(base + "/jira")
 
-    cookie = sanitize_cookie_header(cookie_manual)
-    if not cookie:
-        try:
-            host = urlparse(base).hostname or ""
-            cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
-            if not cookie:
-                other = "edge" if settings.JIRA_BROWSER == "chrome" else "chrome"
-                cookie = get_jira_session_cookie(browser=other, host=host)
-        except Exception as e:
-            return (
-                False,
-                f"No se pudo leer cookie del navegador. Usa fallback manual. Detalle: {e}",
-                None,
-            )
-
+    try:
+        host = urlparse(base).hostname or ""
+        cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
+    except Exception as e:
+        return (
+            False,
+            f"No se pudo leer cookie de Jira en el navegador '{settings.JIRA_BROWSER}'. Detalle: {e}",
+            None,
+        )
     cookie = sanitize_cookie_header(cookie)
     if not cookie:
-        return False, "Cookie Jira vacía o inválida. Usa fallback manual.", None
+        return (
+            False,
+            f"No se encontró una cookie Jira válida en el navegador '{settings.JIRA_BROWSER}'.",
+            None,
+        )
 
     session.headers.update({"Cookie": cookie})
 

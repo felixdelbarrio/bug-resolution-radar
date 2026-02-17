@@ -45,8 +45,20 @@ def _safe_update_settings(settings: Settings, update: Dict[str, Any]) -> Setting
     return settings.model_copy(update=clean)
 
 
+def _parse_csv_ids(raw: object, valid_ids: List[str]) -> List[str]:
+    txt = str(raw or "").strip()
+    if not txt:
+        return []
+    out: List[str] = []
+    for x in txt.split(","):
+        v = x.strip()
+        if v and v in valid_ids and v not in out:
+            out.append(v)
+    return out
+
+
 def render(settings: Settings) -> None:
-    st.subheader("Configuración (persistente en .env; NO guarda cookies)")
+    st.subheader("Configuración (persistente en .env)")
 
     t_jira, t_helix, t_kpis, t_prefs = st.tabs(
         ["🟦 Jira", "🟩 Helix", "📊 KPIs", "⭐ Preferencias"]
@@ -180,16 +192,32 @@ def render(settings: Settings) -> None:
                     return v
             return default
 
-        fav1_default = _get_first_existing("TREND_FAV_1", "TREND_FAVORITE_1", default=all_ids[0])
+        stored = _parse_csv_ids(getattr(settings, "DASHBOARD_SUMMARY_CHARTS", ""), all_ids)
+        if not stored:
+            stored = _parse_csv_ids(getattr(settings, "TREND_SELECTED_CHARTS", ""), all_ids)
+
+        fav1_default = (
+            stored[0]
+            if len(stored) > 0
+            else _get_first_existing("TREND_FAV_1", "TREND_FAVORITE_1", default=all_ids[0])
+        )
         fav2_default = _get_first_existing(
             "TREND_FAV_2",
             "TREND_FAVORITE_2",
-            default=all_ids[1] if len(all_ids) > 1 else all_ids[0],
+            default=(
+                stored[1]
+                if len(stored) > 1
+                else (all_ids[1] if len(all_ids) > 1 else all_ids[0])
+            ),
         )
         fav3_default = _get_first_existing(
             "TREND_FAV_3",
             "TREND_FAVORITE_3",
-            default=all_ids[2] if len(all_ids) > 2 else all_ids[0],
+            default=(
+                stored[2]
+                if len(stored) > 2
+                else (all_ids[2] if len(all_ids) > 2 else all_ids[0])
+            ),
         )
 
         c1, c2, c3 = st.columns(3)
@@ -224,6 +252,7 @@ def render(settings: Settings) -> None:
     # Save (single button applies all tabs)
     # -------------------------
     if st.button("💾 Guardar configuración", key="cfg_save_btn"):
+        summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
         update = dict(
             # Jira
             JIRA_BASE_URL=jira_base.strip(),
@@ -242,15 +271,11 @@ def render(settings: Settings) -> None:
             HELIX_DATA_PATH=str(helix_data_path).strip(),
             HELIX_PROXY=str(helix_proxy).strip(),
             HELIX_SSL_VERIFY=str(helix_ssl_verify).strip().lower(),
-            # Preferencias (si existen en Settings)
-            TREND_FAV_1=str(fav1),
-            TREND_FAV_2=str(fav2),
-            TREND_FAV_3=str(fav3),
-            TREND_FAVORITE_1=str(fav1),  # compat (solo se aplicará si existe)
-            TREND_FAVORITE_2=str(fav2),
-            TREND_FAVORITE_3=str(fav3),
+            # Preferencias
+            DASHBOARD_SUMMARY_CHARTS=summary_csv,
+            TREND_SELECTED_CHARTS=summary_csv,
         )
 
         new_settings = _safe_update_settings(settings, update)
         save_settings(new_settings)
-        st.success("Configuración guardada en .env (cookies NO se guardan).")
+        st.success("Configuración guardada en .env.")

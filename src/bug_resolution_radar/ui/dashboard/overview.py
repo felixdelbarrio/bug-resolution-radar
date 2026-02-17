@@ -12,14 +12,37 @@ from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[str]:
     """
-    Lee settings.DASHBOARD_SUMMARY_CHARTS (CSV) y devuelve hasta 3 ids válidos.
+    Lee preferencias de charts desde varios campos legacy/actuales
+    y devuelve hasta 3 ids válidos.
     Fallback robusto si falta el setting o hay ids inválidos.
     """
-    raw = (getattr(settings, "DASHBOARD_SUMMARY_CHARTS", "") or "").strip()
-    picked = [x.strip() for x in raw.split(",") if x.strip()] if raw else []
+    picked: List[str] = []
 
-    # Filtrar a los que existan
-    picked = [x for x in picked if x in registry_ids]
+    def _append_csv(raw: object) -> None:
+        txt = str(raw or "").strip()
+        if not txt:
+            return
+        for part in txt.split(","):
+            v = part.strip()
+            if v and v in registry_ids and v not in picked:
+                picked.append(v)
+
+    # Nuevos campos canónicos
+    _append_csv(getattr(settings, "DASHBOARD_SUMMARY_CHARTS", ""))
+    _append_csv(getattr(settings, "TREND_SELECTED_CHARTS", ""))
+
+    # Compatibilidad con configuraciones antiguas
+    for name in (
+        "TREND_FAV_1",
+        "TREND_FAVORITE_1",
+        "TREND_FAV_2",
+        "TREND_FAVORITE_2",
+        "TREND_FAV_3",
+        "TREND_FAVORITE_3",
+    ):
+        v = str(getattr(settings, name, "") or "").strip()
+        if v and v in registry_ids and v not in picked:
+            picked.append(v)
 
     # Fallback por orden recomendado
     fallback = [
@@ -87,9 +110,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
                     fig.update_layout(
                         margin=dict(l=10, r=10, t=35, b=10),
                         height=320,
-                        legend=dict(
-                            orientation="h", yanchor="bottom", y=-0.25, xanchor="left", x=0
-                        ),
+                        showlegend=False,
                     )
                     st.plotly_chart(fig, use_container_width=True)
 

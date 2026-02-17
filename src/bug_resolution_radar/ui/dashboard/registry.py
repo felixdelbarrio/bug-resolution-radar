@@ -9,7 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from bug_resolution_radar.ui.common import priority_color_map
+from bug_resolution_radar.ui.common import normalize_text_col, priority_color_map, status_color_map
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
@@ -254,8 +254,11 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
     if open_df is None or open_df.empty or "priority" not in open_df.columns:
         return None
 
+    dff = open_df.copy()
+    dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
+
     fig = px.pie(
-        open_df,
+        dff,
         names="priority",
         hole=0.55,
         color="priority",
@@ -293,7 +296,10 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
     if open_df is None or open_df.empty or "status" not in open_df.columns:
         return None
 
-    stc = open_df["status"].astype(str).value_counts().reset_index()
+    dff = open_df.copy()
+    dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
+
+    stc = dff["status"].astype(str).value_counts().reset_index()
     stc.columns = ["status", "count"]
 
     # ✅ Orden canónico (mismo que Issues/Matrix/Kanban)
@@ -305,8 +311,10 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         stc,
         x="status",
         y="count",
+        color="status",
         title="Abiertas por Estado",
         category_orders={"status": status_order},
+        color_discrete_map=status_color_map(stc["status"].tolist()),
     )
     return apply_plotly_bbva(fig)
 

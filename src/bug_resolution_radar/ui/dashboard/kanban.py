@@ -38,8 +38,6 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
     - Orden de columnas: SIEMPRE el canónico (el mismo que en Issues)
     """
     with st.container(border=True):
-        st.markdown("### Kanban (abiertas por Estado)")
-
         if open_df is None or open_df.empty:
             st.info("No hay incidencias abiertas para mostrar.")
             return

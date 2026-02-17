@@ -5,6 +5,8 @@ from typing import Any
 
 import streamlit as st
 
+from bug_resolution_radar.ui.common import flow_signal_color_map
+
 
 def inject_bbva_css() -> None:
     """Inject BBVA-like CSS styling into Streamlit app."""
@@ -23,6 +25,12 @@ def inject_bbva_css() -> None:
             --bbva-radius-m: 8px;
             --bbva-radius-l: 12px;
             --bbva-radius-xl: 16px;
+            --bbva-tab-soft-bg: #E9EEF4;      /* cool grey-blue */
+            --bbva-tab-soft-border: #C7D2DF;  /* muted border */
+            --bbva-tab-soft-text: #44546B;    /* desaturated ink */
+            --bbva-tab-active-bg: #6F839E;    /* muted steel blue */
+            --bbva-tab-active-border: #657A94;
+            --bbva-tab-active-text: #F8FBFF;
 
             /* Streamlit theme variables (force consistency; avoids odd defaults). */
             --primary-color: var(--bbva-primary);
@@ -52,8 +60,8 @@ def inject_bbva_css() -> None:
             background: transparent;
           }
           [data-testid="stAppViewContainer"] .block-container {
-            padding-top: 0.75rem;
-            padding-bottom: 2.0rem;
+            padding-top: 0.30rem;
+            padding-bottom: 1.15rem;
             max-width: 1200px;
           }
 
@@ -61,29 +69,87 @@ def inject_bbva_css() -> None:
           .bbva-hero {
             background: var(--bbva-midnight);
             border-radius: var(--bbva-radius-xl);
-            padding: 22px 22px;
-            margin: 10px 0 18px 0;
+            padding: 14px 18px;
+            margin: 4px 0 8px 0;
             color: #ffffff;
             border: 1px solid rgba(255,255,255,0.08);
           }
           .bbva-hero-title {
             margin: 0;
-            font-size: 44px;
-            line-height: 1.08;
+            font-size: 34px;
+            line-height: 1.02;
             font-weight: 700;
             color: #ffffff;
           }
           .bbva-hero-sub {
-            margin-top: 8px;
-            opacity: 0.82;
-            font-size: 14px;
+            margin-top: 4px;
+            opacity: 0.75;
+            font-size: 12px;
           }
 
-          /* Native Streamlit header: blend in */
-          header[data-testid="stHeader"] {
-            background: transparent;
+          /* Hide Streamlit chrome (deploy/status/toolbar) to keep a clean branded shell */
+          header[data-testid="stHeader"],
+          [data-testid="stToolbar"],
+          [data-testid="stStatusWidget"],
+          [data-testid="stDecoration"],
+          [data-testid="stAppDeployButton"],
+          [data-testid="stDeployButton"],
+          button[title="Deploy"],
+          button[aria-label="Deploy"],
+          #MainMenu,
+          footer {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
           }
-          header[data-testid="stHeader"] * { color: inherit !important; }
+
+          /* Top nav compact spacing */
+          div[data-testid="stSegmentedControl"] {
+            margin-top: 0.02rem;
+            margin-bottom: 0.08rem !important;
+          }
+          div[data-testid="stSegmentedControl"] [role="radiogroup"] {
+            gap: 0.22rem !important;
+          }
+          div[data-testid="stSegmentedControl"] label {
+            min-height: 2.15rem !important;
+            padding: 0.35rem 0.78rem !important;
+            border-radius: 10px !important;
+            font-weight: 700 !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          div[data-testid="stSegmentedControl"] label:has(input:checked) {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          div[data-testid="stSegmentedControl"] label:hover {
+            filter: brightness(0.99);
+          }
+          div[data-testid="stButton"] > button[aria-label="🛰️"],
+          div[data-testid="stButton"] > button[aria-label="⚙️"] {
+            min-height: 2.2rem !important;
+            padding: 0.25rem 0.25rem !important;
+            border-radius: 11px !important;
+            font-size: 1.05rem !important;
+          }
+          /* Tighten the vertical gap between top tabs and dashboard filters/content */
+          .st-key-workspace_nav_bar {
+            margin-top: -0.06rem;
+            margin-bottom: -0.92rem;
+          }
+          .st-key-workspace_nav_bar div[data-testid="stHorizontalBlock"] {
+            margin-bottom: 0 !important;
+            row-gap: 0 !important;
+          }
+          .st-key-workspace_nav_bar div[data-testid="stSegmentedControl"] {
+            margin-bottom: 0 !important;
+          }
+          .st-key-workspace_dashboard_content {
+            margin-top: -0.24rem;
+          }
 
           /* Sidebar */
           section[data-testid="stSidebar"] {
@@ -153,6 +219,24 @@ def inject_bbva_css() -> None:
           .stButton > button:disabled {
             opacity: 0.45 !important;
             cursor: not-allowed !important;
+          }
+
+          /* Download button: same quiet language as segmented controls */
+          .stDownloadButton > button {
+            min-height: 2.15rem !important;
+            padding: 0.35rem 0.78rem !important;
+            border-radius: 10px !important;
+            font-weight: 700 !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          .stDownloadButton > button:hover {
+            background: #e2e8ef !important;
+            border-color: #bcc8d6 !important;
+          }
+          .stDownloadButton > button:disabled {
+            opacity: 0.45 !important;
           }
 
           /* Pills */
@@ -274,6 +358,8 @@ def render_hero(app_title: str) -> None:
 
 def apply_plotly_bbva(fig: Any) -> Any:
     """Apply a consistent Plotly style aligned with BBVA Experience."""
+    undefined_tokens = {"undefined", "none", "nan", "null"}
+
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -290,9 +376,37 @@ def apply_plotly_bbva(fig: Any) -> Any:
             "#D6E9FF",  # Light Blue
             "#070E46",  # Midnight Blue
         ],
+        showlegend=False,
         legend=dict(bgcolor="rgba(255,255,255,0.65)"),
         margin=dict(l=16, r=16, t=48, b=16),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
     fig.update_yaxes(showgrid=True, gridcolor="rgba(17,25,45,0.10)", zeroline=False)
+    for series_name, color in flow_signal_color_map().items():
+        fig.update_traces(
+            line=dict(color=color),
+            marker=dict(color=color),
+            selector={"name": series_name},
+        )
+
+    # Defensive cleanup to avoid "undefined" noise in hover/labels.
+    for trace in getattr(fig, "data", []):
+        try:
+            name = str(getattr(trace, "name", "") or "").strip()
+            if name.lower() in undefined_tokens:
+                trace.name = ""
+            trace.showlegend = False
+        except Exception:
+            pass
+
+        try:
+            hovertemplate = getattr(trace, "hovertemplate", None)
+            if isinstance(hovertemplate, str):
+                cleaned = hovertemplate
+                cleaned = cleaned.replace("%{fullData.name}", "")
+                cleaned = cleaned.replace("undefined", "")
+                cleaned = cleaned.replace("Undefined", "")
+                trace.hovertemplate = cleaned
+        except Exception:
+            pass
     return fig

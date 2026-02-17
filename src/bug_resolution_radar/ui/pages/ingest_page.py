@@ -19,13 +19,6 @@ def _get_helix_path(settings: Settings) -> str:
 
 
 def render(settings: Settings) -> None:
-    st.subheader("Ingesta")
-    st.caption("Las llamadas se hacen directamente desde tu máquina. No hay backend.")
-    st.info(
-        "Consentimiento: Se leerán cookies locales del navegador (Jira/Helix) solo para autenticar tu sesión personal. "
-        "No se envían a terceros."
-    )
-
     # Sub-tabs inside ingestion page
     t_jira, t_helix = st.tabs(["🟦 Jira", "🟩 Helix"])
 
@@ -33,17 +26,6 @@ def render(settings: Settings) -> None:
     # Jira
     # -----------------------------
     with t_jira:
-        st.markdown("### Ingesta Jira")
-        st.caption("Fuente: Jira (cookies locales).")
-
-        jira_cookie_manual = st.text_input(
-            "Fallback: pegar cookie Jira (header Cookie) manualmente (solo memoria, NO persistente)",
-            value="",
-            type="password",
-            help="Ejemplo: atlassian.xsrf.token=...; cloud.session.token=... (solo si tu entorno lo requiere)",
-            key="jira_cookie_manual",
-        )
-
         colA, colB = st.columns([1, 1])
         with colA:
             test_jira = st.button("🔎 Test conexión Jira", key="btn_test_jira")
@@ -56,7 +38,6 @@ def render(settings: Settings) -> None:
             with st.spinner("Probando Jira..."):
                 ok, msg, _ = ingest_jira(
                     settings=settings,
-                    cookie_manual=jira_cookie_manual or None,
                     dry_run=True,
                 )
             (st.success if ok else st.error)(msg)
@@ -65,7 +46,6 @@ def render(settings: Settings) -> None:
             with st.spinner("Ingestando Jira..."):
                 ok, msg, new_jira_doc = ingest_jira(
                     settings=settings,
-                    cookie_manual=jira_cookie_manual or None,
                     dry_run=False,
                     existing_doc=doc,
                 )
@@ -92,9 +72,6 @@ def render(settings: Settings) -> None:
     # Helix
     # -----------------------------
     with t_helix:
-        st.markdown("### Ingesta Helix")
-        st.caption("Fuente: Helix/SmartIT (cookies locales).")
-
         helix_base_url = (getattr(settings, "HELIX_BASE_URL", "") or "").strip()
         helix_org = (getattr(settings, "HELIX_ORGANIZATION", "") or "").strip()
         helix_browser = (getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip()
@@ -105,27 +82,6 @@ def render(settings: Settings) -> None:
         helix_repo = HelixRepo(Path(helix_path))
 
         helix_doc = helix_repo.load() or HelixDocument.empty()
-
-        # Show current config (read-only hint)
-        with st.expander("Config Helix (desde .env)", expanded=False):
-            st.json(
-                {
-                    "HELIX_BASE_URL": helix_base_url,
-                    "HELIX_ORGANIZATION": helix_org,
-                    "HELIX_BROWSER": helix_browser,
-                    "HELIX_PROXY": helix_proxy,
-                    "HELIX_SSL_VERIFY": helix_ssl_verify,
-                    "HELIX_DATA_PATH": helix_path,
-                }
-            )
-
-        helix_cookie_manual = st.text_input(
-            "Fallback: pegar cookie Helix (header Cookie) manualmente (solo memoria, NO persistente)",
-            value="",
-            type="password",
-            help="Pega aquí el header Cookie si no se puede leer del navegador.",
-            key="helix_cookie_manual",
-        )
 
         colH1, colH2 = st.columns([1, 1])
         with colH1:
@@ -141,7 +97,6 @@ def render(settings: Settings) -> None:
                     organization=helix_org,
                     proxy=helix_proxy,
                     ssl_verify=helix_ssl_verify,
-                    cookie_manual=helix_cookie_manual or None,
                     dry_run=True,
                     existing_doc=helix_doc,
                 )
@@ -155,7 +110,6 @@ def render(settings: Settings) -> None:
                     organization=helix_org,
                     proxy=helix_proxy,
                     ssl_verify=helix_ssl_verify,
-                    cookie_manual=helix_cookie_manual or None,
                     dry_run=False,
                     existing_doc=helix_doc,
                 )

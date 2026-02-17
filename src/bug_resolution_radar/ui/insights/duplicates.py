@@ -9,6 +9,7 @@ import streamlit as st
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.insights import find_similar_issue_clusters
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.insights.chips import inject_insights_chip_css, render_issue_bullet
 from bug_resolution_radar.ui.insights.helpers import build_issue_lookup, col_exists, safe_df
 
 
@@ -20,6 +21,7 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     """
     st.markdown("### 🧩 Incidencias similares (posibles duplicados)")
     st.caption("Agrupado por similitud de texto en el summary (heurístico).")
+    inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
     if dff.empty:
@@ -61,7 +63,10 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
                 if len(summ_txt) > 140:
                     summ_txt = summ_txt[:137] + "..."
 
-                if url:
-                    st.markdown(f"- **[{k}]({url})** · *{status}* · *{prio}* · {summ_txt}")
-                else:
-                    st.markdown(f"- **{k}** · *{status}* · *{prio}* · {summ_txt}")
+                render_issue_bullet(
+                    key=k,
+                    url=url,
+                    status=status,
+                    priority=prio,
+                    summary=summ_txt,
+                )

@@ -13,6 +13,12 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
 )
+from bug_resolution_radar.ui.insights.chips import (
+    inject_insights_chip_css,
+    neutral_chip_html,
+    render_issue_bullet,
+    status_chip_html,
+)
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -75,6 +81,7 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     - Extra: Top 3 más antiguas (si hay created)
     """
     st.markdown("### 👤 Backlog por persona (abiertas)")
+    inject_insights_chip_css()
 
     dff = safe_df(dff_filtered)
     if dff.empty:
@@ -131,7 +138,18 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             st_counts = sub["status"].value_counts()
             st.markdown("**Backlog por estado (bullets)**")
             for st_name, c in st_counts.items():
-                st.markdown(f"- **{st_name}** · {int(c)}")
+                st.markdown(
+                    (
+                        '<div class="ins-item">'
+                        '<span class="ins-bullet">•</span>'
+                        '<div class="ins-main">'
+                        f"{status_chip_html(st_name)}"
+                        f"{neutral_chip_html(int(c))}"
+                        "</div>"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
 
             # ---------------------------------
             # 2) KPIs riesgo (flow + criticidad)
@@ -256,12 +274,14 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                         summ_txt = summ_txt[:87] + "..."
 
                     url = key_to_url.get(k, "")
-                    if url:
-                        st.markdown(
-                            f"- **[{k}]({url})** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}"
-                        )
-                    else:
-                        st.markdown(f"- **{k}** · {age:.0f}d · *{status}* · *{prio}* · {summ_txt}")
+                    render_issue_bullet(
+                        key=k,
+                        url=url,
+                        status=status,
+                        priority=prio,
+                        summary=summ_txt,
+                        age_days=age,
+                    )
 
     st.caption(
         "Tip: el riesgo combina ‘atasco de flujo’ (Entrada/Bloqueadas) + ‘criticidad atrapada’ (Highest/High sin avanzar)."

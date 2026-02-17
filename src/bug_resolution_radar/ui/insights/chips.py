@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import html
+from typing import Optional
+
+import streamlit as st
+
+from bug_resolution_radar.ui.common import (
+    chip_style_from_color,
+    priority_color,
+    status_color,
+)
+
+
+_NEUTRAL_CHIP_STYLE = (
+    "color:#44546B; border:1px solid rgba(17,25,45,0.16); background:#F4F6F9; "
+    "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
+)
+
+
+def inject_insights_chip_css() -> None:
+    st.markdown(
+        """
+        <style>
+          .ins-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.52rem;
+            margin: 0.34rem 0;
+          }
+          .ins-bullet {
+            color: #11192D;
+            line-height: 1;
+            font-size: 1.06rem;
+            margin-top: 0.18rem;
+          }
+          .ins-main {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+            min-width: 0;
+          }
+          .ins-key-link,
+          .ins-key-text {
+            font-weight: 800;
+            font-size: 0.98rem;
+            line-height: 1.25;
+          }
+          .ins-key-link {
+            color: #0051F1 !important;
+            text-decoration: none;
+          }
+          .ins-key-link:hover {
+            text-decoration: underline;
+          }
+          .ins-chip {
+            display: inline-flex;
+            align-items: center;
+            white-space: nowrap;
+            max-width: 100%;
+          }
+          .ins-summary {
+            color: #11192D;
+            opacity: 0.96;
+            line-height: 1.28;
+          }
+          .ins-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.35rem;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _safe_text(value: object, *, fallback: str) -> str:
+    txt = str(value or "").strip()
+    return txt if txt else fallback
+
+
+def _chip_style(value: str, *, is_priority: bool) -> str:
+    color = priority_color(value) if is_priority else status_color(value)
+    if color.upper() == "#E2E6EE":
+        return _NEUTRAL_CHIP_STYLE
+    return chip_style_from_color(color)
+
+
+def _chip_html(value: object, *, is_priority: bool, fallback: str) -> str:
+    txt = _safe_text(value, fallback=fallback)
+    return f'<span class="ins-chip" style="{_chip_style(txt, is_priority=is_priority)}">{html.escape(txt)}</span>'
+
+
+def status_chip_html(value: object) -> str:
+    return _chip_html(value, is_priority=False, fallback="(sin estado)")
+
+
+def priority_chip_html(value: object) -> str:
+    return _chip_html(value, is_priority=True, fallback="(sin priority)")
+
+
+def neutral_chip_html(text: object) -> str:
+    txt = _safe_text(text, fallback="—")
+    return f'<span class="ins-chip" style="{_NEUTRAL_CHIP_STYLE}">{html.escape(txt)}</span>'
+
+
+def key_html(key: object, url: str) -> str:
+    k = _safe_text(key, fallback="")
+    if not k:
+        return ""
+    if url:
+        return (
+            f'<a class="ins-key-link" href="{html.escape(url)}" target="_blank" '
+            f'rel="noopener noreferrer">{html.escape(k)}</a>'
+        )
+    return f'<span class="ins-key-text">{html.escape(k)}</span>'
+
+
+def render_issue_bullet(
+    *,
+    key: object,
+    url: str,
+    status: object,
+    priority: object,
+    summary: Optional[str] = None,
+    age_days: Optional[float] = None,
+) -> None:
+    k_html = key_html(key, url)
+    if not k_html:
+        return
+
+    bits = [k_html]
+    if age_days is not None:
+        bits.append(neutral_chip_html(f"{age_days:.0f}d"))
+    bits.append(status_chip_html(status))
+    bits.append(priority_chip_html(priority))
+    if summary:
+        bits.append(f'<span class="ins-summary">{html.escape(summary)}</span>')
+
+    st.markdown(
+        (
+            '<div class="ins-item">'
+            '<span class="ins-bullet">•</span>'
+            f'<div class="ins-main">{" ".join(bits)}</div>'
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )

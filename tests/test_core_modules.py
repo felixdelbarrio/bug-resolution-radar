@@ -7,6 +7,12 @@ from typing import Any
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.security import mask_secret, safe_log_text
+from bug_resolution_radar.ui.common import (
+    flow_signal_color_map,
+    priority_color,
+    priority_color_map,
+    status_color,
+)
 from bug_resolution_radar.utils import now_iso, parse_age_buckets, parse_int_list
 
 
@@ -65,3 +71,30 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
     cfg.save_settings(settings)
     saved = env_path.read_text(encoding="utf-8")
     assert "JIRA_JQL=linea 1\\nlinea 2" in saved
+
+
+def test_semantic_status_and_priority_colors() -> None:
+    assert status_color("New") == "#E85D63"
+    assert status_color("Analysing") == "#D64550"
+    assert status_color("Blocked") == "#B4232A"
+    assert status_color("Open") == "#FBBF24"
+    assert status_color("Closed") == "#15803D"
+
+    assert priority_color("Supone un impedimento") == "#B4232A"
+    assert priority_color("Highest") == "#B4232A"
+    assert priority_color("High") == "#D64550"
+    assert priority_color("Medium") == "#F59E0B"
+    assert priority_color("Low") == "#22A447"
+    assert priority_color("Lowest") == "#15803D"
+
+
+def test_semantic_color_maps_include_flow_signals() -> None:
+    pmap = priority_color_map()
+    assert pmap["Supone un impedimento"] == "#B4232A"
+    assert pmap["Medium"] == "#F59E0B"
+    assert pmap["Lowest"] == "#15803D"
+
+    smap = flow_signal_color_map()
+    assert smap["created"] == "#E85D63"
+    assert smap["open"] == "#FBBF24"
+    assert smap["closed"] == "#22A447"
