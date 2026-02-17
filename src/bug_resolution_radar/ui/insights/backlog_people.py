@@ -17,6 +17,7 @@ from bug_resolution_radar.ui.insights.chips import (
     render_issue_bullet,
     status_chip_html,
 )
+from bug_resolution_radar.ui.insights.engine import build_people_plan_recommendations
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -215,9 +216,10 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             risk_txt = risk_label(risk_score)
 
             push_pct = pct(b_salida, n_int)
+            aging_p90_days: float | None = None
             if has_created and sub["age_days"].notna().any():
-                p90 = float(sub["age_days"].quantile(0.90))
-                aging_value = f"{p90:.0f}d"
+                aging_p90_days = float(sub["age_days"].quantile(0.90))
+                aging_value = f"{aging_p90_days:.0f}d"
                 aging_caption = "Casos más lentos"
             else:
                 aging_value = "—"
@@ -273,23 +275,16 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                 '<div class="people-plan-title" style="margin-top:0.55rem;">Plan recomendado</div>',
                 unsafe_allow_html=True,
             )
-            recs: List[str] = []
-            if b_bloq > 0:
-                recs.append("Ataca bloqueadas primero: desbloquear 1–3 items suele liberar flujo.")
-            if crit_risk_pct >= 55.0:
-                recs.append(
-                    "Criticidad atrapada en Entrada/Bloqueado: fija dueños/fechas y prioriza Highest/High."
-                )
-            if flow_risk_pct >= 60.0:
-                recs.append(
-                    "Entrada saturada: triage agresivo (duplicados/out-of-scope) y limita WIP nuevo."
-                )
-            if b_curso > 0 and b_salida == 0:
-                recs.append(
-                    "Crea ‘push’ hacia salida: objetivo semanal de mover X items a Verify/Deploy."
-                )
-            if not recs:
-                recs.append("Buen equilibrio: mantén WIP limitado y revisa aging semanalmente.")
+            recs = build_people_plan_recommendations(
+                assignee=str(assignee),
+                open_count=n_int,
+                flow_risk_pct=float(flow_risk_pct),
+                critical_risk_pct=float(crit_risk_pct),
+                blocked_count=b_bloq,
+                in_progress_count=b_curso,
+                exit_count=b_salida,
+                aging_p90_days=aging_p90_days,
+            )
             st.markdown(
                 (
                     '<div class="people-plan">'

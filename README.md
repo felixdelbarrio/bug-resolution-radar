@@ -40,6 +40,7 @@ Centralizar en una sola aplicación local:
 - `src/bug_resolution_radar/ui/`: app Streamlit, páginas, componentes y dashboard modular.
 - `src/bug_resolution_radar/kpis.py`: cálculo de métricas y gráficas base.
 - `src/bug_resolution_radar/insights.py`: lógica de clustering e insights de incidencias similares.
+- `src/bug_resolution_radar/ui/insights/engine.py`: motor de insights adaptativos para tendencias y pestañas analíticas.
 - `src/bug_resolution_radar/security.py`: utilidades de endurecimiento y sanitización.
 - `tests/`: suite de tests unitarios y de regresión.
 

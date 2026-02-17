@@ -14,6 +14,7 @@ from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signatu
 from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import inject_insights_chip_css, render_issue_bullet
+from bug_resolution_radar.ui.insights.engine import build_duplicates_brief
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -210,6 +211,24 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
         heur_export = pd.DataFrame(
             columns=["cluster_size", "summary", "keys", "status_dominante", "priority_dominante"]
         )
+
+    duplicate_groups = 0
+    duplicate_issues = 0
+    if col_exists(df2, "summary"):
+        summary_vc = (
+            df2["summary"].fillna("").astype(str).str.strip().replace("", pd.NA).dropna().value_counts()
+        )
+        repeated = summary_vc[summary_vc > 1]
+        duplicate_groups = int(len(repeated))
+        duplicate_issues = int(repeated.sum())
+    st.caption(
+        build_duplicates_brief(
+            total_open=int(len(df2)),
+            duplicate_groups=duplicate_groups,
+            duplicate_issues=duplicate_issues,
+            heuristic_clusters=int(len(clusters)),
+        )
+    )
 
     view_key = "insights_duplicates_view"
     if str(st.session_state.get(view_key) or "") not in {"Por título", "Por heurística"}:

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import html
-import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +16,7 @@ from bug_resolution_radar.ui.dashboard.downloads import (
     render_minimal_export_actions,
 )
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
+from bug_resolution_radar.ui.insights.engine import top_non_other_theme
 
 
 def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[str]:
@@ -252,43 +251,7 @@ def render_overview_kpis(
             vc = summaries.value_counts()
             dup_groups = int((vc > 1).sum())
             dup_issues = int(vc[vc > 1].sum())
-
-            theme_rules: list[tuple[str, list[str]]] = [
-                ("Softoken", ["softoken", "token", "firma", "otp"]),
-                ("Crédito", ["credito", "credito", "cvv", "tarjeta", "tdc"]),
-                ("Monetarias", ["monetarias", "saldo", "nomina", "nomina"]),
-                ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
-                ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
-                ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
-                (
-                    "Login y acceso",
-                    ["login", "acceso", "face id", "biometr", "password", "tokenbnc"],
-                ),
-                ("Notificaciones", ["notificacion", "notificacion", "push", "mensaje"]),
-            ]
-
-            def _norm(s: object) -> str:
-                txt = str(s or "").strip().lower()
-                txt = unicodedata.normalize("NFKD", txt)
-                return "".join(ch for ch in txt if not unicodedata.combining(ch))
-
-            def _theme_for_summary(summary: str) -> str:
-                s = _norm(summary)
-                for theme_name, keys in theme_rules:
-                    for kw in keys:
-                        if re.search(rf"\b{re.escape(_norm(kw))}\b", s):
-                            return theme_name
-                return "Otros"
-
-            theme_vc = summaries.map(_theme_for_summary).value_counts()
-            if not theme_vc.empty:
-                non_otros = theme_vc[theme_vc.index.astype(str) != "Otros"]
-                if not non_otros.empty:
-                    top_theme = str(non_otros.index[0])
-                    top_theme_count = int(non_otros.iloc[0])
-                else:
-                    top_theme = "—"
-                    top_theme_count = 0
+            top_theme, top_theme_count = top_non_other_theme(open_df)
 
     if not dff.empty and "created" in dff.columns:
         created_dt = pd.to_datetime(dff["created"], errors="coerce", utc=True).dt.tz_localize(None)

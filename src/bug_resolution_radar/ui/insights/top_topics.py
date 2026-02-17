@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import Any, Dict
 
 import pandas as pd
@@ -20,6 +18,7 @@ from bug_resolution_radar.ui.insights.chips import (
     priority_chip_html,
     status_chip_html,
 )
+from bug_resolution_radar.ui.insights.engine import build_topic_brief, classify_theme
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -27,32 +26,6 @@ from bug_resolution_radar.ui.insights.helpers import (
     open_only,
     safe_df,
 )
-
-_THEME_RULES: list[tuple[str, list[str]]] = [
-    ("Softoken", ["softoken", "token", "firma", "otp"]),
-    ("Crédito", ["credito", "crédito", "cvv", "tarjeta", "tdc"]),
-    ("Monetarias", ["monetarias", "saldo", "nomina", "nómina"]),
-    ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
-    ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
-    ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
-    ("Login y acceso", ["login", "acceso", "face id", "biometr", "password", "tokenbnc"]),
-    ("Notificaciones", ["notificacion", "notificación", "push", "mensaje"]),
-]
-
-
-def _norm(s: object) -> str:
-    txt = str(s or "").strip().lower()
-    txt = unicodedata.normalize("NFKD", txt)
-    return "".join(ch for ch in txt if not unicodedata.combining(ch))
-
-
-def _theme_for_summary(summary: str) -> str:
-    s = _norm(summary)
-    for theme, keys in _THEME_RULES:
-        for kw in keys:
-            if re.search(rf"\b{re.escape(_norm(kw))}\b", s):
-                return theme
-    return "Otros"
 
 
 def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
@@ -89,7 +62,7 @@ def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
         empty_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
         return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
 
-    tmp_open["__theme"] = tmp_open["summary"].map(_theme_for_summary)
+    tmp_open["__theme"] = tmp_open["summary"].map(classify_theme)
     theme_counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
     non_otros = [t for t in theme_counts.index.tolist() if str(t) != "Otros"]
     has_otros = "Otros" in theme_counts.index
@@ -198,6 +171,7 @@ def render_top_topics_tab(
                 ),
                 unsafe_allow_html=True,
             )
+            st.caption(build_topic_brief(topic=topic, sub_df=sub, total_open=total_open))
             if sub.empty or not col_exists(sub, "key"):
                 st.caption("No se han podido mapear issues individuales para este tema.")
                 continue
