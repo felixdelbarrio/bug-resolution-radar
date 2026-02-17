@@ -586,8 +586,10 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
 
           /* Download button: same quiet language as segmented controls */
           .stDownloadButton > button {
-            min-height: 2.15rem !important;
-            padding: 0.35rem 0.78rem !important;
+            min-height: 1.84rem !important;
+            min-width: 0 !important;
+            width: auto !important;
+            padding: 0.20rem 0.62rem !important;
             border-radius: 10px !important;
             font-weight: 700 !important;
             border: 1px solid var(--bbva-tab-soft-border) !important;

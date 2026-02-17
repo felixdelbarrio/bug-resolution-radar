@@ -287,37 +287,42 @@ def _inject_minimal_export_css(scope_key: str) -> None:
     st.markdown(
         f"""
         <style>
+          .st-key-{scope_key} {{
+            margin-top: -0.14rem;
+            margin-bottom: 0.12rem;
+            padding-right: 0.52rem;
+          }}
           .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
             justify-content: flex-end !important;
-            align-items: flex-end !important;
-            gap: 0.3rem !important;
+            align-items: center !important;
+            gap: 0.24rem !important;
+            margin: 0 !important;
           }}
           .st-key-{scope_key} [data-testid="stColumn"] {{
             display: flex;
             justify-content: flex-end;
-            align-items: flex-end;
+            align-items: center;
           }}
           .st-key-{scope_key} [data-testid="stColumn"] > div {{
             display: flex;
             justify-content: flex-end;
-            align-items: flex-end;
-            width: 100%;
+            align-items: center;
+            width: auto;
           }}
           .st-key-{scope_key} .stDownloadButton {{
-            width: 100%;
             display: flex;
             justify-content: flex-end;
           }}
           .st-key-{scope_key} .stDownloadButton > button {{
-            width: 100% !important;
-            min-height: 1.52rem !important;
-            min-width: 3.9rem !important;
-            padding: 0.12rem 0.44rem !important;
+            width: auto !important;
+            min-height: 1.66rem !important;
+            min-width: 0 !important;
+            padding: 0.12rem 0.52rem !important;
             border-radius: 999px !important;
-            font-size: 0.66rem !important;
+            font-size: 0.74rem !important;
             font-weight: 700 !important;
             letter-spacing: 0.01em !important;
-            line-height: 1.0 !important;
+            line-height: 1.08 !important;
             white-space: nowrap !important;
             border: 1px solid var(--bbva-border) !important;
             background: color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-surface-2)) !important;
@@ -382,9 +387,9 @@ def render_minimal_export_actions(
         )
 
     with st.container(key=scope_key):
-        layout = [max(10, len(buttons) * 6)] + [1] * len(buttons)
+        layout = [24] + [1] * len(buttons) + [0.9]
         cols = st.columns(layout, gap="small")
-        for col, btn in zip(cols[1:], buttons):
+        for col, btn in zip(cols[1 : 1 + len(buttons)], buttons):
             with col:
                 st.download_button(
                     label=btn["label"],
@@ -392,7 +397,7 @@ def render_minimal_export_actions(
                     file_name=btn["file_name"],
                     mime=btn["mime"],
                     key=btn["key"],
-                    use_container_width=True,
+                    use_container_width=False,
                     disabled=bool(btn.get("disabled", False)),
                     help=btn.get("help"),
                 )
