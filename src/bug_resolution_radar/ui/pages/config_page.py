@@ -503,7 +503,15 @@ def render(settings: Settings) -> None:
 
     with t_helix:
         st.markdown("### Helix defaults")
-        h1, h2, h3, h4 = st.columns(4)
+        query_mode_current = _as_str(getattr(settings, "HELIX_QUERY_MODE", "arsql")).lower()
+        if query_mode_current not in {"arsql", "person_workitems"}:
+            query_mode_current = "arsql"
+        helix_query_mode_labels = {
+            "arsql": "ARSQL (dashboards/report/arsqlquery)",
+            "person_workitems": "Helix API (/rest/v2/person/workitems/get)",
+        }
+
+        h1, h2, h3 = st.columns(3)
         with h1:
             helix_default_browser = st.selectbox(
                 "Browser default",
@@ -521,17 +529,42 @@ def render(settings: Settings) -> None:
                 key="cfg_helix_ssl_default",
             )
         with h3:
+            helix_query_mode = st.selectbox(
+                "Modo de ingesta",
+                options=["arsql", "person_workitems"],
+                index=0 if query_mode_current == "arsql" else 1,
+                format_func=lambda x: helix_query_mode_labels.get(x, x),
+                key="cfg_helix_query_mode",
+            )
+
+        h4, h5 = st.columns(2)
+        with h4:
             helix_default_proxy = st.text_input(
                 "Proxy default",
                 value=_as_str(getattr(settings, "HELIX_PROXY", "")),
                 key="cfg_helix_proxy_default",
             )
-        with h4:
+        with h5:
             helix_data_path = st.text_input(
                 "Helix Data Path",
                 value=_as_str(getattr(settings, "HELIX_DATA_PATH", "data/helix_dump.json")),
                 key="cfg_helix_data_path",
             )
+        helix_dashboard_url = st.text_input(
+            "Helix Dashboard URL (base apertura ticket)",
+            value=_as_str(
+                getattr(
+                    settings,
+                    "HELIX_DASHBOARD_URL",
+                    "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+                )
+            ),
+            key="cfg_helix_dashboard_url",
+        )
+        if helix_query_mode == "arsql":
+            st.caption("Modo activo: ARSQL (por defecto).")
+        else:
+            st.caption("Modo activo: endpoint Helix clásico person/workitems/get.")
 
         st.markdown("### Fuentes Helix por país")
         helix_rows = _rows_from_helix_settings(settings, countries)
@@ -722,7 +755,9 @@ def render(settings: Settings) -> None:
             HELIX_BROWSER=helix_default_browser,
             HELIX_PROXY=str(helix_default_proxy).strip(),
             HELIX_SSL_VERIFY=str(helix_default_ssl_verify).strip().lower(),
+            HELIX_QUERY_MODE=str(helix_query_mode).strip().lower(),
             HELIX_DATA_PATH=str(helix_data_path).strip(),
+            HELIX_DASHBOARD_URL=str(helix_dashboard_url).strip(),
             KPI_FORTNIGHT_DAYS=str(fort),
             KPI_MONTH_DAYS=str(month),
             KPI_OPEN_AGE_X_DAYS=open_age.strip(),

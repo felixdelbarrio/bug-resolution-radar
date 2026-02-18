@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import time
+import webbrowser
+from platform import system as platform_system
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -21,6 +26,117 @@ def _request(session: requests.Session, method: str, url: str, **kwargs: Any) ->
     if r.status_code in (429, 503):
         raise RuntimeError("rate limited")
     return r
+
+
+def _open_url_in_configured_browser(url: str, browser: str) -> bool:
+    b = str(browser or "").strip().lower()
+    browser_names = (
+        ["chrome", "google-chrome", "google chrome"]
+        if b == "chrome"
+        else ["edge", "msedge", "microsoft-edge", "microsoft edge"]
+    )
+    for name in browser_names:
+        try:
+            ctl = webbrowser.get(name)
+            if ctl.open(url, new=2, autoraise=True):
+                return True
+        except Exception:
+            continue
+
+    platform = platform_system().lower()
+    if platform == "darwin":
+        app_name = "Google Chrome" if b == "chrome" else "Microsoft Edge"
+        try:
+            subprocess.Popen(
+                ["open", "-a", app_name, url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            pass
+
+    if platform == "linux":
+        bins = (
+            ["google-chrome", "chrome", "chromium"]
+            if b == "chrome"
+            else ["microsoft-edge", "msedge"]
+        )
+        for bin_name in bins:
+            try:
+                subprocess.Popen(
+                    [bin_name, url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return True
+            except Exception:
+                continue
+
+    try:
+        return bool(webbrowser.open(url, new=2, autoraise=True))
+    except Exception:
+        return False
+
+
+def _cookie_names_from_header(cookie_header: str) -> List[str]:
+    names: List[str] = []
+    for part in (cookie_header or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name = part.split("=", 1)[0].strip()
+        if name:
+            names.append(name)
+    return sorted(set(names))
+
+
+def _has_jira_auth_cookie(cookie_names: List[str]) -> bool:
+    got = {str(x).strip().lower() for x in cookie_names}
+    if not got:
+        return False
+    wanted = {
+        "jsessionid",
+        "atlassian.xsrf.token",
+        "atlassian.account.id",
+        "cloud.session.token",
+        "seraph.rememberme.cookie",
+    }
+    if any(x in got for x in wanted):
+        return True
+    if any(name.startswith("atlassian.") for name in got):
+        return True
+    return True
+
+
+def _bootstrap_jira_cookie_from_browser(
+    *,
+    browser: str,
+    host: str,
+    login_url: str,
+    wait_seconds: int,
+    poll_seconds: float,
+) -> Optional[str]:
+    try:
+        existing = get_jira_session_cookie(browser=browser, host=host)
+    except Exception:
+        existing = None
+    existing = sanitize_cookie_header(existing)
+    if existing and _has_jira_auth_cookie(_cookie_names_from_header(existing)):
+        return existing
+
+    _open_url_in_configured_browser(login_url, browser)
+    deadline = time.monotonic() + float(wait_seconds)
+    while time.monotonic() < deadline:
+        try:
+            candidate = get_jira_session_cookie(browser=browser, host=host)
+        except Exception:
+            candidate = None
+        candidate = sanitize_cookie_header(candidate)
+        if candidate and _has_jira_auth_cookie(_cookie_names_from_header(candidate)):
+            return candidate
+        time.sleep(poll_seconds)
+    return None
 
 
 def _resolve_source_scope(
@@ -82,17 +198,34 @@ def ingest_jira(
     try:
         host = urlparse(base).hostname or ""
         cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
+        cookie_error = ""
     except Exception as e:
-        return (
-            False,
-            f"{source_label}: no se pudo leer cookie de Jira en '{settings.JIRA_BROWSER}'. Detalle: {e}",
-            None,
-        )
+        cookie = None
+        cookie_error = str(e)
     cookie = sanitize_cookie_header(cookie)
+    cookie_names = _cookie_names_from_header(cookie or "")
+    if not cookie or not _has_jira_auth_cookie(cookie_names):
+        jira_web_base = base if base.endswith("/jira") else f"{base}/jira"
+        login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or (
+            f"{jira_web_base}/secure/Dashboard.jspa"
+        )
+        wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
+        poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
+        bootstrapped_cookie = _bootstrap_jira_cookie_from_browser(
+            browser=settings.JIRA_BROWSER,
+            host=host,
+            login_url=login_url,
+            wait_seconds=wait_seconds,
+            poll_seconds=poll_seconds,
+        )
+        if bootstrapped_cookie:
+            cookie = bootstrapped_cookie
+
     if not cookie:
+        details = f" Detalle: {cookie_error}" if cookie_error else ""
         return (
             False,
-            f"{source_label}: no se encontró cookie Jira válida en '{settings.JIRA_BROWSER}'.",
+            f"{source_label}: no se encontró cookie Jira válida en '{settings.JIRA_BROWSER}'.{details}",
             None,
         )
 

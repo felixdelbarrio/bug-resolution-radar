@@ -97,6 +97,9 @@ class Settings(BaseModel):
     # legacy fallback (solo compatibilidad si no hay JIRA_SOURCES_JSON)
     JIRA_JQL: str = ""
     JIRA_BROWSER: str = "chrome"
+    JIRA_BROWSER_LOGIN_URL: str = ""
+    JIRA_BROWSER_LOGIN_WAIT_SECONDS: int = 90
+    JIRA_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
     # -------------------------
     # HELIX
@@ -107,6 +110,9 @@ class Settings(BaseModel):
     HELIX_ORGANIZATION: str = ""
     HELIX_BROWSER: str = "chrome"
     HELIX_DATA_PATH: str = "data/helix_dump.json"
+    HELIX_DASHBOARD_URL: str = (
+        "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
+    )
 
     # Proxy y SS
     HELIX_PROXY: str = ""
@@ -121,6 +127,18 @@ class Settings(BaseModel):
     HELIX_MIN_CHUNK_SIZE: int = 10
     HELIX_MAX_PAGES: int = 200
     HELIX_MAX_INGEST_SECONDS: int = 900
+    HELIX_QUERY_MODE: str = "arsql"  # person_workitems|arsql|auto
+    HELIX_ARSQL_BASE_URL: str = ""
+    HELIX_ARSQL_DATASOURCE_UID: str = ""
+    HELIX_ARSQL_SOURCE_SERVICE_N1: str = "ENTERPRISE WEB"
+    HELIX_ARSQL_LIMIT: int = 500
+    HELIX_ARSQL_DS_AUTH: str = "IMS-JWT JWT PLACEHOLDER"
+    HELIX_ARSQL_CLIENT_TYPE: str = "4021"
+    HELIX_ARSQL_GRAFANA_ORG_ID: str = ""
+    HELIX_ARSQL_GRAFANA_DEVICE_ID: str = ""
+    HELIX_ARSQL_DASHBOARD_URL: str = ""
+    HELIX_BROWSER_LOGIN_WAIT_SECONDS: int = 90
+    HELIX_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
     # -------------------------
     # KPIs

@@ -14,11 +14,20 @@ class HelixWorkItem(BaseModel):
     id: str
     summary: str = ""
     status: str = ""
+    status_raw: str = ""
     priority: str = ""
+    incident_type: str = ""
+    service: str = ""
+    impacted_service: str = ""
     assignee: str = ""
     customer_name: str = ""
+    sla_status: str = ""
     target_date: Optional[str] = None
     last_modified: Optional[str] = None
+    start_datetime: Optional[str] = None
+    closed_date: Optional[str] = None
+    matrix_service_n1: str = ""
+    source_service_n1: str = ""
     url: str = ""
     country: str = ""
     source_alias: str = ""
