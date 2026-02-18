@@ -290,36 +290,51 @@ def resolve_filters_against_open_df(
         return status, priority, assignee
 
     # Guarantee useful navigation: if strict combination is empty, relax dimensions progressively.
-    if _open_match_count(
-        open_df=open_df,
-        status_filters=status,
-        priority_filters=priority,
-        assignee_filters=assignee,
-    ) > 0:
+    if (
+        _open_match_count(
+            open_df=open_df,
+            status_filters=status,
+            priority_filters=priority,
+            assignee_filters=assignee,
+        )
+        > 0
+    ):
         return status, priority, assignee
 
-    if assignee and _open_match_count(
-        open_df=open_df,
-        status_filters=status,
-        priority_filters=priority,
-        assignee_filters=[],
-    ) > 0:
+    if (
+        assignee
+        and _open_match_count(
+            open_df=open_df,
+            status_filters=status,
+            priority_filters=priority,
+            assignee_filters=[],
+        )
+        > 0
+    ):
         return status, priority, []
 
-    if priority and _open_match_count(
-        open_df=open_df,
-        status_filters=status,
-        priority_filters=[],
-        assignee_filters=[],
-    ) > 0:
+    if (
+        priority
+        and _open_match_count(
+            open_df=open_df,
+            status_filters=status,
+            priority_filters=[],
+            assignee_filters=[],
+        )
+        > 0
+    ):
         return status, [], []
 
-    if status and _open_match_count(
-        open_df=open_df,
-        status_filters=[],
-        priority_filters=[],
-        assignee_filters=[],
-    ) > 0:
+    if (
+        status
+        and _open_match_count(
+            open_df=open_df,
+            status_filters=[],
+            priority_filters=[],
+            assignee_filters=[],
+        )
+        > 0
+    ):
         return [], [], []
 
     return status, priority, assignee
@@ -356,7 +371,11 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         else pd.Series([], dtype=str)
     )
 
-    created_open = _to_dt_naive(safe_open["created"]) if "created" in safe_open.columns else pd.Series([], dtype="datetime64[ns]")
+    created_open = (
+        _to_dt_naive(safe_open["created"])
+        if "created" in safe_open.columns
+        else pd.Series([], dtype="datetime64[ns]")
+    )
     now = pd.Timestamp.utcnow().tz_localize(None)
     age_days = (
         ((now - created_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
@@ -369,11 +388,11 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         if not status.empty
         else 0
     )
-    critical_mask = (priority.map(priority_rank) <= 2) if not priority.empty else pd.Series([], dtype=bool)
-    critical_count = _safe_series_count(critical_mask) if not critical_mask.empty else 0
-    unassigned_count = (
-        _safe_series_count(assignee.eq("(sin asignar)")) if not assignee.empty else 0
+    critical_mask = (
+        (priority.map(priority_rank) <= 2) if not priority.empty else pd.Series([], dtype=bool)
     )
+    critical_count = _safe_series_count(critical_mask) if not critical_mask.empty else 0
+    unassigned_count = _safe_series_count(assignee.eq("(sin asignar)")) if not assignee.empty else 0
     critical_unassigned = (
         _safe_series_count(critical_mask & assignee.eq("(sin asignar)"))
         if (not critical_mask.empty and not assignee.empty)
@@ -398,16 +417,24 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
             top_priority_share = float(pv.iloc[0]) / float(max(int(pv.sum()), 1))
 
     created_all = (
-        _to_dt_naive(safe_dff["created"]) if "created" in safe_dff.columns else pd.Series([], dtype="datetime64[ns]")
+        _to_dt_naive(safe_dff["created"])
+        if "created" in safe_dff.columns
+        else pd.Series([], dtype="datetime64[ns]")
     )
     resolved_all = (
-        _to_dt_naive(safe_dff["resolved"]) if "resolved" in safe_dff.columns else pd.Series([], dtype="datetime64[ns]")
+        _to_dt_naive(safe_dff["resolved"])
+        if "resolved" in safe_dff.columns
+        else pd.Series([], dtype="datetime64[ns]")
     )
     from_14 = now - pd.Timedelta(days=14)
     created_14 = _safe_series_count(created_all >= from_14) if not created_all.empty else 0
     resolved_14 = _safe_series_count(resolved_all >= from_14) if not resolved_all.empty else 0
     net_14 = int(created_14 - resolved_14)
-    close_entry_ratio_14 = (float(resolved_14) / float(created_14)) if created_14 > 0 else (float("inf") if resolved_14 > 0 else 0.0)
+    close_entry_ratio_14 = (
+        (float(resolved_14) / float(created_14))
+        if created_14 > 0
+        else (float("inf") if resolved_14 > 0 else 0.0)
+    )
 
     closed_subset = pd.DataFrame()
     if not safe_dff.empty and "created" in safe_dff.columns and "resolved" in safe_dff.columns:
@@ -416,9 +443,9 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         closed_subset = safe_dff.copy(deep=False)
         closed_subset["__c"] = c
         closed_subset["__r"] = r
-        closed_subset = closed_subset[closed_subset["__c"].notna() & closed_subset["__r"].notna()].copy(
-            deep=False
-        )
+        closed_subset = closed_subset[
+            closed_subset["__c"].notna() & closed_subset["__r"].notna()
+        ].copy(deep=False)
         if not closed_subset.empty:
             closed_subset["__res_days"] = (
                 (closed_subset["__r"] - closed_subset["__c"]).dt.total_seconds() / 86400.0
@@ -438,7 +465,11 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
             duplicate_groups = int(len(rep))
             duplicate_issues = int(rep.sum())
 
-    updated_open = _to_dt_naive(safe_open["updated"]) if "updated" in safe_open.columns else pd.Series([], dtype="datetime64[ns]")
+    updated_open = (
+        _to_dt_naive(safe_open["updated"])
+        if "updated" in safe_open.columns
+        else pd.Series([], dtype="datetime64[ns]")
+    )
     stale_days = (
         ((now - updated_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
         if not updated_open.empty
@@ -595,9 +626,7 @@ def list_next_best_actions(
         actions.append(
             NextBestAction(
                 title="Tratamiento de cola envejecida",
-                body=(
-                    f"El {_fmt_pct(aged30_pct)} del backlog abierto supera los 30 dias."
-                ),
+                body=(f"El {_fmt_pct(aged30_pct)} del backlog abierto supera los 30 dias."),
                 expected_impact=(
                     "Impacto esperado: reducir el riesgo de envejecimiento "
                     "al trabajar esta cola de forma dedicada."
@@ -608,9 +637,7 @@ def list_next_best_actions(
         actions.append(
             NextBestAction(
                 title="Consolidacion de duplicidades",
-                body=(
-                    f"Las duplicidades representan {_fmt_pct(dup_share)} del backlog abierto."
-                ),
+                body=(f"Las duplicidades representan {_fmt_pct(dup_share)} del backlog abierto."),
                 expected_impact=(
                     "Impacto esperado: reducir carga operativa al consolidar incidencias repetidas."
                 ),
@@ -673,7 +700,9 @@ def build_copilot_suggestions(
         elif intent == "summary":
             _push_unique(out, "Dame un resumen ejecutivo de la situacion actual.", max_len=limit)
         elif intent == "simulation":
-            _push_unique(out, "Que pasaria si reducimos entrada un 20% y subimos cierres?", max_len=limit)
+            _push_unique(
+                out, "Que pasaria si reducimos entrada un 20% y subimos cierres?", max_len=limit
+            )
 
     if next_action is not None:
         _push_unique(
@@ -681,9 +710,10 @@ def build_copilot_suggestions(
             f"Como ejecuto ya la accion '{next_action.title}' y que impacto espero?",
             max_len=limit,
         )
-    if float(s.get("critical_pct", 0.0) or 0.0) >= 0.12 or int(
-        s.get("critical_unassigned_count", 0) or 0
-    ) > 0:
+    if (
+        float(s.get("critical_pct", 0.0) or 0.0) >= 0.12
+        or int(s.get("critical_unassigned_count", 0) or 0) > 0
+    ):
         _push_unique(
             out,
             "Donde esta la bolsa critica sin owner y como la cierro primero?",
@@ -881,7 +911,9 @@ def answer_copilot_question(
     if intent == "action":
         if next_action is not None:
             ans = f"{next_action.title}: {next_action.body} {next_action.expected_impact}"
-            return CopilotAnswer(answer=ans, confidence=0.89, evidence=evidence, followups=followups)
+            return CopilotAnswer(
+                answer=ans, confidence=0.89, evidence=evidence, followups=followups
+            )
         return CopilotAnswer(
             answer="La accion prioritaria depende del principal cuello operativo del filtro actual.",
             confidence=0.62,
@@ -892,12 +924,16 @@ def answer_copilot_question(
     if intent == "change":
         if base:
             delta_open = int((s.get("open_total", 0) or 0) - (base.get("open_total", 0) or 0))
-            delta_blocked = int((s.get("blocked_count", 0) or 0) - (base.get("blocked_count", 0) or 0))
+            delta_blocked = int(
+                (s.get("blocked_count", 0) or 0) - (base.get("blocked_count", 0) or 0)
+            )
             ans = (
                 f"Comparado con la ultima sesion: backlog {'+' if delta_open > 0 else ''}{delta_open}, "
                 f"bloqueadas {'+' if delta_blocked > 0 else ''}{delta_blocked}."
             )
-            return CopilotAnswer(answer=ans, confidence=0.81, evidence=evidence, followups=followups)
+            return CopilotAnswer(
+                answer=ans, confidence=0.81, evidence=evidence, followups=followups
+            )
         return CopilotAnswer(
             answer="Aun no hay baseline historico para comparar en este cliente.",
             confidence=0.55,

@@ -116,7 +116,9 @@ def _norm_text(value: object) -> str:
     return txt
 
 
-def classify_theme(summary: object, *, theme_rules: Sequence[Tuple[str, Sequence[str]]] | None = None) -> str:
+def classify_theme(
+    summary: object, *, theme_rules: Sequence[Tuple[str, Sequence[str]]] | None = None
+) -> str:
     rules = list(theme_rules or THEME_RULES)
     text = _norm_text(summary)
     if not text:
@@ -152,8 +154,16 @@ def top_non_other_theme(open_df: pd.DataFrame) -> Tuple[str, int]:
 def _daily_flow(dff: pd.DataFrame, *, lookback_days: int = 90) -> pd.DataFrame:
     if dff.empty:
         return pd.DataFrame(columns=["date", "created", "closed", "net", "backlog_proxy"])
-    created = _to_dt_naive(dff["created"]) if "created" in dff.columns else pd.Series(pd.NaT, index=dff.index)
-    closed = _to_dt_naive(dff["resolved"]) if "resolved" in dff.columns else pd.Series(pd.NaT, index=dff.index)
+    created = (
+        _to_dt_naive(dff["created"])
+        if "created" in dff.columns
+        else pd.Series(pd.NaT, index=dff.index)
+    )
+    closed = (
+        _to_dt_naive(dff["resolved"])
+        if "resolved" in dff.columns
+        else pd.Series(pd.NaT, index=dff.index)
+    )
 
     valid_created = created.dropna()
     valid_closed = closed.dropna()
@@ -248,7 +258,9 @@ def _sorted_cards(cards: Iterable[ActionInsight], *, limit: int = 5) -> List[Act
     return sorted(valid, key=lambda c: float(c.score), reverse=True)[:limit]
 
 
-def build_trend_insight_pack(chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPack:
+def build_trend_insight_pack(
+    chart_id: str, *, dff: pd.DataFrame, open_df: pd.DataFrame
+) -> TrendInsightPack:
     cid = str(chart_id or "").strip()
     safe_dff = _safe_df(dff)
     safe_open = _safe_df(open_df)
@@ -265,7 +277,9 @@ def build_trend_insight_pack(chart_id: str, *, dff: pd.DataFrame, open_df: pd.Da
         return _status_pack(safe_open)
     return TrendInsightPack(
         metrics=[],
-        cards=[ActionInsight(title="Sin insights", body="No hay reglas de insight para este grafico.")],
+        cards=[
+            ActionInsight(title="Sin insights", body="No hay reglas de insight para este grafico.")
+        ],
         executive_tip=None,
     )
 
@@ -295,7 +309,11 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
     closed_14 = int(daily["closed"].tail(14).sum())
     ratio_close_entry = _ratio(closed_14, created_14)
     net_14 = int(created_14 - closed_14)
-    weekly_net = float(daily["net"].tail(28).mean()) * 7.0 if len(daily) >= 7 else float(daily["net"].mean()) * 7.0
+    weekly_net = (
+        float(daily["net"].tail(28).mean()) * 7.0
+        if len(daily) >= 7
+        else float(daily["net"].mean()) * 7.0
+    )
     open_now = int(len(open_df))
     created_tail = daily["created"].tail(30)
     closed_tail = daily["closed"].tail(30)
@@ -425,8 +443,15 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
         )
 
     if "priority" in open_df.columns and "status" in open_df.columns and not open_df.empty:
-        crit_mask = normalize_text_col(open_df["priority"], "(sin priority)").astype(str).map(priority_rank) <= 2
-        triage_mask = normalize_text_col(open_df["status"], "(sin estado)").astype(str).isin(TRIAGE_STATUS_FILTERS)
+        crit_mask = (
+            normalize_text_col(open_df["priority"], "(sin priority)").astype(str).map(priority_rank)
+            <= 2
+        )
+        triage_mask = (
+            normalize_text_col(open_df["status"], "(sin estado)")
+            .astype(str)
+            .isin(TRIAGE_STATUS_FILTERS)
+        )
         crit_early = int((crit_mask & triage_mask).sum())
         if crit_early > 0:
             cards.append(
@@ -507,17 +532,13 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
 
     tip: str | None
     if ratio_close_entry < 1.0:
-        tip = (
-            "Palanca ejecutiva: alinear compromiso semanal de cierres con entrada real para evitar crecimiento estructural."
-        )
+        tip = "Palanca ejecutiva: alinear compromiso semanal de cierres con entrada real para evitar crecimiento estructural."
     elif ratio_close_entry > 1.1:
         tip = (
             "Momento favorable: usar el superavit de cierre para recortar deuda de mas de 30 dias."
         )
     else:
-        tip = (
-            "Flujo estable: priorizar precision en triage y reducir reincidencias para sostener el equilibrio."
-        )
+        tip = "Flujo estable: priorizar precision en triage y reducir reincidencias para sostener el equilibrio."
 
     return TrendInsightPack(
         metrics=[
@@ -610,7 +631,9 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 )
 
         critical_old_mask = pr.map(priority_rank) <= 2
-        crit_old_count = int((critical_old_mask & (ages.reindex(pr.index, fill_value=np.nan) > 14)).sum())
+        crit_old_count = int(
+            (critical_old_mask & (ages.reindex(pr.index, fill_value=np.nan) > 14)).sum()
+        )
         if crit_old_count > 0:
             cards.append(
                 ActionInsight(
@@ -748,7 +771,12 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
 
     if "priority" in closed.columns and not closed.empty:
         pr = normalize_text_col(closed["priority"], "(sin priority)")
-        grouped = closed.assign(priority=pr).groupby("priority")["resolution_days"].median().sort_values(ascending=False)
+        grouped = (
+            closed.assign(priority=pr)
+            .groupby("priority")["resolution_days"]
+            .median()
+            .sort_values(ascending=False)
+        )
         if len(grouped) >= 2:
             slowest = str(grouped.index[0])
             fastest = str(grouped.index[-1])
@@ -984,9 +1012,7 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             cards.append(
                 ActionInsight(
                     title="Criticas sin movimiento reciente",
-                    body=(
-                        f"{crit_stale} High/Highest no tienen actualizacion en mas de 7 dias."
-                    ),
+                    body=(f"{crit_stale} High/Highest no tienen actualizacion en mas de 7 dias."),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                     score=14.0 + float(crit_stale),
                 )
@@ -1054,7 +1080,9 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 f"{_fmt_pct(active_share)} del backlog esta en estados activos. "
                 "Por encima de 60% suele subir el cambio de contexto."
             ),
-            status_filters=[s for s in ACTIVE_STATUS_FILTERS if s in df["status"].astype(str).unique().tolist()],
+            status_filters=[
+                s for s in ACTIVE_STATUS_FILTERS if s in df["status"].astype(str).unique().tolist()
+            ],
             score=8.0 + (active_share * 100.0),
         )
     )
@@ -1074,7 +1102,9 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             )
         )
 
-    blocked_count = int(df["status"].astype(str).str.lower().str.contains("blocked|bloque", regex=True).sum())
+    blocked_count = int(
+        df["status"].astype(str).str.lower().str.contains("blocked|bloque", regex=True).sum()
+    )
     blocked_share = (blocked_count / total) if total else 0.0
     if blocked_count > 0:
         cards.append(
@@ -1163,9 +1193,7 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     tip = "Control de flujo recomendado: medir SLA por estado y revisar desvio diariamente."
     if top_share > 0.45:
-        tip = (
-            f"Prioridad de gestion: descargar {top_status} hasta bajar por debajo de 35% del backlog."
-        )
+        tip = f"Prioridad de gestion: descargar {top_status} hasta bajar por debajo de 35% del backlog."
 
     return TrendInsightPack(
         metrics=[
@@ -1216,7 +1244,9 @@ def build_people_plan_recommendations(
             "Volumen relevante pero estable: mantener limite de WIP y revision semanal de aging."
         )
     if not recs:
-        recs.append("Riesgo controlado: sostener disciplina de flujo y evitar acumulacion en entrada.")
+        recs.append(
+            "Riesgo controlado: sostener disciplina de flujo y evitar acumulacion en entrada."
+        )
 
     return recs[:4]
 
@@ -1232,7 +1262,9 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
     aged_30_pct = (aged_30 / open_total) if open_total else 0.0
     blocked = 0
     if "status" in safe_open.columns:
-        status_norm = normalize_text_col(safe_open["status"], "(sin estado)").astype(str).str.lower()
+        status_norm = (
+            normalize_text_col(safe_open["status"], "(sin estado)").astype(str).str.lower()
+        )
         blocked = int(status_norm.str.contains("blocked|bloque", regex=True).sum())
     blocked_pct = (blocked / open_total) if open_total else 0.0
 
@@ -1264,7 +1296,11 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
 
     if not safe_dff.empty and "created" in safe_dff.columns:
         created = _to_dt_naive(safe_dff["created"])
-        resolved = _to_dt_naive(safe_dff["resolved"]) if "resolved" in safe_dff.columns else pd.Series(pd.NaT, index=safe_dff.index)
+        resolved = (
+            _to_dt_naive(safe_dff["resolved"])
+            if "resolved" in safe_dff.columns
+            else pd.Series(pd.NaT, index=safe_dff.index)
+        )
         now = pd.Timestamp.utcnow().tz_localize(None)
         from_14 = now - pd.Timedelta(days=14)
         created_14 = int((created >= from_14).sum())

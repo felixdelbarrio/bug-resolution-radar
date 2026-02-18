@@ -279,7 +279,9 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
 
     dff = open_df.copy()
     if "status" in dff.columns:
-        status_norm = normalize_text_col(dff["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        status_norm = (
+            normalize_text_col(dff["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        )
         terminal_mask = status_norm.map(
             lambda st_name: any(tok in str(st_name or "") for tok in TERMINAL_STATUS_TOKENS)
         )
@@ -307,7 +309,9 @@ def _insights_open_priority_pie(ctx: ChartContext) -> List[str]:
 
     dff = open_df.copy()
     if "status" in dff.columns:
-        status_norm = normalize_text_col(dff["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        status_norm = (
+            normalize_text_col(dff["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        )
         terminal_mask = status_norm.map(
             lambda st_name: any(tok in str(st_name or "") for tok in TERMINAL_STATUS_TOKENS)
         )

@@ -77,13 +77,15 @@ def _rank_topic_candidates(sub: pd.DataFrame) -> pd.DataFrame:
         if col_exists(work, "assignee")
         else 0.0
     )
-    critical_bonus = (
-        (work["__prio_rank"] <= 2).astype(float) * 24.0
-        + (work["__prio_rank"] == 3).astype(float) * 10.0
+    critical_bonus = (work["__prio_rank"] <= 2).astype(float) * 24.0 + (
+        work["__prio_rank"] == 3
+    ).astype(float) * 10.0
+    work["__topic_score"] = (
+        critical_bonus
+        + (age.clip(upper=180.0) * 0.22)
+        + (stale.clip(upper=90.0) * 0.18)
+        + no_owner_bonus
     )
-    work["__topic_score"] = critical_bonus + (age.clip(upper=180.0) * 0.22) + (
-        stale.clip(upper=90.0) * 0.18
-    ) + no_owner_bonus
     return work.sort_values(["__topic_score", "__age_days"], ascending=[False, False])
 
 

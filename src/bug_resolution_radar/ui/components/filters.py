@@ -510,13 +510,7 @@ def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_ke
 
 
 def _normalize_filter_values(values: List[str]) -> List[str]:
-    out = sorted(
-        {
-            str(x).strip().lower()
-            for x in list(values or [])
-            if str(x).strip()
-        }
-    )
+    out = sorted({str(x).strip().lower() for x in list(values or []) if str(x).strip()})
     return list(out)
 
 

@@ -167,12 +167,20 @@ def _dict_any(value: Any) -> Dict[str, Any]:
 
 def _insight_identity(chart_id: str, insight: ActionInsight) -> str:
     base = f"{chart_id.strip().lower()}|{str(insight.title or '').strip().lower()}"
-    status = ",".join(sorted([str(x).strip().lower() for x in list(insight.status_filters or []) if str(x).strip()]))
+    status = ",".join(
+        sorted(
+            [str(x).strip().lower() for x in list(insight.status_filters or []) if str(x).strip()]
+        )
+    )
     priority = ",".join(
-        sorted([str(x).strip().lower() for x in list(insight.priority_filters or []) if str(x).strip()])
+        sorted(
+            [str(x).strip().lower() for x in list(insight.priority_filters or []) if str(x).strip()]
+        )
     )
     assignee = ",".join(
-        sorted([str(x).strip().lower() for x in list(insight.assignee_filters or []) if str(x).strip()])
+        sorted(
+            [str(x).strip().lower() for x in list(insight.assignee_filters or []) if str(x).strip()]
+        )
     )
     digest = hashlib.sha1(f"{base}|{status}|{priority}|{assignee}".encode("utf-8")).hexdigest()[:12]
     return f"{chart_id}:{digest}"
@@ -243,7 +251,11 @@ def _personalize_insights(
             status_filters=list(card.status_filters or []),
             priority_filters=list(card.priority_filters or []),
             assignee_filters=list(card.assignee_filters or []),
-            score=float(card.score) + novelty_bonus + affinity_bonus + active_alignment + last_alignment,
+            score=float(card.score)
+            + novelty_bonus
+            + affinity_bonus
+            + active_alignment
+            + last_alignment,
         )
         out.append(personalized)
 
@@ -259,7 +271,9 @@ def _render_token(
     return f"{chart_id}|{len(dff)}|{len(open_df)}|{status}|{priority}|{assignee}"
 
 
-def _register_shown_insights(cards: List[ActionInsight], *, chart_id: str, render_token: str) -> None:
+def _register_shown_insights(
+    cards: List[ActionInsight], *, chart_id: str, render_token: str
+) -> None:
     state = _ensure_learning_state()
     last_token = str(state.get("last_render_token") or "")
     if last_token == render_token:
@@ -435,7 +449,9 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
         .value_counts(sort=False)
     )
 
-    all_dates = created_daily.index.union(closed_daily.index).union(deployed_daily.index).sort_values()
+    all_dates = (
+        created_daily.index.union(closed_daily.index).union(deployed_daily.index).sort_values()
+    )
     if all_dates.empty:
         return pd.DataFrame()
 

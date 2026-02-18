@@ -44,7 +44,9 @@ def default_learning_path(settings: Settings) -> Path:
     return Path("data/insights_learning.json")
 
 
-def learning_payload_hash(*, state: Dict[str, Any], interactions: int, snapshot: Dict[str, Any]) -> str:
+def learning_payload_hash(
+    *, state: Dict[str, Any], interactions: int, snapshot: Dict[str, Any]
+) -> str:
     payload = {
         "state": _as_dict(state),
         "interactions": int(interactions),
@@ -110,8 +112,10 @@ class InsightsLearningStore:
     ) -> None:
         scopes = _as_dict(self._raw.get("scopes"))
         current = _as_dict(scopes.get(scope))
-        resolved_snapshot = _as_dict(snapshot) if isinstance(snapshot, dict) else _as_dict(
-            current.get("last_snapshot")
+        resolved_snapshot = (
+            _as_dict(snapshot)
+            if isinstance(snapshot, dict)
+            else _as_dict(current.get("last_snapshot"))
         )
         scopes[scope] = {
             "state": _as_dict(state),
@@ -134,8 +138,10 @@ def ensure_learning_session_loaded(*, settings: Settings) -> None:
 
     cur_scope = str(st.session_state.get(LEARNING_SCOPE_KEY) or "").strip()
     cur_path = str(st.session_state.get(LEARNING_STORE_PATH_SESSION_KEY) or "").strip()
-    if cur_scope == scope and cur_path == str(path) and isinstance(
-        st.session_state.get(LEARNING_STATE_KEY), dict
+    if (
+        cur_scope == scope
+        and cur_path == str(path)
+        and isinstance(st.session_state.get(LEARNING_STATE_KEY), dict)
     ):
         return
 

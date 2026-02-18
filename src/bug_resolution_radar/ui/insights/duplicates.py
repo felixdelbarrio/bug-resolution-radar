@@ -216,7 +216,13 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     duplicate_issues = 0
     if col_exists(df2, "summary"):
         summary_vc = (
-            df2["summary"].fillna("").astype(str).str.strip().replace("", pd.NA).dropna().value_counts()
+            df2["summary"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .replace("", pd.NA)
+            .dropna()
+            .value_counts()
         )
         repeated = summary_vc[summary_vc > 1]
         duplicate_groups = int(len(repeated))
