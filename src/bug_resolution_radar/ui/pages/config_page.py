@@ -10,6 +10,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import (
     Settings,
+    build_source_id,
     helix_sources,
     jira_sources,
     save_settings,
@@ -77,12 +78,6 @@ def _as_str(value: Any) -> str:
     return str(value).strip()
 
 
-def _source_label(source: Dict[str, str]) -> str:
-    country = _as_str(source.get("country")) or "N/A"
-    alias = _as_str(source.get("alias")) or "Sin alias"
-    return f"{country} · {alias}"
-
-
 def _render_purge_stats(stats: Dict[str, int]) -> None:
     issues_removed = int(stats.get("issues_removed", 0) or 0)
     helix_items_removed = int(stats.get("helix_items_removed", 0) or 0)
@@ -110,22 +105,79 @@ def _is_delete_phrase_valid(value: Any) -> bool:
     return str(value or "").strip().upper() == "ELIMINAR"
 
 
+def _inject_delete_zone_css() -> None:
+    st.markdown(
+        """
+        <style>
+          [class*="st-key-cfg_jira_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, #95BAFF 14%) !important;
+            background:
+              radial-gradient(1200px 280px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 55%),
+              linear-gradient(155deg, color-mix(in srgb, var(--bbva-surface) 92%, #0E234C 8%), var(--bbva-surface));
+            box-shadow: 0 12px 28px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
+            border-radius: var(--bbva-radius-xl) !important;
+          }
+          .cfg-delete-chip-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem;
+            margin: .2rem 0 .4rem;
+          }
+          .cfg-delete-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .28rem .78rem;
+            border-radius: 999px;
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 74%, #8EB4FF 26%);
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 84%, #0D224A 16%);
+            color: color-mix(in srgb, var(--bbva-text) 95%, transparent);
+            font-size: .91rem;
+            line-height: 1.15rem;
+            font-weight: 600;
+          }
+          .cfg-delete-chip-dot {
+            width: .46rem;
+            height: .46rem;
+            border-radius: 50%;
+            background: color-mix(in srgb, var(--bbva-primary) 76%, #7EA8FF 24%);
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 20%, transparent);
+          }
+          .cfg-delete-ghost {
+            border: 1px dashed var(--bbva-border);
+            border-radius: var(--bbva-radius-m);
+            padding: .65rem .75rem;
+            color: var(--bbva-text-muted);
+            background: color-mix(in srgb, var(--bbva-surface) 96%, transparent);
+            margin-bottom: .25rem;
+            font-size: .92rem;
+          }
+          .cfg-delete-counter {
+            color: color-mix(in srgb, var(--bbva-text) 86%, transparent);
+            margin-bottom: .2rem;
+            font-size: .92rem;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_selected_source_chips(
     selected_source_ids: List[str], source_label_by_id: Dict[str, str]
 ) -> None:
     if not selected_source_ids:
         return
-    chips_html = []
+    chips_html = ['<div class="cfg-delete-chip-wrap">']
     for sid in selected_source_ids:
         label = source_label_by_id.get(str(sid), str(sid))
         chips_html.append(
-            '<span style="display:inline-block; margin:0 8px 8px 0; padding:6px 10px; '
-            "border:1px solid var(--bbva-border); border-radius:999px; "
-            "background:color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2)); "
-            'font-size:0.9rem;">'
+            '<span class="cfg-delete-chip"><span class="cfg-delete-chip-dot"></span>'
             f"{escape(label)}"
             "</span>"
         )
+    chips_html.append("</div>")
     st.markdown("".join(chips_html), unsafe_allow_html=True)
 
 
@@ -133,38 +185,42 @@ def _render_source_delete_container(
     *,
     section_title: str,
     source_label: str,
-    source_options: List[str],
-    source_label_by_id: Dict[str, str],
+    selected_source_ids: List[str],
+    selected_label_by_id: Dict[str, str],
     key_prefix: str,
 ) -> Dict[str, Any]:
     st.markdown(section_title)
 
-    with st.container(border=True):
+    with st.container(border=True, key=f"{key_prefix}_delete_shell"):
         st.markdown("#### Zona segura de eliminación")
         st.caption(
             "La eliminación se ejecuta al pulsar Guardar configuración. "
             "El saneado de cache asociado se aplica siempre."
         )
 
-        if not source_options:
-            st.info(f"No hay fuentes {source_label} configuradas para eliminar.")
-            return {"source_ids": [], "armed": False, "valid": True}
-
-        source_ids_raw = st.pills(
-            f"Fuentes {source_label} a eliminar",
-            options=source_options,
-            selection_mode="multi",
-            format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
-            key=f"{key_prefix}_delete_sids",
-        )
-        if isinstance(source_ids_raw, list):
-            source_ids = source_ids_raw
-        elif source_ids_raw is None:
-            source_ids = []
+        has_selection = bool(selected_source_ids)
+        if has_selection:
+            plural = "s" if len(selected_source_ids) != 1 else ""
+            st.markdown(
+                f'<div class="cfg-delete-counter"><strong>{len(selected_source_ids)}</strong> '
+                f"fuente{plural} seleccionada{plural} desde la tabla.</div>",
+                unsafe_allow_html=True,
+            )
+            _render_selected_source_chips(selected_source_ids, selected_label_by_id)
         else:
-            source_ids = [str(source_ids_raw)]
+            st.markdown(
+                f'<div class="cfg-delete-ghost">Marca en la tabla las fuentes {source_label} '
+                "que quieras eliminar. Aquí aparecerán como chips country · alias.</div>",
+                unsafe_allow_html=True,
+            )
+
+        confirm_target = (
+            f"estas fuentes {source_label}"
+            if len(selected_source_ids) != 1
+            else f"esta fuente {source_label}"
+        )
         confirm = st.checkbox(
-            f"Confirmo que quiero eliminar esta fuente {source_label} de forma permanente.",
+            f"Confirmo que quiero eliminar {confirm_target} de forma permanente.",
             key=f"{key_prefix}_delete_confirm",
         )
         phrase = st.text_input(
@@ -174,11 +230,6 @@ def _render_source_delete_container(
             help="Confirmación reforzada para evitar borrados accidentales.",
         )
 
-        selected_source_ids = [str(x).strip() for x in source_ids if str(x).strip()]
-        has_selection = bool(selected_source_ids)
-        if has_selection:
-            st.caption(f"Seleccionadas para eliminar: {len(selected_source_ids)}")
-            _render_selected_source_chips(selected_source_ids, source_label_by_id)
         phrase_ok = _is_delete_phrase_valid(phrase)
         has_partial_input = bool(has_selection or confirm or str(phrase).strip())
         armed = bool(has_selection and confirm and phrase_ok)
@@ -208,6 +259,8 @@ def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[D
             continue
         rows.append(
             {
+                "__delete__": False,
+                "__source_id__": _as_str(src.get("source_id")),
                 "country": country,
                 "alias": _as_str(src.get("alias")),
                 "jql": _as_str(src.get("jql")),
@@ -224,6 +277,8 @@ def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[
             continue
         rows.append(
             {
+                "__delete__": False,
+                "__source_id__": _as_str(src.get("source_id")),
                 "country": country,
                 "alias": _as_str(src.get("alias")),
                 "base_url": _as_str(src.get("base_url")),
@@ -244,6 +299,8 @@ def _normalize_jira_rows(
     seen: set[tuple[str, str]] = set()
 
     for idx, row in enumerate(df.to_dict(orient="records"), start=1):
+        if _boolish(row.get("__delete__"), default=False):
+            continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
         jql = _as_str(row.get("jql"))
@@ -278,6 +335,8 @@ def _normalize_helix_rows(
     seen: set[tuple[str, str]] = set()
 
     for idx, row in enumerate(df.to_dict(orient="records"), start=1):
+        if _boolish(row.get("__delete__"), default=False):
+            continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
         base_url = _as_str(row.get("base_url"))
@@ -327,10 +386,34 @@ def _normalize_helix_rows(
     return out, errors
 
 
+def _selected_sources_from_editor(
+    df: pd.DataFrame, *, source_type: str
+) -> Tuple[List[str], Dict[str, str]]:
+    selected_ids: List[str] = []
+    label_by_id: Dict[str, str] = {}
+
+    for row in df.to_dict(orient="records"):
+        if not _boolish(row.get("__delete__"), default=False):
+            continue
+        country = _as_str(row.get("country"))
+        alias = _as_str(row.get("alias"))
+        sid = _as_str(row.get("__source_id__"))
+        if not sid and country and alias:
+            sid = build_source_id(source_type, country, alias)
+        if not sid:
+            continue
+        if sid not in selected_ids:
+            selected_ids.append(sid)
+            label_by_id[sid] = f"{country or 'N/A'} · {alias or 'Sin alias'}"
+
+    return selected_ids, label_by_id
+
+
 def render(settings: Settings) -> None:
     countries = supported_countries(settings)
-    jira_delete_cfg: Dict[str, Any] = {"source_id": "", "armed": False, "valid": True}
-    helix_delete_cfg: Dict[str, Any] = {"source_id": "", "armed": False, "valid": True}
+    jira_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
+    helix_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
+    _inject_delete_zone_css()
 
     st.subheader("Configuración")
 
@@ -359,34 +442,41 @@ def render(settings: Settings) -> None:
         st.markdown("### Fuentes Jira por país")
         st.caption("Alias y JQL son obligatorios.")
         jira_rows = _rows_from_jira_settings(settings, countries)
-        jira_df = pd.DataFrame(jira_rows or [{"country": countries[0], "alias": "", "jql": ""}])
+        jira_df = pd.DataFrame(
+            jira_rows
+            or [
+                {
+                    "__delete__": False,
+                    "__source_id__": "",
+                    "country": countries[0],
+                    "alias": "",
+                    "jql": "",
+                }
+            ]
+        )
         jira_editor = st.data_editor(
             jira_df,
             hide_index=True,
             num_rows="dynamic",
             width="stretch",
             key="cfg_jira_sources_editor",
+            column_order=["__delete__", "country", "alias", "jql"],
             column_config={
+                "__delete__": st.column_config.CheckboxColumn("Eliminar"),
                 "country": st.column_config.SelectboxColumn("country", options=countries),
                 "alias": st.column_config.TextColumn("alias"),
                 "jql": st.column_config.TextColumn("jql"),
             },
         )
 
-        jira_cfg_sources = jira_sources(settings)
-        jira_options = [
-            _as_str(src.get("source_id"))
-            for src in jira_cfg_sources
-            if _as_str(src.get("source_id"))
-        ]
-        jira_label_by_id = {
-            _as_str(src.get("source_id")): _source_label(src) for src in jira_cfg_sources
-        }
+        jira_delete_ids, jira_delete_labels = _selected_sources_from_editor(
+            jira_editor, source_type="jira"
+        )
         jira_delete_cfg = _render_source_delete_container(
             section_title="### 🧹 Eliminar fuente Jira",
             source_label="Jira",
-            source_options=jira_options,
-            source_label_by_id=jira_label_by_id,
+            selected_source_ids=jira_delete_ids,
+            selected_label_by_id=jira_delete_labels,
             key_prefix="cfg_jira",
         )
 
@@ -428,6 +518,8 @@ def render(settings: Settings) -> None:
             helix_rows
             or [
                 {
+                    "__delete__": False,
+                    "__source_id__": "",
                     "country": countries[0],
                     "alias": "",
                     "base_url": "",
@@ -444,7 +536,18 @@ def render(settings: Settings) -> None:
             num_rows="dynamic",
             width="stretch",
             key="cfg_helix_sources_editor",
+            column_order=[
+                "__delete__",
+                "country",
+                "alias",
+                "base_url",
+                "organization",
+                "browser",
+                "proxy",
+                "ssl_verify",
+            ],
             column_config={
+                "__delete__": st.column_config.CheckboxColumn("Eliminar"),
                 "country": st.column_config.SelectboxColumn("country", options=countries),
                 "alias": st.column_config.TextColumn("alias"),
                 "base_url": st.column_config.TextColumn("base_url"),
@@ -457,20 +560,14 @@ def render(settings: Settings) -> None:
             },
         )
 
-        helix_cfg_sources = helix_sources(settings)
-        helix_options = [
-            _as_str(src.get("source_id"))
-            for src in helix_cfg_sources
-            if _as_str(src.get("source_id"))
-        ]
-        helix_label_by_id = {
-            _as_str(src.get("source_id")): _source_label(src) for src in helix_cfg_sources
-        }
+        helix_delete_ids, helix_delete_labels = _selected_sources_from_editor(
+            helix_editor, source_type="helix"
+        )
         helix_delete_cfg = _render_source_delete_container(
             section_title="### 🧹 Eliminar fuente Helix",
             source_label="Helix",
-            source_options=helix_options,
-            source_label_by_id=helix_label_by_id,
+            selected_source_ids=helix_delete_ids,
+            selected_label_by_id=helix_delete_labels,
             key_prefix="cfg_helix",
         )
 
