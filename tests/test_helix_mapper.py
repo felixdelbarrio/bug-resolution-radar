@@ -123,6 +123,7 @@ def test_map_helix_values_to_item_keeps_query_fields_and_raw_status() -> None:
     assert item.closed_date == "2024-01-02T00:00:00+00:00"
     assert item.matrix_service_n1 == "Matriz N1"
     assert item.source_service_n1 == "Source N1"
+    assert item.url == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
 
 
 def test_map_helix_values_to_item_reads_custom_attributes_container() -> None:
@@ -148,6 +149,20 @@ def test_map_helix_values_to_item_reads_custom_attributes_container() -> None:
     assert item.closed_date == "2026-02-20T00:00:00Z"
     assert item.matrix_service_n1 == "Core"
     assert item.source_service_n1 == "Legacy"
+
+
+def test_map_helix_values_to_item_uses_configured_dashboard_url() -> None:
+    item = map_helix_values_to_item(
+        values={"id": "INC9999", "status": "Open"},
+        base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
+        country="México",
+        source_alias="MX SmartIT",
+        source_id="helix:mexico:mx-smartit",
+        ticket_console_url="https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    )
+
+    assert item is not None
+    assert item.url == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
 
 
 def test_helix_item_to_issue_maps_labels_and_components_as_requested() -> None:

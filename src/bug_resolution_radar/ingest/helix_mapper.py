@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
 import unicodedata
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from bug_resolution_radar.schema_helix import HelixWorkItem
@@ -237,6 +237,7 @@ def map_helix_values_to_item(
     country: str,
     source_alias: str,
     source_id: str,
+    ticket_console_url: str = "",
 ) -> Optional[HelixWorkItem]:
     """Build a HelixWorkItem with canonicalized fields from one API object."""
     wid = _as_text(values.get("displayId") or values.get("id") or values.get("workItemId"))
@@ -260,13 +261,13 @@ def map_helix_values_to_item(
         ),
         # Explicitly ignored in canonical VRR mapping for this geography.
         sla_status="",
-        target_date=values.get("targetDate"),
-        last_modified=values.get("lastModifiedDate") or values.get("lastModified"),
+        target_date=_to_iso_datetime(values.get("targetDate")),
+        last_modified=_to_iso_datetime(values.get("lastModifiedDate") or values.get("lastModified")),
         start_datetime=_to_iso_datetime(_extract_custom_attr(values, "bbva_startdatetime")),
         closed_date=_to_iso_datetime(_extract_custom_attr(values, "bbva_closeddate")),
         matrix_service_n1=_extract_custom_attr(values, "bbva_matrixservicen1"),
         source_service_n1=_extract_custom_attr(values, "bbva_sourceservicen1"),
-        url=f"{base_url}/app/#/ticket-console",
+        url=str(ticket_console_url or f"{base_url}/app/#/ticket-console").strip(),
         country=country,
         source_alias=source_alias,
         source_id=source_id,
