@@ -13,8 +13,8 @@ from bug_resolution_radar.config import (
     ensure_env,
     load_settings,
     save_settings,
-    supported_countries,
 )
+from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
@@ -36,10 +36,81 @@ def _dashboard_labels() -> Dict[str, str]:
     }
 
 
+def _sources_with_results(settings: Settings) -> List[Dict[str, str]]:
+    """Return configured sources that currently have ingested rows."""
+    configured_sources = all_configured_sources(settings)
+    if not configured_sources:
+        return []
+
+    try:
+        df = load_issues_df(settings.DATA_PATH)
+    except Exception:
+        # If data cannot be loaded, keep configured options available.
+        return configured_sources
+    if df.empty:
+        return []
+
+    has_source_id_column = "source_id" in df.columns
+    has_country_column = "country" in df.columns
+
+    source_ids_with_results: set[str] = set()
+    if has_source_id_column:
+        source_ids_with_results = {
+            sid.strip()
+            for sid in df["source_id"].fillna("").astype(str).tolist()
+            if sid and sid.strip()
+        }
+
+    countries_with_results: set[str] = set()
+    if has_country_column:
+        countries_with_results = {
+            country.strip()
+            for country in df["country"].fillna("").astype(str).tolist()
+            if country and country.strip()
+        }
+
+    # Legacy fallback: if dataset has no source_id metadata, filter by country only.
+    use_country_fallback = not source_ids_with_results and has_country_column
+    if not has_source_id_column and not has_country_column:
+        return configured_sources
+
+    filtered_sources: List[Dict[str, str]] = []
+    for src in configured_sources:
+        sid = str(src.get("source_id") or "").strip()
+        country = str(src.get("country") or "").strip()
+
+        if use_country_fallback:
+            if country and country in countries_with_results:
+                filtered_sources.append(src)
+            continue
+
+        if sid and sid in source_ids_with_results:
+            filtered_sources.append(src)
+
+    return filtered_sources
+
+
+def _sources_with_results_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
+    """Group result-backed sources by country while preserving configuration order."""
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    for src in _sources_with_results(settings):
+        country = str(src.get("country") or "").strip()
+        if not country:
+            continue
+        grouped.setdefault(country, []).append(src)
+    return grouped
+
+
 def _ensure_scope_state(settings: Settings) -> None:
     """Ensure selected country/source are valid for current configuration."""
-    countries = supported_countries(settings)
-    default_country = countries[0] if countries else "México"
+    sources_by_country = _sources_with_results_by_country(settings)
+    countries = list(sources_by_country.keys())
+    default_country = countries[0] if countries else ""
+
+    if not countries:
+        st.session_state["workspace_country"] = ""
+        st.session_state["workspace_source_id"] = ""
+        return
 
     if "workspace_country" not in st.session_state:
         st.session_state["workspace_country"] = default_country
@@ -47,7 +118,7 @@ def _ensure_scope_state(settings: Settings) -> None:
         st.session_state["workspace_country"] = default_country
 
     selected_country = str(st.session_state.get("workspace_country") or default_country)
-    source_rows = all_configured_sources(settings, country=selected_country)
+    source_rows = sources_by_country.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
     ]
@@ -233,14 +304,15 @@ def _render_workspace_header() -> None:
 
 def _render_workspace_scope(settings: Settings) -> None:
     """Render country/source selectors used to scope the working dataset."""
-    countries = supported_countries(settings)
+    sources_by_country = _sources_with_results_by_country(settings)
+    countries = list(sources_by_country.keys())
     if not countries:
         return
 
     c_country, c_source = st.columns([1.0, 2.0], gap="small")
     with c_country:
         selected_country = st.selectbox("País", options=countries, key="workspace_country")
-    source_rows = all_configured_sources(settings, country=selected_country)
+    source_rows = sources_by_country.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
     ]
@@ -267,7 +339,7 @@ def _render_workspace_scope(settings: Settings) -> None:
                 "Origen",
                 options=["__none__"],
                 key="workspace_source_id_aux",
-                format_func=lambda _: "Sin orígenes configurados",
+                format_func=lambda _: "Sin orígenes con resultados",
                 disabled=True,
             )
 
