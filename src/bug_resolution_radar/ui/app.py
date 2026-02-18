@@ -12,6 +12,7 @@ from bug_resolution_radar.config import (
     all_configured_sources,
     ensure_env,
     load_settings,
+    save_settings,
     supported_countries,
 )
 from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
@@ -96,6 +97,25 @@ def _toggle_dark_mode() -> None:
     st.session_state["workspace_dark_mode"] = not bool(
         st.session_state.get("workspace_dark_mode", False)
     )
+    _persist_theme_preference_in_env(bool(st.session_state.get("workspace_dark_mode", False)))
+
+
+def _theme_pref_to_dark_mode(theme_pref: str, *, fallback: bool = False) -> bool:
+    pref = str(theme_pref or "").strip().lower()
+    if pref == "dark":
+        return True
+    if pref == "light":
+        return False
+    return fallback
+
+
+def _persist_theme_preference_in_env(is_dark: bool) -> None:
+    desired_theme = "dark" if bool(is_dark) else "light"
+    settings = load_settings()
+    current_theme = str(getattr(settings, "THEME", "") or "").strip().lower()
+    if current_theme == desired_theme:
+        return
+    save_settings(settings.model_copy(update={"THEME": desired_theme}))
 
 
 def _sync_streamlit_theme_from_workspace() -> bool:
@@ -257,7 +277,13 @@ def main() -> None:
     ensure_env()
     settings = load_settings()
     if "workspace_dark_mode" not in st.session_state:
-        st.session_state["workspace_dark_mode"] = False
+        streamlit_dark_fallback = (
+            str(st_config.get_option("theme.base") or "").strip().lower() == "dark"
+        )
+        st.session_state["workspace_dark_mode"] = _theme_pref_to_dark_mode(
+            str(getattr(settings, "THEME", "auto") or "auto"),
+            fallback=streamlit_dark_fallback,
+        )
     theme_changed = _sync_streamlit_theme_from_workspace()
     hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
     if hero_title.lower() in {"", "bug resolution radar"}:
