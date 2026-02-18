@@ -555,7 +555,7 @@ def _open_status_payload(status_df: pd.DataFrame) -> dict[str, Any]:
     status_order = stc_total["status"].astype(str).tolist()
 
     grouped = (
-        dff.groupby(["status", "priority"], dropna=False)
+        dff.groupby(["status", "priority"], dropna=False, observed=False)
         .size()
         .reset_index(name="count")
         .sort_values(["status", "count"], ascending=[True, False])
@@ -734,7 +734,7 @@ def _render_trend_chart(
             "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
         )
         fig.update_traces(textposition="inside", textfont=dict(size=10, color=text_color))
-        age_totals = grp.groupby("bucket", dropna=False)["count"].sum()
+        age_totals = grp.groupby("bucket", dropna=False, observed=False)["count"].sum()
         _add_bar_totals(
             fig,
             x_values=bucket_order,
@@ -820,7 +820,9 @@ def _render_trend_chart(
             "61-90d",
             ">90d",
         ]
-        res_totals = grouped_res.groupby("resolution_bucket", dropna=False)["count"].sum()
+        res_totals = grouped_res.groupby("resolution_bucket", dropna=False, observed=False)[
+            "count"
+        ].sum()
         _add_bar_totals(
             fig,
             x_values=res_order,
@@ -860,7 +862,9 @@ def _render_trend_chart(
         fig.update_layout(title_text="")
         fig.update_traces(sort=False)
         fig = apply_plotly_bbva(fig, showlegend=True)
-        pie_export = dff.groupby("priority", dropna=False).size().reset_index(name="count")
+        pie_export = (
+            dff.groupby("priority", dropna=False, observed=False).size().reset_index(name="count")
+        )
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
@@ -913,7 +917,7 @@ def _render_trend_chart(
         )
         fig.update_layout(title_text="", xaxis_title="Estado", yaxis_title="Incidencias")
         fig.update_traces(textposition="inside", textfont=dict(size=10))
-        st_totals = grouped.groupby("status", dropna=False)["count"].sum()
+        st_totals = grouped.groupby("status", dropna=False, observed=False)["count"].sum()
         _add_bar_totals(
             fig,
             x_values=status_order,

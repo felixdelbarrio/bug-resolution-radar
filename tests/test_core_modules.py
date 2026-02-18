@@ -79,7 +79,7 @@ def test_semantic_status_and_priority_colors() -> None:
     assert status_color("Blocked") == "#B4232A"
     assert status_color("Open") == "#FBBF24"
     assert status_color("Closed") == "#15803D"
-    assert status_color("Deployed") == "#00A65A"
+    assert status_color("Deployed") == "#00B86E"
 
     assert priority_color("Supone un impedimento") == "#B4232A"
     assert priority_color("Highest") == "#B4232A"
@@ -99,7 +99,7 @@ def test_semantic_color_maps_include_flow_signals() -> None:
     assert smap["created"] == "#E85D63"
     assert smap["open"] == "#FBBF24"
     assert smap["closed"] == "#22A447"
-    assert smap["deployed"] == "#00A65A"
+    assert smap["deployed"] == "#00B86E"
 
 
 def test_multi_country_sources_parsing_and_ids() -> None:

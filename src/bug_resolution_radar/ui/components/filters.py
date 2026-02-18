@@ -154,7 +154,7 @@ def _inject_combo_signal_script() -> None:
             const doc = root && root.document;
             if (!doc) return;
             const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
-            const PAINTER_VERSION = 4; // bump to force refresh of painter logic/colors in active sessions
+            const PAINTER_VERSION = 5; // bump to force refresh of painter logic/colors in active sessions
 
             const normalizeText = (raw) =>
               String(raw || "")
@@ -192,6 +192,10 @@ def _inject_combo_signal_script() -> None:
             const PRIORITY_RED = new Set(["supone un impedimento", "impedimento", "highest", "high"]);
             const PRIORITY_AMBER = new Set(["medium"]);
             const PRIORITY_GREEN = new Set(["low", "lowest"]);
+            const GOAL_GREEN =
+              (root.getComputedStyle && doc.documentElement
+                ? String(root.getComputedStyle(doc.documentElement).getPropertyValue("--bbva-goal-green") || "").trim()
+                : "") || "#00B86E";
 
             const toRgba = (hex, alpha) => {
               const h = String(hex || "").replace("#", "");
@@ -207,7 +211,7 @@ def _inject_combo_signal_script() -> None:
               if (!t) return "";
               if (STATUS_RED.has(t) || PRIORITY_RED.has(t)) return "#B4232A";
               if (STATUS_AMBER.has(t) || PRIORITY_AMBER.has(t)) return "#E08A00";
-              if (t === "deployed") return "#00A65A";
+              if (t === "deployed") return GOAL_GREEN;
               if (STATUS_GREEN.has(t) || PRIORITY_GREEN.has(t)) return "#1E9E53";
               return "";
             };

@@ -35,7 +35,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-active-bg: #355A86;
             --bbva-tab-active-border: #6F92BF;
             --bbva-tab-active-text: #FFFFFF;
-            --bbva-goal-green: #00A65A;
+            --bbva-goal-green: #00B86E;
             --bbva-action-link: #154A9C;
             --bbva-action-link-hover: #0D3778;
             --primary-color: var(--bbva-primary);
@@ -70,7 +70,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-active-bg: #6F839E;
             --bbva-tab-active-border: #657A94;
             --bbva-tab-active-text: #F8FBFF;
-            --bbva-goal-green: #00A65A;
+            --bbva-goal-green: #00B86E;
             --bbva-action-link: #1C53B7;
             --bbva-action-link-hover: #123F90;
             --primary-color: var(--bbva-primary);
