@@ -5,14 +5,17 @@ from __future__ import annotations
 from typing import Dict, List
 
 import streamlit as st
+from streamlit import config as st_config
 
 from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
     ensure_env,
     load_settings,
-    supported_countries,
+    save_settings,
 )
+from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.state import clear_all_filters
 from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
@@ -34,10 +37,100 @@ def _dashboard_labels() -> Dict[str, str]:
     }
 
 
+def _reset_scope_filters() -> None:
+    """Reset dashboard filters whenever workspace scope changes."""
+    clear_all_filters()
+    st.session_state.pop("__filters_action_context", None)
+    suffixes = ("filter_status_ui", "filter_priority_ui", "filter_assignee_ui")
+    for key in list(st.session_state.keys()):
+        key_txt = str(key or "")
+        if key_txt in suffixes:
+            st.session_state.pop(key, None)
+            continue
+        if any(key_txt.endswith(f"::{suffix}") for suffix in suffixes):
+            st.session_state.pop(key, None)
+
+
+def _on_workspace_scope_change() -> None:
+    """Handle country/source changes by clearing active analysis filters."""
+    _reset_scope_filters()
+
+
+def _sources_with_results(settings: Settings) -> List[Dict[str, str]]:
+    """Return configured sources that currently have ingested rows."""
+    configured_sources = all_configured_sources(settings)
+    if not configured_sources:
+        return []
+
+    try:
+        df = load_issues_df(settings.DATA_PATH)
+    except Exception:
+        # If data cannot be loaded, keep configured options available.
+        return configured_sources
+    if df.empty:
+        return []
+
+    has_source_id_column = "source_id" in df.columns
+    has_country_column = "country" in df.columns
+
+    source_ids_with_results: set[str] = set()
+    if has_source_id_column:
+        source_ids_with_results = {
+            sid.strip()
+            for sid in df["source_id"].fillna("").astype(str).tolist()
+            if sid and sid.strip()
+        }
+
+    countries_with_results: set[str] = set()
+    if has_country_column:
+        countries_with_results = {
+            country.strip()
+            for country in df["country"].fillna("").astype(str).tolist()
+            if country and country.strip()
+        }
+
+    # Legacy fallback: if dataset has no source_id metadata, filter by country only.
+    use_country_fallback = not source_ids_with_results and has_country_column
+    if not has_source_id_column and not has_country_column:
+        return configured_sources
+
+    filtered_sources: List[Dict[str, str]] = []
+    for src in configured_sources:
+        sid = str(src.get("source_id") or "").strip()
+        country = str(src.get("country") or "").strip()
+
+        if use_country_fallback:
+            if country and country in countries_with_results:
+                filtered_sources.append(src)
+            continue
+
+        if sid and sid in source_ids_with_results:
+            filtered_sources.append(src)
+
+    return filtered_sources
+
+
+def _sources_with_results_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
+    """Group result-backed sources by country while preserving configuration order."""
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    for src in _sources_with_results(settings):
+        country = str(src.get("country") or "").strip()
+        if not country:
+            continue
+        grouped.setdefault(country, []).append(src)
+    return grouped
+
+
 def _ensure_scope_state(settings: Settings) -> None:
     """Ensure selected country/source are valid for current configuration."""
-    countries = supported_countries(settings)
-    default_country = countries[0] if countries else "México"
+    sources_by_country = _sources_with_results_by_country(settings)
+    countries = list(sources_by_country.keys())
+    default_country = countries[0] if countries else ""
+
+    if not countries:
+        st.session_state["workspace_country"] = ""
+        st.session_state["workspace_source_id"] = ""
+        return
 
     if "workspace_country" not in st.session_state:
         st.session_state["workspace_country"] = default_country
@@ -45,7 +138,7 @@ def _ensure_scope_state(settings: Settings) -> None:
         st.session_state["workspace_country"] = default_country
 
     selected_country = str(st.session_state.get("workspace_country") or default_country)
-    source_rows = all_configured_sources(settings, country=selected_country)
+    source_rows = sources_by_country.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
     ]
@@ -95,6 +188,58 @@ def _toggle_dark_mode() -> None:
     st.session_state["workspace_dark_mode"] = not bool(
         st.session_state.get("workspace_dark_mode", False)
     )
+    _persist_theme_preference_in_env(bool(st.session_state.get("workspace_dark_mode", False)))
+
+
+def _theme_pref_to_dark_mode(theme_pref: str, *, fallback: bool = False) -> bool:
+    pref = str(theme_pref or "").strip().lower()
+    if pref == "dark":
+        return True
+    if pref == "light":
+        return False
+    return fallback
+
+
+def _persist_theme_preference_in_env(is_dark: bool) -> None:
+    desired_theme = "dark" if bool(is_dark) else "light"
+    settings = load_settings()
+    current_theme = str(getattr(settings, "THEME", "") or "").strip().lower()
+    if current_theme == desired_theme:
+        return
+    save_settings(settings.model_copy(update={"THEME": desired_theme}))
+
+
+def _sync_streamlit_theme_from_workspace() -> bool:
+    """Sync Streamlit's runtime theme with workspace dark/light mode."""
+    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
+    desired = (
+        {
+            "theme.base": "dark",
+            "theme.primaryColor": "#5F9FFF",
+            "theme.backgroundColor": "#0A1228",
+            "theme.secondaryBackgroundColor": "#1A2B47",
+            "theme.textColor": "#EAF0FF",
+            "theme.font": "sans serif",
+        }
+        if is_dark
+        else {
+            "theme.base": "light",
+            "theme.primaryColor": "#0051F1",
+            "theme.backgroundColor": "#F4F6F9",
+            "theme.secondaryBackgroundColor": "#FFFFFF",
+            "theme.textColor": "#11192D",
+            "theme.font": "sans serif",
+        }
+    )
+
+    changed = False
+    for key, value in desired.items():
+        current = st_config.get_option(key)
+        if str(current or "").strip().lower() != str(value).strip().lower():
+            st_config.set_option(key, value)
+            changed = True
+
+    return changed
 
 
 def _set_workspace_section(section: str) -> None:
@@ -121,7 +266,6 @@ def _render_workspace_header() -> None:
     if not section_options:
         return
     mode = str(st.session_state.get("workspace_mode") or "dashboard")
-    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
     current_section = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
@@ -161,7 +305,7 @@ def _render_workspace_header() -> None:
             b_theme.button(
                 "◐",
                 key="workspace_btn_theme",
-                type="primary" if is_dark else "secondary",
+                type="secondary",
                 width="stretch",
                 help="Tema oscuro",
                 on_click=_toggle_dark_mode,
@@ -179,14 +323,20 @@ def _render_workspace_header() -> None:
 
 def _render_workspace_scope(settings: Settings) -> None:
     """Render country/source selectors used to scope the working dataset."""
-    countries = supported_countries(settings)
+    sources_by_country = _sources_with_results_by_country(settings)
+    countries = list(sources_by_country.keys())
     if not countries:
         return
 
     c_country, c_source = st.columns([1.0, 2.0], gap="small")
     with c_country:
-        selected_country = st.selectbox("País", options=countries, key="workspace_country")
-    source_rows = all_configured_sources(settings, country=selected_country)
+        selected_country = st.selectbox(
+            "País",
+            options=countries,
+            key="workspace_country",
+            on_change=_on_workspace_scope_change,
+        )
+    source_rows = sources_by_country.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
     ]
@@ -207,13 +357,14 @@ def _render_workspace_scope(settings: Settings) -> None:
                 options=source_ids,
                 key="workspace_source_id",
                 format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+                on_change=_on_workspace_scope_change,
             )
         else:
             st.selectbox(
                 "Origen",
                 options=["__none__"],
                 key="workspace_source_id_aux",
-                format_func=lambda _: "Sin orígenes configurados",
+                format_func=lambda _: "Sin orígenes con resultados",
                 disabled=True,
             )
 
@@ -222,14 +373,22 @@ def main() -> None:
     """Boot application, render hero/shell and dispatch the selected page."""
     ensure_env()
     settings = load_settings()
+    if "workspace_dark_mode" not in st.session_state:
+        streamlit_dark_fallback = (
+            str(st_config.get_option("theme.base") or "").strip().lower() == "dark"
+        )
+        st.session_state["workspace_dark_mode"] = _theme_pref_to_dark_mode(
+            str(getattr(settings, "THEME", "auto") or "auto"),
+            fallback=streamlit_dark_fallback,
+        )
+    theme_changed = _sync_streamlit_theme_from_workspace()
     hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
     if hero_title.lower() in {"", "bug resolution radar"}:
         hero_title = "Cuadro de mando de incidencias"
 
     st.set_page_config(page_title=hero_title, layout="wide")
-
-    if "workspace_dark_mode" not in st.session_state:
-        st.session_state["workspace_dark_mode"] = False
+    if theme_changed:
+        st.rerun()
 
     inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)

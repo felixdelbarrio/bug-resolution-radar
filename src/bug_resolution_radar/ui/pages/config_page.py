@@ -19,8 +19,6 @@ from bug_resolution_radar.config import (
 )
 from bug_resolution_radar.source_maintenance import (
     purge_source_cache,
-    remove_helix_source_from_settings,
-    remove_jira_source_from_settings,
 )
 
 
@@ -409,7 +407,30 @@ def _selected_sources_from_editor(
     return selected_ids, label_by_id
 
 
+def _clear_delete_confirmation_widget_state() -> None:
+    for key in (
+        "cfg_jira_delete_confirm",
+        "cfg_jira_delete_phrase",
+        "cfg_helix_delete_confirm",
+        "cfg_helix_delete_phrase",
+    ):
+        st.session_state.pop(key, None)
+
+
+def _clear_config_delete_widget_state() -> None:
+    _clear_delete_confirmation_widget_state()
+    for key in (
+        "cfg_jira_sources_editor",
+        "cfg_helix_sources_editor",
+    ):
+        st.session_state.pop(key, None)
+
+
 def render(settings: Settings) -> None:
+    flash_success = str(st.session_state.pop("__cfg_flash_success", "") or "").strip()
+    if flash_success:
+        st.success(flash_success)
+
     countries = supported_countries(settings)
     jira_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
     helix_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
@@ -604,6 +625,24 @@ def render(settings: Settings) -> None:
 
     with t_prefs:
         st.markdown("### ⭐ Favoritos (Tendencias)")
+        stored_theme_pref = str(getattr(settings, "THEME", "auto") or "auto").strip().lower()
+        if stored_theme_pref in {"dark", "light"}:
+            theme_default = stored_theme_pref
+        else:
+            theme_default = (
+                "dark" if bool(st.session_state.get("workspace_dark_mode", False)) else "light"
+            )
+
+        st.markdown("#### Ambiente de trabajo")
+        theme_mode = st.radio(
+            "Modo visual",
+            options=["light", "dark"],
+            index=0 if theme_default == "light" else 1,
+            format_func=lambda v: "Claro" if v == "light" else "Oscuro",
+            horizontal=True,
+            key="cfg_workspace_theme_mode",
+        )
+        st.caption("Se guarda en el .env como preferencia del usuario.")
         st.caption("Define los 3 gráficos favoritos.")
 
         catalog = _trend_chart_catalog()
@@ -674,6 +713,7 @@ def render(settings: Settings) -> None:
 
         summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
         update = dict(
+            THEME=str(theme_mode).strip().lower(),
             SUPPORTED_COUNTRIES=",".join(countries),
             JIRA_BASE_URL=jira_base.strip(),
             JIRA_BROWSER=jira_browser,
@@ -693,66 +733,60 @@ def render(settings: Settings) -> None:
 
         new_settings = _safe_update_settings(settings, update)
         save_settings(new_settings)
+        target_dark_mode = str(theme_mode).strip().lower() == "dark"
+        theme_mode_changed = (
+            bool(st.session_state.get("workspace_dark_mode", False)) != target_dark_mode
+        )
+        if theme_mode_changed:
+            st.session_state["workspace_dark_mode"] = target_dark_mode
 
-        working_settings = new_settings
         any_deletion = False
 
         if bool(jira_delete_cfg.get("armed", False)):
             jira_delete_sids = [
                 str(x).strip() for x in jira_delete_cfg.get("source_ids", []) if str(x).strip()
             ]
-            jira_deleted = 0
-            jira_purge_total = {
-                "issues_removed": 0,
-                "helix_items_removed": 0,
-                "learning_scopes_removed": 0,
-            }
-            for delete_sid in jira_delete_sids:
-                working_settings, deleted = remove_jira_source_from_settings(
-                    working_settings, delete_sid
-                )
-                if not deleted:
-                    st.warning(f"No se encontró la fuente Jira seleccionada: {delete_sid}.")
-                    continue
-                save_settings(working_settings)
-                purge_stats = purge_source_cache(working_settings, delete_sid)
-                jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
-                jira_deleted += 1
-
-            if jira_deleted > 0:
-                st.success(f"Fuentes Jira eliminadas: {jira_deleted}. Cache saneado.")
-                _render_purge_stats(jira_purge_total)
+            if jira_delete_sids:
                 any_deletion = True
+                jira_purge_total = {
+                    "issues_removed": 0,
+                    "helix_items_removed": 0,
+                    "learning_scopes_removed": 0,
+                }
+                for delete_sid in jira_delete_sids:
+                    purge_stats = purge_source_cache(new_settings, delete_sid)
+                    jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
+                st.success(f"Fuentes Jira eliminadas: {len(jira_delete_sids)}. Cache saneado.")
+                _render_purge_stats(jira_purge_total)
 
         if bool(helix_delete_cfg.get("armed", False)):
             helix_delete_sids = [
                 str(x).strip() for x in helix_delete_cfg.get("source_ids", []) if str(x).strip()
             ]
-            helix_deleted = 0
-            helix_purge_total = {
-                "issues_removed": 0,
-                "helix_items_removed": 0,
-                "learning_scopes_removed": 0,
-            }
-            for delete_sid in helix_delete_sids:
-                working_settings, deleted = remove_helix_source_from_settings(
-                    working_settings, delete_sid
-                )
-                if not deleted:
-                    st.warning(f"No se encontró la fuente Helix seleccionada: {delete_sid}.")
-                    continue
-                save_settings(working_settings)
-                purge_stats = purge_source_cache(working_settings, delete_sid)
-                helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
-                helix_deleted += 1
-
-            if helix_deleted > 0:
-                st.success(f"Fuentes Helix eliminadas: {helix_deleted}. Cache saneado.")
-                _render_purge_stats(helix_purge_total)
+            if helix_delete_sids:
                 any_deletion = True
+                helix_purge_total = {
+                    "issues_removed": 0,
+                    "helix_items_removed": 0,
+                    "learning_scopes_removed": 0,
+                }
+                for delete_sid in helix_delete_sids:
+                    purge_stats = purge_source_cache(new_settings, delete_sid)
+                    helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
+                st.success(f"Fuentes Helix eliminadas: {len(helix_delete_sids)}. Cache saneado.")
+                _render_purge_stats(helix_purge_total)
 
         if any_deletion:
-            st.success("Configuración y eliminación aplicadas.")
+            _clear_config_delete_widget_state()
+            st.session_state["__cfg_flash_success"] = "Configuración y eliminación aplicadas."
+            st.rerun()
+        elif theme_mode_changed:
+            _clear_delete_confirmation_widget_state()
+            st.session_state["__cfg_flash_success"] = (
+                "Configuración guardada. Modo visual actualizado."
+            )
             st.rerun()
         else:
-            st.success("Configuración guardada.")
+            _clear_delete_confirmation_widget_state()
+            st.session_state["__cfg_flash_success"] = "Configuración guardada."
+            st.rerun()

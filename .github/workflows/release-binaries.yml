@@ -73,8 +73,15 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable with PyInstaller
+        shell: bash
         run: |
-          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "${{ matrix.add_data_app }}" --add-data "${{ matrix.add_data_assets }}" --collect-all streamlit --collect-all plotly --collect-all bug_resolution_radar run_streamlit.py
+          EXTRA_ARGS=()
+          if [ -d assets ]; then
+            EXTRA_ARGS+=(--add-data "${{ matrix.add_data_assets }}")
+          else
+            echo "assets/ no existe; se omite --add-data de assets."
+          fi
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all plotly --collect-all bug_resolution_radar run_streamlit.py
 
       - name: Package release archive
         shell: bash

@@ -32,7 +32,13 @@ jobs:
 
       - name: Build executable with PyInstaller
         run: |
-          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "app.py:." --add-data "assets:assets" --collect-all streamlit --collect-all plotly --collect-all bug_resolution_radar run_streamlit.py
+          EXTRA_ARGS=()
+          if [ -d assets ]; then
+            EXTRA_ARGS+=(--add-data "assets:assets")
+          else
+            echo "assets/ no existe; se omite --add-data de assets."
+          fi
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all plotly --collect-all bug_resolution_radar run_streamlit.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

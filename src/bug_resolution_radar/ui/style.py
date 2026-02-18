@@ -875,6 +875,43 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             border-radius: 12px !important;
             overflow: hidden !important;
             background: var(--bbva-surface-elevated) !important;
+            --gdg-accent-color: var(--bbva-primary) !important;
+            --gdg-accent-fg: #ffffff !important;
+            --gdg-accent-light: color-mix(in srgb, var(--bbva-primary) 22%, transparent) !important;
+            --gdg-text-dark: var(--bbva-text) !important;
+            --gdg-text-medium: color-mix(in srgb, var(--bbva-text) 78%, transparent) !important;
+            --gdg-text-light: color-mix(in srgb, var(--bbva-text) 60%, transparent) !important;
+            --gdg-text-header: color-mix(in srgb, var(--bbva-text) 86%, transparent) !important;
+            --gdg-text-group-header: color-mix(in srgb, var(--bbva-text) 86%, transparent) !important;
+            --gdg-bg-cell: color-mix(in srgb, var(--bbva-surface) 95%, var(--bbva-surface-2)) !important;
+            --gdg-bg-cell-medium: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important;
+            --gdg-bg-header: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-surface-2)) !important;
+            --gdg-bg-header-has-focus: color-mix(in srgb, var(--bbva-primary) 16%, var(--bbva-surface)) !important;
+            --gdg-bg-header-hovered: color-mix(in srgb, var(--bbva-primary) 10%, var(--bbva-surface)) !important;
+            --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
+            --gdg-border-color: var(--bbva-border) !important;
+            --gdg-horizontal-border-color: var(--bbva-border) !important;
+            --gdg-link-color: var(--bbva-primary) !important;
+          }
+          [data-testid="stDataFrame"] *,
+          [data-testid="stDataEditor"] * {
+            --gdg-accent-color: var(--bbva-primary) !important;
+            --gdg-accent-fg: #ffffff !important;
+            --gdg-accent-light: color-mix(in srgb, var(--bbva-primary) 22%, transparent) !important;
+            --gdg-text-dark: var(--bbva-text) !important;
+            --gdg-text-medium: color-mix(in srgb, var(--bbva-text) 78%, transparent) !important;
+            --gdg-text-light: color-mix(in srgb, var(--bbva-text) 60%, transparent) !important;
+            --gdg-text-header: color-mix(in srgb, var(--bbva-text) 86%, transparent) !important;
+            --gdg-text-group-header: color-mix(in srgb, var(--bbva-text) 86%, transparent) !important;
+            --gdg-bg-cell: color-mix(in srgb, var(--bbva-surface) 95%, var(--bbva-surface-2)) !important;
+            --gdg-bg-cell-medium: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important;
+            --gdg-bg-header: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-surface-2)) !important;
+            --gdg-bg-header-has-focus: color-mix(in srgb, var(--bbva-primary) 16%, var(--bbva-surface)) !important;
+            --gdg-bg-header-hovered: color-mix(in srgb, var(--bbva-primary) 10%, var(--bbva-surface)) !important;
+            --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
+            --gdg-border-color: var(--bbva-border) !important;
+            --gdg-horizontal-border-color: var(--bbva-border) !important;
+            --gdg-link-color: var(--bbva-primary) !important;
           }
           [data-testid="stDataFrame"] [role="grid"],
           [data-testid="stDataEditor"] [role="grid"] {
@@ -895,6 +932,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           [data-testid="stDataEditor"] input {
             color: var(--bbva-text) !important;
             background: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2)) !important;
+          }
+          [data-testid="stDataEditor"] input[type="checkbox"] {
+            accent-color: var(--bbva-primary) !important;
+            background-color: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2)) !important;
+            border-color: var(--bbva-border-strong) !important;
           }
 
           /* Metrics and expanders for dark/light readability */
