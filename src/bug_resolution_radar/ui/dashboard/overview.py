@@ -69,6 +69,17 @@ def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[s
     return out
 
 
+def _exit_funnel_counts_from_filtered(status_df: pd.DataFrame) -> tuple[int, int, int]:
+    """Return Accepted / Ready to Deploy / total counts from the filtered chart scope."""
+    safe = status_df if isinstance(status_df, pd.DataFrame) else pd.DataFrame()
+    if safe.empty or "status" not in safe.columns:
+        return (0, 0, 0)
+    stx = normalize_text_col(safe["status"], "(sin estado)").astype(str).str.strip().str.lower()
+    accepted_count = int(stx.eq("accepted").sum())
+    ready_deploy_count = int(stx.eq("ready to deploy").sum())
+    return (accepted_count, ready_deploy_count, accepted_count + ready_deploy_count)
+
+
 def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
     """Render the three selected summary charts and compact export actions."""
     registry = build_trends_registry()
@@ -216,8 +227,9 @@ def render_overview_kpis(
     if not open_df.empty and "status" in open_df.columns:
         stx = normalize_text_col(open_df["status"], "(sin estado)").str.strip().str.lower()
         blocked_count = int(stx.str.contains("blocked|bloque", regex=True).sum())
-        accepted_count = int(stx.eq("accepted").sum())
-        ready_deploy_count = int(stx.str.contains("ready to deploy", regex=False).sum())
+
+    # Exit funnel must match the same filtered scope shown in "Issues por Estado" chart.
+    accepted_count, ready_deploy_count, exit_buffer = _exit_funnel_counts_from_filtered(dff)
 
     if not open_df.empty and "created" in open_df.columns:
         created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
@@ -235,8 +247,8 @@ def render_overview_kpis(
 
     aged_30_pct = (aged_30_count / open_issues * 100.0) if open_issues else 0.0
     blocked_pct = (blocked_count / open_issues * 100.0) if open_issues else 0.0
-    exit_buffer = accepted_count + ready_deploy_count
-    exit_buffer_pct = (exit_buffer / open_issues * 100.0) if open_issues else 0.0
+    filtered_total = int(len(dff))
+    exit_buffer_pct = (exit_buffer / filtered_total * 100.0) if filtered_total else 0.0
     dup_groups = 0
     dup_issues = 0
     top_theme = "-"
@@ -433,7 +445,7 @@ def render_overview_kpis(
         "open_priority_pie": "Prioridad",
     }
     insights_target_labels = {
-        "top_topics": "Top tópicos",
+        "top_topics": "Por funcionalidad",
         "duplicates": "Duplicados",
         "people": "Personas",
         "ops_health": "Salud operativa",
@@ -477,7 +489,10 @@ def render_overview_kpis(
                 card_id="exit",
                 title="Embudo de salida",
                 metric=f"{exit_buffer:,}",
-                detail=f"issues en Accepted + Ready ({exit_buffer_pct:.1f}% del backlog abierto).",
+                detail=(
+                    f"Accepted={accepted_count:,} + Ready={ready_deploy_count:,} "
+                    f"({exit_buffer_pct:.1f}% del total filtrado)."
+                ),
                 score=float(exit_buffer_pct)
                 + (8.0 if accepted_count > (ready_deploy_count * 1.5) else 0.0),
                 section="trends",
@@ -590,7 +605,7 @@ def render_overview_kpis(
                 card_id="exit_f",
                 title="Embudo de salida",
                 metric=f"{exit_buffer:,}",
-                detail="issues actualmente en Accepted + Ready.",
+                detail=f"Accepted={accepted_count:,} + Ready={ready_deploy_count:,}.",
                 score=0.0,
                 section="trends",
                 trend_chart="open_status_bar",

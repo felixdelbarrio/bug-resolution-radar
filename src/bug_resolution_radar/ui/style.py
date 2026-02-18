@@ -409,6 +409,29 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
             border: 1px solid var(--bbva-border) !important;
           }
+          .stSelectbox [data-baseweb="select"] input,
+          .stMultiSelect [data-baseweb="select"] input,
+          div[data-baseweb="select"] input {
+            color: var(--bbva-text) !important;
+            -webkit-text-fill-color: var(--bbva-text) !important;
+          }
+          .stSelectbox [data-baseweb="select"] [aria-placeholder="true"],
+          .stMultiSelect [data-baseweb="select"] [aria-placeholder="true"],
+          div[data-baseweb="select"] [aria-placeholder="true"],
+          .stSelectbox [data-baseweb="select"] [class*="placeholder"],
+          .stMultiSelect [data-baseweb="select"] [class*="placeholder"],
+          div[data-baseweb="select"] [class*="placeholder"] {
+            color: color-mix(in srgb, var(--bbva-text) 76%, transparent) !important;
+            -webkit-text-fill-color: color-mix(in srgb, var(--bbva-text) 76%, transparent) !important;
+            opacity: 1 !important;
+          }
+          .stSelectbox [data-baseweb="select"] input::placeholder,
+          .stMultiSelect [data-baseweb="select"] input::placeholder,
+          div[data-baseweb="select"] input::placeholder {
+            color: color-mix(in srgb, var(--bbva-text) 76%, transparent) !important;
+            -webkit-text-fill-color: color-mix(in srgb, var(--bbva-text) 76%, transparent) !important;
+            opacity: 1 !important;
+          }
           .stSelectbox [data-baseweb="select"] svg,
           .stMultiSelect [data-baseweb="select"] svg,
           div[data-baseweb="select"] svg {
