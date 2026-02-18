@@ -135,6 +135,7 @@ class Settings(BaseModel):
     # -------------------------
     DASHBOARD_SUMMARY_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
     TREND_SELECTED_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
+    KEEP_CACHE_ON_SOURCE_DELETE: str = "false"
 
 
 def ensure_env() -> None:

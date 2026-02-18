@@ -128,6 +128,49 @@ class InsightsLearningStore:
         self._raw["scopes"] = scopes
         self._raw["version"] = 1
 
+    def remove_source(self, source_id: str) -> int:
+        """Remove all scope records associated with a source id."""
+        sid = str(source_id or "").strip()
+        if not sid:
+            return 0
+
+        scopes = _as_dict(self._raw.get("scopes"))
+        kept: Dict[str, Any] = {}
+        removed = 0
+        suffix = f"::{sid}"
+
+        for scope_key, record in scopes.items():
+            record_dict = _as_dict(record)
+            rec_source_id = str(record_dict.get("source_id") or "").strip()
+            scope_txt = str(scope_key or "")
+            if rec_source_id == sid or (not rec_source_id and scope_txt.endswith(suffix)):
+                removed += 1
+                continue
+            kept[scope_txt] = record_dict
+
+        if removed > 0:
+            self._raw["scopes"] = kept
+            self._raw["version"] = 1
+
+        return removed
+
+    def count_source_scopes(self, source_id: str) -> int:
+        """Count scope records associated with a source id."""
+        sid = str(source_id or "").strip()
+        if not sid:
+            return 0
+
+        scopes = _as_dict(self._raw.get("scopes"))
+        suffix = f"::{sid}"
+        count = 0
+        for scope_key, record in scopes.items():
+            record_dict = _as_dict(record)
+            rec_source_id = str(record_dict.get("source_id") or "").strip()
+            scope_txt = str(scope_key or "")
+            if rec_source_id == sid or (not rec_source_id and scope_txt.endswith(suffix)):
+                count += 1
+        return count
+
 
 def ensure_learning_session_loaded(*, settings: Settings) -> None:
     """Hydrate in-memory learning state for current country/source scope."""
