@@ -15,6 +15,11 @@ from bug_resolution_radar.config import (
     supported_countries,
     to_env_json,
 )
+from bug_resolution_radar.source_maintenance import (
+    purge_source_cache,
+    remove_helix_source_from_settings,
+    remove_jira_source_from_settings,
+)
 
 
 def _boolish(value: Any, default: bool = True) -> bool:
@@ -69,6 +74,81 @@ def _as_str(value: Any) -> str:
     except Exception:
         pass
     return str(value).strip()
+
+
+def _source_label(source: Dict[str, str]) -> str:
+    country = _as_str(source.get("country")) or "N/A"
+    alias = _as_str(source.get("alias")) or "Sin alias"
+    source_type = _as_str(source.get("source_type")).upper() or "SOURCE"
+    sid = _as_str(source.get("source_id")) or "sin-source-id"
+    return f"{country} · {alias} · {source_type} · {sid}"
+
+
+def _render_purge_stats(stats: Dict[str, int]) -> None:
+    issues_removed = int(stats.get("issues_removed", 0) or 0)
+    helix_items_removed = int(stats.get("helix_items_removed", 0) or 0)
+    learning_scopes_removed = int(stats.get("learning_scopes_removed", 0) or 0)
+    st.info(
+        "Cache saneado. "
+        f"Issues purgados: {issues_removed}. "
+        f"Items Helix purgados: {helix_items_removed}. "
+        f"Scopes de aprendizaje purgados: {learning_scopes_removed}."
+    )
+
+
+def _is_delete_phrase_valid(value: Any) -> bool:
+    return str(value or "").strip().upper() == "ELIMINAR"
+
+
+def _render_source_delete_container(
+    *,
+    section_title: str,
+    source_label: str,
+    source_options: List[str],
+    source_label_by_id: Dict[str, str],
+    key_prefix: str,
+) -> Dict[str, Any]:
+    st.markdown(section_title)
+
+    with st.container(border=True):
+        st.markdown("#### Zona segura de eliminación")
+        st.caption(
+            "La eliminación se ejecuta al pulsar Guardar configuración. "
+            "El saneado de cache asociado se aplica siempre."
+        )
+
+        if not source_options:
+            st.info(f"No hay fuentes {source_label} configuradas para eliminar.")
+            return {"source_id": "", "armed": False, "valid": True}
+
+        source_id = st.selectbox(
+            f"Fuente {source_label} a eliminar",
+            options=source_options,
+            format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+            key=f"{key_prefix}_delete_sid",
+        )
+        confirm = st.checkbox(
+            f"Confirmo que quiero eliminar esta fuente {source_label} de forma permanente.",
+            key=f"{key_prefix}_delete_confirm",
+        )
+        phrase = st.text_input(
+            "Escribe ELIMINAR para confirmar",
+            value="",
+            key=f"{key_prefix}_delete_phrase",
+            help="Confirmación reforzada para evitar borrados accidentales.",
+        )
+
+        phrase_ok = _is_delete_phrase_valid(phrase)
+        has_partial_input = bool(confirm or str(phrase).strip())
+        armed = bool(confirm and phrase_ok)
+        valid = bool((not has_partial_input) or armed)
+
+        if has_partial_input and not armed:
+            st.warning("Para aplicar la eliminación debes marcar confirmación y escribir ELIMINAR.")
+        elif armed:
+            st.success("Eliminación preparada. Se aplicará al guardar configuración.")
+
+        return {"source_id": str(source_id), "armed": armed, "valid": valid}
 
 
 def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[Dict[str, str]]:
@@ -200,6 +280,8 @@ def _normalize_helix_rows(
 
 def render(settings: Settings) -> None:
     countries = supported_countries(settings)
+    jira_delete_cfg: Dict[str, Any] = {"source_id": "", "armed": False, "valid": True}
+    helix_delete_cfg: Dict[str, Any] = {"source_id": "", "armed": False, "valid": True}
 
     st.subheader("Configuración")
 
@@ -240,6 +322,23 @@ def render(settings: Settings) -> None:
                 "alias": st.column_config.TextColumn("alias"),
                 "jql": st.column_config.TextColumn("jql"),
             },
+        )
+
+        jira_cfg_sources = jira_sources(settings)
+        jira_options = [
+            _as_str(src.get("source_id"))
+            for src in jira_cfg_sources
+            if _as_str(src.get("source_id"))
+        ]
+        jira_label_by_id = {
+            _as_str(src.get("source_id")): _source_label(src) for src in jira_cfg_sources
+        }
+        jira_delete_cfg = _render_source_delete_container(
+            section_title="### 🧹 Eliminar fuente Jira",
+            source_label="Jira",
+            source_options=jira_options,
+            source_label_by_id=jira_label_by_id,
+            key_prefix="cfg_jira",
         )
 
     with t_helix:
@@ -307,6 +406,23 @@ def render(settings: Settings) -> None:
                     "ssl_verify", options=["true", "false"]
                 ),
             },
+        )
+
+        helix_cfg_sources = helix_sources(settings)
+        helix_options = [
+            _as_str(src.get("source_id"))
+            for src in helix_cfg_sources
+            if _as_str(src.get("source_id"))
+        ]
+        helix_label_by_id = {
+            _as_str(src.get("source_id")): _source_label(src) for src in helix_cfg_sources
+        }
+        helix_delete_cfg = _render_source_delete_container(
+            section_title="### 🧹 Eliminar fuente Helix",
+            source_label="Helix",
+            source_options=helix_options,
+            source_label_by_id=helix_label_by_id,
+            key_prefix="cfg_helix",
         )
 
     with t_kpis:
@@ -386,7 +502,22 @@ def render(settings: Settings) -> None:
                 key="cfg_trend_fav_3",
             )
 
-    if st.button("💾 Guardar configuración", key="cfg_save_btn"):
+    delete_forms_valid = bool(
+        jira_delete_cfg.get("valid", True) and helix_delete_cfg.get("valid", True)
+    )
+    save_btn_help = None
+    if not delete_forms_valid:
+        save_btn_help = (
+            "Completa la confirmación de eliminación (checkbox + texto ELIMINAR) "
+            "o limpia esos campos para continuar."
+        )
+
+    if st.button(
+        "💾 Guardar configuración",
+        key="cfg_save_btn",
+        disabled=not delete_forms_valid,
+        help=save_btn_help,
+    ):
         jira_clean, jira_errors = _normalize_jira_rows(jira_editor, countries)
         helix_clean, helix_errors = _normalize_helix_rows(helix_editor, countries)
         all_errors = jira_errors + helix_errors
@@ -416,4 +547,42 @@ def render(settings: Settings) -> None:
 
         new_settings = _safe_update_settings(settings, update)
         save_settings(new_settings)
-        st.success("Configuración guardada.")
+
+        working_settings = new_settings
+        any_deletion = False
+
+        if bool(jira_delete_cfg.get("armed", False)):
+            delete_sid = str(jira_delete_cfg.get("source_id") or "").strip()
+            if delete_sid:
+                working_settings, deleted = remove_jira_source_from_settings(
+                    working_settings, delete_sid
+                )
+                if deleted:
+                    save_settings(working_settings)
+                    purge_stats = purge_source_cache(working_settings, delete_sid)
+                    st.success("Fuente Jira eliminada y cache saneado.")
+                    _render_purge_stats(purge_stats)
+                    any_deletion = True
+                else:
+                    st.warning("No se encontró la fuente Jira seleccionada para eliminar.")
+
+        if bool(helix_delete_cfg.get("armed", False)):
+            delete_sid = str(helix_delete_cfg.get("source_id") or "").strip()
+            if delete_sid:
+                working_settings, deleted = remove_helix_source_from_settings(
+                    working_settings, delete_sid
+                )
+                if deleted:
+                    save_settings(working_settings)
+                    purge_stats = purge_source_cache(working_settings, delete_sid)
+                    st.success("Fuente Helix eliminada y cache saneado.")
+                    _render_purge_stats(purge_stats)
+                    any_deletion = True
+                else:
+                    st.warning("No se encontró la fuente Helix seleccionada para eliminar.")
+
+        if any_deletion:
+            st.success("Configuración y eliminación aplicadas.")
+            st.rerun()
+        else:
+            st.success("Configuración guardada.")
