@@ -361,14 +361,8 @@ def main() -> None:
         hero_title = "Cuadro de mando de incidencias"
 
     st.set_page_config(page_title=hero_title, layout="wide")
-<<<<<<< BUG-FIXES-20260218
     if theme_changed:
         st.rerun()
-=======
-
-    if "workspace_dark_mode" not in st.session_state:
-        st.session_state["workspace_dark_mode"] = False
->>>>>>> develop
 
     inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)
