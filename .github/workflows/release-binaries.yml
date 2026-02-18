@@ -39,14 +39,20 @@ jobs:
             label: Linux
             archive_suffix: linux
             binary_path: dist/bug-resolution-radar
+            add_data_app: app.py:.
+            add_data_assets: assets:assets
           - os: macos-latest
             label: macOS
             archive_suffix: macos
             binary_path: dist/bug-resolution-radar
+            add_data_app: app.py:.
+            add_data_assets: assets:assets
           - os: windows-latest
             label: Windows
             archive_suffix: windows
             binary_path: dist/bug-resolution-radar.exe
+            add_data_app: app.py;.
+            add_data_assets: assets;assets
     env:
       ARCHIVE_NAME: bug-resolution-radar-${{ github.ref_name }}-${{ matrix.archive_suffix }}.zip
 
@@ -68,7 +74,7 @@ jobs:
 
       - name: Build executable with PyInstaller
         run: |
-          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --collect-all streamlit --collect-all plotly app.py
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "${{ matrix.add_data_app }}" --add-data "${{ matrix.add_data_assets }}" --collect-all streamlit --collect-all plotly --collect-all bug_resolution_radar run_streamlit.py
 
       - name: Package release archive
         shell: bash
