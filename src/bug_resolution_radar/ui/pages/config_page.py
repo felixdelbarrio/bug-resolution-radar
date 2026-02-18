@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -79,9 +80,7 @@ def _as_str(value: Any) -> str:
 def _source_label(source: Dict[str, str]) -> str:
     country = _as_str(source.get("country")) or "N/A"
     alias = _as_str(source.get("alias")) or "Sin alias"
-    source_type = _as_str(source.get("source_type")).upper() or "SOURCE"
-    sid = _as_str(source.get("source_id")) or "sin-source-id"
-    return f"{country} · {alias} · {source_type} · {sid}"
+    return f"{country} · {alias}"
 
 
 def _render_purge_stats(stats: Dict[str, int]) -> None:
@@ -96,8 +95,38 @@ def _render_purge_stats(stats: Dict[str, int]) -> None:
     )
 
 
+def _merge_purge_stats(acc: Dict[str, int], nxt: Dict[str, int]) -> Dict[str, int]:
+    return {
+        "issues_removed": int(acc.get("issues_removed", 0) or 0)
+        + int(nxt.get("issues_removed", 0) or 0),
+        "helix_items_removed": int(acc.get("helix_items_removed", 0) or 0)
+        + int(nxt.get("helix_items_removed", 0) or 0),
+        "learning_scopes_removed": int(acc.get("learning_scopes_removed", 0) or 0)
+        + int(nxt.get("learning_scopes_removed", 0) or 0),
+    }
+
+
 def _is_delete_phrase_valid(value: Any) -> bool:
     return str(value or "").strip().upper() == "ELIMINAR"
+
+
+def _render_selected_source_chips(
+    selected_source_ids: List[str], source_label_by_id: Dict[str, str]
+) -> None:
+    if not selected_source_ids:
+        return
+    chips_html = []
+    for sid in selected_source_ids:
+        label = source_label_by_id.get(str(sid), str(sid))
+        chips_html.append(
+            '<span style="display:inline-block; margin:0 8px 8px 0; padding:6px 10px; '
+            "border:1px solid var(--bbva-border); border-radius:999px; "
+            "background:color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2)); "
+            'font-size:0.9rem;">'
+            f"{escape(label)}"
+            "</span>"
+        )
+    st.markdown("".join(chips_html), unsafe_allow_html=True)
 
 
 def _render_source_delete_container(
@@ -119,14 +148,21 @@ def _render_source_delete_container(
 
         if not source_options:
             st.info(f"No hay fuentes {source_label} configuradas para eliminar.")
-            return {"source_id": "", "armed": False, "valid": True}
+            return {"source_ids": [], "armed": False, "valid": True}
 
-        source_id = st.selectbox(
-            f"Fuente {source_label} a eliminar",
+        source_ids_raw = st.pills(
+            f"Fuentes {source_label} a eliminar",
             options=source_options,
+            selection_mode="multi",
             format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
-            key=f"{key_prefix}_delete_sid",
+            key=f"{key_prefix}_delete_sids",
         )
+        if isinstance(source_ids_raw, list):
+            source_ids = source_ids_raw
+        elif source_ids_raw is None:
+            source_ids = []
+        else:
+            source_ids = [str(source_ids_raw)]
         confirm = st.checkbox(
             f"Confirmo que quiero eliminar esta fuente {source_label} de forma permanente.",
             key=f"{key_prefix}_delete_confirm",
@@ -138,17 +174,30 @@ def _render_source_delete_container(
             help="Confirmación reforzada para evitar borrados accidentales.",
         )
 
+        selected_source_ids = [str(x).strip() for x in source_ids if str(x).strip()]
+        has_selection = bool(selected_source_ids)
+        if has_selection:
+            st.caption(f"Seleccionadas para eliminar: {len(selected_source_ids)}")
+            _render_selected_source_chips(selected_source_ids, source_label_by_id)
         phrase_ok = _is_delete_phrase_valid(phrase)
-        has_partial_input = bool(confirm or str(phrase).strip())
-        armed = bool(confirm and phrase_ok)
+        has_partial_input = bool(has_selection or confirm or str(phrase).strip())
+        armed = bool(has_selection and confirm and phrase_ok)
         valid = bool((not has_partial_input) or armed)
 
-        if has_partial_input and not armed:
-            st.warning("Para aplicar la eliminación debes marcar confirmación y escribir ELIMINAR.")
+        if has_partial_input and not has_selection:
+            st.warning(f"Selecciona al menos una fuente {source_label} para eliminar.")
+        elif has_partial_input and not armed:
+            st.warning(
+                "Para aplicar la eliminación debes seleccionar fuentes, "
+                "marcar confirmación y escribir ELIMINAR."
+            )
         elif armed:
-            st.success("Eliminación preparada. Se aplicará al guardar configuración.")
+            st.success(
+                f"Eliminación preparada ({len(selected_source_ids)}). "
+                "Se aplicará al guardar configuración."
+            )
 
-        return {"source_id": str(source_id), "armed": armed, "valid": valid}
+        return {"source_ids": selected_source_ids, "armed": armed, "valid": valid}
 
 
 def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[Dict[str, str]]:
@@ -552,34 +601,58 @@ def render(settings: Settings) -> None:
         any_deletion = False
 
         if bool(jira_delete_cfg.get("armed", False)):
-            delete_sid = str(jira_delete_cfg.get("source_id") or "").strip()
-            if delete_sid:
+            jira_delete_sids = [
+                str(x).strip() for x in jira_delete_cfg.get("source_ids", []) if str(x).strip()
+            ]
+            jira_deleted = 0
+            jira_purge_total = {
+                "issues_removed": 0,
+                "helix_items_removed": 0,
+                "learning_scopes_removed": 0,
+            }
+            for delete_sid in jira_delete_sids:
                 working_settings, deleted = remove_jira_source_from_settings(
                     working_settings, delete_sid
                 )
-                if deleted:
-                    save_settings(working_settings)
-                    purge_stats = purge_source_cache(working_settings, delete_sid)
-                    st.success("Fuente Jira eliminada y cache saneado.")
-                    _render_purge_stats(purge_stats)
-                    any_deletion = True
-                else:
-                    st.warning("No se encontró la fuente Jira seleccionada para eliminar.")
+                if not deleted:
+                    st.warning(f"No se encontró la fuente Jira seleccionada: {delete_sid}.")
+                    continue
+                save_settings(working_settings)
+                purge_stats = purge_source_cache(working_settings, delete_sid)
+                jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
+                jira_deleted += 1
+
+            if jira_deleted > 0:
+                st.success(f"Fuentes Jira eliminadas: {jira_deleted}. Cache saneado.")
+                _render_purge_stats(jira_purge_total)
+                any_deletion = True
 
         if bool(helix_delete_cfg.get("armed", False)):
-            delete_sid = str(helix_delete_cfg.get("source_id") or "").strip()
-            if delete_sid:
+            helix_delete_sids = [
+                str(x).strip() for x in helix_delete_cfg.get("source_ids", []) if str(x).strip()
+            ]
+            helix_deleted = 0
+            helix_purge_total = {
+                "issues_removed": 0,
+                "helix_items_removed": 0,
+                "learning_scopes_removed": 0,
+            }
+            for delete_sid in helix_delete_sids:
                 working_settings, deleted = remove_helix_source_from_settings(
                     working_settings, delete_sid
                 )
-                if deleted:
-                    save_settings(working_settings)
-                    purge_stats = purge_source_cache(working_settings, delete_sid)
-                    st.success("Fuente Helix eliminada y cache saneado.")
-                    _render_purge_stats(purge_stats)
-                    any_deletion = True
-                else:
-                    st.warning("No se encontró la fuente Helix seleccionada para eliminar.")
+                if not deleted:
+                    st.warning(f"No se encontró la fuente Helix seleccionada: {delete_sid}.")
+                    continue
+                save_settings(working_settings)
+                purge_stats = purge_source_cache(working_settings, delete_sid)
+                helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
+                helix_deleted += 1
+
+            if helix_deleted > 0:
+                st.success(f"Fuentes Helix eliminadas: {helix_deleted}. Cache saneado.")
+                _render_purge_stats(helix_purge_total)
+                any_deletion = True
 
         if any_deletion:
             st.success("Configuración y eliminación aplicadas.")
