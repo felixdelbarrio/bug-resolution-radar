@@ -15,6 +15,12 @@ from bug_resolution_radar.config import (
     supported_countries,
     to_env_json,
 )
+from bug_resolution_radar.source_maintenance import (
+    purge_source_cache,
+    remove_helix_source_from_settings,
+    remove_jira_source_from_settings,
+    source_cache_impact,
+)
 
 
 def _boolish(value: Any, default: bool = True) -> bool:
@@ -69,6 +75,55 @@ def _as_str(value: Any) -> str:
     except Exception:
         pass
     return str(value).strip()
+
+
+def _source_label(source: Dict[str, str]) -> str:
+    country = _as_str(source.get("country")) or "N/A"
+    alias = _as_str(source.get("alias")) or "Sin alias"
+    source_type = _as_str(source.get("source_type")).upper() or "SOURCE"
+    sid = _as_str(source.get("source_id")) or "sin-source-id"
+    return f"{country} · {alias} · {source_type} · {sid}"
+
+
+def _render_purge_stats(stats: Dict[str, int]) -> None:
+    issues_removed = int(stats.get("issues_removed", 0) or 0)
+    helix_items_removed = int(stats.get("helix_items_removed", 0) or 0)
+    learning_scopes_removed = int(stats.get("learning_scopes_removed", 0) or 0)
+    st.info(
+        "Cache saneado. "
+        f"Issues purgados: {issues_removed}. "
+        f"Items Helix purgados: {helix_items_removed}. "
+        f"Scopes de aprendizaje purgados: {learning_scopes_removed}."
+    )
+
+
+def _keep_cache_pref(settings: Settings) -> bool:
+    if "cfg_keep_cache_on_source_delete" in st.session_state:
+        return _boolish(st.session_state.get("cfg_keep_cache_on_source_delete"), default=False)
+    return _boolish(getattr(settings, "KEEP_CACHE_ON_SOURCE_DELETE", "false"), default=False)
+
+
+def _delete_mode_options(default_keep_cache: bool) -> Tuple[List[str], int]:
+    options = ["purge", "keep"]
+    default_idx = 1 if default_keep_cache else 0
+    return options, default_idx
+
+
+def _delete_mode_label(mode: str) -> str:
+    if str(mode) == "keep":
+        return "Eliminar fuente y mantener cache"
+    return "Eliminar fuente y sanear cache"
+
+
+def _is_delete_phrase_valid(value: Any) -> bool:
+    return str(value or "").strip().upper() == "ELIMINAR"
+
+
+def _render_impact_metrics(impact: Dict[str, int]) -> None:
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Issues en cache", int(impact.get("issues_records", 0) or 0))
+    m2.metric("Items Helix en cache", int(impact.get("helix_items", 0) or 0))
+    m3.metric("Scopes de insights", int(impact.get("learning_scopes", 0) or 0))
 
 
 def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[Dict[str, str]]:
@@ -242,6 +297,70 @@ def render(settings: Settings) -> None:
             },
         )
 
+        st.markdown("### 🧹 Eliminar fuente Jira")
+        jira_cfg_sources = jira_sources(settings)
+        jira_options = [
+            _as_str(src.get("source_id"))
+            for src in jira_cfg_sources
+            if _as_str(src.get("source_id"))
+        ]
+        jira_label_by_id = {
+            _as_str(src.get("source_id")): _source_label(src) for src in jira_cfg_sources
+        }
+        if jira_options:
+            jira_delete_sid = st.selectbox(
+                "Fuente Jira a eliminar",
+                options=jira_options,
+                format_func=lambda sid: jira_label_by_id.get(str(sid), str(sid)),
+                key="cfg_jira_delete_sid",
+            )
+            jira_impact = source_cache_impact(settings, jira_delete_sid)
+            _render_impact_metrics(jira_impact)
+            st.caption(
+                "Vista previa del impacto. Si eliges saneado, estos registros se purgarán del cache."
+            )
+            default_keep_cache = _keep_cache_pref(settings)
+            delete_modes, delete_mode_idx = _delete_mode_options(default_keep_cache)
+            jira_delete_mode = st.radio(
+                "Estrategia de eliminación",
+                options=delete_modes,
+                index=delete_mode_idx,
+                format_func=_delete_mode_label,
+                key="cfg_jira_delete_mode",
+                horizontal=True,
+            )
+            jira_confirm_delete = st.checkbox(
+                "Confirmo que quiero eliminar esta fuente Jira de forma permanente.",
+                key="cfg_jira_delete_confirm",
+            )
+            jira_delete_phrase = st.text_input(
+                "Escribe ELIMINAR para confirmar",
+                value="",
+                key="cfg_jira_delete_phrase",
+                help="Confirmación reforzada para evitar borrados accidentales.",
+            )
+            jira_delete_ready = jira_confirm_delete and _is_delete_phrase_valid(jira_delete_phrase)
+            if st.button(
+                "🗑️ Eliminar fuente Jira seleccionada",
+                key="cfg_jira_delete_btn",
+                disabled=not jira_delete_ready,
+            ):
+                keep_cache = str(jira_delete_mode) == "keep"
+                new_settings, deleted = remove_jira_source_from_settings(settings, jira_delete_sid)
+                if not deleted:
+                    st.warning("No se encontró la fuente Jira seleccionada para eliminar.")
+                else:
+                    save_settings(new_settings)
+                    if keep_cache:
+                        st.success("Fuente Jira eliminada. Cache mantenido.")
+                    else:
+                        purge_stats = purge_source_cache(new_settings, jira_delete_sid)
+                        st.success("Fuente Jira eliminada y cache saneado.")
+                        _render_purge_stats(purge_stats)
+                    st.rerun()
+        else:
+            st.info("No hay fuentes Jira configuradas para eliminar.")
+
     with t_helix:
         st.markdown("### Helix defaults")
         h1, h2, h3, h4 = st.columns(4)
@@ -308,6 +427,74 @@ def render(settings: Settings) -> None:
                 ),
             },
         )
+
+        st.markdown("### 🧹 Eliminar fuente Helix")
+        helix_cfg_sources = helix_sources(settings)
+        helix_options = [
+            _as_str(src.get("source_id"))
+            for src in helix_cfg_sources
+            if _as_str(src.get("source_id"))
+        ]
+        helix_label_by_id = {
+            _as_str(src.get("source_id")): _source_label(src) for src in helix_cfg_sources
+        }
+        if helix_options:
+            helix_delete_sid = st.selectbox(
+                "Fuente Helix a eliminar",
+                options=helix_options,
+                format_func=lambda sid: helix_label_by_id.get(str(sid), str(sid)),
+                key="cfg_helix_delete_sid",
+            )
+            helix_impact = source_cache_impact(settings, helix_delete_sid)
+            _render_impact_metrics(helix_impact)
+            st.caption(
+                "Vista previa del impacto. Si eliges saneado, estos registros se purgarán del cache."
+            )
+            default_keep_cache = _keep_cache_pref(settings)
+            delete_modes, delete_mode_idx = _delete_mode_options(default_keep_cache)
+            helix_delete_mode = st.radio(
+                "Estrategia de eliminación",
+                options=delete_modes,
+                index=delete_mode_idx,
+                format_func=_delete_mode_label,
+                key="cfg_helix_delete_mode",
+                horizontal=True,
+            )
+            helix_confirm_delete = st.checkbox(
+                "Confirmo que quiero eliminar esta fuente Helix de forma permanente.",
+                key="cfg_helix_delete_confirm",
+            )
+            helix_delete_phrase = st.text_input(
+                "Escribe ELIMINAR para confirmar",
+                value="",
+                key="cfg_helix_delete_phrase",
+                help="Confirmación reforzada para evitar borrados accidentales.",
+            )
+            helix_delete_ready = helix_confirm_delete and _is_delete_phrase_valid(
+                helix_delete_phrase
+            )
+            if st.button(
+                "🗑️ Eliminar fuente Helix seleccionada",
+                key="cfg_helix_delete_btn",
+                disabled=not helix_delete_ready,
+            ):
+                keep_cache = str(helix_delete_mode) == "keep"
+                new_settings, deleted = remove_helix_source_from_settings(
+                    settings, helix_delete_sid
+                )
+                if not deleted:
+                    st.warning("No se encontró la fuente Helix seleccionada para eliminar.")
+                else:
+                    save_settings(new_settings)
+                    if keep_cache:
+                        st.success("Fuente Helix eliminada. Cache mantenido.")
+                    else:
+                        purge_stats = purge_source_cache(new_settings, helix_delete_sid)
+                        st.success("Fuente Helix eliminada y cache saneado.")
+                        _render_purge_stats(purge_stats)
+                    st.rerun()
+        else:
+            st.info("No hay fuentes Helix configuradas para eliminar.")
 
     with t_kpis:
         st.markdown("### KPIs")
@@ -386,6 +573,19 @@ def render(settings: Settings) -> None:
                 key="cfg_trend_fav_3",
             )
 
+        st.markdown("### 🧽 Cache de fuentes")
+        keep_cache_on_source_delete = st.checkbox(
+            "Mantener cache al eliminar una fuente",
+            value=_boolish(
+                getattr(settings, "KEEP_CACHE_ON_SOURCE_DELETE", "false"), default=False
+            ),
+            key="cfg_keep_cache_on_source_delete",
+            help=(
+                "Si está activado, eliminar una fuente no purga registros históricos asociados. "
+                "Si está desactivado, se sanea cache en issues, Helix e insights."
+            ),
+        )
+
     if st.button("💾 Guardar configuración", key="cfg_save_btn"):
         jira_clean, jira_errors = _normalize_jira_rows(jira_editor, countries)
         helix_clean, helix_errors = _normalize_helix_rows(helix_editor, countries)
@@ -412,6 +612,7 @@ def render(settings: Settings) -> None:
             KPI_AGE_BUCKETS=age_buckets.strip(),
             DASHBOARD_SUMMARY_CHARTS=summary_csv,
             TREND_SELECTED_CHARTS=summary_csv,
+            KEEP_CACHE_ON_SOURCE_DELETE="true" if keep_cache_on_source_delete else "false",
         )
 
         new_settings = _safe_update_settings(settings, update)

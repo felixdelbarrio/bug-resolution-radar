@@ -50,3 +50,35 @@ def test_learning_scope_key_and_default_path() -> None:
 
     settings = Settings(INSIGHTS_LEARNING_PATH="data/custom_learning.json")
     assert default_learning_path(settings) == Path("data/custom_learning.json")
+
+
+def test_learning_store_remove_source() -> None:
+    store = InsightsLearningStore(Path("/tmp/unused-learning.json"))
+    store._raw = {
+        "version": 1,
+        "scopes": {
+            "México::jira:mexico:core": {
+                "state": {"a": 1},
+                "interactions": 2,
+                "source_id": "jira:mexico:core",
+            },
+            "España::jira:espana:retail": {
+                "state": {"b": 1},
+                "interactions": 3,
+                "source_id": "jira:espana:retail",
+            },
+            "Peru::jira:mexico:core": {
+                "state": {"c": 1},
+                "interactions": 4,
+                # Fallback de versiones antiguas sin source_id explícito.
+                "source_id": "",
+            },
+        },
+    }
+
+    removed = store.remove_source("jira:mexico:core")
+    assert removed == 2
+    scopes = store._raw.get("scopes", {})
+    assert "México::jira:mexico:core" not in scopes
+    assert "Peru::jira:mexico:core" not in scopes
+    assert "España::jira:espana:retail" in scopes
