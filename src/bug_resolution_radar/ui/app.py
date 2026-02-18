@@ -246,7 +246,6 @@ def _render_workspace_header() -> None:
     if not section_options:
         return
     mode = str(st.session_state.get("workspace_mode") or "dashboard")
-    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
     current_section = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
@@ -286,7 +285,7 @@ def _render_workspace_header() -> None:
             b_theme.button(
                 "◐",
                 key="workspace_btn_theme",
-                type="primary" if is_dark else "secondary",
+                type="secondary",
                 width="stretch",
                 help="Tema oscuro",
                 on_click=_toggle_dark_mode,
