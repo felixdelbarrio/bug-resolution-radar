@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 import streamlit as st
+from streamlit import config as st_config
 
 from bug_resolution_radar.config import (
     Settings,
@@ -95,6 +96,39 @@ def _toggle_dark_mode() -> None:
     st.session_state["workspace_dark_mode"] = not bool(
         st.session_state.get("workspace_dark_mode", False)
     )
+
+
+def _sync_streamlit_theme_from_workspace() -> bool:
+    """Sync Streamlit's runtime theme with workspace dark/light mode."""
+    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
+    desired = (
+        {
+            "theme.base": "dark",
+            "theme.primaryColor": "#5F9FFF",
+            "theme.backgroundColor": "#0A1228",
+            "theme.secondaryBackgroundColor": "#1A2B47",
+            "theme.textColor": "#EAF0FF",
+            "theme.font": "sans serif",
+        }
+        if is_dark
+        else {
+            "theme.base": "light",
+            "theme.primaryColor": "#0051F1",
+            "theme.backgroundColor": "#F4F6F9",
+            "theme.secondaryBackgroundColor": "#FFFFFF",
+            "theme.textColor": "#11192D",
+            "theme.font": "sans serif",
+        }
+    )
+
+    changed = False
+    for key, value in desired.items():
+        current = st_config.get_option(key)
+        if str(current or "").strip().lower() != str(value).strip().lower():
+            st_config.set_option(key, value)
+            changed = True
+
+    return changed
 
 
 def _set_workspace_section(section: str) -> None:
@@ -222,14 +256,16 @@ def main() -> None:
     """Boot application, render hero/shell and dispatch the selected page."""
     ensure_env()
     settings = load_settings()
+    if "workspace_dark_mode" not in st.session_state:
+        st.session_state["workspace_dark_mode"] = False
+    theme_changed = _sync_streamlit_theme_from_workspace()
     hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
     if hero_title.lower() in {"", "bug resolution radar"}:
         hero_title = "Cuadro de mando de incidencias"
 
-    st.set_page_config(page_title=hero_title, layout="wide", page_icon="assets/bbva/favicon.png")
-
-    if "workspace_dark_mode" not in st.session_state:
-        st.session_state["workspace_dark_mode"] = False
+    st.set_page_config(page_title=hero_title, layout="wide")
+    if theme_changed:
+        st.rerun()
 
     inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)
