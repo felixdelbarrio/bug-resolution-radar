@@ -1,0 +1,63 @@
+name: Build Binaries
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pyinstaller-build:
+    name: Build ${{ matrix.label }}
+    if: github.ref == 'refs/heads/master'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux
+            binary_path: dist/bug-resolution-radar
+            artifact_name: bug-resolution-radar-linux
+          - os: macos-latest
+            label: macOS
+            binary_path: dist/bug-resolution-radar
+            artifact_name: bug-resolution-radar-macos
+          - os: windows-latest
+            label: Windows
+            binary_path: dist/bug-resolution-radar.exe
+            artifact_name: bug-resolution-radar-windows
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --collect-all streamlit --collect-all plotly app.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.binary_path }}
+            .env.example
+            assets/
+            README.md
+          if-no-files-found: error
