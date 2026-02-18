@@ -36,3 +36,26 @@ def test_build_filter_criteria_includes_create_date_ranges() -> None:
         "organizations": ["ENTERPRISE WEB SYSTEMS SERVICE OWNER"],
         "createDateRanges": [{"start": 1, "end": 2}],
     }
+
+
+def test_build_filter_criteria_includes_optional_filters() -> None:
+    criteria = _build_filter_criteria(
+        "ENTERPRISE WEB SYSTEMS SERVICE OWNER",
+        1,
+        2,
+        status_mappings=["open", "close"],
+        incident_types=["User Service Restoration", "Security Incident"],
+        priorities=["High", "Low"],
+        companies=[{"name": "BBVA México"}],
+        risk_level=["Risk Level 1", "Risk Level 2"],
+    )
+
+    assert criteria == {
+        "organizations": ["ENTERPRISE WEB SYSTEMS SERVICE OWNER"],
+        "createDateRanges": [{"start": 1, "end": 2}],
+        "statusMappings": ["open", "close"],
+        "incidentTypes": ["User Service Restoration", "Security Incident"],
+        "priorities": ["High", "Low"],
+        "companies": [{"name": "BBVA México"}],
+        "riskLevel": ["Risk Level 1", "Risk Level 2"],
+    }

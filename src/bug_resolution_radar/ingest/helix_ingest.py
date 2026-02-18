@@ -16,6 +16,7 @@ from ..config import build_source_id
 from ..schema_helix import HelixDocument, HelixWorkItem
 from ..security import sanitize_cookie_header, validate_service_base_url
 from ..utils import now_iso
+from .helix_mapper import map_helix_values_to_item
 from .helix_session import get_helix_session_cookie
 
 
@@ -48,6 +49,16 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _csv_list(value: Any, default: str = "") -> List[str]:
+    raw = default if value is None else value
+    if isinstance(raw, (list, tuple, set)):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    txt = str(raw or "").strip()
+    if not txt:
+        return []
+    return [x.strip() for x in txt.split(",") if x.strip()]
+
+
 def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int, int]:
     year_int = _coerce_int(year, 0) if year is not None else 0
     if year_int < 1970:
@@ -61,12 +72,39 @@ def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int
 
 
 def _build_filter_criteria(
-    organization: str, create_start_ms: int, create_end_ms: int
+    organization: str,
+    create_start_ms: int,
+    create_end_ms: int,
+    *,
+    status_mappings: Optional[List[str]] = None,
+    incident_types: Optional[List[str]] = None,
+    priorities: Optional[List[str]] = None,
+    companies: Optional[List[Dict[str, str]]] = None,
+    risk_level: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    return {
+    criteria: Dict[str, Any] = {
         "organizations": [str(organization or "").strip()],
         "createDateRanges": [{"start": int(create_start_ms), "end": int(create_end_ms)}],
     }
+    if status_mappings:
+        criteria["statusMappings"] = [str(x).strip() for x in status_mappings if str(x).strip()]
+    if incident_types:
+        criteria["incidentTypes"] = [str(x).strip() for x in incident_types if str(x).strip()]
+    if priorities:
+        criteria["priorities"] = [str(x).strip() for x in priorities if str(x).strip()]
+    if companies:
+        valid_companies: List[Dict[str, str]] = []
+        for row in companies:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "").strip()
+            if name:
+                valid_companies.append({"name": name})
+        if valid_companies:
+            criteria["companies"] = valid_companies
+    if risk_level:
+        criteria["riskLevel"] = [str(x).strip() for x in risk_level if str(x).strip()]
+    return criteria
 
 
 def _iso_from_epoch_ms(ms: int) -> str:
@@ -300,6 +338,38 @@ def _looks_like_sso_redirect(resp: requests.Response) -> bool:
     return any(m in body for m in markers)
 
 
+def _looks_like_session_expired_text(text: str) -> bool:
+    body = (text or "").lower()
+    markers = (
+        "mobility_error_session_expired",
+        "session_expired",
+        "session expired",
+        "sesion expirada",
+    )
+    return any(m in body for m in markers)
+
+
+def _is_session_expired_response(resp: requests.Response) -> bool:
+    if getattr(resp, "status_code", 0) not in (401, 403):
+        return False
+
+    if _looks_like_session_expired_text(getattr(resp, "text", "") or ""):
+        return True
+
+    try:
+        payload = resp.json()
+    except Exception:
+        return False
+
+    if isinstance(payload, dict):
+        joined = " ".join(
+            str(payload.get(k) or "")
+            for k in ("error", "message", "detail", "code")
+        ).strip()
+        return _looks_like_session_expired_text(joined)
+    return False
+
+
 def _short_text(s: str, max_chars: int = 240) -> str:
     txt = (s or "").replace("\n", " ").replace("\r", " ").strip()
     if len(txt) <= max_chars:
@@ -316,6 +386,15 @@ def _has_auth_cookie(cookie_names: List[str]) -> bool:
     wanted = {"jsessionid", "xsrf-token", "loginid", "sso.session.restore.cookies", "route"}
     got = {str(x).strip().lower() for x in cookie_names}
     return any(x in got for x in wanted)
+
+
+def _apply_xsrf_headers(session: requests.Session) -> None:
+    xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
+    if not xsrf:
+        return
+    session.headers["X-Xsrf-Token"] = xsrf
+    session.headers["X-XSRF-TOKEN"] = xsrf
+    session.headers["X-CSRF-Token"] = xsrf
 
 
 def _item_merge_key(item: HelixWorkItem) -> str:
@@ -434,6 +513,73 @@ def ingest_helix(
             None,
         )
 
+    def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
+        try:
+            fresh_cookie = get_helix_session_cookie(browser=browser, host=host)
+        except Exception as e:
+            return (
+                False,
+                f"{source_label}: no se pudo refrescar cookie Helix en '{browser}' ({trigger}). "
+                f"Detalle: {e}",
+            )
+
+        fresh_cookie = sanitize_cookie_header(fresh_cookie)
+        if not fresh_cookie:
+            return (
+                False,
+                f"{source_label}: no se encontró cookie Helix válida en '{browser}' ({trigger}).",
+            )
+
+        try:
+            session.cookies.clear()
+        except Exception:
+            pass
+
+        refreshed_cookie_names = _cookies_to_jar(session, fresh_cookie, host=host)
+        if not _has_auth_cookie(refreshed_cookie_names):
+            return (
+                False,
+                f"{source_label}: no se detectaron cookies de sesión Helix/SmartIT válidas tras refresco "
+                f"({trigger}). cookies_cargadas={refreshed_cookie_names}.",
+            )
+
+        try:
+            refresh_preflight = session.get(f"{base}/app/", timeout=(5, 15))
+        except requests.exceptions.Timeout as e:
+            return (
+                False,
+                f"{source_label}: timeout validando sesión Helix tras refresco ({trigger}). "
+                f"Detalle: {e}",
+            )
+        except SSLError as e:
+            return (
+                False,
+                f"{source_label}: error SSL validando sesión Helix tras refresco ({trigger}): {e}",
+            )
+        except requests.exceptions.RequestException as e:
+            return (
+                False,
+                f"{source_label}: error de red validando sesión Helix tras refresco ({trigger}): "
+                f"{type(e).__name__}: {e}",
+            )
+
+        if _looks_like_sso_redirect(refresh_preflight):
+            return (
+                False,
+                f"{source_label}: Helix no autenticado tras refresco ({trigger}). "
+                f"Abre Helix en '{browser}' y vuelve a autenticarte.",
+            )
+
+        if refresh_preflight.status_code >= 400:
+            return (
+                False,
+                f"{source_label}: Helix devolvió {refresh_preflight.status_code} en /app/ tras refresco "
+                f"({trigger}): {_short_text(refresh_preflight.text)}",
+            )
+
+        _apply_xsrf_headers(session)
+        return True, ""
+
     preflight: Optional[requests.Response] = None
     if not dry_run:
         try:
@@ -441,27 +587,51 @@ def ingest_helix(
         except requests.RequestException:
             preflight = None
 
-    xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
-    if xsrf:
-        session.headers["X-Xsrf-Token"] = xsrf
-        session.headers["X-XSRF-TOKEN"] = xsrf
-        session.headers["X-CSRF-Token"] = xsrf
+    _apply_xsrf_headers(session)
+
+    if not dry_run and preflight is not None and _looks_like_sso_redirect(preflight):
+        refreshed_ok, refreshed_msg = _refresh_auth_session("preflight_sso_redirect")
+        if not refreshed_ok:
+            return (
+                False,
+                f"{refreshed_msg} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
 
     attribute_names = [
-        "priority",
-        "id",
-        "targetDate",
         "slaStatus",
-        "customerName",
+        "priority",
+        "incidentType",
+        "id",
         "assignee",
-        "summary",
         "status",
-        "lastModifiedDate",
+        "summary",
+        "service",
+    ]
+    custom_attribute_names = [
+        "bbva_closeddate",
+        "bbva_matrixservicen1",
+        "bbva_sourceservicen1",
+        "bbva_startdatetime",
     ]
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    filter_criteria = _build_filter_criteria(org, create_start_ms, create_end_ms)
+    filter_criteria = _build_filter_criteria(
+        org,
+        create_start_ms,
+        create_end_ms,
+        status_mappings=_csv_list(os.getenv("HELIX_FILTER_STATUS_MAPPINGS"), "open,close"),
+        incident_types=_csv_list(
+            os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
+            "User Service Restoration,Security Incident",
+        ),
+        priorities=_csv_list(os.getenv("HELIX_FILTER_PRIORITIES"), "High,Low,Medium,Critical"),
+        companies=[
+            {"name": name}
+            for name in _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
+        ],
+    )
 
     def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
         size = int(page_chunk_size if page_chunk_size is not None else chunk_size)
@@ -469,7 +639,7 @@ def ingest_helix(
             "filterCriteria": filter_criteria,
             "attributeNames": attribute_names,
             "chunkInfo": {"startIndex": int(start_index), "chunkSize": size},
-            "customAttributeNames": [],
+            "customAttributeNames": custom_attribute_names,
             "sortInfo": {},
         }
 
@@ -541,11 +711,7 @@ def ingest_helix(
                 None,
             )
 
-        xsrf_now = _get_cookie_anywhere(session, "XSRF-TOKEN")
-        if xsrf_now:
-            session.headers["X-Xsrf-Token"] = xsrf_now
-            session.headers["X-XSRF-TOKEN"] = xsrf_now
-            session.headers["X-CSRF-Token"] = xsrf_now
+        _apply_xsrf_headers(session)
 
         return (
             True,
@@ -600,6 +766,11 @@ def ingest_helix(
         900.0,
     )
     page = 0
+    max_session_refreshes = max(
+        0,
+        _coerce_int(os.getenv("HELIX_MAX_SESSION_REFRESHES", "1"), 1),
+    )
+    session_refreshes = 0
 
     while True:
         elapsed = time.monotonic() - started_at
@@ -692,15 +863,34 @@ def ingest_helix(
                 None,
             )
 
-        page += 1
-
         if r.status_code != 200:
+            if _is_session_expired_response(r):
+                if session_refreshes >= max_session_refreshes:
+                    return (
+                        False,
+                        f"{source_label}: error Helix ({r.status_code}) por sesión expirada "
+                        f"y se agotaron los refrescos de sesión. "
+                        f"Detalle: {_short_text(r.text)} | proxy={helix_proxy or '(sin proxy)'} | "
+                        f"verify={verify_desc}",
+                        None,
+                    )
+                refreshed_ok, refreshed_msg = _refresh_auth_session("session_expired")
+                if not refreshed_ok:
+                    return (
+                        False,
+                        f"{refreshed_msg} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                        None,
+                    )
+                session_refreshes += 1
+                continue
             return (
                 False,
                 f"{source_label}: error Helix ({r.status_code}): {r.text[:800]} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
+
+        page += 1
 
         data = r.json()
         batch = _extract_objects(data)
@@ -715,51 +905,22 @@ def ingest_helix(
             values: Dict[str, Any] = cast(
                 Dict[str, Any], values_raw if isinstance(values_raw, dict) else it
             )
-            wid = str(
-                values.get("displayId") or values.get("id") or values.get("workItemId") or ""
-            ).strip()
-            if not wid:
+            mapped_item = map_helix_values_to_item(
+                values=values,
+                base_url=base,
+                country=country_value,
+                source_alias=alias_value,
+                source_id=source_id_value,
+            )
+            if mapped_item is None:
                 continue
+            wid = str(mapped_item.id or "").strip()
             if wid in seen_ids:
                 continue
 
             seen_ids.add(wid)
             new_in_page += 1
-
-            assignee = values.get("assignee") or values.get("assigneeName") or ""
-            if isinstance(assignee, dict):
-                assignee = (
-                    assignee.get("fullName")
-                    or assignee.get("displayName")
-                    or assignee.get("name")
-                    or ""
-                )
-
-            customer_name = values.get("customerName") or values.get("customer") or ""
-            if isinstance(customer_name, dict):
-                customer_name = (
-                    customer_name.get("fullName")
-                    or customer_name.get("displayName")
-                    or customer_name.get("name")
-                    or ""
-                )
-
-            items.append(
-                HelixWorkItem(
-                    id=wid,
-                    summary=str(values.get("summary") or values.get("description") or "").strip(),
-                    status=str(values.get("status") or "").strip(),
-                    priority=str(values.get("priority") or "").strip(),
-                    assignee=str(assignee or "").strip(),
-                    customer_name=str(customer_name or "").strip(),
-                    target_date=values.get("targetDate"),
-                    last_modified=values.get("lastModifiedDate") or values.get("lastModified"),
-                    url=f"{base}/app/#/ticket-console",
-                    country=country_value,
-                    source_alias=alias_value,
-                    source_id=source_id_value,
-                )
-            )
+            items.append(mapped_item)
 
         if new_in_page == 0:
             break
@@ -777,9 +938,15 @@ def ingest_helix(
     doc.helix_base_url = base
     create_start_iso = _iso_from_epoch_ms(create_start_ms)
     create_end_iso = _iso_from_epoch_ms(create_end_ms)
+    status_mappings_q = ",".join(cast(List[str], filter_criteria.get("statusMappings", []))) or "all"
+    incident_types_q = ",".join(cast(List[str], filter_criteria.get("incidentTypes", []))) or "all"
+    priorities_q = ",".join(cast(List[str], filter_criteria.get("priorities", []))) or "all"
+    company_rows = cast(List[Dict[str, str]], filter_criteria.get("companies", []))
+    companies_q = ",".join(str(r.get("name") or "").strip() for r in company_rows if r) or "all"
     doc.query = (
         f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
-        f" (year={create_year})"
+        f" (year={create_year}); statusMappings=[{status_mappings_q}]; "
+        f"incidentTypes=[{incident_types_q}]; priorities=[{priorities_q}]; companies=[{companies_q}]"
     )
 
     merged = {_item_merge_key(i): i for i in doc.items}
