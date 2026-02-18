@@ -154,9 +154,45 @@ def _inject_combo_signal_script() -> None:
             const doc = root && root.document;
             if (!doc) return;
             const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
-            const PAINTER_VERSION = 3; // bump to force refresh of painter logic/colors in active sessions
+            const PAINTER_VERSION = 4; // bump to force refresh of painter logic/colors in active sessions
 
-            const match = (text, keys) => keys.some((k) => text.includes(k));
+            const normalizeText = (raw) =>
+              String(raw || "")
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/\\s+/g, " ")
+                .trim();
+            const canonicalToken = (raw) => {
+              let t = normalizeText(raw);
+              t = t.replace(/^(status|estado|priority|prioridad)\\s*:\\s*/i, "");
+              t = t.replace(/\\s*\\(\\d+\\)\\s*$/, "");
+              return t.trim();
+            };
+            const cssEscape = (raw) => {
+              const t = String(raw || "");
+              if (!t) return "";
+              try {
+                if (root.CSS && typeof root.CSS.escape === "function") return root.CSS.escape(t);
+              } catch (e) {}
+              return t.replace(/["\\\\]/g, "\\\\$&");
+            };
+            const semanticLabelHints = ["estado", "status", "priority", "prioridad"];
+
+            const STATUS_RED = new Set(["new", "analysing", "blocked", "created"]);
+            const STATUS_AMBER = new Set([
+              "en progreso",
+              "in progress",
+              "to rework",
+              "test",
+              "ready to verify",
+              "open",
+            ]);
+            const STATUS_GREEN = new Set(["accepted", "ready to deploy", "closed", "resolved", "done"]);
+            const PRIORITY_RED = new Set(["supone un impedimento", "impedimento", "highest", "high"]);
+            const PRIORITY_AMBER = new Set(["medium"]);
+            const PRIORITY_GREEN = new Set(["low", "lowest"]);
+
             const toRgba = (hex, alpha) => {
               const h = String(hex || "").replace("#", "");
               if (h.length !== 6) return "rgba(122,139,173," + alpha + ")";
@@ -167,12 +203,12 @@ def _inject_combo_signal_script() -> None:
             };
 
             const signalColor = (raw) => {
-              const t = String(raw || "").trim().toLowerCase();
+              const t = canonicalToken(raw);
               if (!t) return "";
-              if (match(t, ["new", "analysing", "blocked", "created", "high", "highest", "impedimento"])) return "#B4232A";
-              if (match(t, ["en progreso", "in progress", "to rework", "test", "ready to verify", "open", "medium"])) return "#E08A00";
-              if (match(t, ["deployed"])) return "#00A65A";
-              if (match(t, ["accepted", "ready to deploy", "closed", "resolved", "done", "low", "lowest"])) return "#1E9E53";
+              if (STATUS_RED.has(t) || PRIORITY_RED.has(t)) return "#B4232A";
+              if (STATUS_AMBER.has(t) || PRIORITY_AMBER.has(t)) return "#E08A00";
+              if (t === "deployed") return "#00A65A";
+              if (STATUS_GREEN.has(t) || PRIORITY_GREEN.has(t)) return "#1E9E53";
               return "";
             };
 
@@ -184,18 +220,70 @@ def _inject_combo_signal_script() -> None:
               return String(el.textContent || "").replace(/\\s+/g, " ").trim();
             };
 
+            const readWidgetLabel = (node) => {
+              const host = node
+                ? node.closest('[data-testid="stMultiSelect"], [data-testid="stSelectbox"], .stMultiSelect, .stSelectbox')
+                : null;
+              const scope = host || (node ? node.closest('[data-testid="stWidget"], .element-container') : null);
+              if (!scope) return "";
+              const labelEl = scope.querySelector(
+                '[data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, label'
+              );
+              return normalizeText(labelEl ? labelEl.textContent : "");
+            };
+
+            const isSemanticWidgetLabel = (labelText) =>
+              semanticLabelHints.some((hint) => labelText.includes(hint));
+
+            const listContainerOf = (el) => el.closest('[role="listbox"], [role="menu"], ul');
+
+            const semanticScopeForOption = (el) => {
+              const pop = el.closest('div[data-baseweb="popover"]');
+              const list = listContainerOf(el);
+              if (!pop || !list) return false;
+              const listId = String(list.getAttribute("id") || "").trim();
+              let control = null;
+              if (listId) {
+                const escaped = cssEscape(listId);
+                if (escaped) {
+                  try {
+                    control = doc.querySelector('[aria-controls="' + escaped + '"]');
+                  } catch (e) {}
+                }
+              }
+              if (!control) {
+                const expanded = Array.from(doc.querySelectorAll('[aria-expanded="true"][aria-controls]'));
+                control =
+                  expanded.find((node) => {
+                    const controls = String(node.getAttribute("aria-controls") || "").trim();
+                    return controls && listId && controls === listId;
+                  }) || expanded[0] || null;
+              }
+              const semantic = isSemanticWidgetLabel(readWidgetLabel(control));
+              pop.classList.toggle("bbva-semantic-popover", semantic);
+              return semantic;
+            };
+
+            const clearOptionSignal = (el) => {
+              el.style.removeProperty("--bbva-opt-dot");
+              el.style.removeProperty("border-left");
+              el.style.removeProperty("padding-left");
+              el.style.removeProperty("background-image");
+              el.style.removeProperty("background-repeat");
+            };
+
             const paintOption = (el) => {
               const inList = !!el.closest('[data-baseweb="popover"], [role="listbox"], [role="menu"]');
               if (!inList) return;
+              if (!semanticScopeForOption(el)) {
+                clearOptionSignal(el);
+                return;
+              }
               const label = optionLabel(el);
               if (!label) return;
               const color = signalColor(label);
               if (!color) {
-                el.style.removeProperty("--bbva-opt-dot");
-                el.style.removeProperty("border-left");
-                el.style.removeProperty("padding-left");
-                el.style.removeProperty("background-image");
-                el.style.removeProperty("background-repeat");
+                clearOptionSignal(el);
                 return;
               }
               el.style.setProperty("--bbva-opt-dot", color, "important");
@@ -209,18 +297,26 @@ def _inject_combo_signal_script() -> None:
               el.style.setProperty("background-repeat", "no-repeat", "important");
             };
 
+            const clearTagSignal = (el) => {
+              el.style.removeProperty("background");
+              el.style.removeProperty("border");
+              el.style.removeProperty("color");
+              el.style.removeProperty("background-image");
+              el.querySelectorAll("*").forEach((n) => {
+                n.style.removeProperty("color");
+              });
+            };
+
             const paintTag = (el) => {
+              if (!isSemanticWidgetLabel(readWidgetLabel(el))) {
+                clearTagSignal(el);
+                return;
+              }
               const label = optionLabel(el);
               if (!label) return;
               const color = signalColor(label);
               if (!color) {
-                el.style.removeProperty("background");
-                el.style.removeProperty("border");
-                el.style.removeProperty("color");
-                el.style.removeProperty("background-image");
-                el.querySelectorAll("*").forEach((n) => {
-                  n.style.removeProperty("color");
-                });
+                clearTagSignal(el);
                 return;
               }
               el.style.setProperty("background", toRgba(color, 0.14), "important");

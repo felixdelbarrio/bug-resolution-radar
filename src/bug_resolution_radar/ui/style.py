@@ -421,6 +421,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: var(--bbva-surface) !important;
             border: 1px solid var(--bbva-border) !important;
             color: var(--bbva-text) !important;
+            list-style: none !important;
+            margin: 0 !important;
+            padding-inline-start: 0 !important;
           }
           div[data-baseweb="popover"] [role="option"],
           div[data-baseweb="popover"] li {
@@ -429,6 +432,10 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             position: relative;
             padding-left: 0.66rem !important;
             --bbva-opt-dot: transparent;
+            list-style: none !important;
+          }
+          div[data-baseweb="popover"] li::marker {
+            content: "" !important;
           }
           div[data-baseweb="popover"] [role="option"]::before,
           div[data-baseweb="popover"] li::before {
@@ -452,74 +459,74 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
           }
           /* Option semáforo en listados (status/priority); el chip seleccionado mantiene solo fondo/borde */
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="new" i], [title*="new" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="created" i], [title*="created" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: #D24756;
             border-left: 2px solid rgba(210,71,86,0.72);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="test" i], [title*="test" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="open" i], [title*="open" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="test" i], [title*="test" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: #E08A00;
             border-left: 2px solid rgba(224,138,0,0.72);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: var(--bbva-goal-green);
             border-left: 2px solid color-mix(in srgb, var(--bbva-goal-green) 72%, transparent);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="closed" i], [title*="closed" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: #1E9E53;
             border-left: 2px solid rgba(30,158,83,0.72);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="highest" i], [title*="highest" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="high" i], [title*="high" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: #B4232A;
             border-left: 2px solid rgba(180,35,42,0.72);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="medium" i], [title*="medium" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: #E08A00;
             border-left: 2px solid rgba(224,138,0,0.72);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="low" i], [title*="low" i]),
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i]) {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i]),
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i]) {
             padding-left: 1.70rem !important;
             --bbva-opt-dot: #1E9E53;
             border-left: 2px solid rgba(30,158,83,0.72);
           }
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="new" i], [title*="new" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="created" i], [title*="created" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="test" i], [title*="test" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="open" i], [title*="open" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="closed" i], [title*="closed" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="highest" i], [title*="highest" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="high" i], [title*="high" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="medium" i], [title*="medium" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="low" i], [title*="low" i])::before,
-          div[data-baseweb="popover"] [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i])::before {
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="test" i], [title*="test" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i])::before,
+          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i])::before {
             content: "";
           }
           .stTextInput input::placeholder,
