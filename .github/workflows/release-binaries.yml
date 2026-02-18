@@ -1,0 +1,131 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-tag:
+    name: Validate tag on master
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tagged commit is on master
+        run: |
+          git fetch --no-tags --depth=1 origin master
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/master"; then
+            echo "Tag $GITHUB_REF_NAME does not point to a commit in master."
+            exit 1
+          fi
+
+  build-release-assets:
+    name: Build ${{ matrix.label }} release asset
+    needs: validate-tag
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux
+            archive_suffix: linux
+            binary_path: dist/bug-resolution-radar
+          - os: macos-latest
+            label: macOS
+            archive_suffix: macos
+            binary_path: dist/bug-resolution-radar
+          - os: windows-latest
+            label: Windows
+            archive_suffix: windows
+            binary_path: dist/bug-resolution-radar.exe
+    env:
+      ARCHIVE_NAME: bug-resolution-radar-${{ github.ref_name }}-${{ matrix.archive_suffix }}.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --collect-all streamlit --collect-all plotly app.py
+
+      - name: Package release archive
+        shell: bash
+        env:
+          ARCHIVE_SUFFIX: ${{ matrix.archive_suffix }}
+          BINARY_PATH: ${{ matrix.binary_path }}
+        run: |
+          python - <<'PY'
+          import os
+          import shutil
+          import zipfile
+          from pathlib import Path
+
+          archive_suffix = os.environ["ARCHIVE_SUFFIX"].strip()
+          binary_path = Path(os.environ["BINARY_PATH"].strip())
+          archive_name = Path(os.environ["ARCHIVE_NAME"].strip())
+
+          bundle_root = Path("release_bundle")
+          bundle_dir = bundle_root / f"bug-resolution-radar-{archive_suffix}"
+          bundle_dir.mkdir(parents=True, exist_ok=True)
+
+          shutil.copy2(binary_path, bundle_dir / binary_path.name)
+          shutil.copy2(".env.example", bundle_dir / ".env.example")
+          shutil.copy2("README.md", bundle_dir / "README.md")
+
+          assets_dir = Path("assets")
+          if assets_dir.exists():
+              shutil.copytree(assets_dir, bundle_dir / "assets", dirs_exist_ok=True)
+
+          with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for path in bundle_dir.rglob("*"):
+                  if path.is_file():
+                      zf.write(path, arcname=path.relative_to(bundle_root))
+          PY
+
+      - name: Upload release archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.archive_suffix }}
+          path: ${{ env.ARCHIVE_NAME }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-release-assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create release and upload binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*.zip
