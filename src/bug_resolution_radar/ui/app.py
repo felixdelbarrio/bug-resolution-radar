@@ -15,6 +15,7 @@ from bug_resolution_radar.config import (
     save_settings,
 )
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.state import clear_all_filters
 from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
@@ -34,6 +35,25 @@ def _dashboard_labels() -> Dict[str, str]:
         "insights": "Insights",
         "notes": "Notas",
     }
+
+
+def _reset_scope_filters() -> None:
+    """Reset dashboard filters whenever workspace scope changes."""
+    clear_all_filters()
+    st.session_state.pop("__filters_action_context", None)
+    suffixes = ("filter_status_ui", "filter_priority_ui", "filter_assignee_ui")
+    for key in list(st.session_state.keys()):
+        key_txt = str(key or "")
+        if key_txt in suffixes:
+            st.session_state.pop(key, None)
+            continue
+        if any(key_txt.endswith(f"::{suffix}") for suffix in suffixes):
+            st.session_state.pop(key, None)
+
+
+def _on_workspace_scope_change() -> None:
+    """Handle country/source changes by clearing active analysis filters."""
+    _reset_scope_filters()
 
 
 def _sources_with_results(settings: Settings) -> List[Dict[str, str]]:
@@ -310,7 +330,12 @@ def _render_workspace_scope(settings: Settings) -> None:
 
     c_country, c_source = st.columns([1.0, 2.0], gap="small")
     with c_country:
-        selected_country = st.selectbox("País", options=countries, key="workspace_country")
+        selected_country = st.selectbox(
+            "País",
+            options=countries,
+            key="workspace_country",
+            on_change=_on_workspace_scope_change,
+        )
     source_rows = sources_by_country.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
@@ -332,6 +357,7 @@ def _render_workspace_scope(settings: Settings) -> None:
                 options=source_ids,
                 key="workspace_source_id",
                 format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+                on_change=_on_workspace_scope_change,
             )
         else:
             st.selectbox(

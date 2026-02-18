@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -64,3 +65,41 @@ def test_scope_sources_empty_when_there_are_no_results(monkeypatch: Any) -> None
     settings = _settings_with_jira_sources()
     monkeypatch.setattr(app, "load_issues_df", lambda _path: pd.DataFrame())
     assert app._sources_with_results_by_country(settings) == {}
+
+
+def test_reset_scope_filters_clears_canonical_and_ui_keys(monkeypatch: Any) -> None:
+    fake_state = {
+        "filter_status": ["Open"],
+        "filter_priority": ["High"],
+        "filter_assignee": ["Ana"],
+        "__filters_action_context": {"label": "test"},
+        "dashboard::filter_status_ui": ["Open"],
+        "dashboard::filter_priority_ui": ["High"],
+        "dashboard::filter_assignee_ui": ["Ana"],
+        "filter_status_ui": ["Open"],
+        "filter_priority_ui": ["High"],
+        "filter_assignee_ui": ["Ana"],
+        "other_key": "keep",
+    }
+
+    def _fake_clear_all_filters() -> None:
+        fake_state["filter_status"] = []
+        fake_state["filter_priority"] = []
+        fake_state["filter_assignee"] = []
+
+    monkeypatch.setattr(app, "st", SimpleNamespace(session_state=fake_state))
+    monkeypatch.setattr(app, "clear_all_filters", _fake_clear_all_filters)
+
+    app._reset_scope_filters()
+
+    assert fake_state["filter_status"] == []
+    assert fake_state["filter_priority"] == []
+    assert fake_state["filter_assignee"] == []
+    assert "__filters_action_context" not in fake_state
+    assert "dashboard::filter_status_ui" not in fake_state
+    assert "dashboard::filter_priority_ui" not in fake_state
+    assert "dashboard::filter_assignee_ui" not in fake_state
+    assert "filter_status_ui" not in fake_state
+    assert "filter_priority_ui" not in fake_state
+    assert "filter_assignee_ui" not in fake_state
+    assert fake_state["other_key"] == "keep"
