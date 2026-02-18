@@ -460,9 +460,7 @@ def ingest_helix(
     ]
 
     org = (organization or "").strip()
-    create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(
-        create_date_year
-    )
+    create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
     filter_criteria = _build_filter_criteria(org, create_start_ms, create_end_ms)
 
     def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
