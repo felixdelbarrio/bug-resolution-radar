@@ -15,6 +15,7 @@ CANONICAL_STATUS_ORDER: Tuple[str, ...] = (
     "Ready To Verify",
     "Accepted",
     "Ready to Deploy",
+    "Deployed",
 )
 
 

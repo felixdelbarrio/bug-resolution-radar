@@ -27,7 +27,7 @@ def render(
     """
     Insights page (tab):
       - Tabs para modularizar:
-          1) Top tópicos (Top 10 problemas/funcionalidades)
+          1) Por funcionalidad (Top 10 problemas/funcionalidades)
           2) Duplicados (clusters similares)
           3) Personas (concentración + modo acción)
           4) Salud operativa (KPIs + top antiguas)
@@ -61,7 +61,7 @@ def render(
     )
 
     with st.container(key="insights_shell"):
-        t1, t2, t3, t4 = st.tabs(["Top tópicos", "Duplicados", "Personas", "Salud operativa"])
+        t1, t2, t3, t4 = st.tabs(["Por funcionalidad", "Duplicados", "Personas", "Salud operativa"])
 
         with t1:
             render_top_topics_tab(settings=settings, dff_filtered=dff, kpis=kpis)

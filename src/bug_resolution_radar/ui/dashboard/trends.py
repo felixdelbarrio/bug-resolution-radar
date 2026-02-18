@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+import re
+import unicodedata
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -10,6 +12,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -24,7 +27,31 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
 )
+from bug_resolution_radar.ui.insights.copilot import (
+    build_operational_snapshot,
+    build_session_delta_lines,
+)
+from bug_resolution_radar.ui.insights.engine import ActionInsight, build_trend_insight_pack
+from bug_resolution_radar.ui.insights.learning_store import (
+    LEARNING_BASELINE_SNAPSHOT_KEY,
+    LEARNING_INTERACTIONS_KEY,
+    LEARNING_STATE_KEY,
+    ensure_learning_session_loaded,
+    increment_learning_interactions,
+    persist_learning_session,
+    set_learning_snapshot,
+)
 from bug_resolution_radar.ui.style import apply_plotly_bbva
+
+TERMINAL_STATUS_TOKENS: Tuple[str, ...] = (
+    "closed",
+    "resolved",
+    "done",
+    "deployed",
+    "accepted",
+    "cancelled",
+    "canceled",
+)
 
 
 def _to_dt_naive(s: pd.Series) -> pd.Series:
@@ -45,6 +72,239 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
 
 def _safe_df(df: pd.DataFrame) -> pd.DataFrame:
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+
+def _norm_status_token(value: object) -> str:
+    txt = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", txt).strip()
+
+
+def _status_filter_has_terminal(status_filters: List[str]) -> bool:
+    return any(
+        any(tok in _norm_status_token(st_name) for tok in TERMINAL_STATUS_TOKENS)
+        for st_name in list(status_filters or [])
+    )
+
+
+def _effective_trends_open_scope(
+    *,
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+    active_status_filters: List[str],
+) -> tuple[pd.DataFrame, bool]:
+    """
+    Return the dataframe scope for open-like trend charts.
+
+    Normally charts use open_df (abiertas). If active status filters include
+    terminal states (e.g. Deployed), open_df can be empty by definition, so we
+    switch to the filtered status subset from dff to keep chart behavior coherent.
+    """
+    safe_open = _safe_df(open_df)
+    safe_dff = _safe_df(dff)
+    chosen = [str(x).strip() for x in list(active_status_filters or []) if str(x).strip()]
+    if not chosen:
+        return safe_open, False
+    if safe_dff.empty or "status" not in safe_dff.columns:
+        return safe_open, False
+
+    status_norm = normalize_text_col(safe_dff["status"], "(sin estado)")
+    scoped = safe_dff.loc[status_norm.isin(chosen)].copy(deep=False)
+    if scoped.empty:
+        return safe_open, False
+    if _status_filter_has_terminal(chosen):
+        return scoped, True
+    return safe_open, False
+
+
+def _exclude_terminal_status_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Exclude terminal/finalist statuses from an open-like dataframe view."""
+    safe = _safe_df(df)
+    if safe.empty or "status" not in safe.columns:
+        return safe.copy(deep=False)
+    status_norm = normalize_text_col(safe["status"], "(sin estado)").map(_norm_status_token)
+    terminal_mask = status_norm.map(
+        lambda st_name: any(tok in str(st_name or "") for tok in TERMINAL_STATUS_TOKENS)
+    )
+    return safe.loc[~terminal_mask].copy(deep=False)
+
+
+def _ensure_learning_state() -> Dict[str, Any]:
+    raw = st.session_state.get(LEARNING_STATE_KEY)
+    if isinstance(raw, dict):
+        state: Dict[str, Any] = raw
+    else:
+        state = {}
+    if not isinstance(state.get("shown_counts"), dict):
+        state["shown_counts"] = {}
+    if not isinstance(state.get("clicked_counts"), dict):
+        state["clicked_counts"] = {}
+    if not isinstance(state.get("last_click_filters"), dict):
+        state["last_click_filters"] = {"status": [], "priority": [], "assignee": []}
+    if not isinstance(state.get("chart_seen_counts"), dict):
+        state["chart_seen_counts"] = {}
+    if not isinstance(state.get("last_render_token"), str):
+        state["last_render_token"] = ""
+    if not isinstance(state.get("last_context_token"), str):
+        state["last_context_token"] = ""
+    if not isinstance(state.get("copilot_intents"), dict):
+        state["copilot_intents"] = {}
+    st.session_state[LEARNING_STATE_KEY] = state
+    return state
+
+
+def _active_filter_snapshot() -> Dict[str, List[str]]:
+    return {
+        "status": list(st.session_state.get(FILTER_STATUS_KEY) or []),
+        "priority": list(st.session_state.get(FILTER_PRIORITY_KEY) or []),
+        "assignee": list(st.session_state.get(FILTER_ASSIGNEE_KEY) or []),
+    }
+
+
+def _dict_any(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _insight_identity(chart_id: str, insight: ActionInsight) -> str:
+    base = f"{chart_id.strip().lower()}|{str(insight.title or '').strip().lower()}"
+    status = ",".join(
+        sorted(
+            [str(x).strip().lower() for x in list(insight.status_filters or []) if str(x).strip()]
+        )
+    )
+    priority = ",".join(
+        sorted(
+            [str(x).strip().lower() for x in list(insight.priority_filters or []) if str(x).strip()]
+        )
+    )
+    assignee = ",".join(
+        sorted(
+            [str(x).strip().lower() for x in list(insight.assignee_filters or []) if str(x).strip()]
+        )
+    )
+    digest = hashlib.sha1(f"{base}|{status}|{priority}|{assignee}".encode("utf-8")).hexdigest()[:12]
+    return f"{chart_id}:{digest}"
+
+
+def _overlap_ratio(active: List[str], candidate: List[str] | None) -> float:
+    cand = [str(x).strip() for x in list(candidate or []) if str(x).strip()]
+    if not active or not cand:
+        return 0.0
+    a = {x.lower() for x in active}
+    c = {x.lower() for x in cand}
+    if not c:
+        return 0.0
+    return float(len(a & c)) / float(len(c))
+
+
+def _personalize_insights(
+    cards: List[ActionInsight], *, chart_id: str, active_filters: Dict[str, List[str]]
+) -> List[ActionInsight]:
+    state = _ensure_learning_state()
+    shown_counts = _dict_any(state.get("shown_counts"))
+    clicked_counts = _dict_any(state.get("clicked_counts"))
+    last_click = _dict_any(state.get("last_click_filters"))
+    out: List[ActionInsight] = []
+
+    for card in cards:
+        iid = _insight_identity(chart_id, card)
+        shown = int(shown_counts.get(iid, 0) or 0)
+        clicked = int(clicked_counts.get(iid, 0) or 0)
+
+        novelty_bonus = 0.0
+        if shown == 0:
+            novelty_bonus = 6.0
+        elif shown == 1:
+            novelty_bonus = 2.5
+        else:
+            novelty_bonus = -min(float(shown - 1), 4.0)
+
+        affinity_bonus = min(float(clicked) * 2.0, 6.0)
+        active_alignment = 0.0
+        active_alignment += 4.0 * _overlap_ratio(
+            active_filters.get("status", []), card.status_filters
+        )
+        active_alignment += 3.5 * _overlap_ratio(
+            active_filters.get("priority", []), card.priority_filters
+        )
+        active_alignment += 3.0 * _overlap_ratio(
+            active_filters.get("assignee", []), card.assignee_filters
+        )
+
+        last_alignment = 0.0
+        last_alignment += 3.0 * _overlap_ratio(
+            list(last_click.get("status", []) or []), card.status_filters
+        )
+        last_alignment += 2.5 * _overlap_ratio(
+            list(last_click.get("priority", []) or []), card.priority_filters
+        )
+        last_alignment += 2.5 * _overlap_ratio(
+            list(last_click.get("assignee", []) or []), card.assignee_filters
+        )
+
+        if not (card.status_filters or card.priority_filters or card.assignee_filters):
+            active_alignment += 0.8
+
+        personalized = ActionInsight(
+            title=card.title,
+            body=card.body,
+            status_filters=list(card.status_filters or []),
+            priority_filters=list(card.priority_filters or []),
+            assignee_filters=list(card.assignee_filters or []),
+            score=float(card.score)
+            + novelty_bonus
+            + affinity_bonus
+            + active_alignment
+            + last_alignment,
+        )
+        out.append(personalized)
+
+    return sorted(out, key=lambda c: float(c.score), reverse=True)
+
+
+def _render_token(
+    *, chart_id: str, dff: pd.DataFrame, open_df: pd.DataFrame, active_filters: Dict[str, List[str]]
+) -> str:
+    status = ",".join(sorted([str(x) for x in active_filters.get("status", [])]))
+    priority = ",".join(sorted([str(x) for x in active_filters.get("priority", [])]))
+    assignee = ",".join(sorted([str(x) for x in active_filters.get("assignee", [])]))
+    return f"{chart_id}|{len(dff)}|{len(open_df)}|{status}|{priority}|{assignee}"
+
+
+def _register_shown_insights(
+    cards: List[ActionInsight], *, chart_id: str, render_token: str
+) -> None:
+    state = _ensure_learning_state()
+    last_token = str(state.get("last_render_token") or "")
+    if last_token == render_token:
+        return
+
+    shown_counts = _dict_any(state.get("shown_counts"))
+    for card in cards[:6]:
+        iid = _insight_identity(chart_id, card)
+        shown_counts[iid] = int(shown_counts.get(iid, 0) or 0) + 1
+    state["shown_counts"] = shown_counts
+
+    chart_seen = _dict_any(state.get("chart_seen_counts"))
+    chart_seen[chart_id] = int(chart_seen.get(chart_id, 0) or 0) + 1
+    state["chart_seen_counts"] = chart_seen
+    state["last_render_token"] = render_token
+    st.session_state[LEARNING_STATE_KEY] = state
+    persist_learning_session()
+
+
+def _track_context_interaction(*, chart_id: str, active_filters: Dict[str, List[str]]) -> None:
+    state = _ensure_learning_state()
+    status = ",".join(sorted([str(x) for x in active_filters.get("status", [])]))
+    priority = ",".join(sorted([str(x) for x in active_filters.get("priority", [])]))
+    assignee = ",".join(sorted([str(x) for x in active_filters.get("assignee", [])]))
+    token = f"{chart_id}|{status}|{priority}|{assignee}"
+    prev = str(state.get("last_context_token") or "")
+    if token == prev:
+        return
+    state["last_context_token"] = token
+    st.session_state[LEARNING_STATE_KEY] = state
+    increment_learning_interactions(step=1, persist=True)
 
 
 def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
@@ -140,10 +400,27 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
         if "resolved" in dff.columns
         else pd.Series(pd.NaT, index=dff.index)
     )
+    updated = (
+        _to_dt_naive(dff["updated"])
+        if "updated" in dff.columns
+        else pd.Series(pd.NaT, index=dff.index)
+    )
+    status_norm = (
+        normalize_text_col(dff["status"], "(sin estado)").map(_norm_status_token)
+        if "status" in dff.columns
+        else pd.Series("", index=dff.index)
+    )
+    deployed_mask = status_norm.eq("deployed")
+    deployed_ts = pd.Series(pd.NaT, index=dff.index)
+    if deployed_mask.any():
+        deployed_ts = resolved.where(deployed_mask)
+        deployed_ts = deployed_ts.where(deployed_ts.notna(), updated.where(deployed_mask))
+        deployed_ts = deployed_ts.where(deployed_ts.notna(), created.where(deployed_mask))
 
     created_notna = created.notna()
     resolved_notna = resolved.notna()
-    if not created_notna.any() and not resolved_notna.any():
+    deployed_notna = deployed_ts.notna()
+    if not created_notna.any() and not resolved_notna.any() and not deployed_notna.any():
         return pd.DataFrame()
 
     end_candidates = []
@@ -151,6 +428,8 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
         end_candidates.append(created.loc[created_notna].max())
     if resolved_notna.any():
         end_candidates.append(resolved.loc[resolved_notna].max())
+    if deployed_notna.any():
+        end_candidates.append(deployed_ts.loc[deployed_notna].max())
     end_ts = (
         pd.Timestamp(max(end_candidates)).normalize()
         if end_candidates
@@ -164,14 +443,22 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
     closed_daily = (
         resolved.loc[resolved_notna & (resolved >= start_ts)].dt.floor("D").value_counts(sort=False)
     )
+    deployed_daily = (
+        deployed_ts.loc[deployed_notna & (deployed_ts >= start_ts)]
+        .dt.floor("D")
+        .value_counts(sort=False)
+    )
 
-    all_dates = created_daily.index.union(closed_daily.index).sort_values()
+    all_dates = (
+        created_daily.index.union(closed_daily.index).union(deployed_daily.index).sort_values()
+    )
     if all_dates.empty:
         return pd.DataFrame()
 
     daily = pd.DataFrame({"date": all_dates})
     daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
     daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
+    daily["deployed"] = deployed_daily.reindex(all_dates, fill_value=0).to_numpy()
     # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
     daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
     return daily
@@ -262,12 +549,12 @@ def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {"grouped": grouped_res, "closed": export_df}
 
 
-def _open_status_payload(open_df: pd.DataFrame) -> dict[str, Any]:
-    """Build grouped open-by-status data and canonical ordered categories."""
-    if open_df.empty or "status" not in open_df.columns:
+def _open_status_payload(status_df: pd.DataFrame) -> dict[str, Any]:
+    """Build grouped issues-by-status data and canonical ordered categories."""
+    if status_df.empty or "status" not in status_df.columns:
         return {"grouped": pd.DataFrame(), "status_order": []}
 
-    dff = open_df.copy(deep=False)
+    dff = status_df.copy(deep=False)
     dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
     if "priority" in dff.columns:
         dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
@@ -284,7 +571,7 @@ def _open_status_payload(open_df: pd.DataFrame) -> dict[str, Any]:
     status_order = stc_total["status"].astype(str).tolist()
 
     grouped = (
-        dff.groupby(["status", "priority"], dropna=False)
+        dff.groupby(["status", "priority"], dropna=False, observed=False)
         .size()
         .reset_index(name="count")
         .sort_values(["status", "count"], ascending=[True, False])
@@ -296,18 +583,21 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     """Return all available chart ids and visible labels for trends tab."""
     return [
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
-        ("age_buckets", "Antigüedad de abiertas (distribución)"),
+        ("age_buckets", "Antigüedad por estado (distribución)"),
         ("resolution_hist", "Tiempos de resolución (cerradas)"),
-        ("open_priority_pie", "Abiertas por Priority"),
-        ("open_status_bar", "Abiertas por Estado"),
+        ("open_priority_pie", "Issues abiertos por prioridad"),
+        ("open_status_bar", "Issues por Estado"),
     ]
 
 
-def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -> None:
+def render_trends_tab(
+    *, settings: Settings, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict
+) -> None:
     """Render trends tab with one selected chart and contextual insights."""
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
     kpis = kpis if isinstance(kpis, dict) else {}
+    ensure_learning_session_loaded(settings=settings)
 
     chart_options = available_trend_charts()
     id_to_label: Dict[str, str] = {cid: label for cid, label in chart_options}
@@ -328,6 +618,12 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
         format_func=lambda x: id_to_label.get(x, x),
         key="trend_chart_single",
         label_visibility="collapsed",
+    )
+    active_status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
+    trends_open_df, adapted_for_terminal = _effective_trends_open_scope(
+        dff=dff,
+        open_df=open_df,
+        active_status_filters=active_status_filters,
     )
 
     st.markdown(
@@ -353,8 +649,18 @@ def render_trends_tab(*, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict) -
 
     # 2) Contenedor del gráfico seleccionado
     with st.container(border=True, key="trend_chart_shell"):
-        _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=open_df)
-        _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=open_df)
+        if adapted_for_terminal and selected_chart not in {"open_priority_pie", "open_status_bar"}:
+            st.caption(
+                "Vista adaptada al estado finalista seleccionado (incluye incidencias finalizadas)."
+            )
+        _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=trends_open_df)
+        if selected_chart == "open_priority_pie":
+            insights_scope_df = _exclude_terminal_status_rows(trends_open_df)
+        elif selected_chart == "open_status_bar":
+            insights_scope_df = dff
+        else:
+            insights_scope_df = trends_open_df
+        _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=insights_scope_df)
 
 
 # -------------------------
@@ -369,8 +675,8 @@ def _render_trend_chart(
     if chart_id == "timeseries":
         ts_sig = dataframe_signature(
             dff,
-            columns=("created", "resolved"),
-            salt="trends.timeseries.v1",
+            columns=("created", "resolved", "status", "updated"),
+            salt="trends.timeseries.v2",
         )
         daily, _ = cached_by_signature(
             "trends.timeseries.daily",
@@ -381,7 +687,7 @@ def _render_trend_chart(
         if not isinstance(daily, pd.DataFrame) or daily.empty:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return
-        fig = px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
+        fig = px.line(daily, x="date", y=["created", "closed", "deployed", "open_backlog_proxy"])
         fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
@@ -444,7 +750,7 @@ def _render_trend_chart(
             "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
         )
         fig.update_traces(textposition="inside", textfont=dict(size=10, color=text_color))
-        age_totals = grp.groupby("bucket", dropna=False)["count"].sum()
+        age_totals = grp.groupby("bucket", dropna=False, observed=False)["count"].sum()
         _add_bar_totals(
             fig,
             x_values=bucket_order,
@@ -530,7 +836,9 @@ def _render_trend_chart(
             "61-90d",
             ">90d",
         ]
-        res_totals = grouped_res.groupby("resolution_bucket", dropna=False)["count"].sum()
+        res_totals = grouped_res.groupby("resolution_bucket", dropna=False, observed=False)[
+            "count"
+        ].sum()
         _add_bar_totals(
             fig,
             x_values=res_order,
@@ -550,13 +858,14 @@ def _render_trend_chart(
         return
 
     if chart_id == "open_priority_pie":
-        if open_df.empty or "priority" not in open_df.columns:
+        open_scope = _exclude_terminal_status_rows(open_df)
+        if open_scope.empty or "priority" not in open_scope.columns:
             st.info(
                 "No hay datos suficientes para el gráfico de Priority con los filtros actuales."
             )
             return
 
-        dff = open_df.copy()
+        dff = open_scope.copy()
         dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
 
         fig = px.pie(
@@ -569,7 +878,9 @@ def _render_trend_chart(
         fig.update_layout(title_text="")
         fig.update_traces(sort=False)
         fig = apply_plotly_bbva(fig, showlegend=True)
-        pie_export = dff.groupby("priority", dropna=False).size().reset_index(name="count")
+        pie_export = (
+            dff.groupby("priority", dropna=False, observed=False).size().reset_index(name="count")
+        )
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
@@ -581,19 +892,19 @@ def _render_trend_chart(
         return
 
     if chart_id == "open_status_bar":
-        if open_df.empty or "status" not in open_df.columns:
+        if dff.empty or "status" not in dff.columns:
             st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
             return
 
         status_sig = dataframe_signature(
-            open_df,
+            dff,
             columns=("status", "priority"),
-            salt="trends.open_status_bar.v1",
+            salt="trends.open_status_bar.v2",
         )
         status_payload, _ = cached_by_signature(
             "trends.open_status_bar.payload",
             status_sig,
-            lambda: _open_status_payload(open_df),
+            lambda: _open_status_payload(dff),
             max_entries=10,
         )
         grouped = status_payload.get("grouped") if isinstance(status_payload, dict) else None
@@ -622,7 +933,7 @@ def _render_trend_chart(
         )
         fig.update_layout(title_text="", xaxis_title="Estado", yaxis_title="Incidencias")
         fig.update_traces(textposition="inside", textfont=dict(size=10))
-        st_totals = grouped.groupby("status", dropna=False)["count"].sum()
+        st_totals = grouped.groupby("status", dropna=False, observed=False)["count"].sum()
         _add_bar_totals(
             fig,
             x_values=status_order,
@@ -647,34 +958,52 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
     """Render management-oriented insights for the selected trend chart."""
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
+    snapshot = build_operational_snapshot(dff=dff, open_df=open_df)
+    set_learning_snapshot(snapshot, persist=True)
+    baseline_snapshot = st.session_state.get(LEARNING_BASELINE_SNAPSHOT_KEY)
+    if not isinstance(baseline_snapshot, dict):
+        baseline_snapshot = {}
 
-    if chart_id == "timeseries":
-        _insights_timeseries(dff)
-        return
-    if chart_id == "age_buckets":
-        _insights_age(open_df)
-        return
-    if chart_id == "resolution_hist":
-        _insights_resolution(dff)
-        return
-    if chart_id == "open_priority_pie":
-        _insights_priority(open_df)
-        return
-    if chart_id == "open_status_bar":
-        _insights_status(open_df)
+    with st.container(border=True, key=f"trend_delta_shell_{chart_id}"):
+        st.markdown("#### Que cambio desde tu ultima sesion")
+        for line in build_session_delta_lines(snapshot, baseline_snapshot):
+            st.markdown(f"- {line}")
+
+    pack = build_trend_insight_pack(chart_id, dff=dff, open_df=open_df)
+    if not pack.metrics and not pack.cards:
+        st.caption("Sin insights para este grafico con los filtros actuales.")
         return
 
+    st.markdown("#### Insights accionables")
+    if pack.metrics:
+        cols = st.columns(len(pack.metrics))
+        for col, metric in zip(cols, pack.metrics):
+            with col:
+                st.metric(metric.label, metric.value)
 
-@dataclass(frozen=True)
-class _TrendActionInsight:
-    """Insight card model with optional filter actions and relevance score."""
+    active_filters = _active_filter_snapshot()
+    _track_context_interaction(chart_id=str(chart_id), active_filters=active_filters)
+    personalized_cards = _personalize_insights(
+        pack.cards, chart_id=str(chart_id), active_filters=active_filters
+    )
+    key_prefix = str(chart_id or "chart").strip().replace("-", "_")
 
-    title: str
-    body: str
-    status_filters: List[str] | None = None
-    priority_filters: List[str] | None = None
-    assignee_filters: List[str] | None = None
-    score: float = 0.0
+    _render_insight_cards(personalized_cards, key_prefix=key_prefix, chart_id=str(chart_id))
+    _register_shown_insights(
+        personalized_cards,
+        chart_id=str(chart_id),
+        render_token=_render_token(
+            chart_id=str(chart_id), dff=dff, open_df=open_df, active_filters=active_filters
+        ),
+    )
+
+    interactions = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
+    if interactions > 0:
+        st.caption(
+            f"Priorizacion adaptativa activa: {interactions} interacciones consideradas en esta sesion."
+        )
+    if pack.executive_tip:
+        st.caption(pack.executive_tip)
 
 
 def _jump_to_issues(
@@ -682,15 +1011,28 @@ def _jump_to_issues(
     status_filters: List[str] | None = None,
     priority_filters: List[str] | None = None,
     assignee_filters: List[str] | None = None,
+    insight_id: str | None = None,
 ) -> None:
     """Open Issues tab and sync filters derived from an actionable insight."""
     st.session_state["__jump_to_tab"] = "issues"
     st.session_state[FILTER_STATUS_KEY] = list(status_filters or [])
     st.session_state[FILTER_PRIORITY_KEY] = list(priority_filters or [])
     st.session_state[FILTER_ASSIGNEE_KEY] = list(assignee_filters or [])
+    if insight_id:
+        state = _ensure_learning_state()
+        clicked_counts = _dict_any(state.get("clicked_counts"))
+        clicked_counts[insight_id] = int(clicked_counts.get(insight_id, 0) or 0) + 1
+        state["clicked_counts"] = clicked_counts
+        state["last_click_filters"] = {
+            "status": list(status_filters or []),
+            "priority": list(priority_filters or []),
+            "assignee": list(assignee_filters or []),
+        }
+        st.session_state[LEARNING_STATE_KEY] = state
+        increment_learning_interactions(step=1, persist=True)
 
 
-def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) -> None:
+def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str, chart_id: str) -> None:
     """Render insight cards; only cards with filters are shown as actionable links."""
     items = [c for c in cards if str(c.title or "").strip() and str(c.body or "").strip()]
     items = sorted(items, key=lambda c: float(c.score), reverse=True)
@@ -707,16 +1049,30 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
             padding: 0 !important;
             border: 0 !important;
             background: transparent !important;
-            color: var(--bbva-text) !important;
+            color: var(--bbva-action-link) !important;
+            font-family: var(--bbva-font-sans) !important;
             font-size: 0.98rem !important;
-            font-weight: 800 !important;
+            font-weight: 760 !important;
             border-radius: 8px !important;
             text-align: left !important;
             box-shadow: none !important;
           }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button *,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button svg {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button div[data-testid="stMarkdownContainer"] p,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button div[data-testid="stMarkdownContainer"] strong {
+            color: var(--bbva-action-link) !important;
+          }
           [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover {
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-action-link-hover) !important;
             transform: translateX(1px);
+          }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover div[data-testid="stMarkdownContainer"] p,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover div[data-testid="stMarkdownContainer"] strong {
+            color: var(--bbva-action-link-hover) !important;
           }
         </style>
         """,
@@ -726,6 +1082,7 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
     cols = st.columns(2, gap="small")
     for i, item in enumerate(items[:6]):
         has_action = bool(item.status_filters or item.priority_filters or item.assignee_filters)
+        insight_id = _insight_identity(chart_id, item)
         with cols[i % 2]:
             with st.container(border=True, key=f"trins_card_{key_prefix}_{i}"):
                 if has_action:
@@ -739,560 +1096,9 @@ def _render_insight_cards(cards: List[_TrendActionInsight], *, key_prefix: str) 
                                 "status_filters": item.status_filters,
                                 "priority_filters": item.priority_filters,
                                 "assignee_filters": item.assignee_filters,
+                                "insight_id": insight_id,
                             },
                         )
                 else:
                     st.markdown(f"**{item.title}**")
                 st.markdown(item.body)
-
-
-def _insights_timeseries(dff: pd.DataFrame) -> None:
-    if dff.empty or "created" not in dff.columns:
-        st.caption("Sin datos suficientes para generar insights de evolución.")
-        return
-
-    df = dff.copy()
-
-    df["__created_dt"] = _to_dt_naive(df["created"])
-    if "resolved" in df.columns:
-        df["__resolved_dt"] = _to_dt_naive(df["resolved"])
-    else:
-        df["__resolved_dt"] = pd.NaT
-
-    created = df[df["__created_dt"].notna()].copy()
-    if created.empty:
-        st.caption("Sin created válidas para generar insights.")
-        return
-
-    max_dt = created["__created_dt"].max()
-    end_ts = pd.Timestamp(max_dt).normalize()
-    start_ts = end_ts - pd.Timedelta(days=90)
-
-    created_day = created["__created_dt"].dt.normalize()
-    created_counts = created_day[created_day >= start_ts].value_counts()
-
-    closed = df[df["__resolved_dt"].notna()].copy()
-    closed_day = (
-        closed["__resolved_dt"].dt.normalize()
-        if not closed.empty
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    closed_counts = (
-        closed_day[closed_day >= start_ts].value_counts()
-        if not closed_day.empty
-        else pd.Series([], dtype=int)
-    )
-
-    days = pd.date_range(start=start_ts, end=end_ts, freq="D")
-    created_series = pd.Series({d: int(created_counts.get(d, 0)) for d in days})
-    closed_series = pd.Series({d: int(closed_counts.get(d, 0)) for d in days})
-
-    net = created_series - closed_series
-    backlog_proxy = net.cumsum()
-
-    last14 = backlog_proxy.tail(14)
-    prev14 = backlog_proxy.tail(28).head(14) if len(backlog_proxy) >= 28 else None
-
-    slope_last = float(last14.iloc[-1] - last14.iloc[0]) if len(last14) >= 2 else 0.0
-    slope_prev = (
-        float(prev14.iloc[-1] - prev14.iloc[0]) if prev14 is not None and len(prev14) >= 2 else 0.0
-    )
-
-    created_14 = int(created_series.tail(14).sum())
-    closed_14 = int(closed_series.tail(14).sum())
-    flow_ratio = (created_14 / closed_14) if closed_14 > 0 else np.inf
-
-    weekly_net = float(net.tail(28).mean()) * 7.0 if len(net) >= 7 else float(net.mean()) * 7.0
-    risk_flag = weekly_net > 0
-
-    st.markdown("#### Insights accionables")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Creación (últ. 14d)", created_14)
-    with c2:
-        st.metric("Cierre (últ. 14d)", closed_14)
-    with c3:
-        st.metric("Ratio creación/cierre", "∞" if flow_ratio == np.inf else f"{flow_ratio:.2f}")
-
-    cards: List[_TrendActionInsight] = []
-
-    if slope_last > 0 and (prev14 is None or slope_last > slope_prev):
-        cards.append(
-            _TrendActionInsight(
-                title="Aceleración de backlog",
-                body=(
-                    f"En los últimos 14 días el backlog proxy sube **+{int(slope_last)}** "
-                    f"(vs **+{int(slope_prev)}** en los 14 días anteriores). Señal de saturación del flujo."
-                ),
-                score=max(20.0, float(slope_last)),
-            )
-        )
-    elif slope_last > 0:
-        cards.append(
-            _TrendActionInsight(
-                title="Backlog creciendo",
-                body=(
-                    f"El backlog proxy sube **+{int(slope_last)}** en 14 días. "
-                    "Prioriza cerrar antes de seguir abriendo."
-                ),
-                score=max(10.0, float(slope_last)),
-            )
-        )
-    elif slope_last < 0:
-        cards.append(
-            _TrendActionInsight(
-                title="Backlog bajando",
-                body=(
-                    f"El backlog proxy cae **{int(abs(slope_last))}** en 14 días. "
-                    "Buen momento para atacar deuda técnica/causas raíz."
-                ),
-                score=6.0,
-            )
-        )
-    else:
-        cards.append(
-            _TrendActionInsight(
-                title="Backlog estable",
-                body="Se mantiene estable en los últimos 14 días (señal de equilibrio).",
-                score=2.0,
-            )
-        )
-
-    if flow_ratio == np.inf:
-        cards.append(
-            _TrendActionInsight(
-                title="Cierre a cero",
-                body="No hay cierres en 14 días: revisa bloqueos (QA, releases) o colas de validación.",
-                score=30.0,
-            )
-        )
-    elif flow_ratio >= 1.2:
-        cards.append(
-            _TrendActionInsight(
-                title="Capacidad insuficiente",
-                body=(
-                    "Estás abriendo bastante más de lo que cierras. "
-                    "Acción: fija un objetivo semanal de cierre y limita casos en curso."
-                ),
-                score=18.0 + float(flow_ratio),
-            )
-        )
-    elif flow_ratio <= 0.9:
-        cards.append(
-            _TrendActionInsight(
-                title="Ventana de limpieza",
-                body=(
-                    "Cierras más de lo que abres. Usa el margen para eliminar reincidencias "
-                    "y automatizar pruebas."
-                ),
-                score=7.0,
-            )
-        )
-
-    if risk_flag:
-        cards.append(
-            _TrendActionInsight(
-                title="Tendencia semanal neta positiva",
-                body=(
-                    f"~**{weekly_net:.1f}** issues/semana. "
-                    "Si se mantiene, el backlog seguirá creciendo."
-                ),
-                score=14.0 + float(weekly_net),
-            )
-        )
-
-    _render_insight_cards(cards[:5], key_prefix="timeseries")
-
-    st.caption(
-        "Tip de gestión: si el ratio creación/cierre > 1 de forma sostenida, cualquier mejora visual será temporal. "
-        "La palanca real está en reducir entrada (calidad/triage) o aumentar cierre (flujo/bloqueos)."
-    )
-
-
-def _insights_age(open_df: pd.DataFrame) -> None:
-    if open_df is None or open_df.empty or "created" not in open_df.columns:
-        st.caption("Sin datos suficientes para insights de antigüedad.")
-        return
-
-    df = open_df.copy()
-    df["__created_dt"] = _to_dt_naive(df["created"])
-    now = pd.Timestamp.utcnow().tz_localize(None)
-
-    df = df[df["__created_dt"].notna()].copy()
-    if df.empty:
-        st.caption("No hay created válidas para calcular antigüedad.")
-        return
-
-    df["age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
-    p50 = float(df["age_days"].median())
-    p90 = float(df["age_days"].quantile(0.90))
-    over30 = int((df["age_days"] > 30).sum())
-    total = int(len(df))
-    pct_over30 = (over30 / total * 100.0) if total else 0.0
-
-    st.markdown("#### Insights accionables")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Antigüedad típica", f"{p50:.0f} días")
-    with c2:
-        st.metric("Casos más atascados", f"{p90:.0f} días")
-    with c3:
-        st.metric(">30 días", f"{pct_over30:.1f}%")
-
-    cards: List[_TrendActionInsight] = []
-    cards.append(
-        _TrendActionInsight(
-            title="Atasco en casos antiguos",
-            body=(
-                "Cuando los casos más lentos tardan mucho, el equipo pierde foco y velocidad. "
-                "Separar esos casos en revisión específica mejora el ritmo general."
-            ),
-            score=max(8.0, p90 / 15.0),
-        )
-    )
-
-    if pct_over30 >= 25:
-        cards.append(
-            _TrendActionInsight(
-                title="Backlog envejecido",
-                body=(
-                    f"**{pct_over30:.1f}%** supera 30 días. "
-                    "Acción: clínica semanal para cerrar, re-priorizar o descomponer."
-                ),
-                score=float(pct_over30),
-            )
-        )
-
-    if "priority" in df.columns:
-        tail = df[df["age_days"] > 30].copy()
-        if not tail.empty:
-            pr = tail["priority"].astype(str).value_counts().head(3)
-            top_prios = ", ".join([f"{k} ({int(v)})" for k, v in pr.items()])
-            cards.append(
-                _TrendActionInsight(
-                    title="Dónde duele la cola",
-                    body=(
-                        f"En >30 días dominan: **{top_prios}**. "
-                        "Si High/Highest aparecen, hay riesgo de impacto cliente."
-                    ),
-                    priority_filters=[str(p) for p in pr.index.tolist()],
-                    score=12.0 + float(len(pr)),
-                )
-            )
-
-    cards.append(
-        _TrendActionInsight(
-            title="Política útil de flujo",
-            body=(
-                "Para evitar envejecimiento, limita cuántos casos caben por estado "
-                "y exige criterio de salida."
-            ),
-            status_filters=["En progreso", "In Progress", "To Rework", "Test", "Ready To Verify"],
-            score=5.0,
-        )
-    )
-
-    _render_insight_cards(cards[:5], key_prefix="age")
-
-
-def _insights_resolution(dff: pd.DataFrame) -> None:
-    if dff is None or dff.empty or "resolved" not in dff.columns or "created" not in dff.columns:
-        st.caption("Sin datos suficientes para insights de resolución.")
-        return
-
-    df = dff.copy()
-    df["__created_dt"] = _to_dt_naive(df["created"])
-    df["__resolved_dt"] = _to_dt_naive(df["resolved"])
-
-    closed = df[df["__created_dt"].notna() & df["__resolved_dt"].notna()].copy()
-    if closed.empty:
-        st.caption("No hay cerradas con fechas suficientes para este filtro.")
-        return
-
-    closed["resolution_days"] = (
-        (closed["__resolved_dt"] - closed["__created_dt"]).dt.total_seconds() / 86400.0
-    ).clip(lower=0.0)
-
-    med = float(closed["resolution_days"].median())
-    p90 = float(closed["resolution_days"].quantile(0.90))
-    p95 = float(closed["resolution_days"].quantile(0.95))
-
-    st.markdown("#### Insights accionables")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Resolución habitual", f"{med:.1f} d")
-    with c2:
-        st.metric("Resolución lenta", f"{p90:.1f} d")
-    with c3:
-        st.metric("Casos muy lentos", f"{p95:.1f} d")
-
-    cards: List[_TrendActionInsight] = []
-    cards.append(
-        _TrendActionInsight(
-            title="Impacto de casos lentos",
-            body=(
-                "No basta con cerrar rápido los fáciles; si mejoras los más atascados, "
-                "la percepción del cliente mejora de verdad."
-            ),
-            score=max(6.0, p90 / 10.0),
-        )
-    )
-
-    if p95 > med * 3:
-        cards.append(
-            _TrendActionInsight(
-                title="Cola de casos muy lentos",
-                body=(
-                    "Algunos casos tardan mucho más que el promedio. "
-                    "Clasifica por causa y asigna responsable."
-                ),
-                score=max(10.0, p95 / max(med, 1.0)),
-            )
-        )
-
-    if "priority" in closed.columns:
-        grp = (
-            closed.groupby(closed["priority"].astype(str))["resolution_days"]
-            .median()
-            .sort_values(ascending=False)
-        )
-        if not grp.empty:
-            worst = str(grp.index[0])
-            cards.append(
-                _TrendActionInsight(
-                    title="Dónde se atasca",
-                    body=(
-                        f"La mediana peor está en **{worst}** (**{grp.iloc[0]:.1f} d**). "
-                        "Revisa pasos extra que alargan el ciclo."
-                    ),
-                    priority_filters=[worst],
-                    score=float(grp.iloc[0]),
-                )
-            )
-
-    cards.append(
-        _TrendActionInsight(
-            title="Vía rápida de incidentes",
-            body=("Plantilla + checklist de evidencias reduce rebotes y acelera diagnóstico."),
-            score=3.0,
-        )
-    )
-
-    _render_insight_cards(cards[:5], key_prefix="resolution")
-
-
-def _insights_priority(open_df: pd.DataFrame) -> None:
-    if open_df is None or open_df.empty or "priority" not in open_df.columns:
-        st.caption("Sin datos suficientes para insights por priority.")
-        return
-
-    df = open_df.copy()
-    total = int(len(df))
-    counts = df["priority"].astype(str).value_counts()
-    top = str(counts.index[0]) if not counts.empty else None
-
-    from bug_resolution_radar.ui.common import priority_rank  # local import to keep module clean
-
-    df["_prio_rank"] = df["priority"].astype(str).map(priority_rank).fillna(99).astype(int)
-    df["_weight"] = (6 - df["_prio_rank"]).clip(lower=1, upper=6)
-    risk_score = int(df["_weight"].sum())
-
-    st.markdown("#### Insights accionables")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Total abiertas", total)
-    with c2:
-        st.metric("Priority dominante", top or "—")
-    with c3:
-        st.metric("Riesgo ponderado", risk_score)
-
-    cards: List[_TrendActionInsight] = []
-    if top:
-        pct = (int(counts.iloc[0]) / total * 100.0) if total else 0.0
-        cards.append(
-            _TrendActionInsight(
-                title="Concentración de prioridad",
-                body=(
-                    f"**{top}** representa **{pct:.1f}%** del backlog. "
-                    "Si es Medium/Low y crece, puede ocultar deuda."
-                ),
-                priority_filters=[top],
-                score=8.0 + pct,
-            )
-        )
-
-    cards.append(
-        _TrendActionInsight(
-            title="Riesgo ponderado",
-            body=(
-                "No basta contar issues; una High puede equivaler a varias Low en impacto. "
-                "Usa este score para decidir si activar modo incidente."
-            ),
-            score=float(risk_score / max(total, 1)),
-        )
-    )
-
-    if "status" in df.columns:
-        early = {"New", "Analysing", "Analyzing"}
-        crit = df[df["_prio_rank"] <= 2]
-        if not crit.empty:
-            crit_early = crit[crit["status"].astype(str).isin(early)]
-            if len(crit_early) > 0:
-                cards.append(
-                    _TrendActionInsight(
-                        title="Críticas sin arrancar",
-                        body=(
-                            f"**{len(crit_early)}** issues High/Highest siguen en estados iniciales. "
-                            "Asigna owner hoy y fuerza primer diagnóstico."
-                        ),
-                        priority_filters=["Supone un impedimento", "Highest", "High"],
-                        status_filters=["New", "Analysing", "Analyzing"],
-                        score=15.0 + float(len(crit_early)),
-                    )
-                )
-
-    cards.append(
-        _TrendActionInsight(
-            title="Gobierno de prioridades",
-            body=("Si todo es High, nada es High. Mantén cupo de prioridades altas activas."),
-            priority_filters=["Supone un impedimento", "Highest", "High"],
-            score=5.0,
-        )
-    )
-
-    _render_insight_cards(cards[:5], key_prefix="priority")
-
-
-def _insights_status(open_df: pd.DataFrame) -> None:
-    if open_df is None or open_df.empty or "status" not in open_df.columns:
-        st.caption("Sin datos suficientes para insights por estado.")
-        return
-
-    df = open_df.copy()
-    df["status"] = normalize_text_col(df["status"], "(sin estado)")
-    counts = df["status"].astype(str).value_counts()
-    total = int(len(df))
-    top_status = str(counts.index[0]) if not counts.empty else None
-    top_share = (int(counts.iloc[0]) / total * 100.0) if (total and not counts.empty) else 0.0
-
-    st.markdown("#### Insights accionables")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Total abiertas", total)
-    with c2:
-        st.metric("Estado dominante", top_status or "—")
-    with c3:
-        st.metric("Concentración top estado", f"{top_share:.1f}%")
-
-    cards: List[_TrendActionInsight] = []
-    if top_status:
-        cards.append(
-            _TrendActionInsight(
-                title="Cuello de botella probable",
-                body=(
-                    f"**{top_share:.1f}%** del backlog está en **{top_status}**. "
-                    "Revisa la condición de salida que está fallando."
-                ),
-                status_filters=[top_status],
-                score=top_share,
-            )
-        )
-
-    active_states = {
-        "En progreso",
-        "In Progress",
-        "Analysing",
-        "Analyzing",
-        "Ready To Verify",
-        "To Rework",
-        "Test",
-    }
-    active = df[df["status"].astype(str).isin(active_states)]
-    active_pct = (len(active) / total * 100.0) if total else 0.0
-
-    cards.append(
-        _TrendActionInsight(
-            title="Carga activa estimada",
-            body=(
-                f"**{active_pct:.1f}%** está en estados activos. "
-                "Si es alto, suele indicar multitarea y cambios de contexto."
-            ),
-            status_filters=[
-                s for s in active_states if s in df["status"].astype(str).unique().tolist()
-            ],
-            score=active_pct,
-        )
-    )
-
-    triage_states = {"New", "Analysing", "Analyzing"}
-    triage = df[df["status"].astype(str).isin(triage_states)]
-    triage_pct = (len(triage) / total * 100.0) if total else 0.0
-    if triage_pct >= 40:
-        cards.append(
-            _TrendActionInsight(
-                title="Deuda de triage",
-                body=(
-                    f"**{triage_pct:.1f}%** en New/Analysing. "
-                    "Haz sesión diaria breve para convertir entrada en decisiones."
-                ),
-                status_filters=["New", "Analysing", "Analyzing"],
-                score=triage_pct + 5.0,
-            )
-        )
-
-    # Flujo final: Accepted -> Ready to deploy -> Deployed
-    accepted_cnt = int((df["status"].astype(str) == "Accepted").sum())
-    rtd_cnt = int((df["status"].astype(str) == "Ready to deploy").sum())
-    deployed_cnt = int((df["status"].astype(str) == "Deployed").sum())
-
-    if accepted_cnt > 0:
-        rtd_conv = (rtd_cnt / accepted_cnt) * 100.0
-        if rtd_conv < 35.0:
-            cards.append(
-                _TrendActionInsight(
-                    title="Atasco post-Accepted",
-                    body=(
-                        f"Hay **{accepted_cnt}** en Accepted y solo **{rtd_cnt}** en Ready to deploy "
-                        f"(conversión **{rtd_conv:.1f}%**)."
-                    ),
-                    status_filters=["Accepted", "Ready to deploy"],
-                    score=max(12.0, float(accepted_cnt - rtd_cnt)),
-                )
-            )
-
-    if rtd_cnt > 0:
-        dep_conv = (deployed_cnt / rtd_cnt) * 100.0
-        if dep_conv < 70.0:
-            cards.append(
-                _TrendActionInsight(
-                    title="Cuello en release",
-                    body=(
-                        f"Hay **{rtd_cnt}** en Ready to deploy y **{deployed_cnt}** en Deployed "
-                        f"(conversión **{dep_conv:.1f}%**)."
-                    ),
-                    status_filters=["Ready to deploy", "Deployed"],
-                    score=max(10.0, float(rtd_cnt - deployed_cnt)),
-                )
-            )
-    elif accepted_cnt > 0 and deployed_cnt == 0:
-        cards.append(
-            _TrendActionInsight(
-                title="Flujo detenido al final",
-                body="Existen Accepted pero no llegan a Ready to deploy ni a Deployed.",
-                status_filters=["Accepted", "Ready to deploy"],
-                score=18.0 + float(accepted_cnt),
-            )
-        )
-
-    cards.append(
-        _TrendActionInsight(
-            title="Política de tiempos por estado",
-            body=(
-                "Define tiempos máximos por estado para hacer visibles los cuellos "
-                "sin revisar caso por caso."
-            ),
-            score=3.0,
-        )
-    )
-
-    _render_insight_cards(cards[:5], key_prefix="status")

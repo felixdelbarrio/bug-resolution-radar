@@ -9,6 +9,10 @@ Dashboard local para seguimiento de incidencias, rendimiento de resolución y sa
 [![Typecheck (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/typecheck.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/typecheck.yml?query=branch%3Amaster)
 [![Coverage (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/coverage.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/coverage.yml?query=branch%3Amaster)
 [![CodeQL (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml?query=branch%3Amaster)
+[![Build Linux (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-linux.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-linux.yml?query=branch%3Amaster)
+[![Build macOS (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml?query=branch%3Amaster)
+[![Build Windows (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml?query=branch%3Amaster)
+[![Release Binaries](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/release-binaries.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/release-binaries.yml)
 
 ### Rama `develop`
 [![Format (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/format.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/format.yml?query=branch%3Adevelop)
@@ -32,7 +36,7 @@ Centralizar en una sola aplicación local:
 - Filtros globales sincronizados para evitar incoherencia entre tabs.
 - Exportación CSV de issues filtradas.
 - Persistencia local de datos y notas.
-- Workflows de GitHub Actions para format, typecheck, coverage y CodeQL.
+- Workflows de GitHub Actions para format, typecheck, coverage, CodeQL, build binario por entorno y release.
 
 ## Arquitectura (alto nivel)
 
@@ -40,6 +44,7 @@ Centralizar en una sola aplicación local:
 - `src/bug_resolution_radar/ui/`: app Streamlit, páginas, componentes y dashboard modular.
 - `src/bug_resolution_radar/kpis.py`: cálculo de métricas y gráficas base.
 - `src/bug_resolution_radar/insights.py`: lógica de clustering e insights de incidencias similares.
+- `src/bug_resolution_radar/ui/insights/engine.py`: motor de insights adaptativos para tendencias y pestañas analíticas.
 - `src/bug_resolution_radar/security.py`: utilidades de endurecimiento y sanitización.
 - `tests/`: suite de tests unitarios y de regresión.
 
@@ -74,7 +79,7 @@ El proyecto usa `.env` (puedes partir de `.env.example`).
 
 Variables más relevantes:
 
-- App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`.
+- App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`.
 - Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_BROWSER`.
 - Helix: `HELIX_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
 - KPIs: `KPI_FORTNIGHT_DAYS`, `KPI_OPEN_AGE_X_DAYS`, `KPI_AGE_BUCKETS`.

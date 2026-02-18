@@ -53,10 +53,12 @@ def inject_insights_chip_css() -> None:
             line-height: 1.25;
           }
           .ins-key-link {
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-action-link) !important;
+            font-family: var(--bbva-font-sans) !important;
             text-decoration: none;
           }
           .ins-key-link:hover {
+            color: var(--bbva-action-link-hover) !important;
             text-decoration: underline;
           }
           .ins-chip {
