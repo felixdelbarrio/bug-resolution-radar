@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -145,7 +145,8 @@ _YELLOW_1 = "#FBBF24"
 _GREEN_1 = "#15803D"
 _GREEN_2 = "#22A447"
 _GREEN_3 = "#4CAF50"
-_GREEN_GOAL = "#00B86E"
+# Stronger goal green for Deployed; intentionally distinct from Accepted/Ready to Deploy.
+_GREEN_GOAL = "#008F2A"
 _NEUTRAL = "#E2E6EE"
 
 
@@ -215,9 +216,19 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha:.3f})"
 
 
+def chip_tone_for_color(hex_color: str) -> Tuple[float, float]:
+    """Return border/bg alpha tuple for chip rendering by semantic color."""
+    normalized = (hex_color or "").strip().upper()
+    if normalized == _GREEN_GOAL:
+        # Stronger fill for goal-state chips so Deployed is clearly differentiated.
+        return (0.78, 0.26)
+    return (0.62, 0.16)
+
+
 def chip_style_from_color(hex_color: str) -> str:
-    border = _hex_to_rgba(hex_color, 0.62)
-    bg = _hex_to_rgba(hex_color, 0.16)
+    border_alpha, bg_alpha = chip_tone_for_color(hex_color)
+    border = _hex_to_rgba(hex_color, border_alpha)
+    bg = _hex_to_rgba(hex_color, bg_alpha)
     return (
         f"color:{hex_color}; border:1px solid {border}; background:{bg}; "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"

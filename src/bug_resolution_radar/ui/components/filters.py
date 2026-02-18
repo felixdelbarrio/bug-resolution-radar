@@ -154,7 +154,7 @@ def _inject_combo_signal_script() -> None:
             const doc = root && root.document;
             if (!doc) return;
             const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
-            const PAINTER_VERSION = 5; // bump to force refresh of painter logic/colors in active sessions
+            const PAINTER_VERSION = 8; // bump to force refresh of painter logic/colors in active sessions
 
             const normalizeText = (raw) =>
               String(raw || "")
@@ -195,7 +195,7 @@ def _inject_combo_signal_script() -> None:
             const GOAL_GREEN =
               (root.getComputedStyle && doc.documentElement
                 ? String(root.getComputedStyle(doc.documentElement).getPropertyValue("--bbva-goal-green") || "").trim()
-                : "") || "#00B86E";
+                : "") || "#008F2A";
 
             const toRgba = (hex, alpha) => {
               const h = String(hex || "").replace("#", "");
@@ -323,8 +323,12 @@ def _inject_combo_signal_script() -> None:
                 clearTagSignal(el);
                 return;
               }
-              el.style.setProperty("background", toRgba(color, 0.14), "important");
-              el.style.setProperty("border", "1px solid " + toRgba(color, 0.52), "important");
+              const token = canonicalToken(label);
+              const isGoal = token === "deployed";
+              const bgAlpha = isGoal ? 0.24 : 0.14;
+              const borderAlpha = isGoal ? 0.72 : 0.52;
+              el.style.setProperty("background", toRgba(color, bgAlpha), "important");
+              el.style.setProperty("border", "1px solid " + toRgba(color, borderAlpha), "important");
               el.style.setProperty("color", color, "important");
               el.style.setProperty("background-image", "none", "important");
               el.querySelectorAll("*").forEach((n) => {

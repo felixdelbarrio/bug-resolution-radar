@@ -11,6 +11,7 @@ import streamlit as st
 
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
+    chip_tone_for_color,
     priority_color,
     priority_rank,
     status_color,
@@ -117,8 +118,9 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
             "border-radius: 999px !important;"
         )
 
-    border = _hex_to_rgba(color, 0.62)
-    bg = _hex_to_rgba(color, 0.16)
+    border_alpha, bg_alpha = chip_tone_for_color(color)
+    border = _hex_to_rgba(color, border_alpha)
+    bg = _hex_to_rgba(color, bg_alpha)
     return (
         f"color: {color} !important; "
         f"background: {bg} !important; "
