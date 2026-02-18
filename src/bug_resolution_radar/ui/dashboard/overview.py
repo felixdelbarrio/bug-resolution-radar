@@ -353,16 +353,22 @@ def render_overview_kpis(
             padding: 0 !important;
             border: 0 !important;
             background: transparent !important;
-            color: var(--bbva-text) !important;
+            color: var(--bbva-action-link) !important;
+            font-family: var(--bbva-font-sans) !important;
             font-size: 0.98rem !important;
-            font-weight: 800 !important;
+            font-weight: 760 !important;
             letter-spacing: 0 !important;
             border-radius: 8px !important;
             text-align: left !important;
             box-shadow: none !important;
           }
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button *,
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button svg {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
           [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:hover {
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-action-link-hover) !important;
             transform: translateX(1px);
           }
           [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:focus-visible {

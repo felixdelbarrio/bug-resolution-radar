@@ -35,10 +35,16 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-active-bg: #355A86;
             --bbva-tab-active-border: #6F92BF;
             --bbva-tab-active-text: #FFFFFF;
+            --bbva-goal-green: #00A65A;
+            --bbva-action-link: #154A9C;
+            --bbva-action-link-hover: #0D3778;
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
             --background-color: var(--bbva-surface-2);
             --secondary-background-color: var(--bbva-surface);
+            --bbva-font-sans: "BBVA Benton Sans", "Benton Sans", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --bbva-font-headline: "Tiempos Headline", "Tiempos Headline Bold", Georgia, "Times New Roman", serif;
+            --bbva-font-label: "Tiempos Headline", "Tiempos Headline Bold", "BBVA Benton Sans", "Benton Sans", Georgia, "Times New Roman", serif;
           }
         """
     else:
@@ -64,10 +70,16 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-active-bg: #6F839E;
             --bbva-tab-active-border: #657A94;
             --bbva-tab-active-text: #F8FBFF;
+            --bbva-goal-green: #00A65A;
+            --bbva-action-link: #1C53B7;
+            --bbva-action-link-hover: #123F90;
             --primary-color: var(--bbva-primary);
             --text-color: var(--bbva-text);
             --background-color: var(--bbva-surface-2);
             --secondary-background-color: var(--bbva-surface);
+            --bbva-font-sans: "BBVA Benton Sans", "Benton Sans", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --bbva-font-headline: "Tiempos Headline", "Tiempos Headline Bold", Georgia, "Times New Roman", serif;
+            --bbva-font-label: "Tiempos Headline", "Tiempos Headline Bold", "BBVA Benton Sans", "Benton Sans", Georgia, "Times New Roman", serif;
           }
         """
 
@@ -77,14 +89,14 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
 
           html, body, [class*="stApp"] {
             color: var(--bbva-text);
-            font-family: "BBVA Benton Sans", "Benton Sans", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: var(--bbva-font-sans);
             font-size: 16px;
             line-height: 1.5;
           }
 
           /* Use serif only for headline-like elements */
           .bbva-hero-title {
-            font-family: "Tiempos Headline", "Tiempos Headline Bold", Georgia, "Times New Roman", serif;
+            font-family: var(--bbva-font-headline);
             letter-spacing: -0.01em;
           }
 
@@ -415,12 +427,12 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
             background: transparent !important;
             position: relative;
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: color-mix(in srgb, var(--bbva-text) 62%, transparent);
+            padding-left: 0.66rem !important;
+            --bbva-opt-dot: transparent;
           }
           div[data-baseweb="popover"] [role="option"]::before,
           div[data-baseweb="popover"] li::before {
-            content: "";
+            content: none;
             width: 0.54rem;
             height: 0.54rem;
             border-radius: 999px;
@@ -440,43 +452,75 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
           }
           /* Option semáforo en listados (status/priority); el chip seleccionado mantiene solo fondo/borde */
-          div[data-baseweb="popover"] [role="option"][aria-label*="new" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="analysing" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="blocked" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="created" i] {
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="new" i], [title*="new" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="created" i], [title*="created" i]) {
+            padding-left: 1.70rem !important;
             --bbva-opt-dot: #D24756;
             border-left: 2px solid rgba(210,71,86,0.72);
           }
-          div[data-baseweb="popover"] [role="option"][aria-label*="en progreso" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="in progress" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="to rework" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="test" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="ready to verify" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="open" i] {
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="test" i], [title*="test" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="open" i], [title*="open" i]) {
+            padding-left: 1.70rem !important;
             --bbva-opt-dot: #E08A00;
             border-left: 2px solid rgba(224,138,0,0.72);
           }
-          div[data-baseweb="popover"] [role="option"][aria-label*="accepted" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="ready to deploy" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="deployed" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="closed" i] {
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i]) {
+            padding-left: 1.70rem !important;
+            --bbva-opt-dot: var(--bbva-goal-green);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-goal-green) 72%, transparent);
+          }
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="closed" i], [title*="closed" i]) {
+            padding-left: 1.70rem !important;
             --bbva-opt-dot: #1E9E53;
             border-left: 2px solid rgba(30,158,83,0.72);
           }
-          div[data-baseweb="popover"] [role="option"][aria-label*="supone un impedimento" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="highest" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="high" i] {
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="highest" i], [title*="highest" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="high" i], [title*="high" i]) {
+            padding-left: 1.70rem !important;
             --bbva-opt-dot: #B4232A;
             border-left: 2px solid rgba(180,35,42,0.72);
           }
-          div[data-baseweb="popover"] [role="option"][aria-label*="medium" i] {
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="medium" i], [title*="medium" i]) {
+            padding-left: 1.70rem !important;
             --bbva-opt-dot: #E08A00;
             border-left: 2px solid rgba(224,138,0,0.72);
           }
-          div[data-baseweb="popover"] [role="option"][aria-label*="low" i],
-          div[data-baseweb="popover"] [role="option"][aria-label*="lowest" i] {
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="low" i], [title*="low" i]),
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i]) {
+            padding-left: 1.70rem !important;
             --bbva-opt-dot: #1E9E53;
             border-left: 2px solid rgba(30,158,83,0.72);
+          }
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="new" i], [title*="new" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="created" i], [title*="created" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="test" i], [title*="test" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="open" i], [title*="open" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="closed" i], [title*="closed" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="highest" i], [title*="highest" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="high" i], [title*="high" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="medium" i], [title*="medium" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="low" i], [title*="low" i])::before,
+          div[data-baseweb="popover"] [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i])::before {
+            content: "";
           }
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
@@ -562,6 +606,33 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-testid="stPills"] button:focus-visible {
             outline: none !important;
             box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
+          }
+
+          /* Action labels: denser, executive tone without altering status/priority chips */
+          .flt-action-chip,
+          .flt-action-chip-lbl,
+          .nba-kicker {
+            font-family: var(--bbva-font-sans) !important;
+            font-weight: 790 !important;
+            letter-spacing: 0.01em;
+            font-kerning: normal;
+          }
+          [class*="st-key-nba_pending_slot_"] div[data-testid="stButton"] > button,
+          [class*="st-key-nba_review_slot_"] div[data-testid="stButton"] > button,
+          [class*="st-key-nba_pending_next_"] div[data-testid="stButton"] > button,
+          [class*="st-key-nba_top_review_"] div[data-testid="stButton"] > button,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button,
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button {
+            font-family: var(--bbva-font-sans) !important;
+            color: var(--bbva-action-link) !important;
+          }
+          [class*="st-key-nba_pending_slot_"] div[data-testid="stButton"] > button:hover,
+          [class*="st-key-nba_review_slot_"] div[data-testid="stButton"] > button:hover,
+          [class*="st-key-nba_pending_next_"] div[data-testid="stButton"] > button:hover,
+          [class*="st-key-nba_top_review_"] div[data-testid="stButton"] > button:hover,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover,
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:hover {
+            color: var(--bbva-action-link-hover) !important;
           }
 
           /* Tabs: underline accent color */

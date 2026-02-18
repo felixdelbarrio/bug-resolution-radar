@@ -6,7 +6,10 @@ Generar mensajes ejecutivos dinamicos, no estaticos, adaptados al estado real de
 ## Dónde vive
 - Motor unificado: `src/bug_resolution_radar/ui/insights/engine.py`
 - Persistencia de aprendizaje: `src/bug_resolution_radar/ui/insights/learning_store.py`
-- Consumo en tendencias: `src/bug_resolution_radar/ui/dashboard/trends.py`
+- Copilot operativo: `src/bug_resolution_radar/ui/insights/copilot.py`
+- Consumo en resumen (copilot): `src/bug_resolution_radar/ui/dashboard/overview.py`
+- Consumo en tendencias (insights): `src/bug_resolution_radar/ui/dashboard/trends.py`
+- Consumo operativo sobre filtros (banner NBA): `src/bug_resolution_radar/ui/dashboard/next_best_banner.py`
 - Consumo en resumen ejecutivo: `src/bug_resolution_radar/ui/dashboard/overview.py`
 - Consumo en insights por pestaña:
   - `src/bug_resolution_radar/ui/insights/top_topics.py`
@@ -22,6 +25,8 @@ Generar mensajes ejecutivos dinamicos, no estaticos, adaptados al estado real de
 - Capa de aprendizaje de sesion: la priorizacion se ajusta por interacciones (clicks en insights, cambios de filtro y navegacion entre graficos).
 - Control de fatiga: los insights muy repetidos pierden prioridad y los no vistos ganan peso.
 - Persistencia cross-session: el aprendizaje se guarda por cliente (`workspace_country` + `workspace_source_id`) y se recarga automaticamente al volver.
+- Memoria de intenciones Copilot: las preguntas del usuario se clasifican por intencion (riesgo, accion, cuello, etc.) y las sugerencias futuras se personalizan por cliente.
+- Next Best Action: el estado `revisado` es solo de sesion (no persistente) para que acciones no resueltas puedan reaparecer en una nueva sesion.
 
 ## Contrato del motor
 `engine.py` expone tres tipos principales:
@@ -34,6 +39,8 @@ Flujo en tendencias:
 2. La UI mantiene el formato actual (3 metricas + tarjetas accionables + caption).
 3. Las tarjetas con filtros sincronizan automaticamente la pestaña `Issues`.
 4. La capa de personalizacion reordena tarjetas segun contexto e historico de uso en sesion.
+5. `copilot.py` calcula snapshot operativo, delta vs ultima sesion, next-best-action y respuestas en lenguaje natural.
+6. El Copilot se renderiza en `Resumen`, justo tras la matriz, y permite saltar a secciones con filtros aplicados.
 
 ## Patrones de insights soportados
 - Presión de flujo: entrada vs salida y backlog neto.
@@ -52,6 +59,11 @@ Cuando un insight es accionable:
 3. El usuario aterriza en el detalle donde validar el hallazgo.
 
 ## Homologacion de lenguaje
-- Tono: negocio y ejecucion (directo, sin ruido tecnico innecesario).
+- Tono: negocio y ejecucion, aseptico (sin presuposiciones no sustentadas por los datos visibles).
 - Forma: mensaje corto, impacto, y accion sugerida.
 - Dinamica: el texto debe cambiar cuando cambian filtros, ventana temporal o concentracion del backlog.
+
+## Comportamiento tipo LLM (sin prompt libre remoto)
+- Contexto vivo: todo se calcula sobre lo que se ve en pantalla, no sobre texto estatico.
+- Memoria por cliente: recuerda patrones de uso entre sesiones para ajustar priorizacion y sugerencias.
+- Respuesta ejecutiva: cada respuesta del Copilot devuelve evidencia numerica, confianza y siguientes preguntas recomendadas.

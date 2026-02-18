@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import unicodedata
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -25,16 +27,11 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
 )
-from bug_resolution_radar.ui.insights.engine import ActionInsight, build_trend_insight_pack
 from bug_resolution_radar.ui.insights.copilot import (
-    CopilotAnswer,
-    NextBestAction,
-    answer_copilot_question,
     build_operational_snapshot,
     build_session_delta_lines,
-    choose_next_best_action,
-    simulate_backlog_what_if,
 )
+from bug_resolution_radar.ui.insights.engine import ActionInsight, build_trend_insight_pack
 from bug_resolution_radar.ui.insights.learning_store import (
     LEARNING_BASELINE_SNAPSHOT_KEY,
     LEARNING_INTERACTIONS_KEY,
@@ -45,6 +42,16 @@ from bug_resolution_radar.ui.insights.learning_store import (
     set_learning_snapshot,
 )
 from bug_resolution_radar.ui.style import apply_plotly_bbva
+
+TERMINAL_STATUS_TOKENS: Tuple[str, ...] = (
+    "closed",
+    "resolved",
+    "done",
+    "deployed",
+    "accepted",
+    "cancelled",
+    "canceled",
+)
 
 
 def _to_dt_naive(s: pd.Series) -> pd.Series:
@@ -67,6 +74,49 @@ def _safe_df(df: pd.DataFrame) -> pd.DataFrame:
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 
 
+def _norm_status_token(value: object) -> str:
+    txt = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", txt).strip()
+
+
+def _status_filter_has_terminal(status_filters: List[str]) -> bool:
+    return any(
+        any(tok in _norm_status_token(st_name) for tok in TERMINAL_STATUS_TOKENS)
+        for st_name in list(status_filters or [])
+    )
+
+
+def _effective_trends_open_scope(
+    *,
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+    active_status_filters: List[str],
+) -> tuple[pd.DataFrame, bool]:
+    """
+    Return the dataframe scope for open-like trend charts.
+
+    Normally charts use open_df (abiertas). If active status filters include
+    terminal states (e.g. Deployed), open_df can be empty by definition, so we
+    switch to the filtered status subset from dff to keep chart behavior coherent.
+    """
+    safe_open = _safe_df(open_df)
+    safe_dff = _safe_df(dff)
+    chosen = [str(x).strip() for x in list(active_status_filters or []) if str(x).strip()]
+    if not chosen:
+        return safe_open, False
+    if safe_dff.empty or "status" not in safe_dff.columns:
+        return safe_open, False
+
+    status_norm = normalize_text_col(safe_dff["status"], "(sin estado)")
+    scoped = safe_dff.loc[status_norm.isin(chosen)].copy(deep=False)
+    if scoped.empty:
+        return safe_open, False
+    if _status_filter_has_terminal(chosen):
+        return scoped, True
+    return safe_open, False
+
+
 def _ensure_learning_state() -> Dict[str, Any]:
     raw = st.session_state.get(LEARNING_STATE_KEY)
     if isinstance(raw, dict):
@@ -85,6 +135,8 @@ def _ensure_learning_state() -> Dict[str, Any]:
         state["last_render_token"] = ""
     if not isinstance(state.get("last_context_token"), str):
         state["last_context_token"] = ""
+    if not isinstance(state.get("copilot_intents"), dict):
+        state["copilot_intents"] = {}
     st.session_state[LEARNING_STATE_KEY] = state
     return state
 
@@ -478,10 +530,10 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     """Return all available chart ids and visible labels for trends tab."""
     return [
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
-        ("age_buckets", "Antigüedad de abiertas (distribución)"),
+        ("age_buckets", "Antigüedad por estado (distribución)"),
         ("resolution_hist", "Tiempos de resolución (cerradas)"),
-        ("open_priority_pie", "Abiertas por Priority"),
-        ("open_status_bar", "Abiertas por Estado"),
+        ("open_priority_pie", "Issues por Priority"),
+        ("open_status_bar", "Issues por Estado"),
     ]
 
 
@@ -514,6 +566,12 @@ def render_trends_tab(
         key="trend_chart_single",
         label_visibility="collapsed",
     )
+    active_status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
+    trends_open_df, adapted_for_terminal = _effective_trends_open_scope(
+        dff=dff,
+        open_df=open_df,
+        active_status_filters=active_status_filters,
+    )
 
     st.markdown(
         """
@@ -538,8 +596,12 @@ def render_trends_tab(
 
     # 2) Contenedor del gráfico seleccionado
     with st.container(border=True, key="trend_chart_shell"):
-        _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=open_df)
-        _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=open_df)
+        if adapted_for_terminal:
+            st.caption(
+                "Vista adaptada al estado finalista seleccionado (incluye incidencias finalizadas)."
+            )
+        _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=trends_open_df)
+        _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=trends_open_df)
 
 
 # -------------------------
@@ -861,29 +923,6 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
         pack.cards, chart_id=str(chart_id), active_filters=active_filters
     )
     key_prefix = str(chart_id or "chart").strip().replace("-", "_")
-    next_action = choose_next_best_action(snapshot, cards=personalized_cards)
-
-    with st.container(border=True, key=f"next_best_action_shell_{chart_id}"):
-        st.markdown("#### Next Best Action")
-        st.markdown(f"**{next_action.title}**")
-        st.markdown(next_action.body)
-        st.caption(next_action.expected_impact)
-        has_action_filters = bool(
-            next_action.status_filters or next_action.priority_filters or next_action.assignee_filters
-        )
-        if has_action_filters:
-            st.button(
-                "Aplicar accion en Issues ↗",
-                key=f"nba_apply_btn_{chart_id}",
-                width="stretch",
-                on_click=_jump_to_issues,
-                kwargs={
-                    "status_filters": list(next_action.status_filters or []),
-                    "priority_filters": list(next_action.priority_filters or []),
-                    "assignee_filters": list(next_action.assignee_filters or []),
-                    "insight_id": f"nextbest::{chart_id}",
-                },
-            )
 
     _render_insight_cards(personalized_cards, key_prefix=key_prefix, chart_id=str(chart_id))
     _register_shown_insights(
@@ -893,129 +932,6 @@ def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.Data
             chart_id=str(chart_id), dff=dff, open_df=open_df, active_filters=active_filters
         ),
     )
-
-    with st.container(border=True, key=f"what_if_shell_{chart_id}"):
-        st.markdown("#### Simulador de impacto (what-if)")
-        s1, s2, s3 = st.columns(3)
-        with s1:
-            entry_reduction = st.slider(
-                "Reducir entrada (%)",
-                min_value=0,
-                max_value=50,
-                value=15,
-                step=5,
-                key=f"whatif_entry_{chart_id}",
-            )
-        with s2:
-            closure_boost = st.slider(
-                "Aumentar cierre (%)",
-                min_value=0,
-                max_value=60,
-                value=20,
-                step=5,
-                key=f"whatif_close_{chart_id}",
-            )
-        with s3:
-            unblock = st.slider(
-                "Desbloquear bloqueadas (%)",
-                min_value=0,
-                max_value=100,
-                value=30,
-                step=10,
-                key=f"whatif_unblock_{chart_id}",
-            )
-        sim = simulate_backlog_what_if(
-            snapshot,
-            entry_reduction_pct=float(entry_reduction),
-            closure_boost_pct=float(closure_boost),
-            unblock_pct=float(unblock),
-        )
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric("Neto semanal simulado", f"{float(sim.get('weekly_net', 0.0)):+.1f}")
-        with m2:
-            st.metric("Backlog estimado en 8 semanas", f"{float(sim.get('backlog_8w', 0.0)):.0f}")
-        with m3:
-            weeks_to_zero = sim.get("weeks_to_zero")
-            st.metric(
-                "Semanas para vaciar",
-                f"{float(weeks_to_zero):.1f}"
-                if isinstance(weeks_to_zero, (int, float))
-                else "No converge",
-            )
-        st.caption(
-            "Estimacion orientativa basada en ritmo reciente y palancas de gestion sobre el filtro activo."
-        )
-
-    with st.container(border=True, key=f"copilot_shell_{chart_id}"):
-        st.markdown("#### Copilot operativo")
-        st.caption("Pregunta en lenguaje natural sobre lo que ves en pantalla.")
-        suggestions = [
-            "Cual es el mayor riesgo cliente hoy?",
-            "Que accion concreta priorizo esta semana?",
-            "Como ha cambiado la situacion desde mi ultima sesion?",
-            "Que cuello de botella penaliza mas el flujo?",
-        ]
-        hist_key = f"copilot_history::{chart_id}"
-        pick_col, action_col = st.columns([3, 1])
-        with pick_col:
-            pick = st.selectbox(
-                "Preguntas sugeridas",
-                options=["(elige)"] + suggestions,
-                key=f"copilot_suggest_{chart_id}",
-            )
-        with action_col:
-            if st.button("Usar sugerida", key=f"copilot_use_suggest_{chart_id}", width="stretch"):
-                if pick and pick != "(elige)":
-                    st.session_state[f"copilot_query_value_{chart_id}"] = pick
-
-        with st.form(key=f"copilot_form_{chart_id}", clear_on_submit=False):
-            q_default = str(st.session_state.get(f"copilot_query_value_{chart_id}") or "")
-            query = st.text_input(
-                "Pregunta",
-                value=q_default,
-                key=f"copilot_query_input_{chart_id}",
-                placeholder="Ej: donde esta el mayor riesgo cliente hoy?",
-            )
-            asked = st.form_submit_button("Analizar")
-
-        if asked and str(query or "").strip():
-            ans: CopilotAnswer = answer_copilot_question(
-                question=str(query),
-                snapshot=snapshot,
-                baseline_snapshot=baseline_snapshot,
-                next_action=next_action,
-            )
-            history = st.session_state.get(hist_key)
-            if not isinstance(history, list):
-                history = []
-            history.append(
-                {
-                    "q": str(query).strip(),
-                    "a": ans.answer,
-                    "confidence": float(ans.confidence),
-                    "evidence": list(ans.evidence or []),
-                    "followups": list(ans.followups or []),
-                }
-            )
-            st.session_state[hist_key] = history[-5:]
-            increment_learning_interactions(step=1, persist=True)
-
-        history = st.session_state.get(hist_key)
-        if isinstance(history, list) and history:
-            latest = history[-1]
-            st.markdown(f"**Respuesta** (confianza {float(latest.get('confidence', 0.0))*100.0:.0f}%)")
-            st.markdown(str(latest.get("a", "")))
-            ev = latest.get("evidence")
-            if isinstance(ev, list) and ev:
-                st.markdown("**Evidencia usada**")
-                for line in ev[:4]:
-                    st.markdown(f"- {line}")
-            fups = latest.get("followups")
-            if isinstance(fups, list) and fups:
-                st.caption("Siguientes preguntas sugeridas:")
-                for line in fups[:3]:
-                    st.markdown(f"- {line}")
 
     interactions = int(st.session_state.get(LEARNING_INTERACTIONS_KEY, 0) or 0)
     if interactions > 0:
@@ -1069,16 +985,30 @@ def _render_insight_cards(cards: List[ActionInsight], *, key_prefix: str, chart_
             padding: 0 !important;
             border: 0 !important;
             background: transparent !important;
-            color: var(--bbva-text) !important;
+            color: var(--bbva-action-link) !important;
+            font-family: var(--bbva-font-sans) !important;
             font-size: 0.98rem !important;
-            font-weight: 800 !important;
+            font-weight: 760 !important;
             border-radius: 8px !important;
             text-align: left !important;
             box-shadow: none !important;
           }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button *,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button svg {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button div[data-testid="stMarkdownContainer"] p,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button div[data-testid="stMarkdownContainer"] strong {
+            color: var(--bbva-action-link) !important;
+          }
           [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover {
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-action-link-hover) !important;
             transform: translateX(1px);
+          }
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover div[data-testid="stMarkdownContainer"] p,
+          [class*="st-key-trins_"] div[data-testid="stButton"] > button:hover div[data-testid="stMarkdownContainer"] strong {
+            color: var(--bbva-action-link-hover) !important;
           }
         </style>
         """,

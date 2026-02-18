@@ -30,6 +30,42 @@ class CopilotAnswer:
     followups: List[str]
 
 
+@dataclass(frozen=True)
+class CopilotRoute:
+    cta: str
+    section: str
+    trend_chart: str | None = None
+    insights_tab: str | None = None
+    status_filters: List[str] | None = None
+    priority_filters: List[str] | None = None
+    assignee_filters: List[str] | None = None
+
+
+KNOWN_INTENTS = (
+    "risk",
+    "priority",
+    "bottleneck",
+    "action",
+    "change",
+    "duplicates",
+    "summary",
+    "simulation",
+    "other",
+)
+
+INTENT_LABELS = {
+    "risk": "riesgo cliente",
+    "priority": "priorizacion",
+    "bottleneck": "cuello de botella",
+    "action": "accion recomendada",
+    "change": "evolucion entre sesiones",
+    "duplicates": "duplicidades",
+    "summary": "resumen ejecutivo",
+    "simulation": "escenarios what-if",
+    "other": "consulta abierta",
+}
+
+
 def _to_dt_naive(series: pd.Series | None) -> pd.Series:
     if series is None:
         return pd.Series([], dtype="datetime64[ns]")
@@ -64,11 +100,239 @@ def _norm(txt: str) -> str:
     return t
 
 
+def _push_unique(target: List[str], value: str, *, max_len: int) -> None:
+    txt = str(value or "").strip()
+    if not txt:
+        return
+    if txt in target:
+        return
+    if len(target) >= max_len:
+        return
+    target.append(txt)
+
+
+def _push_unique_unbounded(target: List[str], value: str) -> None:
+    txt = str(value or "").strip()
+    if not txt:
+        return
+    if txt in target:
+        return
+    target.append(txt)
+
+
 def _safe_series_count(mask: pd.Series) -> int:
     try:
         return int(mask.sum())
     except Exception:
         return 0
+
+
+def normalize_intent_counts(raw: Any) -> Dict[str, int]:
+    counts_raw = raw if isinstance(raw, dict) else {}
+    counts: Dict[str, int] = {}
+    for intent in KNOWN_INTENTS:
+        val = counts_raw.get(intent, 0)
+        try:
+            parsed = int(val)
+        except Exception:
+            parsed = 0
+        counts[intent] = max(parsed, 0)
+    return counts
+
+
+def classify_question_intent(question: str) -> str:
+    q = _norm(question)
+    if not q:
+        return "other"
+    if any(k in q for k in ["riesgo", "cliente", "impacto"]):
+        return "risk"
+    if any(k in q for k in ["prioridad", "priority"]):
+        return "priority"
+    if any(k in q for k in ["estado", "cuello", "atasco", "bloqueo"]):
+        return "bottleneck"
+    if any(k in q for k in ["que hago", "accion", "next", "prioridad hoy"]):
+        return "action"
+    if any(k in q for k in ["cambio", "ultima sesion", "ultima", "evolucion"]):
+        return "change"
+    if any(k in q for k in ["duplic", "reincid", "repet"]):
+        return "duplicates"
+    if any(k in q for k in ["resumen", "brief", "situacion", "situacion actual"]):
+        return "summary"
+    if re.search(r"\b(simula|what if|escenario|proyeccion)\b", q):
+        return "simulation"
+    return "other"
+
+
+def top_learned_intents(intent_counts: Dict[str, int], *, limit: int = 2) -> List[str]:
+    counts = normalize_intent_counts(intent_counts)
+    pairs = sorted(counts.items(), key=lambda x: (x[1], x[0]), reverse=True)
+    out: List[str] = []
+    for intent, weight in pairs:
+        if weight <= 0:
+            continue
+        _push_unique(out, intent, max_len=max(limit, 1))
+    return out[: max(limit, 1)]
+
+
+def _open_unique_values(open_df: pd.DataFrame, *, column: str, empty_label: str) -> List[str]:
+    if not isinstance(open_df, pd.DataFrame) or open_df.empty or column not in open_df.columns:
+        return []
+    vals = normalize_text_col(open_df[column], empty_label).astype(str).tolist()
+    out: List[str] = []
+    for v in vals:
+        _push_unique_unbounded(out, v)
+    return out
+
+
+def _match_filters_to_available(
+    requested: List[str] | None,
+    *,
+    available: List[str],
+    kind: str,
+) -> List[str]:
+    req = [str(x).strip() for x in list(requested or []) if str(x).strip()]
+    if not req:
+        return []
+    if not available:
+        return []
+
+    out: List[str] = []
+    available_norm = [(_norm(v), v) for v in available]
+    for raw in req:
+        q = _norm(raw)
+        exact = [orig for nrm, orig in available_norm if nrm == q]
+        for v in exact:
+            _push_unique_unbounded(out, v)
+        if exact:
+            continue
+
+        if kind == "status" and q in {"blocked", "bloqueado"}:
+            for nrm, orig in available_norm:
+                if ("blocked" in nrm) or ("bloque" in nrm):
+                    _push_unique_unbounded(out, orig)
+            if out:
+                continue
+
+        if kind == "priority" and q in {
+            "highest",
+            "high",
+            "supone un impedimento",
+            "impedimento",
+        }:
+            for nrm, orig in available_norm:
+                if nrm in {"highest", "high", "supone un impedimento", "impedimento"}:
+                    _push_unique_unbounded(out, orig)
+                elif "high" in nrm or "imped" in nrm:
+                    _push_unique_unbounded(out, orig)
+            if out:
+                continue
+
+        if kind == "assignee" and q in {"sin asignar", "(sin asignar)"}:
+            for nrm, orig in available_norm:
+                if nrm in {"sin asignar", "(sin asignar)"}:
+                    _push_unique_unbounded(out, orig)
+            if out:
+                continue
+
+        if len(q) >= 3:
+            fuzzy = [orig for nrm, orig in available_norm if q in nrm or nrm in q]
+            for v in fuzzy:
+                _push_unique_unbounded(out, v)
+    return out
+
+
+def _open_match_count(
+    *,
+    open_df: pd.DataFrame,
+    status_filters: List[str],
+    priority_filters: List[str],
+    assignee_filters: List[str],
+) -> int:
+    if not isinstance(open_df, pd.DataFrame) or open_df.empty:
+        return 0
+    mask = pd.Series(True, index=open_df.index)
+    if status_filters and "status" in open_df.columns:
+        stx = normalize_text_col(open_df["status"], "(sin estado)")
+        mask &= stx.isin(status_filters)
+    if priority_filters and "priority" in open_df.columns:
+        pr = normalize_text_col(open_df["priority"], "(sin priority)")
+        mask &= pr.isin(priority_filters)
+    if assignee_filters and "assignee" in open_df.columns:
+        ass = normalize_text_col(open_df["assignee"], "(sin asignar)")
+        mask &= ass.isin(assignee_filters)
+    return int(mask.sum())
+
+
+def resolve_filters_against_open_df(
+    *,
+    open_df: pd.DataFrame,
+    status_filters: List[str] | None = None,
+    priority_filters: List[str] | None = None,
+    assignee_filters: List[str] | None = None,
+) -> tuple[List[str], List[str], List[str]]:
+    status = _match_filters_to_available(
+        status_filters,
+        available=_open_unique_values(open_df, column="status", empty_label="(sin estado)"),
+        kind="status",
+    )
+    priority = _match_filters_to_available(
+        priority_filters,
+        available=_open_unique_values(open_df, column="priority", empty_label="(sin priority)"),
+        kind="priority",
+    )
+    assignee = _match_filters_to_available(
+        assignee_filters,
+        available=_open_unique_values(open_df, column="assignee", empty_label="(sin asignar)"),
+        kind="assignee",
+    )
+
+    if not isinstance(open_df, pd.DataFrame) or open_df.empty:
+        return status, priority, assignee
+
+    # Guarantee useful navigation: if strict combination is empty, relax dimensions progressively.
+    if _open_match_count(
+        open_df=open_df,
+        status_filters=status,
+        priority_filters=priority,
+        assignee_filters=assignee,
+    ) > 0:
+        return status, priority, assignee
+
+    if assignee and _open_match_count(
+        open_df=open_df,
+        status_filters=status,
+        priority_filters=priority,
+        assignee_filters=[],
+    ) > 0:
+        return status, priority, []
+
+    if priority and _open_match_count(
+        open_df=open_df,
+        status_filters=status,
+        priority_filters=[],
+        assignee_filters=[],
+    ) > 0:
+        return status, [], []
+
+    if status and _open_match_count(
+        open_df=open_df,
+        status_filters=[],
+        priority_filters=[],
+        assignee_filters=[],
+    ) > 0:
+        return [], [], []
+
+    return status, priority, assignee
+
+
+def learned_intents_caption(intent_counts: Dict[str, int]) -> str | None:
+    top = top_learned_intents(intent_counts, limit=2)
+    if not top:
+        return None
+    labels = [INTENT_LABELS.get(x, x) for x in top]
+    if len(labels) == 1:
+        return f"Aprendiendo de tus preguntas: foco en {labels[0]}."
+    return f"Aprendiendo de tus preguntas: foco en {labels[0]} y {labels[1]}."
 
 
 def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> Dict[str, Any]:
@@ -259,6 +523,21 @@ def build_session_delta_lines(
 def choose_next_best_action(
     snapshot: Dict[str, Any], cards: Sequence[Any] | None = None
 ) -> NextBestAction:
+    actions = list_next_best_actions(snapshot=snapshot, cards=cards)
+    if actions:
+        return actions[0]
+    return NextBestAction(
+        title="Seguimiento operativo",
+        body="Con el filtro actual no se observa una desviacion dominante.",
+        expected_impact="Impacto esperado: mantener control de flujo y seguimiento periodico.",
+    )
+
+
+def list_next_best_actions(
+    *,
+    snapshot: Dict[str, Any],
+    cards: Sequence[Any] | None = None,
+) -> List[NextBestAction]:
     s = snapshot if isinstance(snapshot, dict) else {}
     crit_unassigned = int(s.get("critical_unassigned_count", 0) or 0)
     blocked = int(s.get("blocked_count", 0) or 0)
@@ -266,74 +545,251 @@ def choose_next_best_action(
     aged30_pct = float(s.get("aged30_pct", 0.0) or 0.0)
     dup_share = float(s.get("duplicate_share", 0.0) or 0.0)
     top_status = str(s.get("top_status", "—") or "—")
+    actions: List[NextBestAction] = []
 
     if crit_unassigned > 0:
-        return NextBestAction(
-            title="Asignar ownership critico hoy",
-            body=(
-                f"Hay {crit_unassigned} incidencias High/Highest sin owner. "
-                "Esta decision reduce riesgo cliente de forma inmediata."
-            ),
-            expected_impact=f"Impacto esperado: -{min(crit_unassigned, 8)} riesgos criticos en 24h.",
-            priority_filters=["Supone un impedimento", "Highest", "High"],
-            assignee_filters=["(sin asignar)"],
+        actions.append(
+            NextBestAction(
+                title="Asignacion de ownership critico",
+                body=(
+                    f"Con el filtro actual se observan {crit_unassigned} incidencias High/Highest "
+                    "sin owner asignado."
+                ),
+                expected_impact=(
+                    "Impacto esperado: trazabilidad de ownership sobre "
+                    f"{crit_unassigned} incidencias criticas."
+                ),
+                priority_filters=["Supone un impedimento", "Highest", "High"],
+                assignee_filters=["(sin asignar)"],
+            )
         )
     if blocked > 0 and float(s.get("blocked_pct", 0.0) or 0.0) >= 0.08:
-        return NextBestAction(
-            title="Desbloquear el cuello principal",
-            body=(
-                f"Hay {blocked} bloqueadas activas. "
-                "Crear un circuito diario de desbloqueo libera capacidad sin ampliar equipo."
-            ),
-            expected_impact=f"Impacto esperado: mover 20-35% de bloqueadas a flujo activo esta semana.",
-            status_filters=["Blocked", "Bloqueado"],
+        actions.append(
+            NextBestAction(
+                title="Revision de bloqueos activos",
+                body=(
+                    f"Con el filtro actual se observan {blocked} incidencias en estado bloqueado."
+                ),
+                expected_impact=(
+                    "Impacto esperado: priorizacion de desbloqueo sobre "
+                    f"{blocked} incidencias activas."
+                ),
+                status_filters=["Blocked", "Bloqueado"],
+            )
         )
     if net14 > 0:
-        return NextBestAction(
-            title="Corregir balance entrada-salida",
-            body=(
-                f"El balance 14d es +{net14}. "
-                "Sin ajuste operativo, el backlog seguira creciendo."
-            ),
-            expected_impact=f"Impacto esperado: cerrar +{max(2, net14 // 3)} extra/semana para estabilizar.",
-            status_filters=[top_status] if top_status != "—" else None,
+        actions.append(
+            NextBestAction(
+                title="Ajuste de balance entrada-salida",
+                body=(
+                    f"En los ultimos 14 dias la entrada supera a la salida en +{net14} incidencias."
+                ),
+                expected_impact=(
+                    "Impacto esperado: establecer un objetivo de cierres para absorber "
+                    "el diferencial de entrada."
+                ),
+                status_filters=[top_status] if top_status != "—" else None,
+            )
         )
     if aged30_pct >= 0.25:
-        return NextBestAction(
-            title="Ataque quirurgico a cola envejecida",
-            body=(
-                f"El {_fmt_pct(aged30_pct)} del backlog supera 30 dias. "
-                "Conviene una clinica semanal de cierre o descomposicion."
-            ),
-            expected_impact="Impacto esperado: reducir 10-15% de cola >30d en 2 semanas.",
+        actions.append(
+            NextBestAction(
+                title="Tratamiento de cola envejecida",
+                body=(
+                    f"El {_fmt_pct(aged30_pct)} del backlog abierto supera los 30 dias."
+                ),
+                expected_impact=(
+                    "Impacto esperado: reducir el riesgo de envejecimiento "
+                    "al trabajar esta cola de forma dedicada."
+                ),
+            )
         )
     if dup_share >= 0.10:
-        return NextBestAction(
-            title="Eliminar reincidencia visible",
-            body=(
-                f"Los duplicados suponen {_fmt_pct(dup_share)} del backlog. "
-                "Consolidar grupos repetidos acelera reduccion neta."
-            ),
-            expected_impact="Impacto esperado: recorte directo de ruido operativo en 1 sprint.",
+        actions.append(
+            NextBestAction(
+                title="Consolidacion de duplicidades",
+                body=(
+                    f"Las duplicidades representan {_fmt_pct(dup_share)} del backlog abierto."
+                ),
+                expected_impact=(
+                    "Impacto esperado: reducir carga operativa al consolidar incidencias repetidas."
+                ),
+            )
         )
 
-    if cards:
+    if cards and not actions:
         first = cards[0]
         title = str(getattr(first, "title", "") or "Sostener ritmo actual")
         body = str(getattr(first, "body", "") or "El flujo esta estable.")
-        return NextBestAction(
-            title=title,
-            body=body,
-            expected_impact="Impacto esperado: mantener tendencia y atacar deuda puntual.",
-            status_filters=list(getattr(first, "status_filters", []) or []),
-            priority_filters=list(getattr(first, "priority_filters", []) or []),
-            assignee_filters=list(getattr(first, "assignee_filters", []) or []),
+        actions.append(
+            NextBestAction(
+                title=title,
+                body=body,
+                expected_impact="Impacto esperado: mantener tendencia y atacar deuda puntual.",
+                status_filters=list(getattr(first, "status_filters", []) or []),
+                priority_filters=list(getattr(first, "priority_filters", []) or []),
+                assignee_filters=list(getattr(first, "assignee_filters", []) or []),
+            )
         )
 
-    return NextBestAction(
-        title="Sostener control operativo",
-        body="No se detecta un desvio critico dominante en este filtro.",
-        expected_impact="Impacto esperado: estabilidad si se mantiene disciplina de flujo.",
+    if not actions:
+        actions.append(
+            NextBestAction(
+                title="Seguimiento operativo",
+                body="Con el filtro actual no se observa una desviacion dominante.",
+                expected_impact="Impacto esperado: mantener control de flujo y seguimiento periodico.",
+            )
+        )
+    return actions
+
+
+def build_copilot_suggestions(
+    *,
+    snapshot: Dict[str, Any],
+    baseline_snapshot: Dict[str, Any] | None = None,
+    next_action: NextBestAction | None = None,
+    intent_counts: Dict[str, int] | None = None,
+    limit: int = 4,
+) -> List[str]:
+    s = snapshot if isinstance(snapshot, dict) else {}
+    base = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
+    learned = normalize_intent_counts(intent_counts)
+    out: List[str] = []
+
+    # Prioritize learned intent patterns so suggestions feel personalized over time.
+    for intent in top_learned_intents(learned, limit=2):
+        if intent == "risk":
+            _push_unique(out, "Cual es el mayor riesgo cliente hoy?", max_len=limit)
+        elif intent == "priority":
+            _push_unique(out, "Que prioridad debo atacar para reducir riesgo real?", max_len=limit)
+        elif intent == "bottleneck":
+            _push_unique(out, "Que cuello de botella penaliza mas el flujo?", max_len=limit)
+        elif intent == "action":
+            _push_unique(out, "Que accion concreta priorizo esta semana?", max_len=limit)
+        elif intent == "change":
+            _push_unique(out, "Como cambio la situacion desde mi ultima sesion?", max_len=limit)
+        elif intent == "duplicates":
+            _push_unique(out, "Cuanto backlog estamos perdiendo en duplicidades?", max_len=limit)
+        elif intent == "summary":
+            _push_unique(out, "Dame un resumen ejecutivo de la situacion actual.", max_len=limit)
+        elif intent == "simulation":
+            _push_unique(out, "Que pasaria si reducimos entrada un 20% y subimos cierres?", max_len=limit)
+
+    if next_action is not None:
+        _push_unique(
+            out,
+            f"Como ejecuto ya la accion '{next_action.title}' y que impacto espero?",
+            max_len=limit,
+        )
+    if float(s.get("critical_pct", 0.0) or 0.0) >= 0.12 or int(
+        s.get("critical_unassigned_count", 0) or 0
+    ) > 0:
+        _push_unique(
+            out,
+            "Donde esta la bolsa critica sin owner y como la cierro primero?",
+            max_len=limit,
+        )
+    if float(s.get("blocked_pct", 0.0) or 0.0) >= 0.08:
+        _push_unique(
+            out,
+            "Que desbloqueo priorizo para recuperar throughput en 48h?",
+            max_len=limit,
+        )
+    if int(s.get("net_14", 0) or 0) > 0:
+        _push_unique(
+            out,
+            "Que ajuste de capacidad necesito para revertir el balance neto positivo?",
+            max_len=limit,
+        )
+    if float(s.get("duplicate_share", 0.0) or 0.0) >= 0.10:
+        _push_unique(
+            out,
+            "Que impacto tendria eliminar duplicados esta semana?",
+            max_len=limit,
+        )
+    if base:
+        _push_unique(
+            out,
+            "Como ha cambiado la situacion respecto a mi ultima sesion?",
+            max_len=limit,
+        )
+    _push_unique(out, "Que accion concreta priorizo esta semana?", max_len=limit)
+    _push_unique(out, "Cual es el mayor riesgo cliente hoy?", max_len=limit)
+    _push_unique(out, "Que cuello de botella penaliza mas el flujo?", max_len=limit)
+    _push_unique(out, "Dame un resumen ejecutivo de la situacion actual.", max_len=limit)
+
+    return out[: max(limit, 1)]
+
+
+def route_copilot_action(
+    *,
+    question: str,
+    snapshot: Dict[str, Any],
+    next_action: NextBestAction | None = None,
+) -> CopilotRoute:
+    intent = classify_question_intent(question)
+    s = snapshot if isinstance(snapshot, dict) else {}
+
+    def _route_from_next_action() -> CopilotRoute | None:
+        if next_action is None:
+            return None
+        has_filters = bool(
+            next_action.status_filters
+            or next_action.priority_filters
+            or next_action.assignee_filters
+        )
+        if not has_filters:
+            return None
+        return CopilotRoute(
+            cta=f"Aplicar: {next_action.title}",
+            section="issues",
+            status_filters=list(next_action.status_filters or []),
+            priority_filters=list(next_action.priority_filters or []),
+            assignee_filters=list(next_action.assignee_filters or []),
+        )
+
+    if intent in {"risk", "priority", "action"}:
+        route = _route_from_next_action()
+        if route is not None:
+            return route
+
+    if intent == "bottleneck":
+        blocked = int(s.get("blocked_count", 0) or 0)
+        if blocked > 0:
+            return CopilotRoute(
+                cta="Abrir bloqueadas en Issues",
+                section="issues",
+                status_filters=["Blocked", "Bloqueado"],
+            )
+        top_status = str(s.get("top_status", "—") or "—").strip()
+        if top_status and top_status != "—":
+            return CopilotRoute(
+                cta=f"Abrir {top_status} en Issues",
+                section="issues",
+                status_filters=[top_status],
+            )
+
+    if intent == "duplicates":
+        return CopilotRoute(
+            cta="Ir a Insights de Duplicados",
+            section="insights",
+            insights_tab="duplicates",
+        )
+
+    if intent in {"change", "simulation", "summary"}:
+        return CopilotRoute(
+            cta="Abrir Tendencias",
+            section="trends",
+            trend_chart="timeseries",
+        )
+
+    route = _route_from_next_action()
+    if route is not None:
+        return route
+
+    return CopilotRoute(
+        cta="Ir a Issues",
+        section="issues",
     )
 
 
@@ -382,7 +838,7 @@ def answer_copilot_question(
     baseline_snapshot: Dict[str, Any] | None = None,
     next_action: NextBestAction | None = None,
 ) -> CopilotAnswer:
-    q = _norm(question)
+    intent = classify_question_intent(question)
     s = snapshot if isinstance(snapshot, dict) else {}
     base = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
     followups = [
@@ -397,46 +853,48 @@ def answer_copilot_question(
         f"Criticas: {int(s.get('critical_count', 0) or 0)}",
     ]
 
-    if any(k in q for k in ["riesgo", "cliente", "impacto"]):
+    if intent == "risk":
         ans = (
-            f"El riesgo cliente hoy viene de criticas ({int(s.get('critical_count', 0) or 0)}), "
-            f"bloqueadas ({int(s.get('blocked_count', 0) or 0)}) y cola >30d ({_fmt_pct(float(s.get('aged30_pct', 0.0) or 0.0))})."
+            "Con los datos visibles, los principales factores de exposicion son "
+            f"criticas ({int(s.get('critical_count', 0) or 0)}), "
+            f"bloqueadas ({int(s.get('blocked_count', 0) or 0)}) y cola >30d "
+            f"({_fmt_pct(float(s.get('aged30_pct', 0.0) or 0.0))})."
         )
         return CopilotAnswer(answer=ans, confidence=0.84, evidence=evidence, followups=followups)
 
-    if any(k in q for k in ["prioridad", "priority"]):
+    if intent == "priority":
         ans = (
-            f"La prioridad dominante es {s.get('top_priority', '—')} "
-            f"({_fmt_pct(float(s.get('top_priority_share', 0.0) or 0.0))}). "
-            f"Hay {int(s.get('critical_unassigned_count', 0) or 0)} criticas sin owner."
+            f"La prioridad dominante en el filtro es {s.get('top_priority', '—')} "
+            f"({_fmt_pct(float(s.get('top_priority_share', 0.0) or 0.0))}) "
+            f"y hay {int(s.get('critical_unassigned_count', 0) or 0)} criticas sin owner."
         )
         return CopilotAnswer(answer=ans, confidence=0.87, evidence=evidence, followups=followups)
 
-    if any(k in q for k in ["estado", "cuello", "atasco", "bloqueo"]):
+    if intent == "bottleneck":
         ans = (
-            f"El estado dominante es {s.get('top_status', '—')} "
-            f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}) y hay "
+            f"El estado dominante en el filtro es {s.get('top_status', '—')} "
+            f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}) y se observan "
             f"{int(s.get('blocked_count', 0) or 0)} bloqueadas."
         )
         return CopilotAnswer(answer=ans, confidence=0.85, evidence=evidence, followups=followups)
 
-    if any(k in q for k in ["que hago", "accion", "next", "prioridad hoy"]):
+    if intent == "action":
         if next_action is not None:
             ans = f"{next_action.title}: {next_action.body} {next_action.expected_impact}"
             return CopilotAnswer(answer=ans, confidence=0.89, evidence=evidence, followups=followups)
         return CopilotAnswer(
-            answer="La accion prioritaria depende del cuello dominante en el filtro actual.",
+            answer="La accion prioritaria depende del principal cuello operativo del filtro actual.",
             confidence=0.62,
             evidence=evidence,
             followups=followups,
         )
 
-    if any(k in q for k in ["cambio", "ultima sesion", "ultima", "evolucion"]):
+    if intent == "change":
         if base:
             delta_open = int((s.get("open_total", 0) or 0) - (base.get("open_total", 0) or 0))
             delta_blocked = int((s.get("blocked_count", 0) or 0) - (base.get("blocked_count", 0) or 0))
             ans = (
-                f"Vs ultima sesion: backlog {'+' if delta_open > 0 else ''}{delta_open}, "
+                f"Comparado con la ultima sesion: backlog {'+' if delta_open > 0 else ''}{delta_open}, "
                 f"bloqueadas {'+' if delta_blocked > 0 else ''}{delta_blocked}."
             )
             return CopilotAnswer(answer=ans, confidence=0.81, evidence=evidence, followups=followups)
@@ -447,14 +905,14 @@ def answer_copilot_question(
             followups=followups,
         )
 
-    if any(k in q for k in ["duplic", "reincid", "repet"]):
+    if intent == "duplicates":
         ans = (
             f"Hay {int(s.get('duplicate_issues', 0) or 0)} incidencias en grupos repetidos "
             f"({_fmt_pct(float(s.get('duplicate_share', 0.0) or 0.0))} del backlog)."
         )
         return CopilotAnswer(answer=ans, confidence=0.82, evidence=evidence, followups=followups)
 
-    if any(k in q for k in ["resumen", "brief", "situacion", "situacion actual"]):
+    if intent == "summary":
         ans = (
             f"Backlog {int(s.get('open_total', 0) or 0)}; balance 14d {int(s.get('net_14', 0) or 0):+d}; "
             f"cola >30d {_fmt_pct(float(s.get('aged30_pct', 0.0) or 0.0))}; "
@@ -462,7 +920,7 @@ def answer_copilot_question(
         )
         return CopilotAnswer(answer=ans, confidence=0.88, evidence=evidence, followups=followups)
 
-    if re.search(r"\b(simula|what if|escenario|proyeccion)\b", q):
+    if intent == "simulation":
         ans = (
             "Usa el simulador de impacto para estimar backlog a 8 semanas con reduccion de entrada, "
             "mejora de cierre y desbloqueo."

@@ -276,7 +276,7 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
         hole=0.55,
         color="priority",
         color_discrete_map=priority_color_map(),
-        title="Abiertas por Priority",
+        title="Issues por Priority",
     )
     fig.update_traces(sort=False)
     return apply_plotly_bbva(fig)
@@ -290,14 +290,14 @@ def _insights_open_priority_pie(ctx: ChartContext) -> List[str]:
     counts = open_df["priority"].astype(str).value_counts()
     total = int(counts.sum())
     if total == 0:
-        return ["No hay issues abiertas para este análisis."]
+        return ["No hay issues para este análisis."]
 
     top = int(counts.iloc[0])
     top_prio = str(counts.index[0])
     share = float(top) / float(total)
 
     return [
-        f"Concentración: **{top_prio}** representa **{_fmt_pct(share)}** del backlog abierto (sobre {total} issues). "
+        f"Concentración: **{top_prio}** representa **{_fmt_pct(share)}** del conjunto analizado (sobre {total} issues). "
         "Alta concentración sugiere que tu sistema de priorización está ‘aplanado’ o que hay una fuente dominante de problemas.",
         "Acción: si la prioridad más alta domina, crea un ‘fast lane’ con definición de listo (DoR) estricta; "
         "si domina una prioridad baja, revisa higiene: duplicados, issues sin owner o sin impacto claro.",
@@ -344,7 +344,7 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         y="count",
         color="priority",
         barmode="stack",
-        title="Abiertas por Estado",
+        title="Issues por Estado",
         category_orders={"status": ordered_statuses, "priority": priority_order},
         color_discrete_map=priority_color_map(),
     )
@@ -360,14 +360,14 @@ def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
     counts = stc.value_counts()
     total = int(counts.sum())
     if total == 0:
-        return ["No hay issues abiertas para este análisis."]
+        return ["No hay issues para este análisis."]
 
     top_status = str(counts.index[0])
     top_cnt = int(counts.iloc[0])
     share = float(top_cnt) / float(total)
 
     insights = [
-        f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del backlog abierto "
+        f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del conjunto analizado "
         f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
         "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
         "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",

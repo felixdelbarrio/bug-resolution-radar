@@ -145,6 +145,7 @@ _YELLOW_1 = "#FBBF24"
 _GREEN_1 = "#15803D"
 _GREEN_2 = "#22A447"
 _GREEN_3 = "#4CAF50"
+_GREEN_GOAL = "#00A65A"
 _NEUTRAL = "#E2E6EE"
 
 
@@ -160,7 +161,8 @@ _STATUS_COLOR_BY_KEY: Dict[str, str] = {
     "ready to verify": _ORANGE_2,
     "accepted": _GREEN_3,
     "ready to deploy": _GREEN_2,
-    "deployed": _GREEN_1,
+    # Deployed is treated as explicit goal state (stronger green signal).
+    "deployed": _GREEN_GOAL,
     "closed": _GREEN_1,
     "resolved": _GREEN_1,
     "done": _GREEN_1,
@@ -197,6 +199,7 @@ def flow_signal_color_map() -> Dict[str, str]:
         "created": _RED_3,
         "closed": _GREEN_2,
         "resolved": _GREEN_2,
+        "deployed": _GREEN_GOAL,
         "open": _YELLOW_1,
         "open_backlog_proxy": _YELLOW_1,
     }

@@ -192,7 +192,7 @@ def build_default_slide_specs() -> List[SlideSpec]:
         ),
         SlideSpec(
             "age_buckets",
-            "Antigüedad de abiertas",
+            "Antigüedad por estado",
             "Dónde se está quedando el trabajo (cola larga y riesgo).",
         ),
         SlideSpec(

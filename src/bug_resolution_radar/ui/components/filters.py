@@ -23,6 +23,8 @@ from bug_resolution_radar.ui.dashboard.state import (
     FilterState,
 )
 
+FILTER_ACTION_CONTEXT_KEY = "__filters_action_context"
+
 
 def _order_statuses_canonical(statuses: List[str]) -> List[str]:
     """Order statuses by canonical flow. Unknown ones keep stable order and go last."""
@@ -72,9 +74,39 @@ def _hex_with_alpha(hex_color: str, alpha: int) -> str:
 
 
 def _inject_filters_panel_css() -> None:
-    st.markdown(
-        """
+    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
+    if is_dark:
+        chip_border = "#9A7A3A"
+        chip_bg = "rgba(201, 173, 98, 0.20)"
+        chip_text = "#F1C66D"
+        chip_lbl = "#E8D7AE"
+    else:
+        chip_border = "color-mix(in srgb, #8F5C00 34%, var(--bbva-border))"
+        chip_bg = "color-mix(in srgb, #FFF5DE 56%, var(--bbva-surface))"
+        chip_text = "color-mix(in srgb, #8F5C00 86%, var(--bbva-text))"
+        chip_lbl = "currentColor"
+    css = """
         <style>
+          .flt-action-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.34rem;
+            border-radius: 999px;
+            padding: 0.13rem 0.58rem;
+            border: 1px solid __CHIP_BORDER__;
+            background: __CHIP_BG__;
+            color: __CHIP_TEXT__;
+            font-size: 0.74rem;
+            font-weight: 780;
+            letter-spacing: 0.01em;
+            margin-bottom: 0.34rem;
+          }
+          .flt-action-chip-lbl {
+            color: __CHIP_LABEL__;
+            opacity: 0.92;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          }
           [data-testid="stMultiSelect"] > label {
             margin-bottom: 0.1rem !important;
           }
@@ -101,9 +133,14 @@ def _inject_filters_panel_css() -> None:
             color: var(--bbva-text) !important;
           }
         </style>
-        """,
-        unsafe_allow_html=True,
+    """
+    css = (
+        css.replace("__CHIP_BORDER__", chip_border)
+        .replace("__CHIP_BG__", chip_bg)
+        .replace("__CHIP_TEXT__", chip_text)
+        .replace("__CHIP_LABEL__", chip_lbl)
     )
+    st.markdown(css, unsafe_allow_html=True)
 
 
 def _inject_combo_signal_script() -> None:
@@ -117,7 +154,7 @@ def _inject_combo_signal_script() -> None:
             const doc = root && root.document;
             if (!doc) return;
             const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
-            const PAINTER_VERSION = 2;
+            const PAINTER_VERSION = 3; // bump to force refresh of painter logic/colors in active sessions
 
             const match = (text, keys) => keys.some((k) => text.includes(k));
             const toRgba = (hex, alpha) => {
@@ -131,11 +168,12 @@ def _inject_combo_signal_script() -> None:
 
             const signalColor = (raw) => {
               const t = String(raw || "").trim().toLowerCase();
-              if (!t) return "#7A8BAD";
+              if (!t) return "";
               if (match(t, ["new", "analysing", "blocked", "created", "high", "highest", "impedimento"])) return "#B4232A";
               if (match(t, ["en progreso", "in progress", "to rework", "test", "ready to verify", "open", "medium"])) return "#E08A00";
-              if (match(t, ["accepted", "ready to deploy", "deployed", "closed", "low", "lowest"])) return "#1E9E53";
-              return "#7A8BAD";
+              if (match(t, ["deployed"])) return "#00A65A";
+              if (match(t, ["accepted", "ready to deploy", "closed", "resolved", "done", "low", "lowest"])) return "#1E9E53";
+              return "";
             };
 
             const optionLabel = (el) => {
@@ -147,9 +185,19 @@ def _inject_combo_signal_script() -> None:
             };
 
             const paintOption = (el) => {
+              const inList = !!el.closest('[data-baseweb="popover"], [role="listbox"], [role="menu"]');
+              if (!inList) return;
               const label = optionLabel(el);
               if (!label) return;
               const color = signalColor(label);
+              if (!color) {
+                el.style.removeProperty("--bbva-opt-dot");
+                el.style.removeProperty("border-left");
+                el.style.removeProperty("padding-left");
+                el.style.removeProperty("background-image");
+                el.style.removeProperty("background-repeat");
+                return;
+              }
               el.style.setProperty("--bbva-opt-dot", color, "important");
               el.style.setProperty("border-left", "2px solid " + toRgba(color, 0.75), "important");
               el.style.setProperty("padding-left", "1.72rem", "important");
@@ -165,6 +213,16 @@ def _inject_combo_signal_script() -> None:
               const label = optionLabel(el);
               if (!label) return;
               const color = signalColor(label);
+              if (!color) {
+                el.style.removeProperty("background");
+                el.style.removeProperty("border");
+                el.style.removeProperty("color");
+                el.style.removeProperty("background-image");
+                el.querySelectorAll("*").forEach((n) => {
+                  n.style.removeProperty("color");
+                });
+                return;
+              }
               el.style.setProperty("background", toRgba(color, 0.14), "important");
               el.style.setProperty("border", "1px solid " + toRgba(color, 0.52), "important");
               el.style.setProperty("color", color, "important");
@@ -179,7 +237,8 @@ def _inject_combo_signal_script() -> None:
                 .querySelectorAll(
                   'div[data-baseweb="popover"] [role="option"], ' +
                   'div[data-baseweb="popover"] li[role="option"], ' +
-                  'div[data-baseweb="popover"] li'
+                  'div[data-baseweb="popover"] li, ' +
+                  '[role="option"]'
                 )
                 .forEach(paintOption);
               doc
@@ -342,6 +401,40 @@ def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_ke
     st.session_state[ui_assignee_key] = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
 
 
+def _normalize_filter_values(values: List[str]) -> List[str]:
+    out = sorted(
+        {
+            str(x).strip().lower()
+            for x in list(values or [])
+            if str(x).strip()
+        }
+    )
+    return list(out)
+
+
+def _active_context_label(
+    context_raw: object,
+    *,
+    status: List[str],
+    priority: List[str],
+    assignee: List[str],
+) -> str | None:
+    context = context_raw if isinstance(context_raw, dict) else {}
+    label = str(context.get("label") or "").strip()
+    if not label:
+        return None
+    ctx_status = list(context.get("status") or [])
+    ctx_priority = list(context.get("priority") or [])
+    ctx_assignee = list(context.get("assignee") or [])
+    if _normalize_filter_values(ctx_status) != _normalize_filter_values(status):
+        return None
+    if _normalize_filter_values(ctx_priority) != _normalize_filter_values(priority):
+        return None
+    if _normalize_filter_values(ctx_assignee) != _normalize_filter_values(assignee):
+        return None
+    return label
+
+
 # ---------------------------------------------------------------------
 # Filters UI
 # ---------------------------------------------------------------------
@@ -378,6 +471,15 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     # Mirror canonical -> ui before widget creation (so matrix clicks reflect in widgets)
     _mirror_canonical_to_ui(ui_status_key, ui_prio_key, ui_assignee_key)
 
+    ctx_label = _active_context_label(
+        st.session_state.get(FILTER_ACTION_CONTEXT_KEY),
+        status=list(st.session_state.get(FILTER_STATUS_KEY) or []),
+        priority=list(st.session_state.get(FILTER_PRIORITY_KEY) or []),
+        assignee=list(st.session_state.get(FILTER_ASSIGNEE_KEY) or []),
+    )
+    if ctx_label is None:
+        st.session_state.pop(FILTER_ACTION_CONTEXT_KEY, None)
+
     status_opts_raw = status_col.astype(str).unique().tolist()
     status_opts_raw = _order_statuses_canonical(status_opts_raw)
     status_opts_ui = [_status_combo_label(s) for s in status_opts_raw]
@@ -394,6 +496,16 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
 
     with st.container(border=True, key=f"{(key_prefix or 'dashboard')}_filters_panel"):
+        if ctx_label:
+            st.markdown(
+                (
+                    '<div class="flt-action-chip">'
+                    '<span class="flt-action-chip-lbl">Investigando</span>'
+                    f"<span>{ctx_label}</span>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
         c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
 
         with c_status:
@@ -426,7 +538,12 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
 
         with c_assignee:
             if "assignee" in df.columns:
-                assignee_opts = sorted(df["assignee"].dropna().astype(str).unique().tolist())
+                assignee_opts = sorted(
+                    normalize_text_col(df["assignee"], "(sin asignar)")
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
                 selected_ui_assignee = list(st.session_state.get(ui_assignee_key) or [])
                 st.session_state[ui_assignee_key] = [
                     x for x in selected_ui_assignee if x in assignee_opts
@@ -475,7 +592,8 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
             mask &= priority_norm.isin(fs.priority)
 
     if fs.assignee and "assignee" in df.columns:
-        mask &= df["assignee"].isin(fs.assignee)
+        assignee_norm = normalize_text_col(df["assignee"], "(sin asignar)")
+        mask &= assignee_norm.isin(fs.assignee)
 
     needs_status_write = False
     if status_norm is not None:
@@ -651,26 +769,26 @@ def _inject_matrix_header_signal_css(
 
 
 def render_status_priority_matrix(
-    open_df: pd.DataFrame,
+    scoped_df: pd.DataFrame,
     fs: Optional[FilterState] = None,
     *,
     key_prefix: str = "mx",
 ) -> None:
-    """Render a clickable matrix Estado x Priority for open issues.
+    """Render a clickable matrix Estado x Priority for filtered issues.
 
     IMPORTANT: If you render this matrix more than once on the same page (e.g. in multiple tabs),
     you MUST pass different key_prefix values to avoid StreamlitDuplicateElementId.
     """
-    if open_df is None or open_df.empty:
+    if scoped_df is None or scoped_df.empty:
         return
-    if "status" not in open_df.columns or "priority" not in open_df.columns:
+    if "status" not in scoped_df.columns or "priority" not in scoped_df.columns:
         return
 
-    st.markdown("### Matriz Estado x Priority (abiertas)")
+    st.markdown("### Matriz Estado x Priority (filtradas)")
 
-    mx = open_df.assign(
-        status=normalize_text_col(open_df["status"], "(sin estado)"),
-        priority=normalize_text_col(open_df["priority"], "(sin priority)"),
+    mx = scoped_df.assign(
+        status=normalize_text_col(scoped_df["status"], "(sin estado)"),
+        priority=normalize_text_col(scoped_df["priority"], "(sin priority)"),
     )
 
     # Orden filas: CANÓNICO
@@ -707,7 +825,7 @@ def render_status_priority_matrix(
     # Totales: columnas + filas
     col_totals = {p: int(counts[p].sum()) if p in counts.columns else 0 for p in priorities}
     row_totals = counts.sum(axis=1).to_dict()
-    total_open = int(sum(row_totals.values()))
+    total_issues = int(sum(row_totals.values()))
 
     matrix_scope_key = f"{(key_prefix or 'mx')}_matrix_panel"
     _inject_matrix_compact_css(matrix_scope_key)
@@ -725,7 +843,7 @@ def render_status_priority_matrix(
     with st.container(border=True, key=matrix_scope_key):
         # Header row (con totales por columna)
         hdr = st.columns(len(priorities) + 1)
-        hdr[0].markdown(f"**Estado ({total_open:,})**")
+        hdr[0].markdown(f"**Estado ({total_issues:,})**")
         for i, p in enumerate(priorities):
             label = f"{_matrix_priority_label(p)} ({col_totals.get(p, 0)})"
             col_key = f"{key_prefix}__mx_col__{_matrix_safe_token(p)}"

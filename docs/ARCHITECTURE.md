@@ -8,9 +8,11 @@ Aplicación Streamlit para gestión operativa de incidencias multi-fuente, con f
 - `src/bug_resolution_radar/ui/app.py`: shell principal (hero, scope país/origen, navegación, tema).
 - `src/bug_resolution_radar/ui/pages/*.py`: ruteo por secciones funcionales.
 - `src/bug_resolution_radar/ui/dashboard/*.py`: lógica de vistas core (Resumen, Issues, Kanban, Tendencias, Notas).
+- `src/bug_resolution_radar/ui/dashboard/next_best_banner.py`: banner premium de Next Best Action sobre filtros en vistas operativas.
 - `src/bug_resolution_radar/ui/insights/*.py`: vistas analíticas especializadas (Top tópicos, Duplicados, Personas, Salud operativa).
 - `src/bug_resolution_radar/ui/insights/engine.py`: motor unificado de insights adaptativos y scoring ejecutivo.
 - `src/bug_resolution_radar/ui/insights/learning_store.py`: persistencia de aprendizaje por cliente entre sesiones.
+- `src/bug_resolution_radar/ui/insights/copilot.py`: helpers de Copilot operativo (snapshot, next best action, Q&A).
 - `src/bug_resolution_radar/ui/components/*.py`: componentes reutilizables (filtros, tabla/cards de issues).
 - `src/bug_resolution_radar/ui/style.py`: tokens visuales, tema claro/oscuro y estilo Plotly.
 
@@ -20,6 +22,7 @@ Aplicación Streamlit para gestión operativa de incidencias multi-fuente, con f
 3. `pages/dashboard_page.py` carga dataset y aplica filtros canónicos compartidos.
 4. Cada sección consume `DashboardDataContext` para evitar recomputaciones innecesarias.
 5. Acciones de insights pueden sincronizar filtros y navegar automáticamente a `Issues`.
+6. El Copilot operativo se muestra en `Resumen` y puede guiar salto a `Issues`/`Tendencias`/`Insights` aplicando filtros derivados de la acción.
 
 ## Estado de sesión clave
 - Navegación: `workspace_mode`, `workspace_section`, `workspace_section_label`.
@@ -28,6 +31,9 @@ Aplicación Streamlit para gestión operativa de incidencias multi-fuente, con f
 - Filtros canónicos: `FILTER_STATUS_KEY`, `FILTER_PRIORITY_KEY`, `FILTER_ASSIGNEE_KEY`.
 - Deep-linking interno: `__jump_to_tab`, `__jump_to_insights_tab`.
 - Aprendizaje de insights: `__insights_learning_state`, `__insights_interactions`.
+- Baseline y snapshot de sesion: `__insights_session_baseline_snapshot`, `__insights_latest_snapshot`.
+- Memoria Copilot por cliente: `copilot_intents` dentro de `__insights_learning_state`.
+- Cola NBA revisada (solo sesion): `__nba_review_state` (no se persiste a disco).
 
 ## Principios de diseño técnico
 - Fuente única de verdad para filtros (evita desalineación entre pestañas).

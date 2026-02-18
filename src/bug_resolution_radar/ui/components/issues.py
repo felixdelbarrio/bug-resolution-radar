@@ -301,14 +301,10 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
     )
 
 
-def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None:
-    """Render issues as BBVA-styled cards (open issues prioritized)."""
-    if title:
-        st.markdown(f"### {title}")
-
+def prepare_issue_cards_df(dff: pd.DataFrame, *, max_cards: int) -> pd.DataFrame:
+    """Prepare card rows with consistent ordering over the full filtered dataset."""
     if dff is None or dff.empty:
-        st.info("No hay issues para mostrar con los filtros actuales.")
-        return
+        return pd.DataFrame()
 
     cols = [
         "key",
@@ -327,54 +323,89 @@ def render_issue_cards(dff: pd.DataFrame, *, max_cards: int, title: str) -> None
             safe_df[c] = None
 
     now = pd.Timestamp.now(tz="UTC")
-    open_df = (
-        safe_df[safe_df["resolved"].isna()].copy(deep=False)
+    created = (
+        pd.to_datetime(safe_df["created"], errors="coerce", utc=True)
+        if "created" in safe_df.columns
+        else pd.Series([pd.NaT] * len(safe_df), index=safe_df.index)
+    )
+    resolved = (
+        pd.to_datetime(safe_df["resolved"], errors="coerce", utc=True)
         if "resolved" in safe_df.columns
-        else safe_df.copy(deep=False)
+        else pd.Series([pd.NaT] * len(safe_df), index=safe_df.index)
     )
 
-    if "created" in open_df.columns:
-        created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
-        open_df["open_age_days"] = ((now - created).dt.total_seconds() / 86400.0).fillna(0.0)
-    else:
-        open_df["open_age_days"] = 0.0
-
-    # Sort: priority, then updated desc.
-    open_df["_prio_rank"] = (
-        open_df["priority"].astype(str).map(priority_rank) if "priority" in open_df.columns else 99
+    card_df = safe_df.copy(deep=False)
+    card_df["__is_open"] = resolved.isna()
+    card_df["__open_age_days"] = (
+        ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0).fillna(0.0)
     )
-    sort_cols = ["_prio_rank"]
-    asc = [True]
-    if "updated" in open_df.columns:
+    card_df["__cycle_days"] = (
+        ((resolved - created).dt.total_seconds() / 86400.0).clip(lower=0.0).fillna(0.0)
+    )
+    card_df["__prio_rank"] = (
+        card_df["priority"].astype(str).map(priority_rank) if "priority" in card_df.columns else 99
+    )
+
+    sort_cols = ["__is_open", "__prio_rank"]
+    asc = [False, True]
+    if "updated" in card_df.columns:
         sort_cols.append("updated")
         asc.append(False)
+    return card_df.sort_values(by=sort_cols, ascending=asc).head(max_cards)
 
-    open_df = open_df.sort_values(by=sort_cols, ascending=asc).head(max_cards)
+
+def render_issue_cards(
+    dff: pd.DataFrame,
+    *,
+    max_cards: int,
+    title: str,
+    prepared_df: pd.DataFrame | None = None,
+) -> None:
+    """Render issues as BBVA-styled cards over the full filtered set (open first)."""
+    if title:
+        st.markdown(f"### {title}")
+
+    if dff is None or dff.empty:
+        st.info("No hay issues para mostrar con los filtros actuales.")
+        return
+
+    cards_df = (
+        prepared_df
+        if isinstance(prepared_df, pd.DataFrame)
+        else prepare_issue_cards_df(dff, max_cards=max_cards)
+    )
 
     cards: List[str] = []
-    for row in open_df.itertuples(index=False):
-        key = html.escape(str(getattr(row, "key", "") or ""))
-        url = html.escape(str(getattr(row, "url", "") or ""))
-        summary = html.escape(str(getattr(row, "summary", "") or ""))
-        status = html.escape(str(getattr(row, "status", "") or ""))
-        prio = html.escape(str(getattr(row, "priority", "") or ""))
-        assignee = html.escape(str(getattr(row, "assignee", "") or ""))
-        age = float(getattr(row, "open_age_days", 0.0) or 0.0)
+    for row in cards_df.to_dict(orient="records"):
+        key_txt = _safe_cell_text(row.get("key"))
+        key = html.escape(key_txt if key_txt != "—" else _jira_label_from_row(row))
+        url_raw = str(row.get("url") or "").strip()
+        url = html.escape(url_raw)
+        summary = html.escape(_safe_cell_text(row.get("summary")))
+        status_txt = _safe_cell_text(row.get("status"))
+        prio_txt = _safe_cell_text(row.get("priority"))
+        assignee_txt = _safe_cell_text(row.get("assignee"))
+        is_open = bool(row.get("__is_open", True))
+        open_age = float(row.get("__open_age_days", 0.0) or 0.0)
+        cycle_days = float(row.get("__cycle_days", 0.0) or 0.0)
 
         badges: List[str] = []
-        if prio:
-            p_style = chip_style_from_color(priority_color(prio))
+        if prio_txt != "—":
+            p_style = chip_style_from_color(priority_color(prio_txt))
             badges.append(
-                f'<span class="badge badge-priority" style="{p_style}">Priority: {prio}</span>'
+                f'<span class="badge badge-priority" style="{p_style}">Priority: {html.escape(prio_txt)}</span>'
             )
-        if status:
-            s_style = chip_style_from_color(status_color(status))
+        if status_txt != "—":
+            s_style = chip_style_from_color(status_color(status_txt))
             badges.append(
-                f'<span class="badge badge-status" style="{s_style}">Status: {status}</span>'
+                f'<span class="badge badge-status" style="{s_style}">Status: {html.escape(status_txt)}</span>'
             )
-        if assignee:
-            badges.append(f'<span class="badge">Assignee: {assignee}</span>')
-        badges.append(f'<span class="badge badge-age">Open age: {age:.0f}d</span>')
+        if assignee_txt != "—":
+            badges.append(f'<span class="badge">Assignee: {html.escape(assignee_txt)}</span>')
+        if is_open:
+            badges.append(f'<span class="badge badge-age">Open age: {open_age:.0f}d</span>')
+        else:
+            badges.append(f'<span class="badge badge-age">Resolved in: {cycle_days:.0f}d</span>')
 
         cards.append(
             (

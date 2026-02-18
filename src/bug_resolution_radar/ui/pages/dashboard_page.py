@@ -16,8 +16,12 @@ from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_
 from bug_resolution_radar.ui.dashboard.issues import render_issues_tab
 from bug_resolution_radar.ui.dashboard.kanban import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
+from bug_resolution_radar.ui.dashboard.next_best_banner import render_next_best_banner
 from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
-from bug_resolution_radar.ui.dashboard.overview import render_overview_kpis, render_overview_tab
+from bug_resolution_radar.ui.dashboard.overview import (
+    render_overview_kpis,
+    render_overview_tab,
+)
 from bug_resolution_radar.ui.dashboard.trends import render_trends_tab
 from bug_resolution_radar.ui.pages.insights_page import render as render_insights_page
 
@@ -86,6 +90,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         notes.load()
 
     if section in {"issues", "kanban", "trends"}:
+        render_next_best_banner(df_all=scoped_df, section=section)
         render_filters(scoped_df, key_prefix="dashboard")
 
     ctx = build_dashboard_data_context(
@@ -97,7 +102,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
     if section == "overview":
         render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
         render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
-        render_status_priority_matrix(ctx.open_df, ctx.fs, key_prefix="mx_overview")
+        render_status_priority_matrix(ctx.dff, ctx.fs, key_prefix="mx_overview")
     elif section == "issues":
         render_issues_tab(dff=ctx.dff)
     elif section == "kanban":
