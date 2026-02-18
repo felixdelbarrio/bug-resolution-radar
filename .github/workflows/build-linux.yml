@@ -41,6 +41,5 @@ jobs:
           path: |
             dist/bug-resolution-radar
             .env.example
-            assets/
             README.md
           if-no-files-found: error
