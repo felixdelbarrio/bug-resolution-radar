@@ -154,7 +154,7 @@ def _inject_combo_signal_script() -> None:
             const doc = root && root.document;
             if (!doc) return;
             const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
-            const PAINTER_VERSION = 8; // bump to force refresh of painter logic/colors in active sessions
+            const PAINTER_VERSION = 9; // bump to force refresh of painter logic/colors in active sessions
 
             const normalizeText = (raw) =>
               String(raw || "")
@@ -195,7 +195,11 @@ def _inject_combo_signal_script() -> None:
             const GOAL_GREEN =
               (root.getComputedStyle && doc.documentElement
                 ? String(root.getComputedStyle(doc.documentElement).getPropertyValue("--bbva-goal-green") || "").trim()
-                : "") || "#008F2A";
+                : "") || "#5B3FD0";
+            const GOAL_BG =
+              (root.getComputedStyle && doc.documentElement
+                ? String(root.getComputedStyle(doc.documentElement).getPropertyValue("--bbva-goal-green-bg") || "").trim()
+                : "") || "#ECE6FF";
 
             const toRgba = (hex, alpha) => {
               const h = String(hex || "").replace("#", "");
@@ -326,8 +330,8 @@ def _inject_combo_signal_script() -> None:
               const token = canonicalToken(label);
               const isGoal = token === "deployed";
               const bgAlpha = isGoal ? 0.24 : 0.14;
-              const borderAlpha = isGoal ? 0.72 : 0.52;
-              el.style.setProperty("background", toRgba(color, bgAlpha), "important");
+              const borderAlpha = isGoal ? 0.64 : 0.52;
+              el.style.setProperty("background", isGoal ? GOAL_BG : toRgba(color, bgAlpha), "important");
               el.style.setProperty("border", "1px solid " + toRgba(color, borderAlpha), "important");
               el.style.setProperty("color", color, "important");
               el.style.setProperty("background-image", "none", "important");
@@ -765,6 +769,20 @@ def _matrix_toggle_priority_filter(prio: str) -> None:
 
 def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
     color = (hex_color or "#8EA2C4").strip()
+    deployed_color = status_color("Deployed").strip().upper()
+    if color.strip().upper() == deployed_color:
+        border = _hex_with_alpha(color, 180 if selected else 150)
+        bg = (
+            "color-mix(in srgb, var(--bbva-goal-green-bg) 86%, var(--bbva-goal-green) 14%)"
+            if selected
+            else "var(--bbva-goal-green-bg)"
+        )
+        fw = "800" if selected else "700"
+        return (
+            f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
+            f"border-radius:11px; border:1px solid {border}; background:{bg}; "
+            f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
+        )
     border = _hex_with_alpha(color, 150 if selected else 110)
     bg = _hex_with_alpha(color, 48 if selected else 24)
     fw = "800" if selected else "700"
@@ -789,6 +807,33 @@ def _matrix_safe_token(value: str) -> str:
 
 def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
     color = (hex_color or "#8EA2C4").strip()
+    deployed_color = status_color("Deployed").strip().upper()
+    if color.strip().upper() == deployed_color:
+        border = _hex_with_alpha(color, 178 if selected else 145)
+        bg = (
+            "color-mix(in srgb, var(--bbva-goal-green-bg) 84%, var(--bbva-goal-green) 16%)"
+            if selected
+            else "var(--bbva-goal-green-bg)"
+        )
+        hover_bg = "color-mix(in srgb, var(--bbva-goal-green-bg) 78%, var(--bbva-goal-green) 22%)"
+        ring = _hex_with_alpha(color, 86)
+        glow = _hex_with_alpha(color, 66)
+        fw = "800" if selected else "700"
+        return (
+            f"border:1px solid {border} !important;"
+            f"background:{bg} !important;"
+            f"color:{color} !important;"
+            f"font-weight:{fw} !important;"
+            "border-radius:11px !important;"
+            "min-height:2.18rem !important;"
+            "padding:0.22rem 0.46rem !important;"
+            "line-height:1.16 !important;"
+            "white-space:normal !important;"
+            "word-break:break-word !important;"
+            f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+            f"--mx-hover-bg:{hover_bg};"
+            f"--mx-focus-ring:{ring};"
+        )
     border = _hex_with_alpha(color, 170 if selected else 125)
     bg = _hex_with_alpha(color, 64 if selected else 28)
     hover_bg = _hex_with_alpha(color, 76 if selected else 42)

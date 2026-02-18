@@ -35,7 +35,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-active-bg: #355A86;
             --bbva-tab-active-border: #6F92BF;
             --bbva-tab-active-text: #FFFFFF;
-            --bbva-goal-green: #008F2A;
+            --bbva-goal-green: #5B3FD0;
+            --bbva-goal-green-bg: #ECE6FF;
             --bbva-action-link: #154A9C;
             --bbva-action-link-hover: #0D3778;
             --primary-color: var(--bbva-primary);
@@ -70,7 +71,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --bbva-tab-active-bg: #6F839E;
             --bbva-tab-active-border: #657A94;
             --bbva-tab-active-text: #F8FBFF;
-            --bbva-goal-green: #008F2A;
+            --bbva-goal-green: #5B3FD0;
+            --bbva-goal-green-bg: #ECE6FF;
             --bbva-action-link: #1C53B7;
             --bbva-action-link-hover: #123F90;
             --primary-color: var(--bbva-primary);
@@ -584,6 +586,87 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .stButton > button:disabled {
             opacity: 0.45 !important;
             cursor: not-allowed !important;
+          }
+
+          /* Workspace nav: keep tab/action styling aligned with theme after global button rules */
+          .st-key-workspace_nav_tabs .stButton > button,
+          .st-key-workspace_nav_tabs [data-testid^="baseButton-"] {
+            background: transparent !important;
+            background-color: transparent !important;
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            border-radius: 0 !important;
+            color: var(--bbva-tab-soft-text) !important;
+            font-family: var(--bbva-font-label) !important;
+            font-weight: 760 !important;
+            letter-spacing: 0.01em !important;
+            min-height: 2.02rem !important;
+          }
+          .st-key-workspace_nav_tabs .stButton > button[kind="primary"],
+          .st-key-workspace_nav_tabs [data-testid="baseButton-primary"],
+          .st-key-workspace_nav_tabs [data-testid="baseButton-primary"] > button {
+            background: transparent !important;
+            background-color: transparent !important;
+            border: 0 !important;
+            border-bottom: 2px solid var(--bbva-primary) !important;
+            color: var(--bbva-primary) !important;
+          }
+          .st-key-workspace_nav_tabs .stButton > button[kind="secondary"],
+          .st-key-workspace_nav_tabs [data-testid="baseButton-secondary"],
+          .st-key-workspace_nav_tabs [data-testid="baseButton-secondary"] > button {
+            background: transparent !important;
+            background-color: transparent !important;
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          .st-key-workspace_nav_tabs .stButton > button:hover,
+          .st-key-workspace_nav_tabs [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_nav_tabs [data-testid^="baseButton-"] > button:hover {
+            background: transparent !important;
+            background-color: transparent !important;
+            border: 0 !important;
+            border-bottom: 2px solid transparent !important;
+            color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
+          }
+
+          .st-key-workspace_nav_actions .stButton > button,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"],
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button {
+            min-height: 2.02rem !important;
+            min-width: 2.02rem !important;
+            padding: 0.16rem !important;
+            border-radius: 10px !important;
+            font-size: 1.00rem !important;
+            font-weight: 760 !important;
+            border: 1px solid var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            background-color: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+            box-shadow: none !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button[kind="primary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"] > button {
+            border-color: var(--bbva-tab-active-border) !important;
+            background: var(--bbva-tab-active-bg) !important;
+            background-color: var(--bbva-tab-active-bg) !important;
+            color: var(--bbva-tab-active-text) !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button[kind="secondary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-secondary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-secondary"] > button {
+            border-color: var(--bbva-tab-soft-border) !important;
+            background: var(--bbva-tab-soft-bg) !important;
+            background-color: var(--bbva-tab-soft-bg) !important;
+            color: var(--bbva-tab-soft-text) !important;
+          }
+          .st-key-workspace_nav_actions .stButton > button:hover,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:hover {
+            border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
+            background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+            background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
           }
 
           /* Download button: unified pill style across CSV/HTML exports */

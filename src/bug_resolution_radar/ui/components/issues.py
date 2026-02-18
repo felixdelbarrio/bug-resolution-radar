@@ -10,8 +10,8 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.ui.common import (
+    chip_palette_for_color,
     chip_style_from_color,
-    chip_tone_for_color,
     priority_color,
     priority_rank,
     status_color,
@@ -118,11 +118,9 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
             "border-radius: 999px !important;"
         )
 
-    border_alpha, bg_alpha = chip_tone_for_color(color)
-    border = _hex_to_rgba(color, border_alpha)
-    bg = _hex_to_rgba(color, bg_alpha)
+    txt_color, border, bg = chip_palette_for_color(color)
     return (
-        f"color: {color} !important; "
+        f"color: {txt_color} !important; "
         f"background: {bg} !important; "
         f"border: 1px solid {border} !important; "
         "border-radius: 999px !important; "
