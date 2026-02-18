@@ -1066,7 +1066,7 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             ActionInsight(
                 title="Deuda de triage",
                 body=(
-                    f"{_fmt_pct(triage_share)} de abiertas estan en New/Analysing. "
+                    f"{_fmt_pct(triage_share)} de incidencias estan en New/Analysing. "
                     "Una rutina diaria de triage suele reducir esta bolsa rapidamente."
                 ),
                 status_filters=list(TRIAGE_STATUS_FILTERS),
@@ -1169,7 +1169,7 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     return TrendInsightPack(
         metrics=[
-            InsightMetric("Total abiertas", f"{total}"),
+            InsightMetric("Total incidencias", f"{total}"),
             InsightMetric("Estado dominante", top_status),
             InsightMetric("Concentracion top", _fmt_pct(top_share)),
         ],

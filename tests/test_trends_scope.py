@@ -4,6 +4,8 @@ import pandas as pd
 
 from bug_resolution_radar.ui.dashboard.trends import (
     _effective_trends_open_scope,
+    _exclude_terminal_status_rows,
+    _open_status_payload,
     available_trend_charts,
 )
 
@@ -73,8 +75,32 @@ def test_effective_trends_open_scope_keeps_open_df_if_no_matching_status() -> No
     assert scoped.empty
 
 
-def test_available_trend_chart_labels_do_not_use_abiertas_wording() -> None:
+def test_available_trend_chart_labels_are_executive_and_consistent() -> None:
     labels = {cid: label for cid, label in available_trend_charts()}
-    assert labels["open_priority_pie"] == "Issues por Priority"
+    assert labels["open_priority_pie"] == "Issues abiertos por prioridad"
     assert labels["open_status_bar"] == "Issues por Estado"
     assert "abiertas" not in labels["age_buckets"].lower()
+
+
+def test_exclude_terminal_status_rows_removes_deployed_for_open_priority_scope() -> None:
+    df = pd.DataFrame(
+        {
+            "status": ["New", "Blocked", "Deployed", "Accepted", "In Progress"],
+            "priority": ["High", "Medium", "Low", "Low", "High"],
+        }
+    )
+    out = _exclude_terminal_status_rows(df)
+    assert set(out["status"].astype(str).tolist()) == {"New", "Blocked", "In Progress"}
+
+
+def test_open_status_payload_keeps_deployed_in_status_aggregation() -> None:
+    df = pd.DataFrame(
+        {
+            "status": ["New", "In Progress", "Deployed", "Accepted"],
+            "priority": ["High", "Medium", "Low", "Low"],
+        }
+    )
+    payload = _open_status_payload(df)
+    grouped = payload.get("grouped")
+    assert isinstance(grouped, pd.DataFrame)
+    assert "Deployed" in grouped["status"].astype(str).unique().tolist()

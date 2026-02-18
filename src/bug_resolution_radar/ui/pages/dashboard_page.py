@@ -89,7 +89,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         notes = NotesStore(Path(settings.NOTES_PATH))
         notes.load()
 
-    if section in {"issues", "kanban", "trends"}:
+    if section in {"issues", "kanban"}:
         render_next_best_banner(df_all=scoped_df, section=section)
         render_filters(scoped_df, key_prefix="dashboard")
 

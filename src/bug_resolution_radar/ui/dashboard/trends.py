@@ -117,6 +117,18 @@ def _effective_trends_open_scope(
     return safe_open, False
 
 
+def _exclude_terminal_status_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Exclude terminal/finalist statuses from an open-like dataframe view."""
+    safe = _safe_df(df)
+    if safe.empty or "status" not in safe.columns:
+        return safe.copy(deep=False)
+    status_norm = normalize_text_col(safe["status"], "(sin estado)").map(_norm_status_token)
+    terminal_mask = status_norm.map(
+        lambda st_name: any(tok in str(st_name or "") for tok in TERMINAL_STATUS_TOKENS)
+    )
+    return safe.loc[~terminal_mask].copy(deep=False)
+
+
 def _ensure_learning_state() -> Dict[str, Any]:
     raw = st.session_state.get(LEARNING_STATE_KEY)
     if isinstance(raw, dict):
@@ -496,12 +508,12 @@ def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {"grouped": grouped_res, "closed": export_df}
 
 
-def _open_status_payload(open_df: pd.DataFrame) -> dict[str, Any]:
-    """Build grouped open-by-status data and canonical ordered categories."""
-    if open_df.empty or "status" not in open_df.columns:
+def _open_status_payload(status_df: pd.DataFrame) -> dict[str, Any]:
+    """Build grouped issues-by-status data and canonical ordered categories."""
+    if status_df.empty or "status" not in status_df.columns:
         return {"grouped": pd.DataFrame(), "status_order": []}
 
-    dff = open_df.copy(deep=False)
+    dff = status_df.copy(deep=False)
     dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
     if "priority" in dff.columns:
         dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
@@ -532,7 +544,7 @@ def available_trend_charts() -> List[Tuple[str, str]]:
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
         ("age_buckets", "Antigüedad por estado (distribución)"),
         ("resolution_hist", "Tiempos de resolución (cerradas)"),
-        ("open_priority_pie", "Issues por Priority"),
+        ("open_priority_pie", "Issues abiertos por prioridad"),
         ("open_status_bar", "Issues por Estado"),
     ]
 
@@ -596,12 +608,18 @@ def render_trends_tab(
 
     # 2) Contenedor del gráfico seleccionado
     with st.container(border=True, key="trend_chart_shell"):
-        if adapted_for_terminal:
+        if adapted_for_terminal and selected_chart not in {"open_priority_pie", "open_status_bar"}:
             st.caption(
                 "Vista adaptada al estado finalista seleccionado (incluye incidencias finalizadas)."
             )
         _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=trends_open_df)
-        _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=trends_open_df)
+        if selected_chart == "open_priority_pie":
+            insights_scope_df = _exclude_terminal_status_rows(trends_open_df)
+        elif selected_chart == "open_status_bar":
+            insights_scope_df = dff
+        else:
+            insights_scope_df = trends_open_df
+        _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=insights_scope_df)
 
 
 # -------------------------
@@ -797,13 +815,14 @@ def _render_trend_chart(
         return
 
     if chart_id == "open_priority_pie":
-        if open_df.empty or "priority" not in open_df.columns:
+        open_scope = _exclude_terminal_status_rows(open_df)
+        if open_scope.empty or "priority" not in open_scope.columns:
             st.info(
                 "No hay datos suficientes para el gráfico de Priority con los filtros actuales."
             )
             return
 
-        dff = open_df.copy()
+        dff = open_scope.copy()
         dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
 
         fig = px.pie(
@@ -828,19 +847,19 @@ def _render_trend_chart(
         return
 
     if chart_id == "open_status_bar":
-        if open_df.empty or "status" not in open_df.columns:
+        if dff.empty or "status" not in dff.columns:
             st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
             return
 
         status_sig = dataframe_signature(
-            open_df,
+            dff,
             columns=("status", "priority"),
-            salt="trends.open_status_bar.v1",
+            salt="trends.open_status_bar.v2",
         )
         status_payload, _ = cached_by_signature(
             "trends.open_status_bar.payload",
             status_sig,
-            lambda: _open_status_payload(open_df),
+            lambda: _open_status_payload(dff),
             max_entries=10,
         )
         grouped = status_payload.get("grouped") if isinstance(status_payload, dict) else None
