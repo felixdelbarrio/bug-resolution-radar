@@ -251,8 +251,8 @@ def _render_source_delete_container(
         return {"source_ids": selected_source_ids, "armed": armed, "valid": valid}
 
 
-def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[Dict[str, str]]:
-    rows = []
+def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
     for src in jira_sources(settings):
         country = _as_str(src.get("country"))
         if country not in countries:
@@ -269,8 +269,8 @@ def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[D
     return rows
 
 
-def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[Dict[str, str]]:
-    rows = []
+def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
     for src in helix_sources(settings):
         country = _as_str(src.get("country"))
         if country not in countries:
