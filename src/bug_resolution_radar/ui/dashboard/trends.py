@@ -386,10 +386,27 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
         if "resolved" in dff.columns
         else pd.Series(pd.NaT, index=dff.index)
     )
+    updated = (
+        _to_dt_naive(dff["updated"])
+        if "updated" in dff.columns
+        else pd.Series(pd.NaT, index=dff.index)
+    )
+    status_norm = (
+        normalize_text_col(dff["status"], "(sin estado)").map(_norm_status_token)
+        if "status" in dff.columns
+        else pd.Series("", index=dff.index)
+    )
+    deployed_mask = status_norm.eq("deployed")
+    deployed_ts = pd.Series(pd.NaT, index=dff.index)
+    if deployed_mask.any():
+        deployed_ts = resolved.where(deployed_mask)
+        deployed_ts = deployed_ts.where(deployed_ts.notna(), updated.where(deployed_mask))
+        deployed_ts = deployed_ts.where(deployed_ts.notna(), created.where(deployed_mask))
 
     created_notna = created.notna()
     resolved_notna = resolved.notna()
-    if not created_notna.any() and not resolved_notna.any():
+    deployed_notna = deployed_ts.notna()
+    if not created_notna.any() and not resolved_notna.any() and not deployed_notna.any():
         return pd.DataFrame()
 
     end_candidates = []
@@ -397,6 +414,8 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
         end_candidates.append(created.loc[created_notna].max())
     if resolved_notna.any():
         end_candidates.append(resolved.loc[resolved_notna].max())
+    if deployed_notna.any():
+        end_candidates.append(deployed_ts.loc[deployed_notna].max())
     end_ts = (
         pd.Timestamp(max(end_candidates)).normalize()
         if end_candidates
@@ -410,14 +429,20 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
     closed_daily = (
         resolved.loc[resolved_notna & (resolved >= start_ts)].dt.floor("D").value_counts(sort=False)
     )
+    deployed_daily = (
+        deployed_ts.loc[deployed_notna & (deployed_ts >= start_ts)]
+        .dt.floor("D")
+        .value_counts(sort=False)
+    )
 
-    all_dates = created_daily.index.union(closed_daily.index).sort_values()
+    all_dates = created_daily.index.union(closed_daily.index).union(deployed_daily.index).sort_values()
     if all_dates.empty:
         return pd.DataFrame()
 
     daily = pd.DataFrame({"date": all_dates})
     daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
     daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
+    daily["deployed"] = deployed_daily.reindex(all_dates, fill_value=0).to_numpy()
     # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
     daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
     return daily
@@ -634,8 +659,8 @@ def _render_trend_chart(
     if chart_id == "timeseries":
         ts_sig = dataframe_signature(
             dff,
-            columns=("created", "resolved"),
-            salt="trends.timeseries.v1",
+            columns=("created", "resolved", "status", "updated"),
+            salt="trends.timeseries.v2",
         )
         daily, _ = cached_by_signature(
             "trends.timeseries.daily",
@@ -646,7 +671,7 @@ def _render_trend_chart(
         if not isinstance(daily, pd.DataFrame) or daily.empty:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return
-        fig = px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
+        fig = px.line(daily, x="date", y=["created", "closed", "deployed", "open_backlog_proxy"])
         fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]

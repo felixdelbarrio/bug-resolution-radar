@@ -455,7 +455,7 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ),
         ChartSpec(
             chart_id="open_priority_pie",
-            title="Backlog por prioridad",
+            title="Issues abiertos por prioridad",
             subtitle="Concentración y salud del sistema de priorización",
             group="Backlog",
             render=_render_open_priority_pie,

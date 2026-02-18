@@ -202,7 +202,7 @@ def build_default_slide_specs() -> List[SlideSpec]:
         ),
         SlideSpec(
             "open_priority_pie",
-            "Backlog por prioridad",
+            "Issues abiertos por prioridad",
             "Señal de concentración: dónde se está acumulando el riesgo.",
         ),
         SlideSpec(

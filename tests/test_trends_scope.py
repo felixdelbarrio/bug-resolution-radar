@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bug_resolution_radar.ui.dashboard.registry import (
+    ChartContext,
+    _render_open_priority_pie,
+)
 from bug_resolution_radar.ui.dashboard.trends import (
     _effective_trends_open_scope,
     _exclude_terminal_status_rows,
     _open_status_payload,
+    _timeseries_daily_from_filtered,
     available_trend_charts,
 )
 
@@ -104,3 +109,51 @@ def test_open_status_payload_keeps_deployed_in_status_aggregation() -> None:
     grouped = payload.get("grouped")
     assert isinstance(grouped, pd.DataFrame)
     assert "Deployed" in grouped["status"].astype(str).unique().tolist()
+
+
+def test_timeseries_daily_from_filtered_includes_deployed_series() -> None:
+    df = pd.DataFrame(
+        {
+            "status": ["New", "Deployed", "Deployed", "Closed"],
+            "created": [
+                pd.Timestamp("2025-01-01"),
+                pd.Timestamp("2025-01-02"),
+                pd.Timestamp("2025-01-02"),
+                pd.Timestamp("2025-01-02"),
+            ],
+            "resolved": [
+                pd.NaT,
+                pd.Timestamp("2025-01-03"),
+                pd.NaT,
+                pd.Timestamp("2025-01-03"),
+            ],
+            "updated": [
+                pd.Timestamp("2025-01-01"),
+                pd.Timestamp("2025-01-03"),
+                pd.Timestamp("2025-01-04"),
+                pd.Timestamp("2025-01-03"),
+            ],
+        }
+    )
+    daily = _timeseries_daily_from_filtered(df)
+    assert "deployed" in daily.columns
+    by_day = {
+        pd.Timestamp(row.date).normalize(): int(row.deployed)
+        for row in daily[["date", "deployed"]].itertuples(index=False)
+    }
+    assert by_day.get(pd.Timestamp("2025-01-03"), 0) == 1
+    assert by_day.get(pd.Timestamp("2025-01-04"), 0) == 1
+
+
+def test_render_open_priority_pie_excludes_deployed_rows() -> None:
+    open_df = pd.DataFrame(
+        {
+            "status": ["Deployed", "New", "Accepted"],
+            "priority": ["Low", "High", "Medium"],
+        }
+    )
+    ctx = ChartContext(dff=open_df.copy(deep=False), open_df=open_df, kpis={})
+    fig = _render_open_priority_pie(ctx)
+    assert fig is not None
+    labels = [str(x) for x in list(fig.data[0]["labels"])]
+    assert set(labels) == {"High"}
