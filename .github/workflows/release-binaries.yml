@@ -94,10 +94,6 @@ jobs:
           shutil.copy2(".env.example", bundle_dir / ".env.example")
           shutil.copy2("README.md", bundle_dir / "README.md")
 
-          assets_dir = Path("assets")
-          if assets_dir.exists():
-              shutil.copytree(assets_dir, bundle_dir / "assets", dirs_exist_ok=True)
-
           with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_DEFLATED) as zf:
               for path in bundle_dir.rglob("*"):
                   if path.is_file():

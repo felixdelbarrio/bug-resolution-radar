@@ -226,7 +226,7 @@ def main() -> None:
     if hero_title.lower() in {"", "bug resolution radar"}:
         hero_title = "Cuadro de mando de incidencias"
 
-    st.set_page_config(page_title=hero_title, layout="wide", page_icon="assets/bbva/favicon.png")
+    st.set_page_config(page_title=hero_title, layout="wide")
 
     if "workspace_dark_mode" not in st.session_state:
         st.session_state["workspace_dark_mode"] = False
