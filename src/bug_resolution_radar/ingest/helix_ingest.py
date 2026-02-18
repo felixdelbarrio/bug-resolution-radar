@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
@@ -45,6 +46,31 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int, int]:
+    year_int = _coerce_int(year, 0) if year is not None else 0
+    if year_int < 1970:
+        year_int = datetime.now(timezone.utc).year
+
+    start_dt = datetime(year_int, 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc)
+    end_dt = datetime(year_int + 1, 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc)
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000) - 1
+    return start_ms, end_ms, year_int
+
+
+def _build_filter_criteria(
+    organization: str, create_start_ms: int, create_end_ms: int
+) -> Dict[str, Any]:
+    return {
+        "organizations": [str(organization or "").strip()],
+        "createDateRanges": [{"start": int(create_start_ms), "end": int(create_end_ms)}],
+    }
+
+
+def _iso_from_epoch_ms(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
 
 
 def _get_timeouts(
@@ -311,6 +337,7 @@ def ingest_helix(
     ssl_verify: str = "",
     ca_bundle: str = "",
     chunk_size: int = 75,
+    create_date_year: Any = None,
     connect_timeout: Any = None,
     read_timeout: Any = None,
     proxy_min_read_timeout: Any = None,
@@ -433,11 +460,15 @@ def ingest_helix(
     ]
 
     org = (organization or "").strip()
+    create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(
+        create_date_year
+    )
+    filter_criteria = _build_filter_criteria(org, create_start_ms, create_end_ms)
 
     def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
         size = int(page_chunk_size if page_chunk_size is not None else chunk_size)
         return {
-            "filterCriteria": {"organizations": [org]},
+            "filterCriteria": filter_criteria,
             "attributeNames": attribute_names,
             "chunkInfo": {"startIndex": int(start_index), "chunkSize": size},
             "customAttributeNames": [],
@@ -746,7 +777,12 @@ def ingest_helix(
     doc.schema_version = "1.0"
     doc.ingested_at = now_iso()
     doc.helix_base_url = base
-    doc.query = f"organizations in [{org}]"
+    create_start_iso = _iso_from_epoch_ms(create_start_ms)
+    create_end_iso = _iso_from_epoch_ms(create_end_ms)
+    doc.query = (
+        f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
+        f" (year={create_year})"
+    )
 
     merged = {_item_merge_key(i): i for i in doc.items}
     for i in items:
