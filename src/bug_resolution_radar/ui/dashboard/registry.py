@@ -18,6 +18,16 @@ from bug_resolution_radar.ui.common import (
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
+TERMINAL_STATUS_TOKENS = (
+    "closed",
+    "resolved",
+    "done",
+    "deployed",
+    "accepted",
+    "cancelled",
+    "canceled",
+)
+
 
 # ---------------------------------------------------------------------
 # Types
@@ -268,6 +278,16 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
         return None
 
     dff = open_df.copy()
+    if "status" in dff.columns:
+        status_norm = (
+            normalize_text_col(dff["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        )
+        terminal_mask = status_norm.map(
+            lambda st_name: any(tok in str(st_name or "") for tok in TERMINAL_STATUS_TOKENS)
+        )
+        dff = dff.loc[~terminal_mask].copy(deep=False)
+    if dff.empty:
+        return None
     dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
 
     fig = px.pie(
@@ -276,7 +296,7 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
         hole=0.55,
         color="priority",
         color_discrete_map=priority_color_map(),
-        title="Abiertas por Priority",
+        title="Issues abiertos por prioridad",
     )
     fig.update_traces(sort=False)
     return apply_plotly_bbva(fig)
@@ -287,17 +307,29 @@ def _insights_open_priority_pie(ctx: ChartContext) -> List[str]:
     if open_df is None or open_df.empty or "priority" not in open_df.columns:
         return ["No hay datos de prioridad para generar insights con los filtros actuales."]
 
-    counts = open_df["priority"].astype(str).value_counts()
+    dff = open_df.copy()
+    if "status" in dff.columns:
+        status_norm = (
+            normalize_text_col(dff["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        )
+        terminal_mask = status_norm.map(
+            lambda st_name: any(tok in str(st_name or "") for tok in TERMINAL_STATUS_TOKENS)
+        )
+        dff = dff.loc[~terminal_mask].copy(deep=False)
+    if dff.empty:
+        return ["No hay incidencias abiertas por prioridad con los filtros actuales."]
+
+    counts = dff["priority"].astype(str).value_counts()
     total = int(counts.sum())
     if total == 0:
-        return ["No hay issues abiertas para este análisis."]
+        return ["No hay issues para este análisis."]
 
     top = int(counts.iloc[0])
     top_prio = str(counts.index[0])
     share = float(top) / float(total)
 
     return [
-        f"Concentración: **{top_prio}** representa **{_fmt_pct(share)}** del backlog abierto (sobre {total} issues). "
+        f"Concentración: **{top_prio}** representa **{_fmt_pct(share)}** del conjunto analizado (sobre {total} issues). "
         "Alta concentración sugiere que tu sistema de priorización está ‘aplanado’ o que hay una fuente dominante de problemas.",
         "Acción: si la prioridad más alta domina, crea un ‘fast lane’ con definición de listo (DoR) estricta; "
         "si domina una prioridad baja, revisa higiene: duplicados, issues sin owner o sin impacto claro.",
@@ -305,11 +337,11 @@ def _insights_open_priority_pie(ctx: ChartContext) -> List[str]:
 
 
 def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
-    open_df = ctx.open_df
-    if open_df is None or open_df.empty or "status" not in open_df.columns:
+    status_df = ctx.dff
+    if status_df is None or status_df.empty or "status" not in status_df.columns:
         return None
 
-    dff = open_df.copy()
+    dff = status_df.copy()
     dff["status"] = normalize_text_col(dff["status"], "(sin estado)")
     if "priority" in dff.columns:
         dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
@@ -344,7 +376,7 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         y="count",
         color="priority",
         barmode="stack",
-        title="Abiertas por Estado",
+        title="Issues por Estado",
         category_orders={"status": ordered_statuses, "priority": priority_order},
         color_discrete_map=priority_color_map(),
     )
@@ -352,22 +384,22 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
 
 
 def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
-    open_df = ctx.open_df
-    if open_df is None or open_df.empty or "status" not in open_df.columns:
+    status_df = ctx.dff
+    if status_df is None or status_df.empty or "status" not in status_df.columns:
         return ["No hay datos de estado para generar insights con los filtros actuales."]
 
-    stc = normalize_text_col(open_df["status"], "(sin estado)").astype(str)
+    stc = normalize_text_col(status_df["status"], "(sin estado)").astype(str)
     counts = stc.value_counts()
     total = int(counts.sum())
     if total == 0:
-        return ["No hay issues abiertas para este análisis."]
+        return ["No hay issues para este análisis."]
 
     top_status = str(counts.index[0])
     top_cnt = int(counts.iloc[0])
     share = float(top_cnt) / float(total)
 
     insights = [
-        f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del backlog abierto "
+        f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del conjunto analizado "
         f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
         "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
         "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",
@@ -427,7 +459,7 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ),
         ChartSpec(
             chart_id="open_priority_pie",
-            title="Backlog por prioridad",
+            title="Issues abiertos por prioridad",
             subtitle="Concentración y salud del sistema de priorización",
             group="Backlog",
             render=_render_open_priority_pie,

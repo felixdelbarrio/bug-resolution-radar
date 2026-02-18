@@ -5,7 +5,11 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.ui.components.issues import render_issue_cards, render_issue_table
+from bug_resolution_radar.ui.components.issues import (
+    prepare_issue_cards_df,
+    render_issue_cards,
+    render_issue_table,
+)
 from bug_resolution_radar.ui.dashboard.downloads import (
     CsvDownloadSpec,
     download_button_for_df,
@@ -82,6 +86,14 @@ def render_issues_section(
         if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
             st.session_state[view_key] = "Cards"
         view = str(st.session_state.get(view_key) or "Cards")
+        total_filtered = 0 if export_df is None else int(len(export_df))
+        max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
+        cards_df = (
+            prepare_issue_cards_df(dff_show, max_cards=max_cards)
+            if view == "Cards"
+            else pd.DataFrame()
+        )
+        shown_in_cards = int(len(cards_df)) if view == "Cards" else total_filtered
 
         # Keep same grid as filters (Estado | Priority | Asignado) for strict visual alignment.
         left, center, right = st.columns([1.35, 1.0, 1.0], gap="small")
@@ -96,8 +108,10 @@ def render_issues_section(
                 width="content",
             )
         with center:
-            n = 0 if export_df is None else int(len(export_df))
-            st.caption(f"{n:,} issues filtradas")
+            if view == "Cards" and shown_in_cards != total_filtered:
+                st.caption(f"{shown_in_cards:,}/{total_filtered:,} issues filtradas")
+            else:
+                st.caption(f"{shown_in_cards:,} issues filtradas")
         with right:
             toggle_scope = f"{key_prefix}_view_toggle"
             _inject_issues_view_toggle_css(scope_key=toggle_scope)
@@ -125,7 +139,6 @@ def render_issues_section(
             return
 
         if view == "Cards":
-            max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
             if len(dff_show) > MAX_CARDS_RENDER:
                 st.caption(
                     f"Vista Cards mostrando {max_cards}/{len(dff_show)}. "
@@ -135,6 +148,7 @@ def render_issues_section(
                 dff_show,
                 max_cards=max_cards,
                 title="",
+                prepared_df=cards_df,
             )
             return
 

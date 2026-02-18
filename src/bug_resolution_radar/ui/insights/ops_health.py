@@ -13,6 +13,7 @@ from bug_resolution_radar.ui.insights.chips import (
     issue_card_html,
     priority_chip_html,
 )
+from bug_resolution_radar.ui.insights.engine import build_ops_health_brief
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -127,6 +128,13 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
         ),
         unsafe_allow_html=True,
     )
+
+    quick_brief = build_ops_health_brief(dff=dff, open_df=open_df)
+    if quick_brief:
+        with st.container(border=True):
+            st.markdown("#### Lectura ejecutiva")
+            for line in quick_brief:
+                st.markdown(f"- {line}")
 
     # -------------------------
     # Top 10 abiertas más antiguas

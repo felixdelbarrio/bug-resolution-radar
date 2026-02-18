@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -145,6 +145,8 @@ _YELLOW_1 = "#FBBF24"
 _GREEN_1 = "#15803D"
 _GREEN_2 = "#22A447"
 _GREEN_3 = "#4CAF50"
+_GOAL_ACCENT_7 = "#5B3FD0"
+_GOAL_SURFACE_8 = "#ECE6FF"
 _NEUTRAL = "#E2E6EE"
 
 
@@ -160,7 +162,8 @@ _STATUS_COLOR_BY_KEY: Dict[str, str] = {
     "ready to verify": _ORANGE_2,
     "accepted": _GREEN_3,
     "ready to deploy": _GREEN_2,
-    "deployed": _GREEN_1,
+    # Deployed is a goal state and uses a dedicated purple scale (7/8) for clear differentiation.
+    "deployed": _GOAL_ACCENT_7,
     "closed": _GREEN_1,
     "resolved": _GREEN_1,
     "done": _GREEN_1,
@@ -197,6 +200,7 @@ def flow_signal_color_map() -> Dict[str, str]:
         "created": _RED_3,
         "closed": _GREEN_2,
         "resolved": _GREEN_2,
+        "deployed": _GOAL_ACCENT_7,
         "open": _YELLOW_1,
         "open_backlog_proxy": _YELLOW_1,
     }
@@ -212,11 +216,30 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha:.3f})"
 
 
+def chip_tone_for_color(hex_color: str) -> Tuple[float, float]:
+    """Return border/bg alpha tuple for chip rendering by semantic color."""
+    normalized = (hex_color or "").strip().upper()
+    if normalized == _GOAL_ACCENT_7:
+        # Deployed uses explicit 7/8 palette; keep fallback alphas high for non-token contexts.
+        return (0.78, 0.28)
+    return (0.62, 0.16)
+
+
+def chip_palette_for_color(hex_color: str) -> Tuple[str, str, str]:
+    """Return (text_color, border_color, background_color) for chip rendering."""
+    txt = (hex_color or "").strip()
+    normalized = txt.upper()
+    if normalized == _GOAL_ACCENT_7:
+        # Explicit BBVA-like 7/8 pairing: text 7 over background 8.
+        return (_GOAL_ACCENT_7, _hex_to_rgba(_GOAL_ACCENT_7, 0.64), _GOAL_SURFACE_8)
+    border_alpha, bg_alpha = chip_tone_for_color(txt)
+    return (txt, _hex_to_rgba(txt, border_alpha), _hex_to_rgba(txt, bg_alpha))
+
+
 def chip_style_from_color(hex_color: str) -> str:
-    border = _hex_to_rgba(hex_color, 0.62)
-    bg = _hex_to_rgba(hex_color, 0.16)
+    txt, border, bg = chip_palette_for_color(hex_color)
     return (
-        f"color:{hex_color}; border:1px solid {border}; background:{bg}; "
+        f"color:{txt}; border:1px solid {border}; background:{bg}; "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
     )
 

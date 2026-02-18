@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import html
-import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +16,7 @@ from bug_resolution_radar.ui.dashboard.downloads import (
     render_minimal_export_actions,
 )
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
+from bug_resolution_radar.ui.insights.engine import top_non_other_theme
 
 
 def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[str]:
@@ -68,6 +67,17 @@ def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[s
             break
 
     return out
+
+
+def _exit_funnel_counts_from_filtered(status_df: pd.DataFrame) -> tuple[int, int, int]:
+    """Return Accepted / Ready to Deploy / total counts from the filtered chart scope."""
+    safe = status_df if isinstance(status_df, pd.DataFrame) else pd.DataFrame()
+    if safe.empty or "status" not in safe.columns:
+        return (0, 0, 0)
+    stx = normalize_text_col(safe["status"], "(sin estado)").astype(str).str.strip().str.lower()
+    accepted_count = int(stx.eq("accepted").sum())
+    ready_deploy_count = int(stx.eq("ready to deploy").sum())
+    return (accepted_count, ready_deploy_count, accepted_count + ready_deploy_count)
 
 
 def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
@@ -217,8 +227,9 @@ def render_overview_kpis(
     if not open_df.empty and "status" in open_df.columns:
         stx = normalize_text_col(open_df["status"], "(sin estado)").str.strip().str.lower()
         blocked_count = int(stx.str.contains("blocked|bloque", regex=True).sum())
-        accepted_count = int(stx.eq("accepted").sum())
-        ready_deploy_count = int(stx.str.contains("ready to deploy", regex=False).sum())
+
+    # Exit funnel must match the same filtered scope shown in "Issues por Estado" chart.
+    accepted_count, ready_deploy_count, exit_buffer = _exit_funnel_counts_from_filtered(dff)
 
     if not open_df.empty and "created" in open_df.columns:
         created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
@@ -236,8 +247,8 @@ def render_overview_kpis(
 
     aged_30_pct = (aged_30_count / open_issues * 100.0) if open_issues else 0.0
     blocked_pct = (blocked_count / open_issues * 100.0) if open_issues else 0.0
-    exit_buffer = accepted_count + ready_deploy_count
-    exit_buffer_pct = (exit_buffer / open_issues * 100.0) if open_issues else 0.0
+    filtered_total = int(len(dff))
+    exit_buffer_pct = (exit_buffer / filtered_total * 100.0) if filtered_total else 0.0
     dup_groups = 0
     dup_issues = 0
     top_theme = "-"
@@ -252,43 +263,7 @@ def render_overview_kpis(
             vc = summaries.value_counts()
             dup_groups = int((vc > 1).sum())
             dup_issues = int(vc[vc > 1].sum())
-
-            theme_rules: list[tuple[str, list[str]]] = [
-                ("Softoken", ["softoken", "token", "firma", "otp"]),
-                ("Crédito", ["credito", "credito", "cvv", "tarjeta", "tdc"]),
-                ("Monetarias", ["monetarias", "saldo", "nomina", "nomina"]),
-                ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
-                ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
-                ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
-                (
-                    "Login y acceso",
-                    ["login", "acceso", "face id", "biometr", "password", "tokenbnc"],
-                ),
-                ("Notificaciones", ["notificacion", "notificacion", "push", "mensaje"]),
-            ]
-
-            def _norm(s: object) -> str:
-                txt = str(s or "").strip().lower()
-                txt = unicodedata.normalize("NFKD", txt)
-                return "".join(ch for ch in txt if not unicodedata.combining(ch))
-
-            def _theme_for_summary(summary: str) -> str:
-                s = _norm(summary)
-                for theme_name, keys in theme_rules:
-                    for kw in keys:
-                        if re.search(rf"\b{re.escape(_norm(kw))}\b", s):
-                            return theme_name
-                return "Otros"
-
-            theme_vc = summaries.map(_theme_for_summary).value_counts()
-            if not theme_vc.empty:
-                non_otros = theme_vc[theme_vc.index.astype(str) != "Otros"]
-                if not non_otros.empty:
-                    top_theme = str(non_otros.index[0])
-                    top_theme_count = int(non_otros.iloc[0])
-                else:
-                    top_theme = "—"
-                    top_theme_count = 0
+            top_theme, top_theme_count = top_non_other_theme(open_df)
 
     if not dff.empty and "created" in dff.columns:
         created_dt = pd.to_datetime(dff["created"], errors="coerce", utc=True).dt.tz_localize(None)
@@ -390,16 +365,22 @@ def render_overview_kpis(
             padding: 0 !important;
             border: 0 !important;
             background: transparent !important;
-            color: var(--bbva-text) !important;
+            color: var(--bbva-action-link) !important;
+            font-family: var(--bbva-font-sans) !important;
             font-size: 0.98rem !important;
-            font-weight: 800 !important;
+            font-weight: 760 !important;
             letter-spacing: 0 !important;
             border-radius: 8px !important;
             text-align: left !important;
             box-shadow: none !important;
           }
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button *,
+          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button svg {
+            color: inherit !important;
+            fill: currentColor !important;
+          }
           [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:hover {
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-action-link-hover) !important;
             transform: translateX(1px);
           }
           [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:focus-visible {
@@ -464,7 +445,7 @@ def render_overview_kpis(
         "open_priority_pie": "Prioridad",
     }
     insights_target_labels = {
-        "top_topics": "Top tópicos",
+        "top_topics": "Por funcionalidad",
         "duplicates": "Duplicados",
         "people": "Personas",
         "ops_health": "Salud operativa",
@@ -508,7 +489,10 @@ def render_overview_kpis(
                 card_id="exit",
                 title="Embudo de salida",
                 metric=f"{exit_buffer:,}",
-                detail=f"issues en Accepted + Ready ({exit_buffer_pct:.1f}% del backlog abierto).",
+                detail=(
+                    f"Accepted={accepted_count:,} + Ready={ready_deploy_count:,} "
+                    f"({exit_buffer_pct:.1f}% del total filtrado)."
+                ),
                 score=float(exit_buffer_pct)
                 + (8.0 if accepted_count > (ready_deploy_count * 1.5) else 0.0),
                 section="trends",
@@ -621,7 +605,7 @@ def render_overview_kpis(
                 card_id="exit_f",
                 title="Embudo de salida",
                 metric=f"{exit_buffer:,}",
-                detail="issues actualmente en Accepted + Ready.",
+                detail=f"Accepted={accepted_count:,} + Ready={ready_deploy_count:,}.",
                 score=0.0,
                 section="trends",
                 trend_chart="open_status_bar",

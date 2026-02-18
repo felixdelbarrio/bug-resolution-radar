@@ -8,6 +8,7 @@ from bug_resolution_radar import config as cfg
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.security import mask_secret, safe_log_text
 from bug_resolution_radar.ui.common import (
+    chip_style_from_color,
     flow_signal_color_map,
     priority_color,
     priority_color_map,
@@ -79,6 +80,7 @@ def test_semantic_status_and_priority_colors() -> None:
     assert status_color("Blocked") == "#B4232A"
     assert status_color("Open") == "#FBBF24"
     assert status_color("Closed") == "#15803D"
+    assert status_color("Deployed") == "#5B3FD0"
 
     assert priority_color("Supone un impedimento") == "#B4232A"
     assert priority_color("Highest") == "#B4232A"
@@ -98,6 +100,15 @@ def test_semantic_color_maps_include_flow_signals() -> None:
     assert smap["created"] == "#E85D63"
     assert smap["open"] == "#FBBF24"
     assert smap["closed"] == "#22A447"
+    assert smap["deployed"] == "#5B3FD0"
+
+
+def test_goal_state_chip_uses_stronger_fill() -> None:
+    deployed_style = chip_style_from_color(status_color("Deployed"))
+    accepted_style = chip_style_from_color(status_color("Accepted"))
+    assert "background:#ECE6FF" in deployed_style
+    assert "color:#5B3FD0" in deployed_style
+    assert "rgba(76,175,80,0.160)" in accepted_style
 
 
 def test_multi_country_sources_parsing_and_ids() -> None:
