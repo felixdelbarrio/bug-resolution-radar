@@ -10,6 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
@@ -106,20 +107,20 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
 def _resolution_days_series(dff: pd.DataFrame) -> pd.Series:
     if dff is None or dff.empty:
         return pd.Series([], dtype=float)
-    if "resolved" not in dff.columns or "created" not in dff.columns:
+    if "created" not in dff.columns:
         return pd.Series([], dtype=float)
 
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
 
     closed = dff.copy()
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__resolved"].notna() & closed["__created"].notna()]
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__finalized_at"].notna() & closed["__created"].notna()]
     if closed.empty:
         return pd.Series([], dtype=float)
 
-    days = (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+    days = (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     return days.clip(lower=0.0)
 
 
@@ -255,20 +256,20 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
 
 def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
     dff = ctx.dff
-    if dff is None or dff.empty or "resolved" not in dff.columns or "created" not in dff.columns:
+    if dff is None or dff.empty or "created" not in dff.columns:
         return None
 
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
     closed = dff.copy(deep=False)
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
     if closed.empty:
         return None
 
     closed["resolution_days"] = (
-        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     ).clip(lower=0.0)
     closed["priority"] = (
         normalize_text_col(closed["priority"], "(sin priority)")
@@ -324,11 +325,11 @@ def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
         barmode="stack",
         category_orders={"resolution_bucket": bucket_order, "priority": priority_order},
         color_discrete_map=priority_color_map(),
-        title="Distribución tiempos de resolución (cerradas)",
+        title="Tiempo hasta estado final",
     )
     fig.update_layout(
         title_text="",
-        xaxis_title="Tiempo de resolución",
+        xaxis_title="Tiempo hasta estado final",
         yaxis_title="Incidencias",
         bargap=0.10,
     )
@@ -340,8 +341,8 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     days = _resolution_days_series(ctx.dff)
     if days.empty:
         return [
-            "No hay suficientes cierres con fechas para analizar tiempos de resolución.",
-            "Tip: asegura ‘created’ y ‘resolved’ en la ingesta y mide tiempo habitual vs casos lentos (mejor que mirar solo la media).",
+            "No hay suficientes incidencias en estado final con fechas para analizar tiempos de cierre.",
+            "Tip: asegura ‘created’ y algún marcador de cierre (‘resolved’ o estado final) en la ingesta, y mira tiempo habitual vs casos lentos (mejor que solo la media).",
         ]
 
     p50 = float(days.quantile(0.5))
@@ -349,7 +350,7 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     mean = float(days.mean())
 
     return [
-        f"Tiempo de resolución: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
+        f"Tiempo hasta estado final: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
         "Si la media queda muy por encima del tiempo habitual, hay pocos casos muy lentos que distorsionan el resultado.",
         "Acción: clasifica el 10% más lento por causa raíz (bloqueo externo, falta de reproducibilidad, dependencias) "
         "y ataca la causa, no el síntoma. Reducir los casos lentos suele mejorar satisfacción más que cerrar más casos fáciles.",

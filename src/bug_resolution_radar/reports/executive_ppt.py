@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
+from plotly.subplots import make_subplots
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
@@ -38,9 +39,11 @@ from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
 from bug_resolution_radar.ui.insights.engine import (
     ActionInsight,
+    InsightMetric,
     TrendInsightPack,
     build_trend_insight_pack,
 )
+from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
 
@@ -377,6 +380,12 @@ def _fmt_int(value: int) -> str:
     return f"{int(value):,}".replace(",", ".")
 
 
+def _fmt_pct(value: float | int | None, default: str = "—") -> str:
+    if value is None or pd.isna(value):
+        return default
+    return f"{float(value) * 100.0:.1f}%"
+
+
 def _legend_profile(fig: go.Figure, trace_count: int) -> Tuple[float, int]:
     types = {
         str(getattr(trace, "type", "") or "").strip().lower()
@@ -544,7 +553,225 @@ def _build_sections(
                 insight_pack=insight_pack,
             )
         )
+
+    quality = _build_quality_insights_section(open_df=open_df)
+    if quality is not None:
+        insert_at = len(sections)
+        for idx, sec in enumerate(sections):
+            if sec.chart_id == "open_priority_pie":
+                insert_at = idx + 1
+                break
+        sections.insert(insert_at, quality)
     return sections
+
+
+def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_ChartSection]:
+    """
+    Report-only slide: combines "Por funcionalidad" + "Duplicados" insights.
+    Reuses the app's exact logic for theme classification and duplicate detection.
+    """
+    open_df = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
+    if open_df.empty:
+        return None
+
+    try:
+        from bug_resolution_radar.ui.insights.top_topics import _prepare_top_topics_payload
+        from bug_resolution_radar.ui.insights.duplicates import _prepare_duplicates_payload
+    except Exception:
+        return None
+
+    if "summary" not in open_df.columns:
+        # Both "Por funcionalidad" and duplicates rely on `summary`.
+        return None
+
+    topics_payload = _prepare_top_topics_payload(open_df)
+    top_tbl = topics_payload.get("top_tbl") if isinstance(topics_payload, dict) else None
+    if not isinstance(top_tbl, pd.DataFrame):
+        top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
+
+    dup_payload = _prepare_duplicates_payload(open_df) if "key" in open_df.columns else {}
+    clusters = dup_payload.get("clusters") if isinstance(dup_payload, dict) else None
+    clusters = clusters if isinstance(clusters, list) else []
+
+    duplicate_groups = 0
+    duplicate_issues = 0
+    if "summary" in open_df.columns and "key" in open_df.columns:
+        title_groups = (
+            open_df[open_df["summary"].fillna("").astype(str).str.strip() != ""]
+            .groupby("summary", sort=False)["key"]
+            .apply(lambda s: [str(k).strip() for k in s.tolist() if str(k).strip()])
+            .to_dict()
+        )
+        groups = [keys for keys in title_groups.values() if len(keys) > 1]
+        duplicate_groups = int(len(groups))
+        duplicate_issues = int(sum(len(keys) for keys in groups))
+
+    heuristic_clusters = int(len([c for c in clusters if int(getattr(c, "size", 0) or 0) > 1]))
+    heuristic_issues = int(
+        sum(
+            int(getattr(c, "size", 0) or 0) for c in clusters if int(getattr(c, "size", 0) or 0) > 1
+        )
+    )
+
+    has_topics = (
+        (not top_tbl.empty) and ("tema" in top_tbl.columns) and ("open_count" in top_tbl.columns)
+    )
+    has_dups = (duplicate_issues > 0) or (heuristic_clusters > 0)
+    if not has_topics and not has_dups:
+        return None
+
+    total_open = int(len(open_df))
+    top_theme = "-"
+    top_theme_count = 0
+    top_theme_share = 0.0
+    if has_topics:
+        top_theme = str(top_tbl.iloc[0].get("tema", "") or "").strip() or "-"
+        top_theme_count = int(top_tbl.iloc[0].get("open_count", 0) or 0)
+        top_theme_share = float(top_theme_count) / float(total_open) if total_open else 0.0
+
+    dup_share = float(duplicate_issues) / float(total_open) if total_open else 0.0
+
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        column_widths=[0.64, 0.36],
+        subplot_titles=("Por funcionalidad", "Duplicados"),
+        horizontal_spacing=0.10,
+    )
+
+    if has_topics:
+        view = top_tbl.copy(deep=False).head(10)
+        view["tema"] = view["tema"].astype(str)
+        view["open_count"] = (
+            pd.to_numeric(view["open_count"], errors="coerce").fillna(0).astype(int)
+        )
+        view = view.sort_values("open_count", ascending=True)
+        fig.add_trace(
+            go.Bar(
+                x=view["open_count"].tolist(),
+                y=view["tema"].tolist(),
+                orientation="h",
+                marker=dict(color="#0051F1"),
+                text=[f"{int(v)}" for v in view["open_count"].tolist()],
+                textposition="outside",
+                cliponaxis=False,
+                hovertemplate="Tema: %{y}<br>Abiertas: %{x}<extra></extra>",
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.update_xaxes(title_text="Incidencias abiertas", row=1, col=1)
+        fig.update_yaxes(title_text="", row=1, col=1)
+
+    dup_names = ["Por título", "Por heurística"]
+    dup_values = [int(duplicate_issues), int(heuristic_issues)]
+    fig.add_trace(
+        go.Bar(
+            x=dup_names,
+            y=dup_values,
+            marker=dict(color=["#D64550", "#F59E0B"]),
+            text=[str(v) if v > 0 else "" for v in dup_values],
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="%{x}<br>Casos: %{y}<extra></extra>",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+    fig.update_yaxes(title_text="Casos", row=1, col=2)
+    fig.update_layout(title_text="", margin=dict(l=16, r=16, t=52, b=56))
+    fig = apply_plotly_bbva(fig, showlegend=False)
+
+    as_is_bits: List[str] = []
+    if has_topics and top_theme != "-":
+        as_is_bits.append(
+            f"la demanda se concentra en **{top_theme}** ({_fmt_pct(top_theme_share)}; {top_theme_count} casos)"
+        )
+    if duplicate_issues > 0:
+        as_is_bits.append(
+            f"hay **{duplicate_issues}** incidencias repetidas por título ({_fmt_pct(dup_share)})"
+        )
+    if heuristic_clusters > 0:
+        as_is_bits.append(f"se detectan **{heuristic_clusters}** clusters similares por heurística")
+    as_is = " y ".join(as_is_bits) if as_is_bits else "Sin señal concluyente con el filtro actual."
+    as_is = _clip_text(_soften_insight_tone(as_is), max_len=185)
+
+    metrics: List[InsightMetric] = []
+    if has_topics and top_theme != "-":
+        metrics.append(
+            InsightMetric(
+                label="Tema dominante", value=f"{top_theme} · {_fmt_pct(top_theme_share)}"
+            )
+        )
+    if total_open:
+        metrics.append(InsightMetric(label="Backlog abierto", value=_fmt_int(total_open)))
+    if duplicate_issues > 0:
+        metrics.append(
+            InsightMetric(
+                label="Duplicados (título)",
+                value=f"{_fmt_int(duplicate_issues)} · {_fmt_pct(dup_share)}",
+            )
+        )
+
+    cards: List[ActionInsight] = []
+    if duplicate_issues >= 15 or dup_share >= 0.12:
+        cards.append(
+            ActionInsight(
+                title="Consolidar duplicados y cerrar repetidos",
+                body=(
+                    "Unifica incidencias con el mismo síntoma/causa, define un issue ‘madre’ por grupo y "
+                    "convierte el resto en subtareas o cierra como duplicado con referencia."
+                ),
+                score=26.0,
+            )
+        )
+    elif duplicate_issues > 0 or heuristic_clusters > 0:
+        cards.append(
+            ActionInsight(
+                title="Higiene de demanda: revisión semanal de duplicidad",
+                body=(
+                    "Agenda 30 minutos/semana para revisar duplicados por título y similares por heurística; "
+                    "la meta es reducir ruido y recuperar capacidad de análisis y cierre."
+                ),
+                score=15.0,
+            )
+        )
+
+    if has_topics and top_theme_share >= 0.25 and top_theme != "-":
+        cards.append(
+            ActionInsight(
+                title=f"Foco por funcionalidad: {top_theme}",
+                body=(
+                    "Asigna ownership y define 2–3 causas raíz típicas para este tema. "
+                    "Con un plan corto (2 semanas), deberías ver bajar la proporción del tema dominante."
+                ),
+                score=18.0,
+            )
+        )
+
+    if not cards:
+        cards.append(
+            ActionInsight(
+                title="Estandarizar títulos y etiquetado",
+                body=(
+                    "Define una plantilla de título y etiquetas mínimas (funcionalidad, síntoma, canal) "
+                    "para que el backlog sea comparable y se reduzcan repeticiones."
+                ),
+                score=8.0,
+            )
+        )
+
+    insight_pack = TrendInsightPack(metrics=metrics, cards=cards, executive_tip=as_is)
+    return _ChartSection(
+        chart_id="insights_quality",
+        theme="Riesgo y exposición",
+        title="Funcionalidades y duplicados",
+        subtitle="Dónde se repite y concentra la demanda",
+        figure=fig,
+        insight_pack=insight_pack,
+    )
 
 
 def _build_context(

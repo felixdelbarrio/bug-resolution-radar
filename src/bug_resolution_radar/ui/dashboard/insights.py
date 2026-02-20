@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -156,14 +157,15 @@ def _daily_flow(df: pd.DataFrame, days: int = 90) -> Tuple[pd.DataFrame, Dict[st
 
 
 def _resolution_days(df: pd.DataFrame) -> pd.Series:
-    if df is None or df.empty or not _has_cols(df, ["created", "resolved"]):
+    if df is None or df.empty or not _has_cols(df, ["created"]):
         return pd.Series([], dtype=float)
     created = _safe_dt(df["created"])
-    resolved = _safe_dt(df["resolved"])
-    mask = created.notna() & resolved.notna()
+    finalized_at = effective_finalized_at(df, created_col="created", updated_col="updated")
+    finalized_at = _safe_dt(finalized_at)
+    mask = created.notna() & finalized_at.notna()
     if not mask.any():
         return pd.Series([], dtype=float)
-    days = ((resolved[mask] - created[mask]).dt.total_seconds() / 86400.0).clip(lower=0.0)
+    days = ((finalized_at[mask] - created[mask]).dt.total_seconds() / 86400.0).clip(lower=0.0)
     return days.astype(float)
 
 
@@ -342,7 +344,7 @@ def build_chart_insights(
                 Insight(
                     "info",
                     "Sin cierres con fechas suficientes",
-                    "Faltan created/resolved en cerradas para estimar tiempos de resolución.",
+                    "No hay incidencias en estado final con fechas suficientes para estimar tiempos de cierre.",
                 )
             ]
 
@@ -352,8 +354,8 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "Tiempo real de resolución",
-                f"Resolución habitual: {_fmt_days(median)} · casos lentos: {_fmt_days(p90)}. "
+                "Tiempo hasta estado final",
+                f"Tiempo habitual: {_fmt_days(median)} · casos lentos: {_fmt_days(p90)}. "
                 "Si bajas el tiempo de los casos lentos, la experiencia del cliente mejora más rápido.",
             )
         )
@@ -373,12 +375,15 @@ def build_chart_insights(
         if "priority" in dff.columns:
             closed = dff.copy()
             closed["created"] = _safe_dt(closed.get("created"))
-            closed["resolved"] = _safe_dt(closed.get("resolved"))
-            mask = closed["created"].notna() & closed["resolved"].notna()
+            closed["finalized_at"] = effective_finalized_at(
+                closed, created_col="created", updated_col="updated"
+            )
+            closed["finalized_at"] = _safe_dt(closed.get("finalized_at"))
+            mask = closed["created"].notna() & closed["finalized_at"].notna()
             closed = closed[mask].copy()
             if not closed.empty:
                 closed["resolution_days"] = (
-                    (closed["resolved"] - closed["created"]).dt.total_seconds() / 86400.0
+                    (closed["finalized_at"] - closed["created"]).dt.total_seconds() / 86400.0
                 ).clip(lower=0.0)
                 closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
                 g = closed.groupby("priority")["resolution_days"].median().sort_values()

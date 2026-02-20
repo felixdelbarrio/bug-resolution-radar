@@ -46,7 +46,7 @@ def _trend_chart_catalog() -> List[Tuple[str, str]]:
     return [
         ("timeseries", "Evolución (últimos 90 días)"),
         ("age_buckets", "Distribución antigüedad (abiertas)"),
-        ("resolution_hist", "Distribución tiempos de resolución (cerradas)"),
+        ("resolution_hist", "Tiempo hasta estado final"),
         ("open_priority_pie", "Issues abiertos por prioridad (pie)"),
         ("open_status_bar", "Issues por Estado (bar)"),
     ]

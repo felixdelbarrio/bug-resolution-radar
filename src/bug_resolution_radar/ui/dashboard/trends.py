@@ -13,6 +13,7 @@ import plotly.express as px
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -461,7 +462,7 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
 
 
 def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Build grouped resolution distribution plus export-ready closed subset."""
+    """Build grouped 'time to final state' distribution plus export-ready closed subset."""
     empty_grouped = pd.DataFrame(columns=["resolution_bucket", "priority", "count"])
     empty_closed = pd.DataFrame(
         columns=[
@@ -470,26 +471,27 @@ def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
             "status",
             "priority",
             "created",
+            "finalized_at",
             "resolved",
             "resolution_days",
             "resolution_bucket",
         ]
     )
-    if "resolved" not in dff.columns or "created" not in dff.columns:
+    if "created" not in dff.columns:
         return {"grouped": empty_grouped, "closed": empty_closed}
 
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
 
     closed = dff.copy(deep=False)
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
     if closed.empty:
         return {"grouped": empty_grouped, "closed": empty_closed}
 
     closed["resolution_days"] = (
-        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     ).clip(lower=0.0)
     if "priority" in closed.columns:
         closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
@@ -508,10 +510,12 @@ def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "status",
         "priority",
         "created",
+        "finalized_at",
         "resolved",
         "resolution_days",
         "resolution_bucket",
     ]
+    closed["finalized_at"] = closed["__finalized_at"]
     export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
     return {"grouped": grouped_res, "closed": export_df}
 
@@ -551,7 +555,7 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     return [
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
         ("age_buckets", "Antigüedad por estado (distribución)"),
-        ("resolution_hist", "Tiempos de resolución (cerradas)"),
+        ("resolution_hist", "Tiempo hasta estado final"),
         ("open_priority_pie", "Issues abiertos por prioridad"),
         ("open_status_bar", "Issues por Estado"),
     ]
@@ -714,14 +718,14 @@ def _render_trend_chart(
         return
 
     if chart_id == "resolution_hist":
-        if "resolved" not in dff.columns or "created" not in dff.columns:
-            st.info("No hay fechas suficientes (created/resolved) para calcular resolución.")
+        if "created" not in dff.columns:
+            st.info("No hay fechas suficientes (created) para calcular tiempos hasta estado final.")
             return
 
         res_sig = dataframe_signature(
             dff,
-            columns=("key", "summary", "status", "priority", "created", "resolved"),
-            salt="trends.resolution_hist.v1",
+            columns=("key", "summary", "status", "priority", "created", "updated", "resolved"),
+            salt="trends.resolution_hist.v2",
         )
         res_payload, _ = cached_by_signature(
             "trends.resolution_hist.payload",
@@ -733,7 +737,7 @@ def _render_trend_chart(
         closed = res_payload.get("closed") if isinstance(res_payload, dict) else None
 
         if not isinstance(grouped_res, pd.DataFrame) or grouped_res.empty:
-            st.info("No hay incidencias cerradas con fechas suficientes para este filtro.")
+            st.info("No hay incidencias en estado final con fechas suficientes para este filtro.")
             return
         if not isinstance(closed, pd.DataFrame):
             closed = pd.DataFrame()
@@ -766,7 +770,7 @@ def _render_trend_chart(
         )
         fig.update_layout(
             title_text="",
-            xaxis_title="Tiempo de resolucion",
+            xaxis_title="Tiempo hasta estado final",
             yaxis_title="Incidencias",
             bargap=0.10,
         )

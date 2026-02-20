@@ -10,6 +10,7 @@ from typing import Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -268,18 +269,19 @@ def _stale_days_from_updated(df: pd.DataFrame) -> pd.Series:
 
 
 def _resolution_days(dff: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
-    if dff.empty or "created" not in dff.columns or "resolved" not in dff.columns:
+    if dff.empty or "created" not in dff.columns:
         return pd.Series([], dtype=float), pd.DataFrame()
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
+    finalized_at = _to_dt_naive(finalized_at)
     closed = dff.copy(deep=False)
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
     if closed.empty:
         return pd.Series([], dtype=float), closed
     closed["resolution_days"] = (
-        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     ).clip(lower=0.0)
     return closed["resolution_days"].astype(float), closed
 
@@ -755,15 +757,15 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
     if days.empty:
         return TrendInsightPack(
             metrics=[
-                InsightMetric("Resolucion habitual", "—"),
-                InsightMetric("Resolucion lenta", "—"),
+                InsightMetric("Cierre habitual", "—"),
+                InsightMetric("Cierre lento", "—"),
                 InsightMetric("Casos muy lentos", "—"),
             ],
             cards=[
                 ActionInsight(
                     title="Datos insuficientes",
                     body=(
-                        "No hay incidencias cerradas con fechas completas para medir tiempos de resolucion."
+                        "No hay incidencias en estado final con fechas suficientes para medir tiempos de cierre."
                     ),
                     score=1.0,
                 )
@@ -824,9 +826,9 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
-    if "__resolved" in closed.columns and not closed.empty:
+    if "__finalized_at" in closed.columns and not closed.empty:
         now = pd.Timestamp.utcnow().tz_localize(None)
-        resolved_30 = int((closed["__resolved"] >= (now - pd.Timedelta(days=30))).sum())
+        resolved_30 = int((closed["__finalized_at"] >= (now - pd.Timedelta(days=30))).sum())
         if resolved_30 <= 5:
             cards.append(
                 ActionInsight(
@@ -839,10 +841,10 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
-        recent = closed[closed["__resolved"] >= (now - pd.Timedelta(days=30))]
+        recent = closed[closed["__finalized_at"] >= (now - pd.Timedelta(days=30))]
         prev = closed[
-            (closed["__resolved"] >= (now - pd.Timedelta(days=60)))
-            & (closed["__resolved"] < (now - pd.Timedelta(days=30)))
+            (closed["__finalized_at"] >= (now - pd.Timedelta(days=60)))
+            & (closed["__finalized_at"] < (now - pd.Timedelta(days=30)))
         ]
         if len(recent) >= 5 and len(prev) >= 5:
             med_recent = float(recent["resolution_days"].median())
@@ -891,8 +893,8 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
 
     return TrendInsightPack(
         metrics=[
-            InsightMetric("Resolucion habitual", _fmt_days(med)),
-            InsightMetric("Resolucion lenta", _fmt_days(p90)),
+            InsightMetric("Cierre habitual", _fmt_days(med)),
+            InsightMetric("Cierre lento", _fmt_days(p90)),
             InsightMetric("Casos muy lentos", _fmt_days(p95)),
         ],
         cards=_sorted_cards(cards),
