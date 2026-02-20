@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +18,18 @@ def _resolve_app_script() -> Path:
     raise FileNotFoundError(f"Could not find bundled Streamlit entrypoint: {script}")
 
 
+def _runtime_home_for_binary() -> Path:
+    exe_dir = Path(sys.executable).resolve().parent
+    if exe_dir.name.lower() == "dist":
+        return exe_dir.parent
+    return exe_dir
+
+
 def main() -> int:
+    if getattr(sys, "frozen", False):
+        runtime_home = _runtime_home_for_binary()
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_HOME", str(runtime_home))
+        os.chdir(runtime_home)
     script = _resolve_app_script()
     sys.argv = [
         "streamlit",

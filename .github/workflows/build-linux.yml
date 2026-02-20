@@ -38,14 +38,26 @@ jobs:
           else
             echo "assets/ no existe; se omite --add-data de assets."
           fi
-          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all plotly --collect-all bug_resolution_radar run_streamlit.py
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all plotly --collect-all pptx --collect-all kaleido --collect-all bug_resolution_radar run_streamlit.py
+
+      - name: Prepare distributable bundle
+        run: |
+          BUNDLE_DIR="build_bundle/bug-resolution-radar-linux"
+          mkdir -p "$BUNDLE_DIR/dist"
+          cp dist/bug-resolution-radar "$BUNDLE_DIR/dist/bug-resolution-radar"
+          cp README.md "$BUNDLE_DIR/README.md"
+          if [ -f .env.example ]; then
+            cp .env.example "$BUNDLE_DIR/.env.example"
+          fi
+          if [ -f .streamlit/config.toml ]; then
+            mkdir -p "$BUNDLE_DIR/.streamlit"
+            cp .streamlit/config.toml "$BUNDLE_DIR/.streamlit/config.toml"
+          fi
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: bug-resolution-radar-linux
-          path: |
-            dist/bug-resolution-radar
-            .env.example
-            README.md
+          path: build_bundle/bug-resolution-radar-linux
+          include-hidden-files: true
           if-no-files-found: error

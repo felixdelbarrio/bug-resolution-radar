@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List
@@ -11,8 +13,23 @@ from typing import Any, Dict, List
 from dotenv import dotenv_values
 from pydantic import BaseModel
 
-ENV_PATH = Path(".env")
-ENV_EXAMPLE_PATH = Path(".env.example")
+
+def _runtime_home() -> Path:
+    override = str(os.getenv("BUG_RESOLUTION_RADAR_HOME", "") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        # Build artifacts commonly keep the binary in ./dist while config files sit one level up.
+        if exe_dir.name.lower() == "dist":
+            return exe_dir.parent
+        return exe_dir
+    return Path(__file__).resolve().parents[2]
+
+
+DEFAULT_CONFIG_HOME = _runtime_home()
+ENV_PATH = DEFAULT_CONFIG_HOME / ".env"
+ENV_EXAMPLE_PATH = DEFAULT_CONFIG_HOME / ".env.example"
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "México",
     "España",
@@ -21,6 +38,13 @@ DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
+_PATH_SETTING_KEYS = {
+    "DATA_PATH",
+    "NOTES_PATH",
+    "INSIGHTS_LEARNING_PATH",
+    "HELIX_DATA_PATH",
+    "HELIX_CA_BUNDLE",
+}
 
 
 def _decode_env_multiline(v: str) -> str:
@@ -35,6 +59,34 @@ def _encode_env_multiline(v: str) -> str:
 
 def _coerce_str(value: Any) -> str:
     return str(value or "").strip()
+
+
+def config_home() -> Path:
+    return ENV_PATH.expanduser().resolve().parent
+
+
+def _resolve_runtime_path(raw: str) -> str:
+    txt = _coerce_str(raw)
+    if not txt:
+        return ""
+    path = Path(txt).expanduser()
+    if not path.is_absolute():
+        path = config_home() / path
+    return str(path.resolve())
+
+
+def _to_storable_path(raw: str) -> str:
+    txt = _coerce_str(raw)
+    if not txt:
+        return ""
+    path = Path(txt).expanduser()
+    if not path.is_absolute():
+        return str(path)
+    try:
+        rel = path.resolve().relative_to(config_home())
+        return str(rel)
+    except Exception:
+        return str(path.resolve())
 
 
 def _ascii_fold(value: str) -> str:
@@ -173,8 +225,12 @@ def load_settings() -> Settings:
     # Decodificar multilínea
     if "JIRA_JQL" in vals:
         vals["JIRA_JQL"] = _decode_env_multiline(vals["JIRA_JQL"])
+    settings = Settings.model_validate(vals)
 
-    return Settings.model_validate(vals)
+    payload = settings.model_dump()
+    for key in _PATH_SETTING_KEYS:
+        payload[key] = _resolve_runtime_path(str(payload.get(key) or ""))
+    return Settings.model_validate(payload)
 
 
 def save_settings(settings: Settings) -> None:
@@ -183,6 +239,8 @@ def save_settings(settings: Settings) -> None:
 
     for k, v in data.items():
         if isinstance(v, str):
+            if k in _PATH_SETTING_KEYS:
+                v = _to_storable_path(v)
             v = _encode_env_multiline(v)
         lines.append(f"{k}={v}")
 

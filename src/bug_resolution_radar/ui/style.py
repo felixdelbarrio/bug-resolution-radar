@@ -230,7 +230,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
           }
 
-          /* Top-right workspace actions (Ingesta, Tema, Configuración) */
+          /* Top-right workspace actions (Informe, Ingesta, Tema, Configuración) */
           .st-key-workspace_nav_actions div[data-testid="stHorizontalBlock"] {
             justify-content: flex-end !important;
             align-items: center !important;
@@ -274,62 +274,79 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
           }
           /* Fallback by specific button keys to avoid default Streamlit primary/secondary bleeding */
+          .st-key-workspace_btn_report div[data-testid="stButton"] > button,
           .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
           .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
           .st-key-workspace_btn_config div[data-testid="stButton"] > button,
+          .st-key-workspace_btn_report [data-testid^="baseButton-"],
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"],
           .st-key-workspace_btn_theme [data-testid^="baseButton-"],
           .st-key-workspace_btn_config [data-testid^="baseButton-"],
+          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button,
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button,
           .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button,
           .st-key-workspace_btn_config [data-testid^="baseButton-"] > button {
-            min-height: 2.34rem !important;
-            min-width: 2.34rem !important;
-            border-radius: 12px !important;
-            border: 1px solid var(--bbva-tab-soft-border) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            background-color: var(--bbva-tab-soft-bg) !important;
+            min-height: 2.02rem !important;
+            min-width: 2.02rem !important;
+            padding: 0.08rem !important;
+            border-radius: 0 !important;
+            border: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
             color: var(--bbva-tab-soft-text) !important;
             box-shadow: none !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
           }
+          .st-key-workspace_btn_report div[data-testid="stButton"] > button *,
           .st-key-workspace_btn_ingest div[data-testid="stButton"] > button *,
           .st-key-workspace_btn_theme div[data-testid="stButton"] > button *,
           .st-key-workspace_btn_config div[data-testid="stButton"] > button *,
+          .st-key-workspace_btn_report [data-testid^="baseButton-"] *,
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"] *,
           .st-key-workspace_btn_theme [data-testid^="baseButton-"] *,
           .st-key-workspace_btn_config [data-testid^="baseButton-"] *,
+          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button *,
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button *,
           .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button *,
           .st-key-workspace_btn_config [data-testid^="baseButton-"] > button * {
             color: inherit !important;
             fill: currentColor !important;
           }
+          .st-key-workspace_btn_report div[data-testid="stButton"] > button[kind="primary"],
           .st-key-workspace_btn_ingest div[data-testid="stButton"] > button[kind="primary"],
           .st-key-workspace_btn_theme div[data-testid="stButton"] > button[kind="primary"],
           .st-key-workspace_btn_config div[data-testid="stButton"] > button[kind="primary"],
+          .st-key-workspace_btn_report [data-testid="baseButton-primary"],
           .st-key-workspace_btn_ingest [data-testid="baseButton-primary"],
           .st-key-workspace_btn_theme [data-testid="baseButton-primary"],
           .st-key-workspace_btn_config [data-testid="baseButton-primary"],
+          .st-key-workspace_btn_report [data-testid="baseButton-primary"] > button,
           .st-key-workspace_btn_ingest [data-testid="baseButton-primary"] > button,
           .st-key-workspace_btn_theme [data-testid="baseButton-primary"] > button,
           .st-key-workspace_btn_config [data-testid="baseButton-primary"] > button {
-            border-color: var(--bbva-tab-active-border) !important;
-            background: var(--bbva-tab-active-bg) !important;
-            background-color: var(--bbva-tab-active-bg) !important;
-            color: var(--bbva-tab-active-text) !important;
+            border: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            color: var(--bbva-primary) !important;
           }
+          .st-key-workspace_btn_report div[data-testid="stButton"] > button:hover,
           .st-key-workspace_btn_ingest div[data-testid="stButton"] > button:hover,
           .st-key-workspace_btn_theme div[data-testid="stButton"] > button:hover,
           .st-key-workspace_btn_config div[data-testid="stButton"] > button:hover,
+          .st-key-workspace_btn_report [data-testid^="baseButton-"]:hover,
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"]:hover,
           .st-key-workspace_btn_theme [data-testid^="baseButton-"]:hover,
           .st-key-workspace_btn_config [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button:hover,
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button:hover,
           .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button:hover,
           .st-key-workspace_btn_config [data-testid^="baseButton-"] > button:hover {
-            border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
-            background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
-            background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
+            border: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
           }
           .st-key-workspace_dashboard_content_overview,
           .st-key-workspace_dashboard_content_notes {
@@ -1031,7 +1048,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
         "created": "Creadas",
         "closed": "Cerradas",
         "open_backlog_proxy": "Backlog abierto",
-        "resolution_days": "Dias de resolucion",
+        "resolution_days": "Días de resolución",
     }
 
     def _clean_txt(v: object) -> str:
@@ -1131,7 +1148,11 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
     for trace in getattr(fig, "data", []):
         try:
             trace.name = _localize(getattr(trace, "name", ""))
-            trace.showlegend = bool(showlegend and trace.name)
+            trace_type = str(getattr(trace, "type", "") or "").strip().lower()
+            if trace_type == "pie":
+                trace.showlegend = bool(showlegend)
+            else:
+                trace.showlegend = bool(showlegend and trace.name)
             if hasattr(trace, "textfont"):
                 trace.textfont = dict(color=text_color)
             if hasattr(trace, "legendgrouptitle"):

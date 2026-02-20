@@ -49,7 +49,7 @@ THEME_RULES: List[Tuple[str, List[str]]] = [
 
 
 CRITICAL_PRIORITY_FILTERS = ["Supone un impedimento", "Highest", "High"]
-TRIAGE_STATUS_FILTERS = ["New", "Analysing", "Analyzing"]
+TRIAGE_STATUS_FILTERS = ["New", "Analysing", "Analyzing", "Ready"]
 ACTIVE_STATUS_FILTERS = [
     "En progreso",
     "In Progress",

@@ -48,17 +48,32 @@ jobs:
           $args += @(
             "--collect-all", "streamlit",
             "--collect-all", "plotly",
+            "--collect-all", "pptx",
+            "--collect-all", "kaleido",
             "--collect-all", "bug_resolution_radar",
             "run_streamlit.py"
           )
           pyinstaller @args
 
+      - name: Prepare distributable bundle
+        shell: pwsh
+        run: |
+          $bundleDir = "build_bundle/bug-resolution-radar-windows"
+          New-Item -ItemType Directory -Force -Path "$bundleDir/dist" | Out-Null
+          Copy-Item "dist/bug-resolution-radar.exe" "$bundleDir/dist/bug-resolution-radar.exe" -Force
+          Copy-Item "README.md" "$bundleDir/README.md" -Force
+          if (Test-Path ".env.example" -PathType Leaf) {
+            Copy-Item ".env.example" "$bundleDir/.env.example" -Force
+          }
+          if (Test-Path ".streamlit/config.toml" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/.streamlit" | Out-Null
+            Copy-Item ".streamlit/config.toml" "$bundleDir/.streamlit/config.toml" -Force
+          }
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: bug-resolution-radar-windows
-          path: |
-            dist/bug-resolution-radar.exe
-            .env.example
-            README.md
+          path: build_bundle/bug-resolution-radar-windows
+          include-hidden-files: true
           if-no-files-found: error
