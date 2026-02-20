@@ -10,6 +10,8 @@ from typing import Any, Iterable, Literal, Optional, Sequence
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+
 
 # -------------------------
 # CSV helpers
@@ -245,9 +247,9 @@ def figures_to_html_bytes(
       body {{
         margin: 0;
         padding: 22px;
-        background: #f7f9fc;
-        color: #11192d;
-        font-family: "Benton Sans", "Helvetica Neue", Arial, sans-serif;
+        background: {BBVA_LIGHT.bg_light};
+        color: {BBVA_LIGHT.ink};
+        font-family: {BBVA_FONT_SANS};
       }}
       .wrap {{
         display: grid;
@@ -255,20 +257,22 @@ def figures_to_html_bytes(
         gap: 16px;
       }}
       .panel {{
-        background: #ffffff;
+        background: {BBVA_LIGHT.white};
         border: 1px solid rgba(17,25,45,0.14);
-        border-radius: 12px;
+        border-radius: 16px;
         padding: 12px;
       }}
       h1 {{
         margin: 0 0 10px 0;
         font-size: 1.1rem;
+        font-family: {BBVA_FONT_HEADLINE};
       }}
       h3 {{
         margin: 0 0 8px 0;
         font-size: 0.9rem;
         font-weight: 700;
         color: rgba(17,25,45,0.72);
+        font-family: {BBVA_FONT_SANS};
       }}
     </style>
   </head>

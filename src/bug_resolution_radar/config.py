@@ -193,19 +193,19 @@ class Settings(BaseModel):
     HELIX_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
     # -------------------------
-    # KPIs
-    # -------------------------
-    KPI_FORTNIGHT_DAYS: str = "15"
-    KPI_MONTH_DAYS: str = "30"
-    KPI_OPEN_AGE_X_DAYS: str = "7,14,30"
-    KPI_AGE_BUCKETS: str = "0-2,3-7,8-14,15-30,>30"
-
-    # -------------------------
     # Dashboard preferences
     # -------------------------
     DASHBOARD_SUMMARY_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
     TREND_SELECTED_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
+    DASHBOARD_FILTER_STATUS_JSON: str = "[]"
+    DASHBOARD_FILTER_PRIORITY_JSON: str = "[]"
+    DASHBOARD_FILTER_ASSIGNEE_JSON: str = "[]"
     KEEP_CACHE_ON_SOURCE_DELETE: str = "false"
+    # 0 = auto (máxima antigüedad disponible en backlog)
+    ANALYSIS_LOOKBACK_MONTHS: int = 0
+    # 0 = auto (máxima antigüedad disponible en backlog)
+    # Legacy fallback (mantenido por compatibilidad)
+    ANALYSIS_LOOKBACK_DAYS: int = 0
 
 
 def ensure_env() -> None:

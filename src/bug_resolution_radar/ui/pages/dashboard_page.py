@@ -8,6 +8,7 @@ from typing import Final, List
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.ui.common import load_issues_df
@@ -79,9 +80,16 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         st.caption(f"Detalle técnico: {exc}")
         return section
     scoped_df = _apply_workspace_source_scope(df)
+    analysis_df = apply_analysis_depth_filter(scoped_df, settings=settings)
 
     if scoped_df.empty:
         st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
+        return section
+    if analysis_df.empty:
+        st.warning(
+            "No hay datos en la ventana de análisis configurada. "
+            "Amplía los meses en Configuración → Preferencias → Favoritos."
+        )
         return section
 
     notes: NotesStore | None = None
@@ -90,11 +98,11 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         notes.load()
 
     if section in {"issues", "kanban"}:
-        render_next_best_banner(df_all=scoped_df, section=section)
-        render_filters(scoped_df, key_prefix="dashboard")
+        render_next_best_banner(df_all=analysis_df, section=section)
+        render_filters(analysis_df, key_prefix="dashboard")
 
     ctx = build_dashboard_data_context(
-        df_all=scoped_df,
+        df_all=analysis_df,
         settings=settings,
         include_kpis=section in {"overview", "trends", "insights"},
     )

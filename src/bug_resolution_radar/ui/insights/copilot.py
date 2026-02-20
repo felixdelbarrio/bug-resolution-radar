@@ -65,6 +65,17 @@ INTENT_LABELS = {
     "other": "consulta abierta",
 }
 
+TERMINAL_STATUS_TOKENS = (
+    "closed",
+    "resolved",
+    "done",
+    "deployed",
+    "accepted",
+    "ready to deploy",
+    "cancelled",
+    "canceled",
+)
+
 
 def _to_dt_naive(series: pd.Series | None) -> pd.Series:
     if series is None:
@@ -98,6 +109,13 @@ def _norm(txt: str) -> str:
     t = unicodedata.normalize("NFKD", str(txt or "").strip().lower())
     t = "".join(ch for ch in t if not unicodedata.combining(ch))
     return t
+
+
+def _is_terminal_status(value: object) -> bool:
+    token = _norm(str(value or ""))
+    if not token:
+        return False
+    return any(t in token for t in TERMINAL_STATUS_TOKENS)
 
 
 def _push_unique(target: List[str], value: str, *, max_len: int) -> None:
@@ -488,6 +506,7 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         "aged30_count": aged30_count,
         "aged30_pct": (aged30_count / open_total) if open_total else 0.0,
         "top_status": top_status,
+        "top_status_is_final": _is_terminal_status(top_status),
         "top_status_share": top_status_share,
         "top_priority": top_priority,
         "top_priority_share": top_priority_share,
@@ -683,6 +702,8 @@ def build_copilot_suggestions(
     learned = normalize_intent_counts(intent_counts)
     out: List[str] = []
 
+    top_status_is_final = bool(s.get("top_status_is_final", False))
+
     # Prioritize learned intent patterns so suggestions feel personalized over time.
     for intent in top_learned_intents(learned, limit=2):
         if intent == "risk":
@@ -690,7 +711,15 @@ def build_copilot_suggestions(
         elif intent == "priority":
             _push_unique(out, "Que prioridad debo atacar para reducir riesgo real?", max_len=limit)
         elif intent == "bottleneck":
-            _push_unique(out, "Que cuello de botella penaliza mas el flujo?", max_len=limit)
+            _push_unique(
+                out,
+                (
+                    "Que friccion del tramo final esta penalizando mas el cierre?"
+                    if top_status_is_final
+                    else "Que cuello de botella penaliza mas el flujo?"
+                ),
+                max_len=limit,
+            )
         elif intent == "action":
             _push_unique(out, "Que accion concreta priorizo esta semana?", max_len=limit)
         elif intent == "change":
@@ -745,7 +774,15 @@ def build_copilot_suggestions(
         )
     _push_unique(out, "Que accion concreta priorizo esta semana?", max_len=limit)
     _push_unique(out, "Cual es el mayor riesgo cliente hoy?", max_len=limit)
-    _push_unique(out, "Que cuello de botella penaliza mas el flujo?", max_len=limit)
+    _push_unique(
+        out,
+        (
+            "Que friccion del tramo final esta penalizando mas el cierre?"
+            if top_status_is_final
+            else "Que cuello de botella penaliza mas el flujo?"
+        ),
+        max_len=limit,
+    )
     _push_unique(out, "Dame un resumen ejecutivo de la situacion actual.", max_len=limit)
 
     return out[: max(limit, 1)]
@@ -793,6 +830,12 @@ def route_copilot_action(
             )
         top_status = str(s.get("top_status", "—") or "—").strip()
         if top_status and top_status != "—":
+            if _is_terminal_status(top_status):
+                return CopilotRoute(
+                    cta="Revisar tramo final en Issues",
+                    section="issues",
+                    status_filters=[top_status],
+                )
             return CopilotRoute(
                 cta=f"Abrir {top_status} en Issues",
                 section="issues",
@@ -871,10 +914,16 @@ def answer_copilot_question(
     intent = classify_question_intent(question)
     s = snapshot if isinstance(snapshot, dict) else {}
     base = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
+    top_status = str(s.get("top_status", "—") or "—").strip()
+    top_status_is_final = bool(s.get("top_status_is_final", False)) or _is_terminal_status(top_status)
     followups = [
         "Que accion concreta haria hoy para bajar cartera?",
         "Que pasaria si reducimos entrada un 20%?",
-        "Que cuello de botella esta penalizando mas al cliente?",
+        (
+            "Que friccion del tramo final esta penalizando mas el cierre?"
+            if top_status_is_final
+            else "Que cuello de botella esta penalizando mas al cliente?"
+        ),
     ]
 
     evidence = [
@@ -901,11 +950,19 @@ def answer_copilot_question(
         return CopilotAnswer(answer=ans, confidence=0.87, evidence=evidence, followups=followups)
 
     if intent == "bottleneck":
-        ans = (
-            f"El estado dominante en el filtro es {s.get('top_status', '—')} "
-            f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}) y se observan "
-            f"{int(s.get('blocked_count', 0) or 0)} bloqueadas."
-        )
+        if top_status_is_final:
+            ans = (
+                f"El estado dominante en el filtro es {top_status} "
+                f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}). "
+                "Al ser un estado finalista no se interpreta como cuello de botella: "
+                "la prioridad es completar conversion a Ready to deploy y Deployed."
+            )
+        else:
+            ans = (
+                f"El estado dominante en el filtro es {top_status} "
+                f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}) y se observan "
+                f"{int(s.get('blocked_count', 0) or 0)} bloqueadas."
+            )
         return CopilotAnswer(answer=ans, confidence=0.85, evidence=evidence, followups=followups)
 
     if intent == "action":
@@ -915,7 +972,7 @@ def answer_copilot_question(
                 answer=ans, confidence=0.89, evidence=evidence, followups=followups
             )
         return CopilotAnswer(
-            answer="La accion prioritaria depende del principal cuello operativo del filtro actual.",
+            answer="La accion prioritaria depende de la principal friccion operativa del filtro actual.",
             confidence=0.62,
             evidence=evidence,
             followups=followups,
@@ -965,7 +1022,7 @@ def answer_copilot_question(
 
     return CopilotAnswer(
         answer=(
-            "Puedo ayudarte con riesgo cliente, cuello de botella, prioridades, cambios vs ultima sesion y simulaciones what-if."
+            "Puedo ayudarte con riesgo cliente, fricciones de flujo, prioridades, cambios vs ultima sesion y simulaciones what-if."
         ),
         confidence=0.60,
         evidence=evidence,

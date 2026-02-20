@@ -23,6 +23,14 @@ class Insight:
     body: str
 
 
+FINALIST_STATUS_TOKENS = ("accepted", "ready to deploy", "deployed", "closed", "resolved", "done")
+
+
+def _is_finalist_status(value: object) -> bool:
+    token = str(value or "").strip().lower()
+    return token in FINALIST_STATUS_TOKENS
+
+
 # ---------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------
@@ -456,6 +464,7 @@ def build_chart_insights(
             ]
 
         stc = normalize_text_col(open_df["status"], "(sin estado)")
+        stc_norm = stc.astype(str).str.strip().str.lower()
         vc = stc.value_counts()
         top_status = vc.index[0] if not vc.empty else None
 
@@ -470,25 +479,45 @@ def build_chart_insights(
             )
             if not g.empty:
                 cand = g.index[0]
-                out.append(
-                    Insight(
-                        "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
-                        "Posible cuello de botella",
-                        f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
-                        "Acción: revisa si es un estado de espera ('blocked', 'waiting') y crea un carril explícito para dependencias.",
+                if _is_finalist_status(cand):
+                    out.append(
+                        Insight(
+                            "info",
+                            "Tramo final acumulado",
+                            f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
+                            "Al ser estado finalista no se interpreta como cuello: conviene completar salida hacia Ready to deploy y Deployed.",
+                        )
                     )
-                )
+                else:
+                    out.append(
+                        Insight(
+                            "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
+                            "Posible cuello de botella",
+                            f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
+                            "Acción: revisa si es un estado de espera ('blocked', 'waiting') y crea un carril explícito para dependencias.",
+                        )
+                    )
 
         if top_status:
             share = float(vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
-            out.append(
-                Insight(
-                    "warn" if share >= 0.45 else "info",
-                    "Carga concentrada en un estado",
-                    f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
-                    "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
+            if _is_finalist_status(top_status):
+                out.append(
+                    Insight(
+                        "info",
+                        "Concentración en tramo final",
+                        f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
+                        "En estados finalistas no se considera cuello: se recomienda acelerar el cierre de flujo a Ready to deploy/Deployed.",
+                    )
                 )
-            )
+            else:
+                out.append(
+                    Insight(
+                        "warn" if share >= 0.45 else "info",
+                        "Carga concentrada en un estado",
+                        f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
+                        "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
+                    )
+                )
 
         # Flow health suggestion: too many states or too many empty states
         n_states = int(vc.shape[0])
@@ -502,18 +531,18 @@ def build_chart_insights(
             )
         )
 
-        accepted_cnt = int((stc == "Accepted").sum())
-        rtd_cnt = int((stc == "Ready to deploy").sum())
-        deployed_cnt = int((stc == "Deployed").sum())
+        accepted_cnt = int(stc_norm.eq("accepted").sum())
+        rtd_cnt = int(stc_norm.eq("ready to deploy").sum())
+        deployed_cnt = int(stc_norm.eq("deployed").sum())
         if accepted_cnt > 0:
             rtd_conv = float(rtd_cnt) / float(accepted_cnt)
             if rtd_conv < 0.35:
                 out.append(
                     Insight(
                         "warn",
-                        "Atasco de Accepted a Ready to deploy",
+                        "Cierre pendiente de Accepted a Ready to deploy",
                         f"Hay {_fmt_int(accepted_cnt)} en **Accepted** y {_fmt_int(rtd_cnt)} en **Ready to deploy** "
-                        f"(conversión {_fmt_pct(rtd_conv)}). Acción: define tiempo máximo de salida de Accepted y revisión diaria de bloqueos.",
+                        f"(conversión {_fmt_pct(rtd_conv)}). Acción: define tiempo máximo de salida de Accepted y acompaña su avance hasta Deployed.",
                     )
                 )
         if rtd_cnt > 0:

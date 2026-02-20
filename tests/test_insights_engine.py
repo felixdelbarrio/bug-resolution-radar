@@ -115,3 +115,52 @@ def test_status_pack_flags_stalled_dominant_state() -> None:
     )
     pack = build_trend_insight_pack("open_status_bar", dff=pd.DataFrame(), open_df=open_df)
     assert any("sin avance" in c.title.lower() for c in pack.cards)
+
+
+def test_status_pack_does_not_mark_accepted_as_bottleneck() -> None:
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    open_df = pd.DataFrame(
+        {
+            "status": [
+                "Accepted",
+                "Accepted",
+                "Accepted",
+                "Accepted",
+                "Ready to deploy",
+                "Deployed",
+            ],
+            "priority": ["High", "Medium", "Low", "Highest", "High", "Medium"],
+            "assignee": ["ana", "ana", "luis", "maria", "ana", "ops"],
+            "created": pd.to_datetime(
+                [
+                    now - pd.Timedelta(days=12),
+                    now - pd.Timedelta(days=10),
+                    now - pd.Timedelta(days=8),
+                    now - pd.Timedelta(days=7),
+                    now - pd.Timedelta(days=4),
+                    now - pd.Timedelta(days=3),
+                ],
+                utc=True,
+            ),
+            "updated": pd.to_datetime(
+                [
+                    now - pd.Timedelta(days=4),
+                    now - pd.Timedelta(days=3),
+                    now - pd.Timedelta(days=2),
+                    now - pd.Timedelta(days=2),
+                    now - pd.Timedelta(days=1),
+                    now - pd.Timedelta(days=1),
+                ],
+                utc=True,
+            ),
+        }
+    )
+
+    pack = build_trend_insight_pack("open_status_bar", dff=pd.DataFrame(), open_df=open_df)
+    titles = [str(c.title or "").lower() for c in pack.cards]
+    joined = " ".join(
+        [f"{str(c.title or '')} {str(c.body or '')}".lower() for c in pack.cards]
+    )
+
+    assert not any("cuello de botella" in t for t in titles)
+    assert "accepted" in joined and "ready to deploy" in joined

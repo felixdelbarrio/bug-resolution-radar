@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('app.py', '.'), ('assets', 'assets')]
+datas = [('app.py', '.'), ('src/bug_resolution_radar/ui/assets', 'bug_resolution_radar/ui/assets')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('streamlit')

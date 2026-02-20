@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from bug_resolution_radar.reports.executive_ppt import (
     _best_actions,
     _ChartSection,
     _fig_to_png,
+    _is_finalist_status,
     _select_actions_for_final_slide,
     _soften_insight_tone,
     _urgency_from_score,
@@ -176,6 +178,61 @@ def test_generate_scope_executive_ppt_applies_filters(tmp_path: Path) -> None:
     assert "Estado" in out.applied_filter_summary
 
 
+def test_generate_scope_executive_ppt_applies_analysis_depth_window(tmp_path: Path) -> None:
+    now = datetime.now(timezone.utc)
+    issues_path = tmp_path / "issues.json"
+    doc = IssuesDocument(
+        schema_version="1.0",
+        ingested_at=now.isoformat(),
+        jira_base_url="https://jira.example.com",
+        query="window",
+        issues=[
+            NormalizedIssue(
+                key="MX-W1",
+                summary="Issue reciente",
+                status="New",
+                type="Bug",
+                priority="High",
+                created=(now - timedelta(days=15)).isoformat(),
+                updated=(now - timedelta(days=5)).isoformat(),
+                resolved=None,
+                assignee="Ana",
+                country="México",
+                source_type="jira",
+                source_alias="Core MX",
+                source_id="jira:mexico:core-mx",
+            ),
+            NormalizedIssue(
+                key="MX-W2",
+                summary="Issue antigua",
+                status="Blocked",
+                type="Bug",
+                priority="Highest",
+                created=(now - timedelta(days=130)).isoformat(),
+                updated=(now - timedelta(days=90)).isoformat(),
+                resolved=None,
+                assignee="Luis",
+                country="México",
+                source_type="jira",
+                source_alias="Core MX",
+                source_id="jira:mexico:core-mx",
+            ),
+        ],
+    )
+    save_issues_doc(str(issues_path), doc)
+
+    settings = Settings(DATA_PATH=str(issues_path), ANALYSIS_LOOKBACK_MONTHS=2)
+
+    out = generate_scope_executive_ppt(
+        settings,
+        country="México",
+        source_id="jira:mexico:core-mx",
+    )
+
+    assert out.total_issues == 1
+    assert out.open_issues == 1
+
+
 def test_generate_scope_executive_ppt_raises_when_scope_has_no_data(tmp_path: Path) -> None:
     issues_path = tmp_path / "issues.json"
     _seed_issues(issues_path)
@@ -281,3 +338,10 @@ def test_soften_insight_tone_reduces_catastrophic_language() -> None:
     assert "crítica" not in out.lower()
     assert "Must" in out
     assert "priorización" in out.lower()
+
+
+def test_is_finalist_status_detects_terminal_flow_states() -> None:
+    assert _is_finalist_status("Accepted")
+    assert _is_finalist_status("Ready to deploy")
+    assert _is_finalist_status("Deployed")
+    assert not _is_finalist_status("Analysing")

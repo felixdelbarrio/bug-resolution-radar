@@ -7,7 +7,6 @@ from typing import Any
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.security import mask_secret, safe_log_text
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     flow_signal_color_map,
@@ -15,6 +14,7 @@ from bug_resolution_radar.ui.common import (
     priority_color_map,
     status_color,
 )
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.utils import now_iso, parse_age_buckets, parse_int_list
 
 

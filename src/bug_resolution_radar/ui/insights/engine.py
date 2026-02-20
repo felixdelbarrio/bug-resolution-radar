@@ -59,6 +59,16 @@ ACTIVE_STATUS_FILTERS = [
     "To Rework",
     "Test",
 ]
+FINALIST_STATUS_FILTERS = [
+    "Accepted",
+    "Ready to deploy",
+    "Ready to Deploy",
+    "Deployed",
+    "Closed",
+    "Resolved",
+    "Done",
+]
+_FINALIST_STATUS_TOKENS = tuple({str(s).strip().lower() for s in FINALIST_STATUS_FILTERS})
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -114,6 +124,11 @@ def _norm_text(value: object) -> str:
     txt = unicodedata.normalize("NFKD", txt)
     txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
     return txt
+
+
+def _is_finalist_status(value: object) -> bool:
+    token = str(value or "").strip().lower()
+    return token in _FINALIST_STATUS_TOKENS
 
 
 def classify_theme(
@@ -1051,7 +1066,9 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     df = open_df.copy(deep=False)
     df["status"] = normalize_text_col(df["status"], "(sin estado)")
-    counts = df["status"].value_counts()
+    status_series = df["status"].astype(str)
+    status_norm = status_series.str.strip().str.lower()
+    counts = status_series.value_counts()
     total = int(len(df))
     top_status = str(counts.index[0]) if not counts.empty else "—"
     top_count = int(counts.iloc[0]) if not counts.empty else 0
@@ -1059,19 +1076,49 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     cards: List[ActionInsight] = []
     if top_status != "—":
-        cards.append(
-            ActionInsight(
-                title="Cuello de botella probable",
-                body=(
-                    f"{_fmt_pct(top_share)} del backlog esta en {top_status} "
-                    f"({top_count} de {total})."
-                ),
-                status_filters=[top_status],
-                score=12.0 + (top_share * 100.0),
+        if _is_finalist_status(top_status):
+            if str(top_status).strip().lower() == "accepted":
+                cards.append(
+                    ActionInsight(
+                        title="Accepted en tramo final",
+                        body=(
+                            f"{_fmt_pct(top_share)} del backlog esta en Accepted "
+                            f"({top_count} de {total}). "
+                            "Al ser estado finalista no se considera cuello: "
+                            "conviene completar salida a Ready to deploy y Deployed."
+                        ),
+                        status_filters=["Accepted", "Ready to deploy", "Deployed"],
+                        score=12.0 + (top_share * 100.0),
+                    )
+                )
+            else:
+                cards.append(
+                    ActionInsight(
+                        title="Tramo final acumulado",
+                        body=(
+                            f"{_fmt_pct(top_share)} del backlog esta en {top_status} "
+                            f"({top_count} de {total}). "
+                            "Al ser estado finalista no se interpreta como cuello: "
+                            "la accion recomendada es acelerar cierre de flujo."
+                        ),
+                        status_filters=[top_status],
+                        score=10.0 + (top_share * 100.0),
+                    )
+                )
+        else:
+            cards.append(
+                ActionInsight(
+                    title="Cuello de botella probable",
+                    body=(
+                        f"{_fmt_pct(top_share)} del backlog esta en {top_status} "
+                        f"({top_count} de {total})."
+                    ),
+                    status_filters=[top_status],
+                    score=12.0 + (top_share * 100.0),
+                )
             )
-        )
 
-    active_mask = df["status"].astype(str).isin(ACTIVE_STATUS_FILTERS)
+    active_mask = status_series.isin(ACTIVE_STATUS_FILTERS)
     active_share = float(active_mask.mean()) if total else 0.0
     cards.append(
         ActionInsight(
@@ -1081,13 +1128,13 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 "Por encima de 60% suele subir el cambio de contexto."
             ),
             status_filters=[
-                s for s in ACTIVE_STATUS_FILTERS if s in df["status"].astype(str).unique().tolist()
+                s for s in ACTIVE_STATUS_FILTERS if s in status_series.unique().tolist()
             ],
             score=8.0 + (active_share * 100.0),
         )
     )
 
-    triage_mask = df["status"].astype(str).isin(TRIAGE_STATUS_FILTERS)
+    triage_mask = status_series.isin(TRIAGE_STATUS_FILTERS)
     triage_share = float(triage_mask.mean()) if total else 0.0
     if triage_share >= 0.35:
         cards.append(
@@ -1103,7 +1150,7 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         )
 
     blocked_count = int(
-        df["status"].astype(str).str.lower().str.contains("blocked|bloque", regex=True).sum()
+        status_series.str.lower().str.contains("blocked|bloque", regex=True).sum()
     )
     blocked_share = (blocked_count / total) if total else 0.0
     if blocked_count > 0:
@@ -1120,8 +1167,8 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         )
 
     stale_days = _stale_days_from_updated(df)
-    if stale_days.notna().any() and top_status != "—":
-        dom_mask = df["status"].astype(str).eq(top_status)
+    if stale_days.notna().any() and top_status != "—" and not _is_finalist_status(top_status):
+        dom_mask = status_series.eq(top_status)
         dom_stale = stale_days.loc[dom_mask]
         if dom_stale.notna().any():
             dom_stale_med = float(dom_stale.median())
@@ -1159,23 +1206,28 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                         )
                     )
 
-    accepted = int((df["status"].astype(str) == "Accepted").sum())
-    ready = int((df["status"].astype(str) == "Ready to deploy").sum())
-    deployed = int((df["status"].astype(str) == "Deployed").sum())
+    accepted = int(status_norm.eq("accepted").sum())
+    ready = int(status_norm.eq("ready to deploy").sum())
+    deployed = int(status_norm.eq("deployed").sum())
     if accepted > 0:
         conv = (ready / accepted) if accepted else 0.0
-        if conv < 0.35:
-            cards.append(
-                ActionInsight(
-                    title="Friccion Accepted -> Ready",
-                    body=(
-                        f"Accepted={accepted} y Ready to deploy={ready} "
-                        f"(conversion {_fmt_pct(conv)})."
-                    ),
-                    status_filters=["Accepted", "Ready to deploy"],
-                    score=13.0 + float(accepted - ready),
-                )
+        cards.append(
+            ActionInsight(
+                title=(
+                    "Cierre pendiente Accepted -> Ready"
+                    if conv < 0.35
+                    else "Seguimiento de salida Accepted"
+                ),
+                body=(
+                    f"Accepted={accepted} y Ready to deploy={ready} "
+                    f"(conversion {_fmt_pct(conv)}). "
+                    "Accepted es estado finalista: la recomendacion es completar "
+                    "flujo hacia Ready to deploy y Deployed, no tratarlo como cuello."
+                ),
+                status_filters=["Accepted", "Ready to deploy", "Deployed"],
+                score=(13.0 + float(accepted - ready)) if conv < 0.35 else (8.5 + float(accepted)),
             )
+        )
     if ready > 0:
         conv_release = (deployed / ready) if ready else 0.0
         if conv_release < 0.70:
@@ -1193,7 +1245,16 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     tip = "Control de flujo recomendado: medir SLA por estado y revisar desvio diariamente."
     if top_share > 0.45:
-        tip = f"Prioridad de gestion: descargar {top_status} hasta bajar por debajo de 35% del backlog."
+        if _is_finalist_status(top_status):
+            tip = (
+                f"Prioridad de gestion: acelerar salida del tramo final ({top_status}) "
+                "hacia deploy para cerrar ciclo."
+            )
+        else:
+            tip = (
+                f"Prioridad de gestion: descargar {top_status} "
+                "hasta bajar por debajo de 35% del backlog."
+            )
 
     return TrendInsightPack(
         metrics=[

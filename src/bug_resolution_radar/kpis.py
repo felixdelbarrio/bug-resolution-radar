@@ -3,26 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pandas as pd
 import plotly.express as px
 
 from .config import Settings
-from .utils import parse_age_buckets, parse_int_list
 
 _DT_COLS = ("created", "updated", "resolved")
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _safe_int(value: object, default: int) -> int:
-    try:
-        return int(str(value).strip())
-    except Exception:
-        return default
 
 
 def _ensure_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -60,17 +52,9 @@ def _empty_timeseries_chart() -> Any:
     return px.line(empty_ts, x="date", y=["created", "closed", "open_backlog_proxy"])
 
 
-def _empty_age_buckets_chart() -> Any:
-    return px.bar(
-        pd.DataFrame({"bucket": pd.Series(dtype=str), "count": pd.Series(dtype=int)}),
-        x="bucket",
-        y="count",
-    )
-
-
 def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
     now = pd.Timestamp(_utcnow())
-    fort_days = _safe_int(settings.KPI_FORTNIGHT_DAYS, default=15)
+    _ = settings  # signature preserved for API compatibility
     work_df = _ensure_datetime_columns(df)
 
     if work_df.empty:
@@ -80,14 +64,8 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
             "issues_closed": 0,
             "open_now_total": 0,
             "open_now_by_priority": {},
-            "new_fortnight_total": 0,
-            "new_fortnight_by_priority": {},
-            "closed_fortnight_total": 0,
-            "closed_fortnight_by_resolution_type": {},
             "mean_resolution_days": 0.0,
             "mean_resolution_days_by_priority": {},
-            "pct_open_gt_x_days": "n/a",
-            "age_buckets_chart": _empty_age_buckets_chart(),
             "timeseries_chart": _empty_timeseries_chart(),
             "top_open_table": pd.DataFrame(columns=["summary", "open_count"]),
         }
@@ -96,7 +74,6 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
     has_created = "created" in work_df.columns
     has_resolved = "resolved" in work_df.columns
     has_priority = "priority" in work_df.columns
-    has_resolution_type = "resolution_type" in work_df.columns
     has_summary = "summary" in work_df.columns
 
     if has_created:
@@ -121,9 +98,6 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
         counts = priority.loc[mask].value_counts()
         return {str(priority_name): int(count) for priority_name, count in counts.items()}
 
-    fort_start = now - timedelta(days=fort_days)
-    new_fort_mask = created_notna & (created >= fort_start) if has_created else created_notna
-    closed_fort_mask = resolved_notna & (resolved >= fort_start)
     closed_all_mask = created_notna & resolved_notna
 
     resolution_days = (
@@ -152,49 +126,6 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
             mean_by_priority = grouped.to_dict()
         else:
             mean_by_priority = {}
-
-    try:
-        x_days_list = parse_int_list(settings.KPI_OPEN_AGE_X_DAYS)
-    except Exception:
-        x_days_list = []
-
-    open_age_days = (
-        ((now - created.loc[open_mask & created_notna]).dt.total_seconds() / 86400.0)
-        .clip(lower=0.0)
-        .astype(float)
-    )
-
-    pct_parts: List[str] = []
-    if not open_age_days.empty:
-        for x in sorted(set(x_days_list)):
-            pct = 100.0 * float((open_age_days > x).mean())
-            pct_parts.append(f">{x}d: {pct:.1f}%")
-    pct_open_gt_x = " | ".join(pct_parts) if pct_parts else "n/a"
-
-    try:
-        buckets = parse_age_buckets(settings.KPI_AGE_BUCKETS)
-    except Exception:
-        buckets = []
-
-    bucket_labels: List[str] = []
-    bucket_counts: List[int] = []
-    if not open_age_days.empty:
-        for lo, hi in buckets:
-            if hi >= 10**8:
-                label = f">{lo}"
-                count = int((open_age_days > lo).sum())
-            else:
-                label = f"{lo}-{hi}"
-                count = int(((open_age_days >= lo) & (open_age_days <= hi)).sum())
-            bucket_labels.append(label)
-            bucket_counts.append(count)
-
-    age_buckets_df = pd.DataFrame({"bucket": bucket_labels, "count": bucket_counts})
-    age_buckets_chart = (
-        px.bar(age_buckets_df, x="bucket", y="count")
-        if not age_buckets_df.empty
-        else _empty_age_buckets_chart()
-    )
 
     range_days = 90
     start = now - timedelta(days=range_days)
@@ -239,18 +170,8 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
         "issues_closed": max(total_issues - open_now_total, 0),
         "open_now_total": open_now_total,
         "open_now_by_priority": by_priority_mask(open_mask),
-        "new_fortnight_total": int(new_fort_mask.sum()),
-        "new_fortnight_by_priority": by_priority_mask(new_fort_mask),
-        "closed_fortnight_total": int(closed_fort_mask.sum()),
-        "closed_fortnight_by_resolution_type": (
-            work_df.loc[closed_fort_mask, "resolution_type"].fillna("").value_counts().to_dict()
-            if has_resolution_type
-            else {}
-        ),
         "mean_resolution_days": mean_resolution_days,
         "mean_resolution_days_by_priority": mean_by_priority,
-        "pct_open_gt_x_days": pct_open_gt_x,
-        "age_buckets_chart": age_buckets_chart,
         "timeseries_chart": timeseries_chart,
         "top_open_table": top_open,
     }

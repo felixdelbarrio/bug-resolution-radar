@@ -524,19 +524,29 @@ def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
         return ["No hay issues para este análisis."]
 
     top_status = str(counts.index[0])
+    top_status_token = top_status.strip().lower()
     top_cnt = int(counts.iloc[0])
     share = float(top_cnt) / float(total)
 
-    insights = [
-        f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del conjunto analizado "
-        f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
-        "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
-        "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",
-    ]
+    is_top_terminal = any(tok in top_status_token for tok in TERMINAL_STATUS_TOKENS)
+    if is_top_terminal:
+        insights = [
+            f"Concentración en tramo final: **{top_status}** agrupa **{_fmt_pct(share)}** del conjunto analizado "
+            f"({top_cnt}/{total}). En estados finalistas no se considera cuello de botella.",
+            "Acción ‘WOW’: acelerar cierre de flujo (Accepted -> Ready to deploy -> Deployed) con seguimiento diario de conversión.",
+        ]
+    else:
+        insights = [
+            f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del conjunto analizado "
+            f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
+            "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
+            "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",
+        ]
 
-    accepted_cnt = int((stc == "Accepted").sum())
-    rtd_cnt = int((stc == "Ready to deploy").sum())
-    deployed_cnt = int((stc == "Deployed").sum())
+    stc_norm = stc.str.strip().str.lower()
+    accepted_cnt = int(stc_norm.eq("accepted").sum())
+    rtd_cnt = int(stc_norm.eq("ready to deploy").sum())
+    deployed_cnt = int(stc_norm.eq("deployed").sum())
 
     if accepted_cnt > 0:
         rtd_conv = (rtd_cnt / accepted_cnt) * 100.0
@@ -597,7 +607,7 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ChartSpec(
             chart_id="open_status_bar",
             title="Backlog por estado",
-            subtitle="Detecta cuellos de botella y ‘waiting rooms’",
+            subtitle="Concentración por fase y ritmo de salida del flujo",
             group="Flujo",
             render=_render_open_status_bar,
             insights=_insights_open_status_bar,
