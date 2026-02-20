@@ -101,12 +101,12 @@ ORTHO_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
 SOFT_TONE_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
     (r"\bcriticidad\b", "priorización"),
     (r"\bCriticidad\b", "Priorización"),
-    (r"\bcr[ií]ticas\b", "Must"),
-    (r"\bCr[ií]ticas\b", "Must"),
-    (r"\bcr[ií]tica\b", "Must"),
-    (r"\bCr[ií]tica\b", "Must"),
-    (r"\bcr[ií]tico\b", "Must"),
-    (r"\bCr[ií]tico\b", "Must"),
+    (r"\bcr[ií]ticas\b", "de mayor impacto"),
+    (r"\bCr[ií]ticas\b", "De mayor impacto"),
+    (r"\bcr[ií]tica\b", "de mayor impacto"),
+    (r"\bCr[ií]tica\b", "De mayor impacto"),
+    (r"\bcr[ií]tico\b", "de mayor impacto"),
+    (r"\bCr[ií]tico\b", "De mayor impacto"),
     (r"\burgencia\b", "prioridad de acción"),
     (r"\bUrgencia\b", "Prioridad de acción"),
     (r"\burgente\b", "prioritario"),
@@ -115,6 +115,9 @@ SOFT_TONE_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
 
 BUSINESS_PLAIN_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
     (r"\bPalanca ejecutiva:\s*", ""),
+    (r"\bMensajes clave:\s*", ""),
+    (r"\bMensaje clave:\s*", ""),
+    (r"\bMensaje clave\b\s*:\s*", ""),
     (r"\bSLA\b", "tiempo objetivo"),
     (r"\bslas\b", "tiempos objetivo"),
     (r"\bP95\b", "tramo del 5% más lento"),
@@ -376,6 +379,34 @@ def _soften_insight_tone(text: str) -> str:
     return re.sub(r"\s+", " ", out).strip()
 
 
+def _cap_first(text: str) -> str:
+    txt = str(text or "").strip()
+    if not txt:
+        return ""
+    first = txt[0]
+    if first.isalpha() and first.islower():
+        return first.upper() + txt[1:]
+    return txt
+
+
+def _dedupe_urgency_title(title: str, urgency_label: str) -> str:
+    """Avoid repeating Must/Should/Nice-to-have when we already show a [TAG]."""
+    txt = str(title or "").strip()
+    if not txt:
+        return ""
+    # Remove explicit bracket tags if they exist at the beginning.
+    txt = re.sub(r"^\\[(must|should|nice\\s+to\\s+have)\\]\\s*", "", txt, flags=re.I).strip()
+    # Remove leading urgency word if present (e.g. "Must ...") to prevent duplication.
+    label = str(urgency_label or "").strip()
+    if label:
+        txt2 = re.sub(rf"^{re.escape(label)}\\s*(?:[:-]\\s*)?", "", txt, flags=re.I).strip()
+    else:
+        txt2 = re.sub(
+            r"^(must|should|nice\\s+to\\s+have)\\s*(?:[:-]\\s*)?", "", txt, flags=re.I
+        ).strip()
+    return _cap_first(txt2 or txt)
+
+
 def _fmt_int(value: int) -> str:
     return f"{int(value):,}".replace(",", ".")
 
@@ -634,35 +665,57 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     fig = make_subplots(
         rows=1,
         cols=2,
-        column_widths=[0.64, 0.36],
+        specs=[[{"type": "domain"}, {"type": "xy"}]],
+        column_widths=[0.62, 0.38],
         subplot_titles=("Por funcionalidad", "Duplicados"),
         horizontal_spacing=0.10,
     )
 
     if has_topics:
-        view = top_tbl.copy(deep=False).head(10)
+        view = top_tbl.copy(deep=False)
         view["tema"] = view["tema"].astype(str)
         view["open_count"] = (
             pd.to_numeric(view["open_count"], errors="coerce").fillna(0).astype(int)
         )
-        view = view.sort_values("open_count", ascending=True)
+
+        # Keep the pie legible: top N + (optional) "Otros" if present.
+        view = view.sort_values("open_count", ascending=False)
+        max_slices = 7
+        head = view.head(max_slices).copy(deep=False)
+
+        labels = head["tema"].tolist()
+        values = head["open_count"].tolist()
+
+        bbva_seq = [
+            BBVA_LIGHT.core_blue,
+            BBVA_LIGHT.electric_blue,
+            BBVA_LIGHT.royal_blue,
+            BBVA_LIGHT.serene_dark_blue,
+            BBVA_LIGHT.serene_blue,
+            BBVA_LIGHT.aqua,
+            f"#{PALETTE['line']}",
+        ]
+        colors: list[str] = []
+        for idx, lbl in enumerate(labels):
+            if str(lbl).strip().lower() in {"otros", "other"}:
+                colors.append(f"#{PALETTE['line']}")
+            else:
+                colors.append(bbva_seq[idx % len(bbva_seq)])
+
         fig.add_trace(
-            go.Bar(
-                x=view["open_count"].tolist(),
-                y=view["tema"].tolist(),
-                orientation="h",
-                marker=dict(color="#0051F1"),
-                text=[f"{int(v)}" for v in view["open_count"].tolist()],
-                textposition="outside",
-                cliponaxis=False,
-                hovertemplate="Tema: %{y}<br>Abiertas: %{x}<extra></extra>",
-                showlegend=False,
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.55,
+                sort=False,
+                direction="clockwise",
+                marker=dict(colors=colors, line=dict(color="#FFFFFF", width=2)),
+                hovertemplate="Tema: %{label}<br>Abiertas: %{value}<br>%{percent}<extra></extra>",
+                showlegend=True,
             ),
             row=1,
             col=1,
         )
-        fig.update_xaxes(title_text="Incidencias abiertas", row=1, col=1)
-        fig.update_yaxes(title_text="", row=1, col=1)
 
     dup_names = ["Por título", "Por heurística"]
     dup_values = [int(duplicate_issues), int(heuristic_issues)]
@@ -670,7 +723,7 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         go.Bar(
             x=dup_names,
             y=dup_values,
-            marker=dict(color=["#D64550", "#F59E0B"]),
+            marker=dict(color=[f"#{PALETTE['red']}", f"#{PALETTE['amber']}"]),
             text=[str(v) if v > 0 else "" for v in dup_values],
             textposition="outside",
             cliponaxis=False,
@@ -681,8 +734,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         col=2,
     )
     fig.update_yaxes(title_text="Casos", row=1, col=2)
-    fig.update_layout(title_text="", margin=dict(l=16, r=16, t=52, b=56))
-    fig = apply_plotly_bbva(fig, showlegend=False)
+    fig.update_layout(title_text="", showlegend=True, margin=dict(l=16, r=16, t=52, b=56))
+    fig = apply_plotly_bbva(fig, showlegend=True)
 
     as_is_bits: List[str] = []
     if has_topics and top_theme != "-":
@@ -854,6 +907,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         export_fig = go.Figure(fig)
         traces = list(getattr(export_fig, "data", []) or [])
         bar_category_keys: set[str] = set()
+        vertical_bar_traces: List[object] = []
         for trace in traces:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
             is_vertical_bar = (
@@ -862,6 +916,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             )
             if not is_vertical_bar:
                 continue
+            vertical_bar_traces.append(trace)
             for raw_x in _trace_values(trace, "x"):
                 key = str(raw_x or "").strip()
                 if key:
@@ -931,10 +986,23 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         if dense_chart:
             legend_render_font = min(17.4, legend_render_font + 1.5)
 
+        is_stacked_layout = str(
+            getattr(getattr(export_fig, "layout", None), "barmode", "") or ""
+        ).strip().lower() in {"stack", "relative"}
+        allow_segment_labels = (
+            bool(vertical_bar_traces)
+            and is_stacked_layout
+            and len(vertical_bar_traces) >= 2
+            and len(bar_category_keys) <= 12
+            and len(vertical_bar_traces) <= 6
+        )
+
         export_fig.update_layout(
             template="plotly_white",
             showlegend=showlegend,
-            uniformtext=dict(minsize=18 if dense_chart else 16, mode="hide"),
+            uniformtext=dict(
+                minsize=12 if allow_segment_labels else (18 if dense_chart else 16), mode="hide"
+            ),
             font=dict(
                 family=FONT_BODY_BOOK,
                 size=18,
@@ -980,12 +1048,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
         # For every column chart in the report, show a clear total per column
         # in bold on top and avoid truncated per-segment labels.
-        bar_traces = [
-            tr
-            for tr in traces
-            if str(getattr(tr, "type", "") or "").strip().lower() == "bar"
-            and str(getattr(tr, "orientation", "v") or "v").strip().lower() != "h"
-        ]
+        bar_traces = list(vertical_bar_traces)
         if bar_traces:
             totals: Dict[str, float] = {}
             x_by_key: Dict[str, object] = {}
@@ -1019,15 +1082,51 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     totals[key] += max(0.0, y_val)
 
             if totals:
-                for trace in bar_traces:
-                    if hasattr(trace, "text"):
-                        trace.text = None
-                    if hasattr(trace, "texttemplate"):
-                        trace.texttemplate = None
-                    if hasattr(trace, "textposition"):
-                        trace.textposition = "none"
-                    if hasattr(trace, "cliponaxis"):
-                        trace.cliponaxis = False
+                if allow_segment_labels:
+                    # Keep per-segment labels inside each stacked block (readable).
+                    for trace in bar_traces:
+                        ys = _trace_values(trace, "y")
+                        seg_text: List[str] = []
+                        for y_raw in ys:
+                            if y_raw is None:
+                                seg_text.append("")
+                                continue
+                            if isinstance(y_raw, (int, float)):
+                                y_val = float(y_raw)
+                            else:
+                                y_txt = str(y_raw).strip()
+                                if not y_txt:
+                                    seg_text.append("")
+                                    continue
+                                try:
+                                    y_val = float(y_txt)
+                                except Exception:
+                                    seg_text.append("")
+                                    continue
+                            seg_text.append(f"{int(round(y_val))}" if y_val > 0 else "")
+                        if hasattr(trace, "text"):
+                            trace.text = seg_text
+                        if hasattr(trace, "texttemplate"):
+                            trace.texttemplate = "%{text}"
+                        if hasattr(trace, "textposition"):
+                            trace.textposition = "inside"
+                        if hasattr(trace, "insidetextanchor"):
+                            trace.insidetextanchor = "middle"
+                        if hasattr(trace, "textangle"):
+                            trace.textangle = 0
+                        if hasattr(trace, "cliponaxis"):
+                            trace.cliponaxis = False
+                else:
+                    # Totals only (avoid clutter in dense charts).
+                    for trace in bar_traces:
+                        if hasattr(trace, "text"):
+                            trace.text = None
+                        if hasattr(trace, "texttemplate"):
+                            trace.texttemplate = None
+                        if hasattr(trace, "textposition"):
+                            trace.textposition = "none"
+                        if hasattr(trace, "cliponaxis"):
+                            trace.cliponaxis = False
 
                 ordered_totals = [float(totals[key]) for key in x_order]
                 max_total = max(ordered_totals) if ordered_totals else 0.0
@@ -1093,16 +1192,39 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
             if str(getattr(trace, "name", "") or "").strip():
                 trace.showlegend = bool(showlegend)
-            if hasattr(trace, "textfont"):
-                trace.textfont = dict(
-                    family=FONT_BODY_MEDIUM,
-                    size=24 if dense_chart else 22,
-                    color=f"#{PALETTE['ink']}",
-                )
-            if trace_type == "bar" and hasattr(trace, "textposition"):
-                trace.textposition = "auto"
-                if hasattr(trace, "cliponaxis"):
-                    trace.cliponaxis = False
+            if trace_type == "bar":
+                if allow_segment_labels:
+                    # Smaller font for inside stacked labels.
+                    if hasattr(trace, "textfont"):
+                        trace.textfont = dict(
+                            family=FONT_BODY_MEDIUM,
+                            size=16 if dense_chart else 18,
+                            color=f"#{PALETTE['panel']}",
+                        )
+                    if hasattr(trace, "textposition"):
+                        trace.textposition = "inside"
+                    if hasattr(trace, "insidetextanchor"):
+                        trace.insidetextanchor = "middle"
+                    if hasattr(trace, "cliponaxis"):
+                        trace.cliponaxis = False
+                else:
+                    if hasattr(trace, "textfont"):
+                        trace.textfont = dict(
+                            family=FONT_BODY_MEDIUM,
+                            size=24 if dense_chart else 22,
+                            color=f"#{PALETTE['ink']}",
+                        )
+                    if hasattr(trace, "textposition"):
+                        trace.textposition = "auto"
+                    if hasattr(trace, "cliponaxis"):
+                        trace.cliponaxis = False
+            else:
+                if hasattr(trace, "textfont"):
+                    trace.textfont = dict(
+                        family=FONT_BODY_MEDIUM,
+                        size=24 if dense_chart else 22,
+                        color=f"#{PALETTE['ink']}",
+                    )
 
         image = pio.to_image(
             export_fig, format="png", width=export_width, height=export_height, scale=3
@@ -1414,7 +1536,12 @@ def _section_ribbon_items(section: _ChartSection) -> List[Tuple[str, str, str]]:
         items.append(
             (
                 "Acción foco",
-                _clip_text(_soften_insight_tone(str(cards[0].title or "").strip()), max_len=30),
+                _clip_text(
+                    _dedupe_urgency_title(
+                        _soften_insight_tone(str(cards[0].title or "").strip()), urgency_label
+                    ),
+                    max_len=30,
+                ),
                 "teal",
             )
         )
@@ -1525,8 +1652,8 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     _add_bg(slide, PALETTE["bg"])
     _add_header(
         slide,
-        title="Panorama de negocio",
-        subtitle="Qué está pasando, por qué importa y dónde actuar primero",
+        title="Índice",
+        subtitle="Historia del análisis y población analizada",
     )
     total = int(len(context.dff))
     open_count = int(len(context.open_df))
@@ -1600,19 +1727,39 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     ltf.clear()
     lp0 = ltf.paragraphs[0]
     lr0 = lp0.add_run()
-    lr0.text = "Ruta de lectura"
+    lr0.text = "Índice"
     lr0.font.name = FONT_HEAD
     lr0.font.bold = True
     lr0.font.size = Pt(20)
     lr0.font.color.rgb = _rgb(PALETTE["navy"])
 
-    for idx, theme in enumerate(themes, start=1):
+    # Compact index to fit the left panel (single line per entry).
+    rows: List[Tuple[str, str, str, str]] = [
+        ("01", "Apertura", "Alcance y reglas de lectura del análisis", PALETTE["blue"]),
+        ("02", "Panorama", "Tamaño del problema, foco y prioridades", PALETTE["teal"]),
+    ]
+    idx = 3
+    for theme, themed_sections in _group_sections_by_theme(context.sections):
+        detail = " · ".join([_clip_text(sec.title, max_len=28) for sec in themed_sections])
+        rows.append((f"{idx:02d}", theme, detail, PALETTE["navy"]))
+        idx += 1
+    rows.append(
+        (
+            f"{idx:02d}",
+            "Cierre y acciones",
+            "Plan de trabajo priorizado por impacto",
+            PALETTE["blue"],
+        )
+    )
+
+    for code, title, detail, _code_color in rows:
+        line = _clip_text(f"{code}. {title} · {detail}", max_len=78)
         p = ltf.add_paragraph()
-        p.text = f"{idx}. {theme}"
-        p.space_after = Pt(7)
+        p.space_after = Pt(6)
         p.font.name = FONT_BODY_BOOK
-        p.font.size = Pt(13.0)
+        p.font.size = Pt(12.2)
         p.font.color.rgb = _rgb(PALETTE["ink"])
+        p.text = line
 
     right_box = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
@@ -1629,7 +1776,7 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     rtf.clear()
     rp0 = rtf.paragraphs[0]
     rr0 = rp0.add_run()
-    rr0.text = "Lectura inicial"
+    rr0.text = "Población analizada"
     rr0.font.name = FONT_HEAD
     rr0.font.bold = True
     rr0.font.size = Pt(20)
@@ -1637,8 +1784,11 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
 
     status_line = f"**Fase operativa foco (abiertas):** {top_status}"
 
+    totals_line = f"**Total incidencias:** {total} · **Abiertas:** {open_count} ({open_ratio:.1f}%)"
+
     opening = [
-        f"**Alcance activo:** {context.country} · {context.source_label}",
+        f"**Población:** {context.country} · {context.source_label}",
+        totals_line,
         f"**Filtros:** {context.filters.summary()}",
         status_line,
         f"**Prioridad dominante (abiertas):** {top_priority}",
@@ -1677,19 +1827,15 @@ def _chart_insights_font_scale(
     max_height_pt = 355.0
     estimate = 20.0
     estimate += 30.0  # As-is heading
-    estimate += (
-        _estimate_wrapped_lines(f"Mensaje clave: {tip_text}", max_chars_per_line=43) * 16.6 + 10.0
-    )
+    estimate += _estimate_wrapped_lines(tip_text, max_chars_per_line=43) * 16.6 + 10.0
     estimate += _estimate_wrapped_lines(context_text, max_chars_per_line=47) * 14.6 + 8.0
     estimate += 30.0  # To-Be heading
     estimate += _estimate_wrapped_lines(to_be_context_text, max_chars_per_line=47) * 14.0 + 8.0
 
     for idx_card, card in enumerate(list(cards or []), start=1):
         urgency_label, _ = _urgency_from_score(float(card.score))
-        title_line = (
-            f"{idx_card}. [{urgency_label.upper()}] "
-            f"{_clip_text(_soften_insight_tone(card.title), max_len=68)}"
-        )
+        title_txt = _dedupe_urgency_title(_soften_insight_tone(card.title), urgency_label)
+        title_line = f"{idx_card}. [{urgency_label.upper()}] {_clip_text(title_txt, max_len=68)}"
         body_line = _clip_text(
             _soften_insight_tone(f"Recomendación de acción: {str(card.body or '').strip()}"),
             max_len=178,
@@ -1849,7 +1995,7 @@ def _add_chart_insight_slide(
     p_tip.space_after = Pt(8)
     _set_rich_text(
         p_tip,
-        f"**Mensaje clave:** {tip}",
+        f"{tip}",
         font_name=FONT_BODY_BOOK,
         font_size=_scaled_font(14.4, scale=panel_scale, min_size=11.0),
         color_hex=PALETTE["ink"],
@@ -1928,7 +2074,10 @@ def _add_chart_insight_slide(
         run_tag.font.color.rgb = _rgb(urgency_txt)
 
         run_title = p_title.add_run()
-        run_title.text = _clip_text(_soften_insight_tone(card.title), max_len=68)
+        run_title.text = _clip_text(
+            _dedupe_urgency_title(_soften_insight_tone(card.title), urgency_label),
+            max_len=68,
+        )
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
         run_title.font.size = Pt(_scaled_font(14.2, scale=panel_scale, min_size=11.2))
@@ -2213,7 +2362,7 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
         run_tag.font.color.rgb = _rgb(urgency_txt)
 
         run_title = p_line.add_run()
-        run_title.text = str(action.title or "").strip()
+        run_title.text = _dedupe_urgency_title(_soften_insight_tone(action.title), urgency_label)
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
         run_title.font.size = Pt(17.2)
@@ -2247,7 +2396,7 @@ def _compose_presentation(context: _ScopeContext) -> Any:
     prs.slide_height = SLIDE_HEIGHT
 
     _add_cover_slide(prs, context)
-    _add_index_slide(prs, context)
+    # Combined slide: index + population analyzed (replaces former "Índice" + "Panorama de negocio").
     _add_exec_summary_slide(prs, context)
 
     total = len(context.sections)

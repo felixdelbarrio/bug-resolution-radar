@@ -129,6 +129,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         icon_filter = "brightness(0) invert(1)"
         action_link = "#85C8FF"
         action_link_hover = "#8BE1E9"
+        scrollbar_track = "rgba(234,240,255,0.10)"
+        scrollbar_thumb = "rgba(133,200,255,0.44)"
+        scrollbar_thumb_hover = "rgba(133,200,255,0.62)"
     else:
         text_rgb = "17,25,45"
         surface_soft = "rgba(255,255,255,0.62)"
@@ -145,6 +148,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         icon_filter = "brightness(0) invert(1)"
         action_link = "#0051F1"
         action_link_hover = "#004481"
+        scrollbar_track = "rgba(17,25,45,0.08)"
+        scrollbar_thumb = "rgba(7,33,70,0.22)"
+        scrollbar_thumb_hover = "rgba(7,33,70,0.34)"
 
     css_vars = f"""
       :root {{
@@ -174,6 +180,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-goal-green-bg: {palette.serene_blue};
         --bbva-action-link: {action_link};
         --bbva-action-link-hover: {action_link_hover};
+        --bbva-scrollbar-track: {scrollbar_track};
+        --bbva-scrollbar-thumb: {scrollbar_thumb};
+        --bbva-scrollbar-thumb-hover: {scrollbar_thumb_hover};
         --primary-color: var(--bbva-primary);
         --text-color: var(--bbva-text);
         --background-color: var(--bbva-surface-2);
@@ -235,6 +244,27 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-family: var(--bbva-font-body);
             font-size: 16px;
             line-height: 1.5;
+          }
+
+          /* Scrollbars (avoid bright default thumb in dark mode) */
+          * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--bbva-scrollbar-thumb) var(--bbva-scrollbar-track);
+          }
+          ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+          }
+          ::-webkit-scrollbar-track {
+            background: var(--bbva-scrollbar-track);
+          }
+          ::-webkit-scrollbar-thumb {
+            background-color: var(--bbva-scrollbar-thumb);
+            border-radius: 999px;
+            border: 3px solid var(--bbva-scrollbar-track);
+          }
+          ::-webkit-scrollbar-thumb:hover {
+            background-color: var(--bbva-scrollbar-thumb-hover);
           }
 
           /* Typographic hierarchy */

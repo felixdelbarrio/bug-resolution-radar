@@ -61,7 +61,7 @@ def test_timeseries_pack_builds_actionable_cards() -> None:
     pack = build_trend_insight_pack("timeseries", dff=dff, open_df=open_df)
     assert len(pack.metrics) == 3
     assert len(pack.cards) >= 1
-    assert any("Criticas" in c.title for c in pack.cards)
+    assert any("mayor impacto" in c.title.lower() for c in pack.cards)
 
 
 def test_duplicates_brief_reports_high_duplicate_pressure() -> None:
@@ -91,7 +91,7 @@ def test_priority_pack_flags_unassigned_critical_items() -> None:
     )
     pack = build_trend_insight_pack("open_priority_pie", dff=pd.DataFrame(), open_df=open_df)
     titles = {c.title for c in pack.cards}
-    assert "Criticas sin owner" in titles
+    assert "Incidencias de mayor impacto sin owner" in titles
 
 
 def test_status_pack_flags_stalled_dominant_state() -> None:
