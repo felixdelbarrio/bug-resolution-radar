@@ -20,6 +20,14 @@ def _resolve_app_script() -> Path:
 
 def _runtime_home_for_binary() -> Path:
     exe_dir = Path(sys.executable).resolve().parent
+    # macOS app bundle: <App>.app/Contents/MacOS/<exe>
+    if (
+        exe_dir.name == "MacOS"
+        and exe_dir.parent.name == "Contents"
+        and exe_dir.parent.parent.suffix.lower() == ".app"
+    ):
+        # Put config (.env, data/) next to the .app bundle, not inside it.
+        return exe_dir.parent.parent.parent
     if exe_dir.name.lower() == "dist":
         return exe_dir.parent
     return exe_dir
