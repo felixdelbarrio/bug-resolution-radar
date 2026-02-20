@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 CANONICAL_STATUS_ORDER: Tuple[str, ...] = (
     "New",
     "Analysing",
+    "Ready",
     "Blocked",
     "En progreso",
     "To Rework",

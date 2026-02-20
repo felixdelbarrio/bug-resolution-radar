@@ -14,6 +14,7 @@ from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
+    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
@@ -148,7 +149,7 @@ def _render_timeseries(ctx: ChartContext) -> Optional[go.Figure]:
     if fig is None:
         return None
     # Already a plotly Figure produced by compute_kpis
-    return apply_plotly_bbva(fig)
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_timeseries(ctx: ChartContext) -> List[str]:
@@ -189,10 +190,67 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
 
 def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
-    fig = ctx.kpis.get("age_buckets_chart")
-    if fig is None:
+    open_df = ctx.open_df
+    if open_df is None or open_df.empty or "created" not in open_df.columns:
         return None
-    return apply_plotly_bbva(fig)
+
+    df = open_df.copy(deep=False)
+    df["__created_dt"] = _to_dt_naive(df["created"])
+    df = df[df["__created_dt"].notna()].copy(deep=False)
+    if df.empty:
+        return None
+
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
+    df["__age_days"] = df["__age_days"].clip(lower=0.0)
+    if "status" not in df.columns:
+        df["status"] = "(sin estado)"
+    else:
+        df["status"] = normalize_text_col(df["status"], "(sin estado)")
+
+    df["bucket"] = pd.cut(
+        df["__age_days"],
+        bins=[-float("inf"), 2, 7, 14, 30, float("inf")],
+        labels=["0-2", "3-7", "8-14", "15-30", ">30"],
+        right=True,
+        include_lowest=True,
+        ordered=True,
+    )
+
+    grouped = (
+        df.groupby(["bucket", "status"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+        .sort_values(["bucket", "count"], ascending=[True, False])
+    )
+    if grouped.empty:
+        return None
+
+    statuses = grouped["status"].astype(str).unique().tolist()
+    canon = canonical_status_order()
+    canon_present = [s for s in canon if s in statuses]
+    rest = [s for s in statuses if s not in set(canon_present)]
+    status_order = canon_present + rest
+    bucket_order = ["0-2", "3-7", "8-14", "15-30", ">30"]
+
+    fig = px.bar(
+        grouped,
+        x="bucket",
+        y="count",
+        text="count",
+        color="status",
+        barmode="stack",
+        category_orders={"bucket": bucket_order, "status": status_order},
+        color_discrete_map=status_color_map(status_order),
+        title="Antigüedad por estado",
+    )
+    fig.update_layout(
+        title_text="",
+        xaxis_title="Rango",
+        yaxis_title="Incidencias",
+    )
+    fig.update_traces(textposition="inside", textfont=dict(size=10))
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_age_buckets(ctx: ChartContext) -> List[str]:
@@ -239,17 +297,86 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
 
 
 def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
-    days = _resolution_days_series(ctx.dff)
-    if days.empty:
+    dff = ctx.dff
+    if dff is None or dff.empty or "resolved" not in dff.columns or "created" not in dff.columns:
         return None
 
-    fig = px.histogram(
-        pd.DataFrame({"resolution_days": days}),
-        x="resolution_days",
-        nbins=30,
-        title="Histograma: días hasta resolución (cerradas)",
+    created = _to_dt_naive(dff["created"])
+    resolved = _to_dt_naive(dff["resolved"])
+    closed = dff.copy(deep=False)
+    closed["__created"] = created
+    closed["__resolved"] = resolved
+    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    if closed.empty:
+        return None
+
+    closed["resolution_days"] = (
+        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+    ).clip(lower=0.0)
+    closed["priority"] = (
+        normalize_text_col(closed["priority"], "(sin priority)")
+        if "priority" in closed.columns
+        else "(sin priority)"
     )
-    return apply_plotly_bbva(fig)
+
+    closed["resolution_bucket"] = pd.cut(
+        closed["resolution_days"],
+        bins=[-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, float("inf")],
+        labels=[
+            "Mismo día (0d)",
+            "1-2d",
+            "3-7d",
+            "8-14d",
+            "15-30d",
+            "31-60d",
+            "61-90d",
+            ">90d",
+        ],
+        right=True,
+        include_lowest=True,
+        ordered=True,
+    )
+    grouped = (
+        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+    )
+    if grouped.empty:
+        return None
+
+    priority_order = sorted(
+        grouped["priority"].astype(str).unique().tolist(),
+        key=_priority_sort_key,
+    )
+    bucket_order = [
+        "Mismo día (0d)",
+        "1-2d",
+        "3-7d",
+        "8-14d",
+        "15-30d",
+        "31-60d",
+        "61-90d",
+        ">90d",
+    ]
+    fig = px.bar(
+        grouped,
+        x="resolution_bucket",
+        y="count",
+        text="count",
+        color="priority",
+        barmode="stack",
+        category_orders={"resolution_bucket": bucket_order, "priority": priority_order},
+        color_discrete_map=priority_color_map(),
+        title="Distribución tiempos de resolución (cerradas)",
+    )
+    fig.update_layout(
+        title_text="",
+        xaxis_title="Tiempo de resolución",
+        yaxis_title="Incidencias",
+        bargap=0.10,
+    )
+    fig.update_traces(textposition="inside", textfont=dict(size=10))
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
@@ -299,7 +426,7 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
         title="Issues abiertos por prioridad",
     )
     fig.update_traces(sort=False)
-    return apply_plotly_bbva(fig)
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_open_priority_pie(ctx: ChartContext) -> List[str]:
@@ -374,13 +501,15 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         grouped,
         x="status",
         y="count",
+        text="count",
         color="priority",
         barmode="stack",
         title="Issues por Estado",
         category_orders={"status": ordered_statuses, "priority": priority_order},
         color_discrete_map=priority_color_map(),
     )
-    return apply_plotly_bbva(fig)
+    fig.update_traces(textposition="inside", textfont=dict(size=12))
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_open_status_bar(ctx: ChartContext) -> List[str]:

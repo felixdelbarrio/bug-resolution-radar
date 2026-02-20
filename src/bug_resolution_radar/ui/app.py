@@ -16,7 +16,7 @@ from bug_resolution_radar.config import (
 )
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.state import clear_all_filters
-from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
+from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page, report_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 
@@ -157,7 +157,7 @@ def _ensure_nav_state() -> None:
     name_by_label = {label: name for name, label in labels.items()}
     section_names: List[str] = dashboard_page.dashboard_sections()
     default_section = "overview" if "overview" in section_names else section_names[0]
-    allowed_modes = {"dashboard", "ingest", "config"}
+    allowed_modes = {"dashboard", "report", "ingest", "config"}
 
     if "workspace_mode" not in st.session_state:
         st.session_state["workspace_mode"] = "dashboard"
@@ -270,7 +270,7 @@ def _render_workspace_header() -> None:
         str(st.session_state.get("workspace_section") or "overview")
     )
 
-    left, right = st.columns([5.0, 0.9], gap="small")
+    left, right = st.columns([5.0, 1.3], gap="small")
 
     with left:
         with st.container(key="workspace_nav_tabs"):
@@ -291,34 +291,42 @@ def _render_workspace_header() -> None:
                 )
 
     with right:
-        with st.container(key="workspace_nav_actions"):
-            b_ing, b_theme, b_cfg = st.columns(3, gap="small")
-            b_ing.button(
-                "🛰️",
-                key="workspace_btn_ingest",
-                type="primary" if mode == "ingest" else "secondary",
-                width="stretch",
-                help="Ingesta",
-                on_click=_set_workspace_mode,
-                args=("ingest",),
-            )
-            b_theme.button(
-                "◐",
-                key="workspace_btn_theme",
-                type="secondary",
-                width="stretch",
-                help="Tema oscuro",
-                on_click=_toggle_dark_mode,
-            )
-            b_cfg.button(
-                "⚙️",
-                key="workspace_btn_config",
-                type="primary" if mode == "config" else "secondary",
-                width="stretch",
-                help="Configuración",
-                on_click=_set_workspace_mode,
-                args=("config",),
-            )
+        b_rep, b_ing, b_theme, b_cfg = st.columns(4, gap="small")
+        b_rep.button(
+            "🧾",
+            key="workspace_btn_report",
+            type="primary" if mode == "report" else "secondary",
+            width="stretch",
+            help="Informe PPT",
+            on_click=_set_workspace_mode,
+            args=("report",),
+        )
+        b_ing.button(
+            "🛰️",
+            key="workspace_btn_ingest",
+            type="primary" if mode == "ingest" else "secondary",
+            width="stretch",
+            help="Ingesta",
+            on_click=_set_workspace_mode,
+            args=("ingest",),
+        )
+        b_theme.button(
+            "◐",
+            key="workspace_btn_theme",
+            type="secondary",
+            width="stretch",
+            help="Tema oscuro",
+            on_click=_toggle_dark_mode,
+        )
+        b_cfg.button(
+            "⚙️",
+            key="workspace_btn_config",
+            type="primary" if mode == "config" else "secondary",
+            width="stretch",
+            help="Configuración",
+            on_click=_set_workspace_mode,
+            args=("config",),
+        )
 
 
 def _render_workspace_scope(settings: Settings) -> None:
@@ -411,6 +419,9 @@ def main() -> None:
 
     if mode == "ingest":
         ingest_page.render(settings)
+        return
+    if mode == "report":
+        report_page.render(settings)
         return
     if mode == "config":
         config_page.render(settings)

@@ -152,6 +152,7 @@ _NEUTRAL = "#E2E6EE"
 
 _STATUS_COLOR_BY_KEY: Dict[str, str] = {
     "new": _RED_3,
+    "ready": _RED_3,
     "analysing": _RED_2,
     "blocked": _RED_1,
     "en progreso": _ORANGE_2,
