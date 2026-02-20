@@ -76,6 +76,8 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
     assert "`HPD:Help Desk`.`Incident Number` AS `id`" in sql
     assert "`HPD:Help Desk`.`Incident Number` IS NOT NULL" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
-    assert "`HPD:Help Desk`.`Service Type` IN ('User Service Restoration', 'Security Incident')" in sql
+    assert (
+        "`HPD:Help Desk`.`Service Type` IN ('User Service Restoration', 'Security Incident')" in sql
+    )
     assert "`HPD:Help Desk`.`Contact Company` IN ('BBVA México')" in sql
     assert "LIMIT 75 OFFSET 150" in sql

@@ -60,7 +60,7 @@ INTENT_LABELS = {
     "action": "accion recomendada",
     "change": "evolucion entre sesiones",
     "duplicates": "duplicidades",
-    "summary": "resumen ejecutivo",
+    "summary": "resumen general",
     "simulation": "escenarios what-if",
     "other": "consulta abierta",
 }
@@ -420,11 +420,17 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
 
     top_status = "—"
     top_status_share = 0.0
+    top_active_status = "—"
+    top_active_status_share = 0.0
     if not status.empty:
         vc = status.value_counts()
         if not vc.empty:
             top_status = str(vc.index[0])
             top_status_share = float(vc.iloc[0]) / float(max(int(vc.sum()), 1))
+            active_vc = vc[[not _is_terminal_status(str(idx)) for idx in vc.index]]
+            if not active_vc.empty:
+                top_active_status = str(active_vc.index[0])
+                top_active_status_share = float(active_vc.iloc[0]) / float(max(int(vc.sum()), 1))
 
     top_priority = "—"
     top_priority_share = 0.0
@@ -508,6 +514,8 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         "top_status": top_status,
         "top_status_is_final": _is_terminal_status(top_status),
         "top_status_share": top_status_share,
+        "top_active_status": top_active_status,
+        "top_active_status_share": top_active_status_share,
         "top_priority": top_priority,
         "top_priority_share": top_priority_share,
         "created_14": int(created_14),
@@ -595,6 +603,12 @@ def list_next_best_actions(
     aged30_pct = float(s.get("aged30_pct", 0.0) or 0.0)
     dup_share = float(s.get("duplicate_share", 0.0) or 0.0)
     top_status = str(s.get("top_status", "—") or "—")
+    top_active_status = str(s.get("top_active_status", "—") or "—")
+    focus_status = (
+        top_active_status
+        if top_active_status != "—"
+        else (top_status if (top_status != "—" and not _is_terminal_status(top_status)) else "—")
+    )
     actions: List[NextBestAction] = []
 
     if crit_unassigned > 0:
@@ -638,7 +652,7 @@ def list_next_best_actions(
                     "Impacto esperado: establecer un objetivo de cierres para absorber "
                     "el diferencial de entrada."
                 ),
-                status_filters=[top_status] if top_status != "—" else None,
+                status_filters=[focus_status] if focus_status != "—" else None,
             )
         )
     if aged30_pct >= 0.25:
@@ -702,7 +716,7 @@ def build_copilot_suggestions(
     learned = normalize_intent_counts(intent_counts)
     out: List[str] = []
 
-    top_status_is_final = bool(s.get("top_status_is_final", False))
+    focus_status = str(s.get("top_active_status", "—") or "—").strip()
 
     # Prioritize learned intent patterns so suggestions feel personalized over time.
     for intent in top_learned_intents(learned, limit=2):
@@ -714,8 +728,8 @@ def build_copilot_suggestions(
             _push_unique(
                 out,
                 (
-                    "Que friccion del tramo final esta penalizando mas el cierre?"
-                    if top_status_is_final
+                    f"Que esta frenando el avance en {focus_status}?"
+                    if focus_status and focus_status != "—"
                     else "Que cuello de botella penaliza mas el flujo?"
                 ),
                 max_len=limit,
@@ -727,7 +741,7 @@ def build_copilot_suggestions(
         elif intent == "duplicates":
             _push_unique(out, "Cuanto backlog estamos perdiendo en duplicidades?", max_len=limit)
         elif intent == "summary":
-            _push_unique(out, "Dame un resumen ejecutivo de la situacion actual.", max_len=limit)
+            _push_unique(out, "Dame un resumen general de la situacion actual.", max_len=limit)
         elif intent == "simulation":
             _push_unique(
                 out, "Que pasaria si reducimos entrada un 20% y subimos cierres?", max_len=limit
@@ -777,13 +791,13 @@ def build_copilot_suggestions(
     _push_unique(
         out,
         (
-            "Que friccion del tramo final esta penalizando mas el cierre?"
-            if top_status_is_final
+            f"Que esta frenando el avance en {focus_status}?"
+            if focus_status and focus_status != "—"
             else "Que cuello de botella penaliza mas el flujo?"
         ),
         max_len=limit,
     )
-    _push_unique(out, "Dame un resumen ejecutivo de la situacion actual.", max_len=limit)
+    _push_unique(out, "Dame un resumen general de la situacion actual.", max_len=limit)
 
     return out[: max(limit, 1)]
 
@@ -828,19 +842,27 @@ def route_copilot_action(
                 section="issues",
                 status_filters=["Blocked", "Bloqueado"],
             )
+        top_active_status = str(s.get("top_active_status", "—") or "—").strip()
         top_status = str(s.get("top_status", "—") or "—").strip()
-        if top_status and top_status != "—":
-            if _is_terminal_status(top_status):
-                return CopilotRoute(
-                    cta="Revisar tramo final en Issues",
-                    section="issues",
-                    status_filters=[top_status],
-                )
-            return CopilotRoute(
-                cta=f"Abrir {top_status} en Issues",
-                section="issues",
-                status_filters=[top_status],
+        focus_status = (
+            top_active_status
+            if top_active_status and top_active_status != "—"
+            else (
+                top_status
+                if top_status and top_status != "—" and not _is_terminal_status(top_status)
+                else ""
             )
+        )
+        if focus_status:
+            return CopilotRoute(
+                cta=f"Abrir {focus_status} en Issues",
+                section="issues",
+                status_filters=[focus_status],
+            )
+        return CopilotRoute(
+            cta="Revisar estados operativos en Issues",
+            section="issues",
+        )
 
     if intent == "duplicates":
         return CopilotRoute(
@@ -915,13 +937,13 @@ def answer_copilot_question(
     s = snapshot if isinstance(snapshot, dict) else {}
     base = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
     top_status = str(s.get("top_status", "—") or "—").strip()
-    top_status_is_final = bool(s.get("top_status_is_final", False)) or _is_terminal_status(top_status)
+    top_active_status = str(s.get("top_active_status", "—") or "—").strip()
     followups = [
         "Que accion concreta haria hoy para bajar cartera?",
         "Que pasaria si reducimos entrada un 20%?",
         (
-            "Que friccion del tramo final esta penalizando mas el cierre?"
-            if top_status_is_final
+            f"Que esta frenando el avance en {top_active_status}?"
+            if top_active_status and top_active_status != "—"
             else "Que cuello de botella esta penalizando mas al cliente?"
         ),
     ]
@@ -950,18 +972,22 @@ def answer_copilot_question(
         return CopilotAnswer(answer=ans, confidence=0.87, evidence=evidence, followups=followups)
 
     if intent == "bottleneck":
-        if top_status_is_final:
+        if top_active_status and top_active_status != "—":
+            ans = (
+                f"El estado con mayor peso operativo en el filtro es {top_active_status} "
+                f"({_fmt_pct(float(s.get('top_active_status_share', 0.0) or 0.0))}) y se observan "
+                f"{int(s.get('blocked_count', 0) or 0)} bloqueadas."
+            )
+        elif top_status and top_status != "—" and not _is_terminal_status(top_status):
             ans = (
                 f"El estado dominante en el filtro es {top_status} "
                 f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}). "
-                "Al ser un estado finalista no se interpreta como cuello de botella: "
-                "la prioridad es completar conversion a Ready to deploy y Deployed."
+                f"y se observan {int(s.get('blocked_count', 0) or 0)} bloqueadas."
             )
         else:
             ans = (
-                f"El estado dominante en el filtro es {top_status} "
-                f"({_fmt_pct(float(s.get('top_status_share', 0.0) or 0.0))}) y se observan "
-                f"{int(s.get('blocked_count', 0) or 0)} bloqueadas."
+                "No se observa un estado operativo dominante con este filtro. "
+                "Conviene ampliar foco a estados activos para identificar fricciones accionables."
             )
         return CopilotAnswer(answer=ans, confidence=0.85, evidence=evidence, followups=followups)
 

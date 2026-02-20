@@ -110,7 +110,10 @@ def render_overview_kpis(kpis: dict) -> None:
 
         kcol4, kcol5, kcol6 = st.columns(3)
         with kcol4:
-            st.metric("Tiempo medio resolución (días)", f"{float(kpis.get('mean_resolution_days', 0.0)):.1f}")
+            st.metric(
+                "Tiempo medio resolución (días)",
+                f"{float(kpis.get('mean_resolution_days', 0.0)):.1f}",
+            )
             st.caption(kpis.get("mean_resolution_days_by_priority", {}))
         with kcol5:
             st.metric("Serie temporal", "Últimos 90 días")

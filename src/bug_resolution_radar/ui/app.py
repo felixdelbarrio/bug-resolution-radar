@@ -302,7 +302,7 @@ def _render_workspace_header() -> None:
         with st.container(key="workspace_nav_actions"):
             b_rep, b_ing, b_theme, b_cfg = st.columns(4, gap="small")
             # Keep labels visually empty: icons are injected via CSS and tooltips provide semantics.
-            icon_label = "\u00A0"
+            icon_label = "\u00a0"
             b_rep.button(
                 icon_label,
                 key="workspace_btn_report",

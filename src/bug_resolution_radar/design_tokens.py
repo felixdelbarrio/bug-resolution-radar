@@ -62,8 +62,7 @@ BBVA_FONT_SANS_MEDIUM = (
 )
 BBVA_FONT_SANS = BBVA_FONT_SANS_BOOK
 BBVA_FONT_HEADLINE = (
-    '"Tiempos Headline", "TiemposText-Regular", "Tiempos Text", '
-    '"Lato", "Arial", serif'
+    '"Tiempos Headline", "TiemposText-Regular", "Tiempos Text", ' '"Lato", "Arial", serif'
 )
 
 

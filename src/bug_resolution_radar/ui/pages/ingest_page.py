@@ -70,8 +70,12 @@ def _is_closed_status(value: str) -> bool:
 
 def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
     status = str(item.status or "").strip() or "Open"
-    created = str(item.start_datetime or item.target_date or item.last_modified or "").strip() or None
-    updated = str(item.last_modified or item.closed_date or item.start_datetime or "").strip() or None
+    created = (
+        str(item.start_datetime or item.target_date or item.last_modified or "").strip() or None
+    )
+    updated = (
+        str(item.last_modified or item.closed_date or item.start_datetime or "").strip() or None
+    )
     closed_date = str(item.closed_date or "").strip() or None
     resolved = closed_date or (updated if _is_closed_status(status) else None)
     label = (

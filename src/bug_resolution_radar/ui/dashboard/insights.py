@@ -467,6 +467,8 @@ def build_chart_insights(
         stc_norm = stc.astype(str).str.strip().str.lower()
         vc = stc.value_counts()
         top_status = vc.index[0] if not vc.empty else None
+        non_final_vc = vc[[not _is_finalist_status(s) for s in vc.index.astype(str)]]
+        top_oper_status = non_final_vc.index[0] if not non_final_vc.empty else None
 
         # Bottleneck candidate: high count + high age
         ages = _age_days(open_df)
@@ -478,17 +480,9 @@ def build_chart_insights(
                 .sort_values(["count", "mean_age"], ascending=[False, False])
             )
             if not g.empty:
-                cand = g.index[0]
-                if _is_finalist_status(cand):
-                    out.append(
-                        Insight(
-                            "info",
-                            "Tramo final acumulado",
-                            f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
-                            "Al ser estado finalista no se interpreta como cuello: conviene completar salida hacia Ready to deploy y Deployed.",
-                        )
-                    )
-                else:
+                focus = g.loc[[not _is_finalist_status(s) for s in g.index.astype(str)]]
+                if not focus.empty:
+                    cand = focus.index[0]
                     out.append(
                         Insight(
                             "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
@@ -498,26 +492,25 @@ def build_chart_insights(
                         )
                     )
 
-        if top_status:
-            share = float(vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
-            if _is_finalist_status(top_status):
-                out.append(
-                    Insight(
-                        "info",
-                        "Concentración en tramo final",
-                        f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
-                        "En estados finalistas no se considera cuello: se recomienda acelerar el cierre de flujo a Ready to deploy/Deployed.",
-                    )
+        if top_oper_status:
+            share = float(non_final_vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
+            out.append(
+                Insight(
+                    "warn" if share >= 0.45 else "info",
+                    "Carga concentrada en un estado",
+                    f"El estado con más peso operativo es **{top_oper_status}** con {_fmt_int(non_final_vc.iloc[0])} issues ({_fmt_pct(share)}). "
+                    "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
                 )
-            else:
-                out.append(
-                    Insight(
-                        "warn" if share >= 0.45 else "info",
-                        "Carga concentrada en un estado",
-                        f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
-                        "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
-                    )
+            )
+        elif top_status:
+            out.append(
+                Insight(
+                    "info",
+                    "Sin foco operativo dominante",
+                    "Con este filtro no hay concentración relevante en estados operativos. "
+                    "Para acciones de mejora, amplía el análisis a estados activos.",
                 )
+            )
 
         # Flow health suggestion: too many states or too many empty states
         n_states = int(vc.shape[0])
@@ -531,31 +524,6 @@ def build_chart_insights(
             )
         )
 
-        accepted_cnt = int(stc_norm.eq("accepted").sum())
-        rtd_cnt = int(stc_norm.eq("ready to deploy").sum())
-        deployed_cnt = int(stc_norm.eq("deployed").sum())
-        if accepted_cnt > 0:
-            rtd_conv = float(rtd_cnt) / float(accepted_cnt)
-            if rtd_conv < 0.35:
-                out.append(
-                    Insight(
-                        "warn",
-                        "Cierre pendiente de Accepted a Ready to deploy",
-                        f"Hay {_fmt_int(accepted_cnt)} en **Accepted** y {_fmt_int(rtd_cnt)} en **Ready to deploy** "
-                        f"(conversión {_fmt_pct(rtd_conv)}). Acción: define tiempo máximo de salida de Accepted y acompaña su avance hasta Deployed.",
-                    )
-                )
-        if rtd_cnt > 0:
-            dep_conv = float(deployed_cnt) / float(rtd_cnt)
-            if dep_conv < 0.70:
-                out.append(
-                    Insight(
-                        "warn",
-                        "Embudo en despliegue",
-                        f"Hay {_fmt_int(rtd_cnt)} en **Ready to deploy** y {_fmt_int(deployed_cnt)} en **Deployed** "
-                        f"(conversión {_fmt_pct(dep_conv)}). Acción: revisar capacidad de release y ventanas de despliegue.",
-                    )
-                )
         return out[:4]
 
     # Fallback

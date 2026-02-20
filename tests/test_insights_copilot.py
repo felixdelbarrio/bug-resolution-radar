@@ -113,15 +113,15 @@ def test_route_copilot_action_routes_duplicates_to_insights_tab() -> None:
     assert route.insights_tab == "duplicates"
 
 
-def test_route_copilot_action_uses_final_stage_cta_for_terminal_status() -> None:
+def test_route_copilot_action_uses_operational_cta_for_terminal_status() -> None:
     route = route_copilot_action(
         question="Que cuello de botella tenemos ahora?",
         snapshot={"blocked_count": 0, "top_status": "Accepted"},
         next_action=None,
     )
     assert route.section == "issues"
-    assert route.cta == "Revisar tramo final en Issues"
-    assert route.status_filters == ["Accepted"]
+    assert route.cta == "Revisar estados operativos en Issues"
+    assert route.status_filters is None
 
 
 def test_resolve_filters_against_open_df_maps_blocked_variants() -> None:
@@ -190,11 +190,11 @@ def test_answer_copilot_bottleneck_avoids_neck_language_for_final_status() -> No
             "critical_count": 12,
         },
     )
-    assert "no se interpreta como cuello de botella" in ans.answer.lower()
-    assert "ready to deploy" in ans.answer.lower()
+    assert "estado operativo dominante" in ans.answer.lower()
+    assert "accepted" not in ans.answer.lower()
 
 
-def test_build_copilot_suggestions_uses_final_stage_wording() -> None:
+def test_build_copilot_suggestions_uses_operational_wording_when_no_active_focus() -> None:
     suggestions = build_copilot_suggestions(
         snapshot={
             "top_status": "Accepted",
@@ -210,5 +210,5 @@ def test_build_copilot_suggestions_uses_final_stage_wording() -> None:
         intent_counts={"bottleneck": 3},
         limit=4,
     )
-    assert any("friccion del tramo final" in s.lower() for s in suggestions)
-    assert not any("cuello de botella" in s.lower() for s in suggestions)
+    assert any("cuello de botella" in s.lower() for s in suggestions)
+    assert not any("tramo final" in s.lower() for s in suggestions)

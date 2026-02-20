@@ -11,6 +11,7 @@ from pptx import Presentation
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.reports.executive_ppt import (
+    _build_sections,
     _best_actions,
     _ChartSection,
     _fig_to_png,
@@ -147,7 +148,8 @@ def test_generate_scope_executive_ppt_is_scoped_and_valid_ppt(tmp_path: Path) ->
     assert out.slide_count >= 8
     assert out.file_name.endswith(".pptx")
     assert out.content
-    assert out.applied_filter_summary == "Sin filtros activos"
+    assert "Ventana temporal" in out.applied_filter_summary
+    assert "Estado: Todos" in out.applied_filter_summary
 
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == out.slide_count
@@ -175,7 +177,9 @@ def test_generate_scope_executive_ppt_applies_filters(tmp_path: Path) -> None:
     assert out.total_issues == 1
     assert out.open_issues == 1
     assert out.closed_issues == 0
-    assert "Estado" in out.applied_filter_summary
+    assert "Estado: New" in out.applied_filter_summary
+    assert "Prioridad: High" in out.applied_filter_summary
+    assert "Responsable: Ana" in out.applied_filter_summary
 
 
 def test_generate_scope_executive_ppt_applies_analysis_depth_window(tmp_path: Path) -> None:
@@ -231,6 +235,7 @@ def test_generate_scope_executive_ppt_applies_analysis_depth_window(tmp_path: Pa
 
     assert out.total_issues == 1
     assert out.open_issues == 1
+    assert "últimos 2 de" in out.applied_filter_summary
 
 
 def test_generate_scope_executive_ppt_raises_when_scope_has_no_data(tmp_path: Path) -> None:
@@ -262,13 +267,46 @@ def test_fig_to_png_renders_open_priority_pie() -> None:
     assert fig is not None
 
     image = _fig_to_png(fig)
+    if image is None:
+        pytest.skip("Exportador de imágenes de Plotly no disponible en este entorno.")
     assert image is not None
     assert len(image) > 1_000
 
 
+def test_build_sections_creates_resolution_fallback_figure_when_no_closed_data() -> None:
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "MX-100",
+                "status": "Analysing",
+                "priority": "High",
+                "created": "2026-02-01T00:00:00+00:00",
+                "resolved": None,
+            },
+            {
+                "key": "MX-101",
+                "status": "Blocked",
+                "priority": "Medium",
+                "created": "2026-02-02T00:00:00+00:00",
+                "resolved": None,
+            },
+        ]
+    )
+    dff["created"] = pd.to_datetime(dff["created"], utc=True, errors="coerce")
+    dff["resolved"] = pd.to_datetime(dff["resolved"], utc=True, errors="coerce")
+    open_df = dff.copy()
+
+    sections = _build_sections(Settings(DATA_PATH="unused.json"), dff=dff, open_df=open_df)
+    by_id = {sec.chart_id: sec for sec in sections}
+    assert "resolution_hist" in by_id
+    assert by_id["resolution_hist"].figure is not None
+
+
 def test_select_actions_for_final_slide_returns_4_when_text_fits() -> None:
     actions = [
-        ActionInsight(title=f"Acción {idx}", body="Texto breve para ejecutar pronto.", score=10.0 - idx)
+        ActionInsight(
+            title=f"Acción {idx}", body="Texto breve para ejecutar pronto.", score=10.0 - idx
+        )
         for idx in range(1, 5)
     ]
     selected = _select_actions_for_final_slide(actions)
@@ -317,7 +355,9 @@ def test_best_actions_prioritizes_resolution_value_over_raw_score() -> None:
         title="Backlog por estado",
         subtitle="",
         figure=None,
-        insight_pack=TrendInsightPack(metrics=[], cards=[generic_high_score, high_impact], executive_tip=None),
+        insight_pack=TrendInsightPack(
+            metrics=[], cards=[generic_high_score, high_impact], executive_tip=None
+        ),
     )
 
     ranked = _best_actions([section], open_df=open_df, limit=2)

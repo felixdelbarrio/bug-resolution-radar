@@ -5,7 +5,7 @@ import pandas as pd
 from bug_resolution_radar.ui.dashboard.insights import build_chart_insights
 
 
-def test_open_status_insights_treats_accepted_as_final_stage() -> None:
+def test_open_status_insights_avoids_final_state_focus() -> None:
     now = pd.Timestamp.utcnow().tz_localize(None)
     open_df = pd.DataFrame(
         {
@@ -36,5 +36,5 @@ def test_open_status_insights_treats_accepted_as_final_stage() -> None:
     bodies = " ".join([str(i.body or "").lower() for i in insights])
 
     assert not any("cuello de botella" in t for t in titles)
-    assert "no se interpreta como cuello" in bodies
-    assert "accepted" in bodies and "ready to deploy" in bodies
+    assert "estados operativos" in bodies
+    assert "accepted" not in bodies

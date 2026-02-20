@@ -158,9 +158,8 @@ def test_status_pack_does_not_mark_accepted_as_bottleneck() -> None:
 
     pack = build_trend_insight_pack("open_status_bar", dff=pd.DataFrame(), open_df=open_df)
     titles = [str(c.title or "").lower() for c in pack.cards]
-    joined = " ".join(
-        [f"{str(c.title or '')} {str(c.body or '')}".lower() for c in pack.cards]
-    )
+    joined = " ".join([f"{str(c.title or '')} {str(c.body or '')}".lower() for c in pack.cards])
 
     assert not any("cuello de botella" in t for t in titles)
-    assert "accepted" in joined and "ready to deploy" in joined
+    assert "sin foco operativo dominante" in joined
+    assert "accepted" not in joined

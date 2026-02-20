@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -206,7 +206,7 @@ class _FilterSnapshot:
             parts.append(win)
         parts.append(f"Estado: {self._values_summary(self.status)}")
         parts.append(f"Prioridad: {self._values_summary(self.priority)}")
-        parts.append(f"Assignee: {self._values_summary(self.assignee)}")
+        parts.append(f"Responsable: {self._values_summary(self.assignee)}")
         return " · ".join(parts)
 
 
@@ -266,6 +266,18 @@ def _is_finalist_status(value: object) -> bool:
     if not token:
         return False
     return any(t in token for t in FINALIST_STATUS_TOKENS)
+
+
+def _dominant_operational_status(open_df: pd.DataFrame) -> str:
+    if open_df is None or open_df.empty or "status" not in open_df.columns:
+        return "—"
+    statuses = normalize_text_col(open_df["status"], "(sin estado)").astype(str)
+    counts = statuses.value_counts()
+    for status_name in counts.index.tolist():
+        if _is_finalist_status(status_name):
+            continue
+        return str(status_name)
+    return "—"
 
 
 def _normalize_filter_values(values: Sequence[str] | None) -> Tuple[str, ...]:
@@ -415,7 +427,7 @@ def _estimate_legend_rows(names: Sequence[str], *, font_size: float, width_px: i
 
 
 def _set_rich_text(
-    paragraph,
+    paragraph: Any,
     text: str,
     *,
     font_name: str,
@@ -467,7 +479,7 @@ def _urgency_from_score(score: float) -> Tuple[str, str]:
 
 
 def _add_mini_kpi_ribbons(
-    slide,
+    slide: Any,
     *,
     items: Sequence[Tuple[str, str, str]],
     y: float,
@@ -516,7 +528,9 @@ def _add_mini_kpi_ribbons(
         )
 
 
-def _build_sections(settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[_ChartSection]:
+def _build_sections(
+    settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame
+) -> List[_ChartSection]:
     registry = build_trends_registry()
     kpis = compute_kpis(dff, settings=settings)
     chart_ctx = ChartContext(dff=dff, open_df=open_df, kpis=kpis)
@@ -526,8 +540,19 @@ def _build_sections(settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFr
         spec = registry.get(chart_id)
         if spec is None:
             continue
-        figure = spec.render(chart_ctx)
         insight_pack = build_trend_insight_pack(chart_id, dff=dff, open_df=open_df)
+        figure = spec.render(chart_ctx)
+        if figure is None:
+            reason = "No hay datos suficientes para este gráfico con el filtro actual."
+            if insight_pack.cards:
+                first_body = str(insight_pack.cards[0].body or "").strip()
+                if first_body:
+                    reason = _clip_text(_soften_insight_tone(first_body), max_len=140)
+            figure = _fallback_chart_figure(
+                title=spec.title,
+                subtitle=CHART_BUSINESS_SUBTITLES.get(chart_id, spec.subtitle),
+                reason=reason,
+            )
         sections.append(
             _ChartSection(
                 chart_id=chart_id,
@@ -553,7 +578,9 @@ def _build_context(
 ) -> _ScopeContext:
     if dff_override is None:
         if scoped_source_df is None:
-            base_df = _scope_df(load_issues_df(settings.DATA_PATH), country=country, source_id=source_id)
+            base_df = _scope_df(
+                load_issues_df(settings.DATA_PATH), country=country, source_id=source_id
+            )
         else:
             base_df = scoped_source_df.copy(deep=False)
         base_df = apply_analysis_depth_filter(base_df, settings=settings)
@@ -564,10 +591,14 @@ def _build_context(
         if open_df_override is None:
             open_df, closed_df = _open_closed(dff)
         else:
-            open_df = apply_analysis_depth_filter(open_df_override.copy(deep=False), settings=settings)
+            open_df = apply_analysis_depth_filter(
+                open_df_override.copy(deep=False), settings=settings
+            )
             if not dff.empty and not open_df.empty:
                 open_index = set(open_df.index.tolist())
-                closed_df = dff.loc[[idx for idx in dff.index if idx not in open_index]].copy(deep=False)
+                closed_df = dff.loc[[idx for idx in dff.index if idx not in open_index]].copy(
+                    deep=False
+                )
             else:
                 closed_df = pd.DataFrame()
 
@@ -593,9 +624,9 @@ def _build_context(
 def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
     if fig is None:
         return None
+    export_width = 1280
+    export_height = 820
     try:
-        export_width = 1280
-        export_height = 820
 
         def _trace_values(trace: object, attr: str) -> List[object]:
             raw = getattr(trace, attr, None)
@@ -617,9 +648,10 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         bar_category_keys: set[str] = set()
         for trace in traces:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
-            is_vertical_bar = trace_type == "bar" and str(
-                getattr(trace, "orientation", "v") or "v"
-            ).strip().lower() != "h"
+            is_vertical_bar = (
+                trace_type == "bar"
+                and str(getattr(trace, "orientation", "v") or "v").strip().lower() != "h"
+            )
             if not is_vertical_bar:
                 continue
             for raw_x in _trace_values(trace, "x"):
@@ -627,11 +659,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 if key:
                     bar_category_keys.add(key)
 
-        named_traces = [
-            t
-            for t in traces
-            if str(getattr(t, "name", "") or "").strip()
-        ]
+        named_traces = [t for t in traces if str(getattr(t, "name", "") or "").strip()]
         pie_labels: List[str] = []
         for trace in traces:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
@@ -672,11 +700,13 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
             # Preserve order while removing duplicates (common in pie labels).
             seen_legend: set[str] = set()
-            legend_names = [
-                name
-                for name in legend_names
-                if name and (name not in seen_legend and not seen_legend.add(name))
-            ]
+            unique_legend_names: List[str] = []
+            for name in legend_names:
+                if not name or name in seen_legend:
+                    continue
+                seen_legend.add(name)
+                unique_legend_names.append(name)
+            legend_names = unique_legend_names
             legend_item_count = len(legend_names)
             rows = _estimate_legend_rows(
                 legend_names, font_size=legend_render_font, width_px=export_width
@@ -759,10 +789,18 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 for idx in range(points):
                     x_raw = xs[idx]
                     y_raw = ys[idx]
-                    try:
-                        y_val = float(y_raw)
-                    except Exception:
+                    if y_raw is None:
                         continue
+                    if isinstance(y_raw, (int, float)):
+                        y_val = float(y_raw)
+                    else:
+                        y_txt = str(y_raw).strip()
+                        if not y_txt:
+                            continue
+                        try:
+                            y_val = float(y_txt)
+                        except ValueError:
+                            continue
                     if pd.isna(y_val):
                         continue
                     key = str(x_raw)
@@ -795,7 +833,9 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                             mode="text",
                             text=[f"<b>{_fmt_total(val)}</b>" for val in ordered_totals],
                             textposition="top center",
-                            textfont=dict(size=28 if dense_chart else 24, color=f"#{PALETTE['ink']}"),
+                            textfont=dict(
+                                size=28 if dense_chart else 24, color=f"#{PALETTE['ink']}"
+                            ),
                             showlegend=False,
                             hoverinfo="skip",
                         )
@@ -805,7 +845,9 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         axis_title_size = 26 if dense_chart else 24
         export_fig.update_xaxes(
             tickfont=dict(family=FONT_BODY_BOOK, size=axis_tick_size, color=f"#{PALETTE['ink']}"),
-            title_font=dict(family=FONT_BODY_MEDIUM, size=axis_title_size, color=f"#{PALETTE['ink']}"),
+            title_font=dict(
+                family=FONT_BODY_MEDIUM, size=axis_title_size, color=f"#{PALETTE['ink']}"
+            ),
             color=f"#{PALETTE['ink']}",
             showline=True,
             linecolor=f"#{PALETTE['line']}",
@@ -814,7 +856,9 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         )
         export_fig.update_yaxes(
             tickfont=dict(family=FONT_BODY_BOOK, size=axis_tick_size, color=f"#{PALETTE['ink']}"),
-            title_font=dict(family=FONT_BODY_MEDIUM, size=axis_title_size, color=f"#{PALETTE['ink']}"),
+            title_font=dict(
+                family=FONT_BODY_MEDIUM, size=axis_title_size, color=f"#{PALETTE['ink']}"
+            ),
             color=f"#{PALETTE['ink']}",
             showline=True,
             linecolor=f"#{PALETTE['line']}",
@@ -852,19 +896,52 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 if hasattr(trace, "cliponaxis"):
                     trace.cliponaxis = False
 
-        return pio.to_image(export_fig, format="png", width=export_width, height=export_height, scale=3)
+        image = pio.to_image(
+            export_fig, format="png", width=export_width, height=export_height, scale=3
+        )
+        return cast(bytes, image)
     except Exception:
-        return None
+        try:
+            image = pio.to_image(
+                fig, format="png", width=export_width, height=export_height, scale=2
+            )
+            return cast(bytes, image)
+        except Exception:
+            return None
 
 
-def _add_bg(slide, color_hex: str) -> None:
+def _fallback_chart_figure(*, title: str, subtitle: str, reason: str) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        template="plotly_white",
+        title=dict(text=_clip_text(f"{title} · {subtitle}", max_len=100), x=0.02, xanchor="left"),
+        margin=dict(l=40, r=40, t=80, b=40),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        plot_bgcolor="#FFFFFF",
+        paper_bgcolor="#FFFFFF",
+    )
+    fig.add_annotation(
+        x=0.5,
+        y=0.52,
+        xref="paper",
+        yref="paper",
+        text=_clip_text(reason, max_len=170),
+        showarrow=False,
+        font=dict(family=FONT_BODY_MEDIUM, size=24, color=f"#{PALETTE['muted']}"),
+        align="center",
+    )
+    return fig
+
+
+def _add_bg(slide: Any, color_hex: str) -> None:
     rect = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, 0, 0, SLIDE_WIDTH, SLIDE_HEIGHT)
     rect.fill.solid()
     rect.fill.fore_color.rgb = _rgb(color_hex)
     rect.line.fill.background()
 
 
-def _add_header(slide, *, title: str, subtitle: str, dark: bool = False) -> None:
+def _add_header(slide: Any, *, title: str, subtitle: str, dark: bool = False) -> None:
     band = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
         0,
@@ -898,7 +975,7 @@ def _add_header(slide, *, title: str, subtitle: str, dark: bool = False) -> None
     run2.font.color.rgb = _rgb("CFE2FF" if dark else PALETTE["muted"])
 
 
-def _add_footer(slide, *, context: _ScopeContext) -> None:
+def _add_footer(slide: Any, *, context: _ScopeContext) -> None:
     foot = slide.shapes.add_textbox(Inches(0.52), Inches(7.16), Inches(12.2), Inches(0.20))
     tf = foot.text_frame
     tf.clear()
@@ -915,7 +992,9 @@ def _add_footer(slide, *, context: _ScopeContext) -> None:
     run.font.color.rgb = _rgb(PALETTE["muted"])
 
 
-def _metric_card(slide, *, x: float, y: float, w: float, h: float, label: str, value: str, tone: str) -> None:
+def _metric_card(
+    slide: Any, *, x: float, y: float, w: float, h: float, label: str, value: str, tone: str
+) -> None:
     card = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         Inches(x),
@@ -938,7 +1017,9 @@ def _metric_card(slide, *, x: float, y: float, w: float, h: float, label: str, v
     badge.fill.fore_color.rgb = _rgb(PALETTE.get(tone, PALETTE["blue"]))
     badge.line.fill.background()
 
-    lbl = slide.shapes.add_textbox(Inches(x + 0.38), Inches(y + 0.12), Inches(w - 0.48), Inches(0.22))
+    lbl = slide.shapes.add_textbox(
+        Inches(x + 0.38), Inches(y + 0.12), Inches(w - 0.48), Inches(0.22)
+    )
     tf = lbl.text_frame
     tf.clear()
     p = tf.paragraphs[0]
@@ -948,7 +1029,9 @@ def _metric_card(slide, *, x: float, y: float, w: float, h: float, label: str, v
     run.font.size = Pt(10.8)
     run.font.color.rgb = _rgb(PALETTE["muted"])
 
-    val = slide.shapes.add_textbox(Inches(x + 0.14), Inches(y + 0.44), Inches(w - 0.24), Inches(0.48))
+    val = slide.shapes.add_textbox(
+        Inches(x + 0.14), Inches(y + 0.44), Inches(w - 0.24), Inches(0.48)
+    )
     tf2 = val.text_frame
     tf2.clear()
     p2 = tf2.paragraphs[0]
@@ -960,7 +1043,7 @@ def _metric_card(slide, *, x: float, y: float, w: float, h: float, label: str, v
     run2.font.color.rgb = _rgb(PALETTE["ink"])
 
 
-def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
+def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, "001B4A")
     _add_header(
@@ -1074,7 +1157,9 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
     fr.font.color.rgb = _rgb("BDD8FF")
 
 
-def _group_sections_by_theme(sections: Sequence[_ChartSection]) -> List[Tuple[str, List[_ChartSection]]]:
+def _group_sections_by_theme(
+    sections: Sequence[_ChartSection],
+) -> List[Tuple[str, List[_ChartSection]]]:
     grouped: Dict[str, List[_ChartSection]] = {}
     order: List[str] = []
     for section in sections:
@@ -1126,7 +1211,7 @@ def _section_ribbon_items(section: _ChartSection) -> List[Tuple[str, str, str]]:
 
 
 def _add_index_row(
-    tf,
+    tf: Any,
     *,
     code: str,
     title: str,
@@ -1163,7 +1248,7 @@ def _add_index_row(
     r_detail.font.color.rgb = _rgb(PALETTE["muted"])
 
 
-def _add_index_slide(prs: Presentation, context: _ScopeContext) -> None:
+def _add_index_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, PALETTE["bg"])
     _add_header(
@@ -1223,7 +1308,7 @@ def _dominant_value(series: pd.Series, empty: str) -> str:
     return value or empty
 
 
-def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
+def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, PALETTE["bg"])
     _add_header(
@@ -1235,12 +1320,9 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     open_count = int(len(context.open_df))
     open_ratio = (open_count / total * 100.0) if total else 0.0
 
-    top_status = "-"
-    if not context.open_df.empty and "status" in context.open_df.columns:
-        top_status = _dominant_value(
-            normalize_text_col(context.open_df["status"], "(sin estado)").astype(str),
-            "-",
-        )
+    top_status = _dominant_operational_status(context.open_df)
+    if top_status == "—":
+        top_status = "Sin foco operativo"
 
     top_priority = "-"
     if not context.open_df.empty and "priority" in context.open_df.columns:
@@ -1250,10 +1332,46 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
         )
 
     themes = [theme for theme, _ in _group_sections_by_theme(context.sections)]
-    _metric_card(slide, x=0.70, y=1.30, w=2.82, h=1.16, label="Fase dominante", value=top_status, tone="blue")
-    _metric_card(slide, x=3.64, y=1.30, w=2.82, h=1.16, label="Prioridad dominante", value=top_priority, tone="amber")
-    _metric_card(slide, x=6.58, y=1.30, w=2.82, h=1.16, label="Bloques de lectura", value=f"{len(themes)}", tone="green")
-    _metric_card(slide, x=9.52, y=1.30, w=2.82, h=1.16, label="% abiertas", value=f"{open_ratio:.1f}%", tone="teal")
+    _metric_card(
+        slide,
+        x=0.70,
+        y=1.30,
+        w=2.82,
+        h=1.16,
+        label="Fase operativa foco",
+        value=top_status,
+        tone="blue",
+    )
+    _metric_card(
+        slide,
+        x=3.64,
+        y=1.30,
+        w=2.82,
+        h=1.16,
+        label="Prioridad dominante",
+        value=top_priority,
+        tone="amber",
+    )
+    _metric_card(
+        slide,
+        x=6.58,
+        y=1.30,
+        w=2.82,
+        h=1.16,
+        label="Bloques de lectura",
+        value=f"{len(themes)}",
+        tone="green",
+    )
+    _metric_card(
+        slide,
+        x=9.52,
+        y=1.30,
+        w=2.82,
+        h=1.16,
+        label="% abiertas",
+        value=f"{open_ratio:.1f}%",
+        tone="teal",
+    )
 
     left_box = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
@@ -1305,9 +1423,7 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     rr0.font.size = Pt(20)
     rr0.font.color.rgb = _rgb(PALETTE["navy"])
 
-    status_line = f"**Fase dominante (abiertas):** {top_status}"
-    if _is_finalist_status(top_status):
-        status_line += " (tramo final del flujo; no se interpreta como cuello)"
+    status_line = f"**Fase operativa foco (abiertas):** {top_status}"
 
     opening = [
         f"**Alcance activo:** {context.country} · {context.source_label}",
@@ -1335,7 +1451,7 @@ def _top_cards(pack: TrendInsightPack, *, limit: int = 3) -> List[ActionInsight]
 
 
 def _add_chart_insight_slide(
-    prs: Presentation,
+    prs: Any,
     *,
     context: _ScopeContext,
     section: _ChartSection,
@@ -1397,7 +1513,10 @@ def _add_chart_insight_slide(
         p = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
-        run.text = "No se pudo renderizar este gráfico para exportación."
+        if section.figure is None:
+            run.text = "No hay datos suficientes para este gráfico con el filtro actual."
+        else:
+            run.text = "No se pudo exportar este gráfico para la presentación."
         run.font.name = FONT_BODY_BOOK
         run.font.size = Pt(13)
         run.font.color.rgb = _rgb(PALETTE["muted"])
@@ -1425,12 +1544,19 @@ def _add_chart_insight_slide(
     itf.clear()
     itf.word_wrap = True
 
+    metric_items = [
+        m
+        for m in list(section.insight_pack.metrics or [])
+        if str(getattr(m, "label", "") or "").strip()
+        and str(getattr(m, "value", "") or "").strip() not in {"", "—"}
+    ]
+
     p1 = itf.paragraphs[0]
     run1 = p1.add_run()
-    run1.text = "Qué significa"
+    run1.text = "As-is"
     run1.font.name = FONT_HEAD
     run1.font.bold = True
-    run1.font.size = Pt(27)
+    run1.font.size = Pt(24)
     run1.font.color.rgb = _rgb(PALETTE["navy"])
 
     tip = _clip_text(
@@ -1457,7 +1583,11 @@ def _add_chart_insight_slide(
         p_context,
         _clip_text(
             f"**Por qué importa:** {CHART_BUSINESS_SUBTITLES.get(section.chart_id, section.subtitle)}. "
-            "Las cifras más relevantes están en la banda KPI superior para facilitar la lectura.",
+            + (
+                f"**Dato de contexto:** {metric_items[0].label}: {metric_items[0].value}."
+                if metric_items
+                else "Las cifras más relevantes están en la banda KPI superior para facilitar la lectura."
+            ),
             max_len=188,
         ),
         font_name=FONT_BODY_BOOK,
@@ -1465,16 +1595,40 @@ def _add_chart_insight_slide(
         color_hex=PALETTE["muted"],
     )
 
+    cards = _top_cards(section.insight_pack, limit=2)
+
     p_actions = itf.add_paragraph()
-    p_actions.text = "Qué hacer ahora"
+    p_actions.text = "To-Be"
     p_actions.space_before = Pt(4)
     p_actions.space_after = Pt(2)
     p_actions.font.name = FONT_HEAD
     p_actions.font.bold = True
-    p_actions.font.size = Pt(18)
+    p_actions.font.size = Pt(24)
     p_actions.font.color.rgb = _rgb(PALETTE["navy"])
 
-    cards = _top_cards(section.insight_pack, limit=2)
+    p_to_be_ctx = itf.add_paragraph()
+    p_to_be_ctx.space_before = Pt(0)
+    p_to_be_ctx.space_after = Pt(4)
+    if len(metric_items) >= 2:
+        _set_rich_text(
+            p_to_be_ctx,
+            _clip_text(
+                f"**Dato de contexto:** {metric_items[1].label}: {metric_items[1].value}.",
+                max_len=120,
+            ),
+            font_name=FONT_BODY_BOOK,
+            font_size=12.6,
+            color_hex=PALETTE["muted"],
+        )
+    else:
+        _set_rich_text(
+            p_to_be_ctx,
+            f"**Dato de contexto:** {len(cards)} acciones priorizadas para esta vista.",
+            font_name=FONT_BODY_BOOK,
+            font_size=12.6,
+            color_hex=PALETTE["muted"],
+        )
+
     if not cards:
         p_none = itf.add_paragraph()
         p_none.text = "No se detectaron acciones concretas en este corte."
@@ -1536,26 +1690,43 @@ def _target_impact(action: ActionInsight, *, open_df: pd.DataFrame) -> Tuple[int
         return 0, 0.0, 0
 
     status_filters = [_norm_token(v) for v in list(action.status_filters or []) if _norm_token(v)]
-    priority_filters = [_norm_token(v) for v in list(action.priority_filters or []) if _norm_token(v)]
-    assignee_filters = [_norm_token(v) for v in list(action.assignee_filters or []) if _norm_token(v)]
-    specificity = int(bool(status_filters)) + int(bool(priority_filters)) + int(bool(assignee_filters))
+    priority_filters = [
+        _norm_token(v) for v in list(action.priority_filters or []) if _norm_token(v)
+    ]
+    assignee_filters = [
+        _norm_token(v) for v in list(action.assignee_filters or []) if _norm_token(v)
+    ]
+    specificity = (
+        int(bool(status_filters)) + int(bool(priority_filters)) + int(bool(assignee_filters))
+    )
 
     mask = pd.Series(True, index=open_df.index)
     applied_filters = 0
 
     if status_filters and "status" in open_df.columns:
-        status_series = normalize_text_col(open_df["status"], "(sin estado)").astype(str).str.lower().str.strip()
+        status_series = (
+            normalize_text_col(open_df["status"], "(sin estado)")
+            .astype(str)
+            .str.lower()
+            .str.strip()
+        )
         mask &= status_series.isin(status_filters)
         applied_filters += 1
     if priority_filters and "priority" in open_df.columns:
         prio_series = (
-            normalize_text_col(open_df["priority"], "(sin priority)").astype(str).str.lower().str.strip()
+            normalize_text_col(open_df["priority"], "(sin priority)")
+            .astype(str)
+            .str.lower()
+            .str.strip()
         )
         mask &= prio_series.isin(priority_filters)
         applied_filters += 1
     if assignee_filters and "assignee" in open_df.columns:
         assignee_series = (
-            normalize_text_col(open_df["assignee"], "(sin asignar)").astype(str).str.lower().str.strip()
+            normalize_text_col(open_df["assignee"], "(sin asignar)")
+            .astype(str)
+            .str.lower()
+            .str.strip()
         )
         mask &= assignee_series.isin(assignee_filters)
         applied_filters += 1
@@ -1587,6 +1758,32 @@ def _actionability_strength(action: ActionInsight) -> float:
     )
     hits = sum(1 for cue in cues if cue in text)
     return min(1.0, hits / 4.0)
+
+
+def _is_finalist_centered_action(action: ActionInsight) -> bool:
+    status_filters = [
+        str(s or "").strip() for s in list(action.status_filters or []) if str(s or "").strip()
+    ]
+    if status_filters and all(_is_finalist_status(s) for s in status_filters):
+        return True
+
+    text = f"{str(action.title or '').lower()} {str(action.body or '').lower()}"
+    if "accepted" in text or "ready to deploy" in text or "deployed" in text:
+        if not any(
+            token in text
+            for token in (
+                "blocked",
+                "new",
+                "analys",
+                "progress",
+                "rework",
+                "test",
+                "ready to verify",
+                "en progreso",
+            )
+        ):
+            return True
+    return False
 
 
 def _resolution_value_score(action: ActionInsight, *, open_df: pd.DataFrame) -> Tuple[float, int]:
@@ -1630,6 +1827,8 @@ def _best_actions(
     out: List[ActionInsight] = []
     seen: set[str] = set()
     for card, _, _ in ranked_cards:
+        if _is_finalist_centered_action(card):
+            continue
         key = _soften_insight_tone(str(card.title or "").strip()).lower()
         if not key or key in seen:
             continue
@@ -1689,7 +1888,7 @@ def _select_actions_for_final_slide(actions: Sequence[ActionInsight]) -> List[Ac
     return candidates[:3]
 
 
-def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
+def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, "001C4A")
     _add_header(
@@ -1773,8 +1972,8 @@ def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     frun.font.color.rgb = _rgb("BDD8FF")
 
 
-def _compose_presentation(context: _ScopeContext) -> Presentation:
-    prs = Presentation()
+def _compose_presentation(context: _ScopeContext) -> Any:
+    prs: Any = Presentation()
     prs.slide_width = SLIDE_WIDTH
     prs.slide_height = SLIDE_HEIGHT
 
@@ -1806,10 +2005,20 @@ def generate_scope_executive_ppt(
     if not source_txt:
         raise ValueError("No se ha seleccionado un origen válido para generar el informe.")
 
+    scoped_source_df = _scope_df(
+        load_issues_df(settings.DATA_PATH),
+        country=str(country or "").strip(),
+        source_id=source_txt,
+    )
+    available_months = max_available_backlog_months(scoped_source_df)
+    lookback_months = effective_analysis_lookback_months(settings, df=scoped_source_df)
+
     filters = _FilterSnapshot(
         status=_normalize_filter_values(status_filters),
         priority=_normalize_filter_values(priority_filters),
         assignee=_normalize_filter_values(assignee_filters),
+        analysis_lookback_months=int(lookback_months),
+        analysis_available_months=int(available_months),
     )
 
     context = _build_context(
@@ -1819,6 +2028,7 @@ def generate_scope_executive_ppt(
         filters=filters,
         dff_override=dff_override,
         open_df_override=open_df_override,
+        scoped_source_df=scoped_source_df if dff_override is None else None,
     )
     prs = _compose_presentation(context)
 

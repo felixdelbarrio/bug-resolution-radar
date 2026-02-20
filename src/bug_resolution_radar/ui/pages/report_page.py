@@ -9,6 +9,11 @@ import pandas as pd
 import streamlit as st
 from streamlit.components.v1 import html as components_html
 
+from bug_resolution_radar.analysis_window import (
+    effective_analysis_lookback_months,
+    max_available_backlog_months,
+    parse_analysis_lookback_months,
+)
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.reports import ExecutiveReportResult, generate_scope_executive_ppt
 from bug_resolution_radar.ui.common import load_issues_df
@@ -43,6 +48,29 @@ def _scope_df(df: pd.DataFrame, *, country: str, source_id: str) -> pd.DataFrame
     if source_id and "source_id" in df.columns:
         mask &= df["source_id"].fillna("").astype(str).eq(source_id)
     return df.loc[mask].copy(deep=False)
+
+
+def _analysis_window_label(settings: Settings, *, scoped_df: pd.DataFrame) -> str:
+    if scoped_df is None or scoped_df.empty:
+        configured = parse_analysis_lookback_months(settings)
+        if configured > 0:
+            return f"Ventana={int(configured)} meses"
+        return "Ventana=histórico completo"
+
+    available = int(max_available_backlog_months(scoped_df))
+    effective = int(effective_analysis_lookback_months(settings, df=scoped_df))
+    if effective >= available:
+        return f"Ventana=histórico completo ({available} meses)"
+    return f"Ventana={effective} de {available} meses"
+
+
+def _visible_filter_label(values: list[str], *, name: str) -> str:
+    clean = [str(v or "").strip() for v in list(values or []) if str(v or "").strip()]
+    if not clean:
+        return f"{name}=Todos"
+    if len(clean) <= 3:
+        return f"{name}={', '.join(clean)}"
+    return f"{name}={', '.join(clean[:3])} (+{len(clean) - 3})"
 
 
 def _store_alert(
@@ -153,7 +181,7 @@ def render(settings: Settings) -> None:
     """Render one-click executive report generation for selected scope + active filters."""
     auto_trigger = bool(st.session_state.pop("__report_autorun_requested", False))
     country, source_id = _current_scope()
-    st.subheader("Informe ejecutivo PPT")
+    st.subheader("Informe PPT")
     st.caption(
         "Generación todo-en-uno: usa exactamente el mismo scope, filtros, gráficos y leyendas "
         "que estás viendo en la aplicación."
@@ -167,12 +195,23 @@ def render(settings: Settings) -> None:
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
 
+    all_df_for_scope: pd.DataFrame | None = None
+    scoped_for_scope = pd.DataFrame()
+    try:
+        all_df_for_scope = load_issues_df(settings.DATA_PATH)
+        scoped_for_scope = _scope_df(all_df_for_scope, country=country, source_id=source_id)
+    except Exception:
+        scoped_for_scope = pd.DataFrame()
+
     filters_summary = [
-        f"Estado={len(status_filters)}",
-        f"Prioridad={len(priority_filters)}",
-        f"Assignee={len(assignee_filters)}",
+        _analysis_window_label(settings, scoped_df=scoped_for_scope),
+        _visible_filter_label(status_filters, name="Estado"),
+        _visible_filter_label(priority_filters, name="Prioridad"),
+        _visible_filter_label(assignee_filters, name="Responsable"),
     ]
-    st.info(f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}")
+    st.info(
+        f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}"
+    )
     _render_alert(country, source_id)
 
     run_generation = bool(auto_trigger)
@@ -180,7 +219,11 @@ def render(settings: Settings) -> None:
     if run_generation:
         try:
             with st.spinner("Preparando gráficos e insights del scope activo..."):
-                all_df = load_issues_df(settings.DATA_PATH)
+                all_df = (
+                    all_df_for_scope
+                    if all_df_for_scope is not None
+                    else load_issues_df(settings.DATA_PATH)
+                )
                 scoped_df = _scope_df(all_df, country=country, source_id=source_id)
                 if scoped_df.empty:
                     raise ValueError("No hay datos en el scope seleccionado.")
