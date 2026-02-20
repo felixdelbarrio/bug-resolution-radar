@@ -49,6 +49,8 @@ jobs:
             "--collect-all", "streamlit",
             "--collect-all", "plotly",
             "--collect-all", "pptx",
+            "--collect-all", "lxml",
+            "--collect-all", "PIL",
             "--collect-all", "kaleido",
             "--collect-all", "bug_resolution_radar",
             "run_streamlit.py"
