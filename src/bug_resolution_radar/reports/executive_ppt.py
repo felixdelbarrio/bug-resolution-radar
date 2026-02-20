@@ -2417,17 +2417,23 @@ def generate_scope_executive_ppt(
     assignee_filters: Sequence[str] | None = None,
     dff_override: pd.DataFrame | None = None,
     open_df_override: pd.DataFrame | None = None,
+    scoped_source_df_override: pd.DataFrame | None = None,
 ) -> ExecutiveReportResult:
     """Generate an executive PPT for selected scope using dashboard-equivalent visuals."""
     source_txt = str(source_id or "").strip()
     if not source_txt:
         raise ValueError("No se ha seleccionado un origen válido para generar el informe.")
 
-    scoped_source_df = _scope_df(
-        load_issues_df(settings.DATA_PATH),
-        country=str(country or "").strip(),
-        source_id=source_txt,
-    )
+    if scoped_source_df_override is not None:
+        scoped_source_df = scoped_source_df_override
+    elif dff_override is not None:
+        scoped_source_df = dff_override
+    else:
+        scoped_source_df = _scope_df(
+            load_issues_df(settings.DATA_PATH),
+            country=str(country or "").strip(),
+            source_id=source_txt,
+        )
     available_months = max_available_backlog_months(scoped_source_df)
     lookback_months = effective_analysis_lookback_months(settings, df=scoped_source_df)
 

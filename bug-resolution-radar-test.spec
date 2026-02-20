@@ -1,7 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('app.py', '.'), ('src/bug_resolution_radar/ui/assets', 'bug_resolution_radar/ui/assets')]
+datas = [
+    ("app.py", "."),
+    ("src/bug_resolution_radar/ui/assets", "bug_resolution_radar/ui/assets"),
+    (".env.example", "."),
+    (".streamlit/config.toml", ".streamlit"),
+]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('streamlit')
@@ -48,7 +53,8 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
+    icon="assets/app_icon/bug-resolution-radar.png",
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
