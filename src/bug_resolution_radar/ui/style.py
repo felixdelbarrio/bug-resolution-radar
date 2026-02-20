@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import base64
 import html
+import importlib.resources
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -24,20 +24,30 @@ from bug_resolution_radar.ui.common import flow_signal_color_map
 
 
 def _svg_data_uri(*, file_name: str, fallback_svg: str) -> str:
-    assets_root = Path(__file__).resolve().parent / "assets" / "icons" / "bbva"
-    icon_path = assets_root / file_name
     try:
-        raw = icon_path.read_bytes()
+        icon_ref = (
+            importlib.resources.files("bug_resolution_radar.ui")
+            / "assets"
+            / "icons"
+            / "bbva"
+            / file_name
+        )
+        raw = icon_ref.read_bytes()
     except Exception:
         raw = fallback_svg.encode("utf-8")
     return "data:image/svg+xml;base64," + base64.b64encode(raw).decode("ascii")
 
 
 def _font_data_uri(*, file_name: str, mime: str) -> str:
-    assets_root = Path(__file__).resolve().parent / "assets" / "fonts" / "bbva"
-    font_path = assets_root / file_name
     try:
-        raw = font_path.read_bytes()
+        font_ref = (
+            importlib.resources.files("bug_resolution_radar.ui")
+            / "assets"
+            / "fonts"
+            / "bbva"
+            / file_name
+        )
+        raw = font_ref.read_bytes()
     except Exception:
         return ""
     return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
@@ -233,8 +243,6 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
 
     css_template = """
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap');
-
           __FONT_FACE_CSS__
 
           __CSS_VARS__
