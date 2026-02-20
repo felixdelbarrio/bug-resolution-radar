@@ -288,7 +288,27 @@ def _resolution_days(dff: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
 
 def _sorted_cards(cards: Iterable[ActionInsight], *, limit: int = 5) -> List[ActionInsight]:
     valid = [c for c in cards if str(c.title or "").strip() and str(c.body or "").strip()]
-    return sorted(valid, key=lambda c: float(c.score), reverse=True)[:limit]
+
+    def _is_critical_card(card: ActionInsight) -> bool:
+        filters = list(card.priority_filters or [])
+        if not filters:
+            return False
+        # Critical priorities: "Supone un impedimento" + Highest/High (+ variants).
+        for raw in filters:
+            p = str(raw or "").strip()
+            if not p:
+                continue
+            if priority_rank(p) <= 2:
+                return True
+        return False
+
+    # Business rule: if we have client-affecting priorities in play, show those first.
+    # Within each group, keep the original scoring order.
+    return sorted(
+        valid,
+        key=lambda c: (_is_critical_card(c), float(c.score)),
+        reverse=True,
+    )[:limit]
 
 
 def build_trend_insight_pack(
