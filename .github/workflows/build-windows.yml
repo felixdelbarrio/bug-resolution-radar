@@ -30,6 +30,11 @@ jobs:
           pip install -e .
           pip install pyinstaller
 
+      - name: Generate Windows .ico from PNG
+        shell: pwsh
+        run: |
+          python scripts/update_app_icon.py --input assets/app_icon/bug-resolution-radar.png
+
       - name: Build executable with PyInstaller
         shell: pwsh
         run: |
@@ -38,6 +43,7 @@ jobs:
             "--clean",
             "--onefile",
             "--name", "bug-resolution-radar",
+            "--icon", "assets/app_icon/bug-resolution-radar.ico",
             "--add-data", "app.py;."
           )
           if (Test-Path "src/bug_resolution_radar/ui/assets" -PathType Container) {
@@ -47,6 +53,7 @@ jobs:
           }
           $args += @(
             "--collect-all", "streamlit",
+            "--collect-all", "watchdog",
             "--collect-all", "plotly",
             "--collect-all", "pptx",
             "--collect-all", "lxml",

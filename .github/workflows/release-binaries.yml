@@ -39,18 +39,22 @@ jobs:
             label: Linux
             archive_suffix: linux
             binary_path: dist/bug-resolution-radar
+            icon_path: assets/app_icon/bug-resolution-radar.png
             add_data_app: app.py:.
             add_data_assets: src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets
           - os: macos-latest
             label: macOS
             archive_suffix: macos
             binary_path: dist/bug-resolution-radar
+            icon_path: assets/app_icon/bug-resolution-radar.png
+            extra_asset_path: dist_app/bug-resolution-radar.app
             add_data_app: app.py:.
             add_data_assets: src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets
           - os: windows-latest
             label: Windows
             archive_suffix: windows
             binary_path: dist/bug-resolution-radar.exe
+            icon_path: assets/app_icon/bug-resolution-radar.ico
             add_data_app: app.py;.
             add_data_assets: src/bug_resolution_radar/ui/assets;bug_resolution_radar/ui/assets
     env:
@@ -72,6 +76,13 @@ jobs:
           pip install -e .
           pip install pyinstaller
 
+      - name: Generate Windows .ico from PNG (Windows only)
+        shell: bash
+        run: |
+          if [ "${{ matrix.archive_suffix }}" = "windows" ]; then
+            python scripts/update_app_icon.py --input assets/app_icon/bug-resolution-radar.png
+          fi
+
       - name: Build executable with PyInstaller
         shell: bash
         run: |
@@ -81,13 +92,17 @@ jobs:
           else
             echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."
           fi
-          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all bug_resolution_radar run_streamlit.py
+          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all bug_resolution_radar run_streamlit.py
+          if [ "${{ matrix.archive_suffix }}" = "macos" ]; then
+            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --distpath dist_app --workpath build_app --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all bug_resolution_radar run_streamlit.py
+          fi
 
       - name: Package release archive
         shell: bash
         env:
           ARCHIVE_SUFFIX: ${{ matrix.archive_suffix }}
           BINARY_PATH: ${{ matrix.binary_path }}
+          EXTRA_ASSET_PATH: ${{ matrix.extra_asset_path }}
         run: |
           python - <<'PY'
           import os
@@ -111,6 +126,27 @@ jobs:
               cfg_target_dir = bundle_dir / ".streamlit"
               cfg_target_dir.mkdir(parents=True, exist_ok=True)
               shutil.copy2(streamlit_cfg, cfg_target_dir / "config.toml")
+
+          # Optional desktop entry + icon for Linux.
+          desktop_entry = Path("assets/app_icon/bug-resolution-radar.desktop")
+          desktop_icon = Path("assets/app_icon/bug-resolution-radar.png")
+          if archive_suffix == "linux" and desktop_entry.exists():
+              shutil.copy2(desktop_entry, bundle_dir / "bug-resolution-radar.desktop")
+              if desktop_icon.exists():
+                  icon_dir = bundle_dir / "assets" / "app_icon"
+                  icon_dir.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(desktop_icon, icon_dir / "bug-resolution-radar.png")
+
+          # Optional macOS app bundle (provides icon in Finder/Dock).
+          extra_asset = os.environ.get("EXTRA_ASSET_PATH", "").strip()
+          if extra_asset:
+              extra_path = Path(extra_asset)
+              if extra_path.exists():
+                  dst = bundle_dir / extra_path.name
+                  if extra_path.is_dir():
+                      shutil.copytree(extra_path, dst, dirs_exist_ok=True)
+                  else:
+                      shutil.copy2(extra_path, dst)
 
           with zipfile.ZipFile(archive_name, "w", compression=zipfile.ZIP_DEFLATED) as zf:
               for path in bundle_dir.rglob("*"):

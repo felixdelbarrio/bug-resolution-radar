@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Bug Resolution Radar
+Comment=Dashboard local para seguimiento de incidencias
+Exec=bug-resolution-radar
+Icon=bug-resolution-radar
+Terminal=true
+Categories=Utility;
