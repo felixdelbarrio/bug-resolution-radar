@@ -509,9 +509,9 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
         if crit_early > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin primer diagnostico",
+                    title="Incidencias de mayor impacto sin primer diagnóstico",
                     body=(
-                        f"Hay {crit_early} incidencias High/Highest en estados iniciales. "
+                        f"Hay {crit_early} incidencias de mayor impacto (Supone un impedimento / Highest / High) en estados iniciales. "
                         "Resolver esta bolsa reduce riesgo cliente de forma inmediata."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -690,9 +690,9 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_old_count > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas envejecidas",
+                    title="Incidencias de mayor impacto envejecidas",
                     body=(
-                        f"{crit_old_count} incidencias High/Highest llevan mas de 14 dias abiertas. "
+                        f"{crit_old_count} incidencias de mayor impacto (Supone un impedimento / Highest / High) llevan más de 14 días abiertas. "
                         "Escalado selectivo y cierre de bloqueos deberia ser la accion del dia."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -712,9 +712,9 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             if early_old > 0:
                 cards.append(
                     ActionInsight(
-                        title="Criticas bloqueadas en entrada",
+                        title="Incidencias de mayor impacto atascadas en entrada",
                         body=(
-                            f"{early_old} High/Highest llevan mas de 7 dias en estados iniciales. "
+                            f"{early_old} incidencias de mayor impacto (Supone un impedimento / Highest / High) llevan más de 7 días en estados iniciales. "
                             "Alinear diagnostico y decision de gestion evitara envejecimiento adicional."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -900,11 +900,16 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
             med_hi = float(hi.median())
             med_lo = float(lo.median())
             if med_hi > (med_lo * 1.30):
+                n_hi = int(hi.notna().sum())
+                n_lo = int(lo.notna().sum())
                 cards.append(
                     ActionInsight(
-                        title="Criticas cierran mas lento que el resto",
+                        title="Prioridades de mayor impacto: cierre mas lento",
                         body=(
-                            f"High/Highest cierran en {_fmt_days(med_hi)} de mediana vs {_fmt_days(med_lo)} en prioridades menores."
+                            "Las incidencias de mayor impacto (Supone un impedimento / Highest / High) "
+                            f"tardan {_fmt_days(med_hi)} de forma tipica en llegar a estado final "
+                            f"vs {_fmt_days(med_lo)} en el resto (muestra: {n_hi} vs {n_lo}). "
+                            "Palanca: limita el trabajo en curso de mayor impacto y prioriza desbloqueos/decisiones antes de iniciar nuevos casos de menor prioridad."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                         score=15.0 + (med_hi - med_lo),
@@ -1013,9 +1018,9 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_early > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin arrancar",
+                    title="Incidencias de mayor impacto sin arrancar",
                     body=(
-                        f"{crit_early} incidencias High/Highest siguen en New/Analysing. "
+                        f"{crit_early} incidencias de mayor impacto (Supone un impedimento / Highest / High) siguen en New/Analysing. "
                         "Asignar owner y primer diagnostico hoy reduce impacto cliente."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -1030,9 +1035,9 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_unassigned > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin owner",
+                    title="Incidencias de mayor impacto sin owner",
                     body=(
-                        f"{crit_unassigned} High/Highest no tienen asignacion explicita. "
+                        f"{crit_unassigned} incidencias de mayor impacto (Supone un impedimento / Highest / High) no tienen asignación explícita. "
                         "Asignar ownership es la decision con mayor retorno inmediato."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -1048,9 +1053,9 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             if crit_old > 0:
                 cards.append(
                     ActionInsight(
-                        title="Criticas con antiguedad elevada",
+                        title="Incidencias de mayor impacto con antigüedad elevada",
                         body=(
-                            f"{crit_old} High/Highest superan 14 dias de antiguedad. "
+                            f"{crit_old} incidencias de mayor impacto (Supone un impedimento / Highest / High) superan 14 días de antigüedad. "
                             "Conviene forzar decision de gestion de desbloqueo o cierre."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -1064,8 +1069,11 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_stale > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin movimiento reciente",
-                    body=(f"{crit_stale} High/Highest no tienen actualizacion en mas de 7 dias."),
+                    title="Incidencias de mayor impacto sin movimiento reciente",
+                    body=(
+                        f"{crit_stale} incidencias de mayor impacto (Supone un impedimento / Highest / High) "
+                        "no se han actualizado en más de 7 días."
+                    ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                     score=14.0 + float(crit_stale),
                 )
@@ -1295,7 +1303,7 @@ def build_people_plan_recommendations(
         )
     if critical_risk_pct >= 55.0:
         recs.append(
-            "Criticidad atrapada en entrada/bloqueado: fijar owners y fecha compromiso en las de mayor impacto."
+            "Prioridades de mayor impacto atrapadas en entrada/bloqueado: fijar owners y fecha compromiso."
         )
     if flow_risk_pct >= 60.0:
         recs.append(
@@ -1352,7 +1360,7 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
         critical_share = float((pr.map(priority_rank) <= 2).mean()) if open_total else 0.0
         if critical_share >= 0.30:
             lines.append(
-                f"Criticidad elevada: {_fmt_pct(critical_share)} del backlog abierto esta en High/Highest."
+                f"Prioridades de mayor impacto: {_fmt_pct(critical_share)} del backlog abierto está en Supone un impedimento / Highest / High."
             )
 
     if "updated" in safe_open.columns:
