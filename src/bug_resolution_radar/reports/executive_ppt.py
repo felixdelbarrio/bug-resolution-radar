@@ -907,6 +907,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         export_fig = go.Figure(fig)
         traces = list(getattr(export_fig, "data", []) or [])
         bar_category_keys: set[str] = set()
+        vertical_bar_traces: List[object] = []
         for trace in traces:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
             is_vertical_bar = (
@@ -915,6 +916,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             )
             if not is_vertical_bar:
                 continue
+            vertical_bar_traces.append(trace)
             for raw_x in _trace_values(trace, "x"):
                 key = str(raw_x or "").strip()
                 if key:
@@ -984,10 +986,23 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         if dense_chart:
             legend_render_font = min(17.4, legend_render_font + 1.5)
 
+        is_stacked_layout = str(
+            getattr(getattr(export_fig, "layout", None), "barmode", "") or ""
+        ).strip().lower() in {"stack", "relative"}
+        allow_segment_labels = (
+            bool(vertical_bar_traces)
+            and is_stacked_layout
+            and len(vertical_bar_traces) >= 2
+            and len(bar_category_keys) <= 12
+            and len(vertical_bar_traces) <= 6
+        )
+
         export_fig.update_layout(
             template="plotly_white",
             showlegend=showlegend,
-            uniformtext=dict(minsize=18 if dense_chart else 16, mode="hide"),
+            uniformtext=dict(
+                minsize=12 if allow_segment_labels else (18 if dense_chart else 16), mode="hide"
+            ),
             font=dict(
                 family=FONT_BODY_BOOK,
                 size=18,
@@ -1033,12 +1048,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
         # For every column chart in the report, show a clear total per column
         # in bold on top and avoid truncated per-segment labels.
-        bar_traces = [
-            tr
-            for tr in traces
-            if str(getattr(tr, "type", "") or "").strip().lower() == "bar"
-            and str(getattr(tr, "orientation", "v") or "v").strip().lower() != "h"
-        ]
+        bar_traces = list(vertical_bar_traces)
         if bar_traces:
             totals: Dict[str, float] = {}
             x_by_key: Dict[str, object] = {}
@@ -1072,15 +1082,51 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     totals[key] += max(0.0, y_val)
 
             if totals:
-                for trace in bar_traces:
-                    if hasattr(trace, "text"):
-                        trace.text = None
-                    if hasattr(trace, "texttemplate"):
-                        trace.texttemplate = None
-                    if hasattr(trace, "textposition"):
-                        trace.textposition = "none"
-                    if hasattr(trace, "cliponaxis"):
-                        trace.cliponaxis = False
+                if allow_segment_labels:
+                    # Keep per-segment labels inside each stacked block (readable).
+                    for trace in bar_traces:
+                        ys = _trace_values(trace, "y")
+                        seg_text: List[str] = []
+                        for y_raw in ys:
+                            if y_raw is None:
+                                seg_text.append("")
+                                continue
+                            if isinstance(y_raw, (int, float)):
+                                y_val = float(y_raw)
+                            else:
+                                y_txt = str(y_raw).strip()
+                                if not y_txt:
+                                    seg_text.append("")
+                                    continue
+                                try:
+                                    y_val = float(y_txt)
+                                except Exception:
+                                    seg_text.append("")
+                                    continue
+                            seg_text.append(f"{int(round(y_val))}" if y_val > 0 else "")
+                        if hasattr(trace, "text"):
+                            trace.text = seg_text
+                        if hasattr(trace, "texttemplate"):
+                            trace.texttemplate = "%{text}"
+                        if hasattr(trace, "textposition"):
+                            trace.textposition = "inside"
+                        if hasattr(trace, "insidetextanchor"):
+                            trace.insidetextanchor = "middle"
+                        if hasattr(trace, "textangle"):
+                            trace.textangle = 0
+                        if hasattr(trace, "cliponaxis"):
+                            trace.cliponaxis = False
+                else:
+                    # Totals only (avoid clutter in dense charts).
+                    for trace in bar_traces:
+                        if hasattr(trace, "text"):
+                            trace.text = None
+                        if hasattr(trace, "texttemplate"):
+                            trace.texttemplate = None
+                        if hasattr(trace, "textposition"):
+                            trace.textposition = "none"
+                        if hasattr(trace, "cliponaxis"):
+                            trace.cliponaxis = False
 
                 ordered_totals = [float(totals[key]) for key in x_order]
                 max_total = max(ordered_totals) if ordered_totals else 0.0
@@ -1146,16 +1192,39 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
             if str(getattr(trace, "name", "") or "").strip():
                 trace.showlegend = bool(showlegend)
-            if hasattr(trace, "textfont"):
-                trace.textfont = dict(
-                    family=FONT_BODY_MEDIUM,
-                    size=24 if dense_chart else 22,
-                    color=f"#{PALETTE['ink']}",
-                )
-            if trace_type == "bar" and hasattr(trace, "textposition"):
-                trace.textposition = "auto"
-                if hasattr(trace, "cliponaxis"):
-                    trace.cliponaxis = False
+            if trace_type == "bar":
+                if allow_segment_labels:
+                    # Smaller font for inside stacked labels.
+                    if hasattr(trace, "textfont"):
+                        trace.textfont = dict(
+                            family=FONT_BODY_MEDIUM,
+                            size=16 if dense_chart else 18,
+                            color=f"#{PALETTE['panel']}",
+                        )
+                    if hasattr(trace, "textposition"):
+                        trace.textposition = "inside"
+                    if hasattr(trace, "insidetextanchor"):
+                        trace.insidetextanchor = "middle"
+                    if hasattr(trace, "cliponaxis"):
+                        trace.cliponaxis = False
+                else:
+                    if hasattr(trace, "textfont"):
+                        trace.textfont = dict(
+                            family=FONT_BODY_MEDIUM,
+                            size=24 if dense_chart else 22,
+                            color=f"#{PALETTE['ink']}",
+                        )
+                    if hasattr(trace, "textposition"):
+                        trace.textposition = "auto"
+                    if hasattr(trace, "cliponaxis"):
+                        trace.cliponaxis = False
+            else:
+                if hasattr(trace, "textfont"):
+                    trace.textfont = dict(
+                        family=FONT_BODY_MEDIUM,
+                        size=24 if dense_chart else 22,
+                        color=f"#{PALETTE['ink']}",
+                    )
 
         image = pio.to_image(
             export_fig, format="png", width=export_width, height=export_height, scale=3
