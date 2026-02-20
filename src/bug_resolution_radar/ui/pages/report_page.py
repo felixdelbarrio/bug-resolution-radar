@@ -310,9 +310,9 @@ def render(settings: Settings) -> None:
                     export_dir = _default_report_export_dir()
                     export_path = _unique_export_path(export_dir, file_name=result.file_name)
                     export_path.write_bytes(result.content)
-                    st.session_state[f"workspace_report_saved_path::{_scope_key(country, source_id)}"] = str(
-                        export_path
-                    )
+                    st.session_state[
+                        f"workspace_report_saved_path::{_scope_key(country, source_id)}"
+                    ] = str(export_path)
                 except Exception:
                     pass
 
