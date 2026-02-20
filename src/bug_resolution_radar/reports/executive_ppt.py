@@ -1652,8 +1652,8 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     _add_bg(slide, PALETTE["bg"])
     _add_header(
         slide,
-        title="Panorama de negocio",
-        subtitle="Qué está pasando, por qué importa y dónde actuar primero",
+        title="Índice",
+        subtitle="Historia del análisis y población analizada",
     )
     total = int(len(context.dff))
     open_count = int(len(context.open_df))
@@ -1727,19 +1727,39 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     ltf.clear()
     lp0 = ltf.paragraphs[0]
     lr0 = lp0.add_run()
-    lr0.text = "Ruta de lectura"
+    lr0.text = "Índice"
     lr0.font.name = FONT_HEAD
     lr0.font.bold = True
     lr0.font.size = Pt(20)
     lr0.font.color.rgb = _rgb(PALETTE["navy"])
 
-    for idx, theme in enumerate(themes, start=1):
+    # Compact index to fit the left panel (single line per entry).
+    rows: List[Tuple[str, str, str, str]] = [
+        ("01", "Apertura", "Alcance y reglas de lectura del análisis", PALETTE["blue"]),
+        ("02", "Panorama", "Tamaño del problema, foco y prioridades", PALETTE["teal"]),
+    ]
+    idx = 3
+    for theme, themed_sections in _group_sections_by_theme(context.sections):
+        detail = " · ".join([_clip_text(sec.title, max_len=28) for sec in themed_sections])
+        rows.append((f"{idx:02d}", theme, detail, PALETTE["navy"]))
+        idx += 1
+    rows.append(
+        (
+            f"{idx:02d}",
+            "Cierre y acciones",
+            "Plan de trabajo priorizado por impacto",
+            PALETTE["blue"],
+        )
+    )
+
+    for code, title, detail, _code_color in rows:
+        line = _clip_text(f"{code}. {title} · {detail}", max_len=78)
         p = ltf.add_paragraph()
-        p.text = f"{idx}. {theme}"
-        p.space_after = Pt(7)
+        p.space_after = Pt(6)
         p.font.name = FONT_BODY_BOOK
-        p.font.size = Pt(13.0)
+        p.font.size = Pt(12.2)
         p.font.color.rgb = _rgb(PALETTE["ink"])
+        p.text = line
 
     right_box = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
@@ -1756,7 +1776,7 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
     rtf.clear()
     rp0 = rtf.paragraphs[0]
     rr0 = rp0.add_run()
-    rr0.text = "Lectura inicial"
+    rr0.text = "Población analizada"
     rr0.font.name = FONT_HEAD
     rr0.font.bold = True
     rr0.font.size = Pt(20)
@@ -1764,8 +1784,11 @@ def _add_exec_summary_slide(prs: Any, context: _ScopeContext) -> None:
 
     status_line = f"**Fase operativa foco (abiertas):** {top_status}"
 
+    totals_line = f"**Total incidencias:** {total} · **Abiertas:** {open_count} ({open_ratio:.1f}%)"
+
     opening = [
-        f"**Alcance activo:** {context.country} · {context.source_label}",
+        f"**Población:** {context.country} · {context.source_label}",
+        totals_line,
         f"**Filtros:** {context.filters.summary()}",
         status_line,
         f"**Prioridad dominante (abiertas):** {top_priority}",
@@ -2373,7 +2396,7 @@ def _compose_presentation(context: _ScopeContext) -> Any:
     prs.slide_height = SLIDE_HEIGHT
 
     _add_cover_slide(prs, context)
-    _add_index_slide(prs, context)
+    # Combined slide: index + population analyzed (replaces former "Índice" + "Panorama de negocio").
     _add_exec_summary_slide(prs, context)
 
     total = len(context.sections)
