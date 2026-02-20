@@ -165,7 +165,11 @@ def _extract_customer_name(value: Any) -> str:
             value.get("fullName")
             or value.get("displayName")
             or value.get("name")
-            or ((value.get("company") or {}).get("name") if isinstance(value.get("company"), dict) else "")
+            or (
+                (value.get("company") or {}).get("name")
+                if isinstance(value.get("company"), dict)
+                else ""
+            )
             or ""
         )
     return _as_text(value)
@@ -262,7 +266,9 @@ def map_helix_values_to_item(
         # Explicitly ignored in canonical VRR mapping for this geography.
         sla_status="",
         target_date=_to_iso_datetime(values.get("targetDate")),
-        last_modified=_to_iso_datetime(values.get("lastModifiedDate") or values.get("lastModified")),
+        last_modified=_to_iso_datetime(
+            values.get("lastModifiedDate") or values.get("lastModified")
+        ),
         start_datetime=_to_iso_datetime(_extract_custom_attr(values, "bbva_startdatetime")),
         closed_date=_to_iso_datetime(_extract_custom_attr(values, "bbva_closeddate")),
         matrix_service_n1=_extract_custom_attr(values, "bbva_matrixservicen1"),

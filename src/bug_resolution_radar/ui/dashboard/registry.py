@@ -523,37 +523,28 @@ def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
     if total == 0:
         return ["No hay issues para este análisis."]
 
-    top_status = str(counts.index[0])
-    top_cnt = int(counts.iloc[0])
-    share = float(top_cnt) / float(total)
+    non_terminal_counts = counts[
+        [
+            not any(tok in str(status_name or "").strip().lower() for tok in TERMINAL_STATUS_TOKENS)
+            for status_name in counts.index
+        ]
+    ]
+    if non_terminal_counts.empty:
+        return [
+            "No hay concentración relevante en estados operativos con este filtro.",
+            "Acción ‘WOW’: abre foco en estados activos (New, Analysing, En progreso, Blocked) para detectar dónde se frena el flujo.",
+        ]
 
+    top_status = str(non_terminal_counts.index[0])
+    top_cnt = int(non_terminal_counts.iloc[0])
+    share = float(top_cnt) / float(total)
     insights = [
         f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del conjunto analizado "
         f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
         "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
         "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",
     ]
-
-    accepted_cnt = int((stc == "Accepted").sum())
-    rtd_cnt = int((stc == "Ready to deploy").sum())
-    deployed_cnt = int((stc == "Deployed").sum())
-
-    if accepted_cnt > 0:
-        rtd_conv = (rtd_cnt / accepted_cnt) * 100.0
-        if rtd_conv < 35.0:
-            insights.append(
-                f"Flujo final con fricción: **Accepted={accepted_cnt}** vs **Ready to deploy={rtd_cnt}** "
-                f"(conversión {rtd_conv:.1f}%). Revisa criterio de salida y fija un tiempo máximo para pasar a Ready to deploy."
-            )
-    if rtd_cnt > 0:
-        dep_conv = (deployed_cnt / rtd_cnt) * 100.0
-        if dep_conv < 70.0:
-            insights.append(
-                f"Embudo de despliegue: **Ready to deploy={rtd_cnt}** vs **Deployed={deployed_cnt}** "
-                f"(conversión {dep_conv:.1f}%). Revisa capacidad/ventana de release."
-            )
-
-    return insights[:4]
+    return insights[:3]
 
 
 # ---------------------------------------------------------------------
@@ -597,7 +588,7 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ChartSpec(
             chart_id="open_status_bar",
             title="Backlog por estado",
-            subtitle="Detecta cuellos de botella y ‘waiting rooms’",
+            subtitle="Concentración por fase y ritmo de salida del flujo",
             group="Flujo",
             render=_render_open_status_bar,
             insights=_insights_open_status_bar,

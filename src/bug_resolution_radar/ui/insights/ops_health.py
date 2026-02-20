@@ -132,7 +132,7 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
     quick_brief = build_ops_health_brief(dff=dff, open_df=open_df)
     if quick_brief:
         with st.container(border=True):
-            st.markdown("#### Lectura ejecutiva")
+            st.markdown("#### Lectura rápida")
             for line in quick_brief:
                 st.markdown(f"- {line}")
 

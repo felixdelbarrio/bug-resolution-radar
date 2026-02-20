@@ -7,7 +7,9 @@ from bug_resolution_radar.ingest import jira_ingest as jira_mod
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, *, payload: Optional[dict[str, Any]] = None, text: str = "") -> None:
+    def __init__(
+        self, status_code: int, *, payload: Optional[dict[str, Any]] = None, text: str = ""
+    ) -> None:
         self.status_code = status_code
         self._payload = payload or {}
         self.text = text
@@ -38,11 +40,15 @@ def test_jira_does_not_open_browser_when_cookie_already_exists(monkeypatch: Any)
     monkeypatch.setattr(jira_mod, "_open_url_in_configured_browser", fake_open)
     monkeypatch.setattr(jira_mod, "_request", fake_request)
     monkeypatch.setattr(
-        jira_mod, "get_jira_session_cookie", lambda browser, host: "JSESSIONID=abc; atlassian.xsrf.token=xyz"
+        jira_mod,
+        "get_jira_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; atlassian.xsrf.token=xyz",
     )
 
     ok, msg, _ = jira_mod.ingest_jira(
-        settings=Settings(JIRA_BASE_URL="https://jira.globaldevtools.bbva.com", JIRA_BROWSER="chrome"),
+        settings=Settings(
+            JIRA_BASE_URL="https://jira.globaldevtools.bbva.com", JIRA_BROWSER="chrome"
+        ),
         dry_run=True,
         source=_source(),
     )
@@ -75,7 +81,9 @@ def test_jira_opens_browser_only_when_cookie_missing(monkeypatch: Any) -> None:
     monkeypatch.delenv("JIRA_BROWSER_LOGIN_URL", raising=False)
 
     ok, msg, _ = jira_mod.ingest_jira(
-        settings=Settings(JIRA_BASE_URL="https://jira.globaldevtools.bbva.com", JIRA_BROWSER="chrome"),
+        settings=Settings(
+            JIRA_BASE_URL="https://jira.globaldevtools.bbva.com", JIRA_BROWSER="chrome"
+        ),
         dry_run=True,
         source=_source(),
     )

@@ -31,6 +31,16 @@ dev = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.package-data]
+bug_resolution_radar = [
+  "ui/assets/icons/bbva/*.svg",
+  "ui/assets/fonts/bbva/*.ttf",
+  "ui/assets/fonts/bbva/*.otf",
+  "ui/assets/fonts/bbva/*.woff",
+  "ui/assets/fonts/bbva/*.woff2",
+]
 
 [tool.black]
 line-length = 100

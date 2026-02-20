@@ -211,9 +211,7 @@ def _sql_in_filter(field_sql: str, values: Optional[List[str]]) -> Optional[str]
 def _build_arsql_endpoint(base_root: str, datasource_uid: str) -> str:
     root = str(base_root or "").strip().rstrip("/")
     uid = str(datasource_uid or "").strip()
-    return (
-        f"{root}/dashboards/api/datasources/proxy/uid/{uid}/api/arsys/v1.0/report/arsqlquery"
-    )
+    return f"{root}/dashboards/api/datasources/proxy/uid/{uid}/api/arsys/v1.0/report/arsqlquery"
 
 
 def _root_from_url(url: str) -> str:
@@ -605,7 +603,9 @@ def _frame_to_rows(frame: Dict[str, Any]) -> List[Dict[str, Any]]:
         return []
 
     field_names = (
-        [_column_name(col, idx) for idx, col in enumerate(fields)] if isinstance(fields, list) else []
+        [_column_name(col, idx) for idx, col in enumerate(fields)]
+        if isinstance(fields, list)
+        else []
     )
     row_count = 0
     for col in values:
@@ -818,8 +818,7 @@ def _is_session_expired_response(resp: requests.Response) -> bool:
 
     if isinstance(payload, dict):
         joined = " ".join(
-            str(payload.get(k) or "")
-            for k in ("error", "message", "detail", "code")
+            str(payload.get(k) or "") for k in ("error", "message", "detail", "code")
         ).strip()
         return _looks_like_session_expired_text(joined)
     return False
@@ -961,7 +960,9 @@ def ingest_helix(
             if dashboard_root:
                 inferred_roots.append(dashboard_root)
             if "-smartit." in base_host:
-                inferred_roots.append(f"{base_scheme}://{base_host.replace('-smartit.', '-ir1.', 1)}")
+                inferred_roots.append(
+                    f"{base_scheme}://{base_host.replace('-smartit.', '-ir1.', 1)}"
+                )
             inferred_roots.append(f"{base_scheme}://{base_host}")
             arsql_base_candidates = _dedup_non_empty(inferred_roots)
             arsql_base_url = arsql_base_candidates[0] if arsql_base_candidates else ""
@@ -985,8 +986,7 @@ def ingest_helix(
                 f"bbva-incident-report?orgId={org_id}"
             )
         login_bootstrap_url = (
-            arsql_dashboard_url_cfg
-            or f"{arsql_base_root}{arsql_dashboard_path_default}"
+            arsql_dashboard_url_cfg or f"{arsql_base_root}{arsql_dashboard_path_default}"
         )
 
     session = requests.Session()
@@ -1031,9 +1031,7 @@ def ingest_helix(
         session.headers["X-AR-Client-Type"] = str(
             os.getenv("HELIX_ARSQL_CLIENT_TYPE", "4021")
         ).strip()
-        ds_auth = str(
-            os.getenv("HELIX_ARSQL_DS_AUTH", "IMS-JWT JWT PLACEHOLDER")
-        ).strip()
+        ds_auth = str(os.getenv("HELIX_ARSQL_DS_AUTH", "IMS-JWT JWT PLACEHOLDER")).strip()
         if ds_auth:
             session.headers["X-DS-Authorization"] = ds_auth
         grafana_org_id = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
@@ -1679,7 +1677,9 @@ def ingest_helix(
     doc.helix_base_url = f"{scheme}://{host}" if query_mode == "arsql" else base
     create_start_iso = _iso_from_epoch_ms(create_start_ms)
     create_end_iso = _iso_from_epoch_ms(create_end_ms)
-    status_mappings_q = ",".join(cast(List[str], filter_criteria.get("statusMappings", []))) or "all"
+    status_mappings_q = (
+        ",".join(cast(List[str], filter_criteria.get("statusMappings", []))) or "all"
+    )
     incident_types_q = ",".join(cast(List[str], filter_criteria.get("incidentTypes", []))) or "all"
     priorities_q = ",".join(cast(List[str], filter_criteria.get("priorities", []))) or "all"
     company_rows = cast(List[Dict[str, str]], filter_criteria.get("companies", []))

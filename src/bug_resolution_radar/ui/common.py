@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 
 from bug_resolution_radar.schema import IssuesDocument
+from bug_resolution_radar.status_semantics import effective_closed_mask
 
 # ----------------------------
 # Persistence: IssuesDocument
@@ -91,14 +92,13 @@ def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
 
 
 def open_issues_only(df: pd.DataFrame | None) -> pd.DataFrame:
-    """Return only open issues (`resolved` is null), or a safe empty DataFrame."""
+    """Return only open issues using unified closure semantics."""
     if not isinstance(df, pd.DataFrame):
         return pd.DataFrame()
     if df.empty:
         return df.copy(deep=False)
-    if "resolved" in df.columns:
-        return df[df["resolved"].isna()].copy(deep=False)
-    return df.copy(deep=False)
+    closed_mask = effective_closed_mask(df)
+    return df.loc[~closed_mask].copy(deep=False)
 
 
 def normalize_text_col(series: pd.Series, empty_label: str) -> pd.Series:

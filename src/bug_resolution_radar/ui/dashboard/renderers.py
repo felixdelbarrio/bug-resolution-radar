@@ -99,21 +99,24 @@ def render_overview_kpis(kpis: dict) -> None:
     with box:
         kcol1, kcol2, kcol3 = st.columns(3)
         with kcol1:
-            st.metric("Abiertas actuales", int(kpis["open_now_total"]))
-            st.caption(kpis["open_now_by_priority"])
+            st.metric("Abiertas actuales", int(kpis.get("open_now_total", 0)))
+            st.caption(kpis.get("open_now_by_priority", {}))
         with kcol2:
-            st.metric("Nuevas (quincena)", int(kpis["new_fortnight_total"]))
-            st.caption(kpis["new_fortnight_by_priority"])
+            st.metric("Issues filtradas", int(kpis.get("issues_total", 0)))
+            st.caption(kpis.get("issues_closed", 0))
         with kcol3:
-            st.metric("Cerradas (quincena)", int(kpis["closed_fortnight_total"]))
-            st.caption(kpis["closed_fortnight_by_resolution_type"])
+            st.metric("Cerradas", int(kpis.get("issues_closed", 0)))
+            st.caption("Según filtros actuales")
 
         kcol4, kcol5, kcol6 = st.columns(3)
         with kcol4:
-            st.metric("Tiempo medio resolución (días)", f"{kpis['mean_resolution_days']:.1f}")
-            st.caption(kpis["mean_resolution_days_by_priority"])
+            st.metric(
+                "Tiempo medio resolución (días)",
+                f"{float(kpis.get('mean_resolution_days', 0.0)):.1f}",
+            )
+            st.caption(kpis.get("mean_resolution_days_by_priority", {}))
         with kcol5:
-            st.metric("% abiertas > X días", kpis["pct_open_gt_x_days"])
+            st.metric("Serie temporal", "Últimos 90 días")
         with kcol6:
             st.metric("Top 10 abiertas", "ver pestaña Insights")
 

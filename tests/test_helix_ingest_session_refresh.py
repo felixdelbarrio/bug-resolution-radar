@@ -165,7 +165,9 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
     assert "riskLevel" not in body["filterCriteria"]
 
 
-def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(monkeypatch: Any) -> None:
+def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
+    monkeypatch: Any,
+) -> None:
     captured_starts = []
     responses = [
         _FakeResponse(
@@ -339,7 +341,9 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
 def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> None:
     called_urls: list[str] = []
 
-    def fake_request(session: requests.Session, method: str, url: str, timeout: Any, **kwargs: Any) -> _FakeResponse:
+    def fake_request(
+        session: requests.Session, method: str, url: str, timeout: Any, **kwargs: Any
+    ) -> _FakeResponse:
         called_urls.append(url)
         return _FakeResponse(200, payload={"total": 0, "objects": []}, url=url)
 
@@ -349,7 +353,11 @@ def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> No
                 200,
                 payload=[
                     {"uid": "abc123", "type": "prometheus"},
-                    {"uid": "ZFPVLzQnz", "type": "arsys", "url": "/api/arsys/v1.0/report/arsqlquery"},
+                    {
+                        "uid": "ZFPVLzQnz",
+                        "type": "arsys",
+                        "url": "/api/arsys/v1.0/report/arsqlquery",
+                    },
                 ],
                 url=url,
             )
@@ -378,7 +386,10 @@ def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> No
     assert ok is True
     assert "ingesta Helix OK" in msg
     assert called_urls
-    assert "/dashboards/api/datasources/proxy/uid/ZFPVLzQnz/api/arsys/v1.0/report/arsqlquery" in called_urls[0]
+    assert (
+        "/dashboards/api/datasources/proxy/uid/ZFPVLzQnz/api/arsys/v1.0/report/arsqlquery"
+        in called_urls[0]
+    )
 
 
 def test_ingest_helix_arsql_infers_ir1_host_and_uses_dashboards_preflight(monkeypatch: Any) -> None:

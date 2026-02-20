@@ -179,7 +179,7 @@ def _inject_combo_signal_script() -> None:
             };
             const semanticLabelHints = ["estado", "status", "priority", "prioridad"];
 
-            const STATUS_RED = new Set(["new", "analysing", "blocked", "created"]);
+            const STATUS_RED = new Set(["new", "analysing", "ready", "blocked", "created"]);
             const STATUS_AMBER = new Set([
               "en progreso",
               "in progress",

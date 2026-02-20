@@ -23,6 +23,14 @@ class Insight:
     body: str
 
 
+FINALIST_STATUS_TOKENS = ("accepted", "ready to deploy", "deployed", "closed", "resolved", "done")
+
+
+def _is_finalist_status(value: object) -> bool:
+    token = str(value or "").strip().lower()
+    return token in FINALIST_STATUS_TOKENS
+
+
 # ---------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------
@@ -456,8 +464,11 @@ def build_chart_insights(
             ]
 
         stc = normalize_text_col(open_df["status"], "(sin estado)")
+        stc_norm = stc.astype(str).str.strip().str.lower()
         vc = stc.value_counts()
         top_status = vc.index[0] if not vc.empty else None
+        non_final_vc = vc[[not _is_finalist_status(s) for s in vc.index.astype(str)]]
+        top_oper_status = non_final_vc.index[0] if not non_final_vc.empty else None
 
         # Bottleneck candidate: high count + high age
         ages = _age_days(open_df)
@@ -469,24 +480,35 @@ def build_chart_insights(
                 .sort_values(["count", "mean_age"], ascending=[False, False])
             )
             if not g.empty:
-                cand = g.index[0]
-                out.append(
-                    Insight(
-                        "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
-                        "Posible cuello de botella",
-                        f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
-                        "Acción: revisa si es un estado de espera ('blocked', 'waiting') y crea un carril explícito para dependencias.",
+                focus = g.loc[[not _is_finalist_status(s) for s in g.index.astype(str)]]
+                if not focus.empty:
+                    cand = focus.index[0]
+                    out.append(
+                        Insight(
+                            "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
+                            "Posible cuello de botella",
+                            f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
+                            "Acción: revisa si es un estado de espera ('blocked', 'waiting') y crea un carril explícito para dependencias.",
+                        )
                     )
-                )
 
-        if top_status:
-            share = float(vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
+        if top_oper_status:
+            share = float(non_final_vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
             out.append(
                 Insight(
                     "warn" if share >= 0.45 else "info",
                     "Carga concentrada en un estado",
-                    f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
+                    f"El estado con más peso operativo es **{top_oper_status}** con {_fmt_int(non_final_vc.iloc[0])} issues ({_fmt_pct(share)}). "
                     "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
+                )
+            )
+        elif top_status:
+            out.append(
+                Insight(
+                    "info",
+                    "Sin foco operativo dominante",
+                    "Con este filtro no hay concentración relevante en estados operativos. "
+                    "Para acciones de mejora, amplía el análisis a estados activos.",
                 )
             )
 
@@ -502,31 +524,6 @@ def build_chart_insights(
             )
         )
 
-        accepted_cnt = int((stc == "Accepted").sum())
-        rtd_cnt = int((stc == "Ready to deploy").sum())
-        deployed_cnt = int((stc == "Deployed").sum())
-        if accepted_cnt > 0:
-            rtd_conv = float(rtd_cnt) / float(accepted_cnt)
-            if rtd_conv < 0.35:
-                out.append(
-                    Insight(
-                        "warn",
-                        "Atasco de Accepted a Ready to deploy",
-                        f"Hay {_fmt_int(accepted_cnt)} en **Accepted** y {_fmt_int(rtd_cnt)} en **Ready to deploy** "
-                        f"(conversión {_fmt_pct(rtd_conv)}). Acción: define tiempo máximo de salida de Accepted y revisión diaria de bloqueos.",
-                    )
-                )
-        if rtd_cnt > 0:
-            dep_conv = float(deployed_cnt) / float(rtd_cnt)
-            if dep_conv < 0.70:
-                out.append(
-                    Insight(
-                        "warn",
-                        "Embudo en despliegue",
-                        f"Hay {_fmt_int(rtd_cnt)} en **Ready to deploy** y {_fmt_int(deployed_cnt)} en **Deployed** "
-                        f"(conversión {_fmt_pct(dep_conv)}). Acción: revisar capacidad de release y ventanas de despliegue.",
-                    )
-                )
         return out[:4]
 
     # Fallback

@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.insights import find_similar_issue_clusters
+from bug_resolution_radar.insights import SimilarityCluster, find_similar_issue_clusters
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
@@ -56,6 +56,58 @@ def _inject_duplicates_view_toggle_css(*, scope_key: str) -> None:
     )
 
 
+def _dedupe_heuristic_clusters(
+    *,
+    clusters: list[SimilarityCluster],
+    exact_title_groups: dict[str, list[str]],
+) -> list[SimilarityCluster]:
+    """
+    Drop heuristic clusters that carry the same information already shown
+    in exact-title duplicates.
+    Priority rule: if a cluster maps to the same duplicated-title group,
+    keep only the exact-title view.
+    """
+    if not clusters or not exact_title_groups:
+        return clusters
+
+    normalized_exact_groups: dict[str, set[str]] = {}
+    exact_key_sets: list[set[str]] = []
+    for raw_title, raw_keys in exact_title_groups.items():
+        title = str(raw_title or "").strip()
+        keys = {str(k).strip() for k in list(raw_keys or []) if str(k).strip()}
+        if len(keys) <= 1:
+            continue
+        if title:
+            normalized_exact_groups[title] = keys
+        exact_key_sets.append(keys)
+
+    if not exact_key_sets:
+        return clusters
+
+    deduped: list[SimilarityCluster] = []
+    for cluster in clusters:
+        cluster_keys = {
+            str(k).strip() for k in list(getattr(cluster, "keys", []) or []) if str(k).strip()
+        }
+        if len(cluster_keys) <= 1:
+            deduped.append(cluster)
+            continue
+
+        # Exact same group of issues already exists in "Por título".
+        if any(cluster_keys == exact_keys for exact_keys in exact_key_sets):
+            continue
+
+        # Same title and subset of its exact duplicated group => redundant.
+        rep_title = str(getattr(cluster, "summary", "") or "").strip()
+        rep_exact_keys = normalized_exact_groups.get(rep_title)
+        if rep_exact_keys and cluster_keys.issubset(rep_exact_keys):
+            continue
+
+        deduped.append(cluster)
+
+    return deduped
+
+
 def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
     key_to_extra: dict[str, tuple[float | None, str | None]] = {}
 
@@ -94,6 +146,7 @@ def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
         }
 
     top_titles: list[tuple[str, list[str]]] = []
+    title_groups: dict[str, list[str]] = {}
     if col_exists(df2, "summary") and col_exists(df2, "key"):
         title_groups = (
             df2[df2["summary"].astype(str).str.strip() != ""]
@@ -116,6 +169,7 @@ def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
     )
 
     clusters = find_similar_issue_clusters(df2, only_open=False)
+    clusters = _dedupe_heuristic_clusters(clusters=clusters, exact_title_groups=title_groups)
     heur_export = pd.DataFrame(
         [
             {
