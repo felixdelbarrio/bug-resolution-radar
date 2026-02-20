@@ -19,24 +19,22 @@ def _resolve_app_script() -> Path:
 
 
 def _runtime_home_for_binary() -> Path:
-    exe_dir = Path(sys.executable).resolve().parent
-    # macOS app bundle: <App>.app/Contents/MacOS/<exe>
-    if (
-        exe_dir.name == "MacOS"
-        and exe_dir.parent.name == "Contents"
-        and exe_dir.parent.parent.suffix.lower() == ".app"
-    ):
-        # Put config (.env, data/) next to the .app bundle, not inside it.
-        return exe_dir.parent.parent.parent
-    if exe_dir.name.lower() == "dist":
-        return exe_dir.parent
-    return exe_dir
+    # Use an OS-appropriate, user-writable directory so the app can persist
+    # config/data even when macOS applies App Translocation (read-only mount).
+    if sys.platform == "darwin":
+        base = Path("~/Library/Application Support").expanduser()
+    elif os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    return (base / "bug-resolution-radar").expanduser()
 
 
 def main() -> int:
     if getattr(sys, "frozen", False):
         runtime_home = _runtime_home_for_binary()
         os.environ.setdefault("BUG_RESOLUTION_RADAR_HOME", str(runtime_home))
+        runtime_home.mkdir(parents=True, exist_ok=True)
         os.chdir(runtime_home)
     script = _resolve_app_script()
     sys.argv = [

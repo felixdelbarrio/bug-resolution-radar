@@ -14,22 +14,85 @@ from dotenv import dotenv_values
 from pydantic import BaseModel
 
 
+def _default_user_config_home() -> Path:
+    """
+    Return an OS-appropriate, user-writable config directory.
+
+    We intentionally avoid writing next to the binary / .app bundle because:
+    - macOS App Translocation can mount the app read-only
+    - /Applications (and other install dirs) are often not writable
+    """
+    if sys.platform == "darwin":
+        base = Path("~/Library/Application Support").expanduser()
+    elif os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    return (base / "bug-resolution-radar").expanduser()
+
+
 def _runtime_home() -> Path:
     override = str(os.getenv("BUG_RESOLUTION_RADAR_HOME", "") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
     if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).resolve().parent
-        # Build artifacts commonly keep the binary in ./dist while config files sit one level up.
-        if exe_dir.name.lower() == "dist":
-            return exe_dir.parent
-        return exe_dir
+        # In frozen builds, always use a user-writable location (not inside the app bundle).
+        return _default_user_config_home().resolve()
     return Path(__file__).resolve().parents[2]
 
 
 DEFAULT_CONFIG_HOME = _runtime_home()
 ENV_PATH = DEFAULT_CONFIG_HOME / ".env"
 ENV_EXAMPLE_PATH = DEFAULT_CONFIG_HOME / ".env.example"
+
+
+def _candidate_env_example_paths() -> List[Path]:
+    out: List[Path] = []
+    out.append(ENV_EXAMPLE_PATH)
+
+    # Useful for local/dev runs (in case working dir differs).
+    try:
+        out.append(Path.cwd() / ".env.example")
+    except Exception:
+        pass
+
+    if getattr(sys, "frozen", False):
+        try:
+            exe = Path(sys.executable).resolve()
+            exe_dir = exe.parent
+            out.append(exe_dir / ".env.example")
+            out.append(exe_dir.parent / ".env.example")
+
+            # macOS app bundle: <App>.app/Contents/MacOS/<exe>
+            if (
+                sys.platform == "darwin"
+                and exe_dir.name == "MacOS"
+                and exe_dir.parent.name == "Contents"
+                and exe_dir.parent.parent.suffix.lower() == ".app"
+            ):
+                bundle_dir = exe_dir.parent.parent  # <App>.app
+                out.append(bundle_dir.parent / ".env.example")  # alongside .app
+                out.append(bundle_dir.parent.parent / ".env.example")  # bundle root (e.g. .../dist/..)
+        except Exception:
+            pass
+
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            try:
+                out.append(Path(meipass) / ".env.example")
+            except Exception:
+                pass
+
+    # De-dup preserving order.
+    seen: set[str] = set()
+    uniq: List[Path] = []
+    for path in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(path)
+    return uniq
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "México",
     "España",
@@ -209,14 +272,13 @@ class Settings(BaseModel):
 
 
 def ensure_env() -> None:
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not ENV_PATH.exists():
-        if ENV_EXAMPLE_PATH.exists():
-            ENV_PATH.write_text(
-                ENV_EXAMPLE_PATH.read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
-        else:
-            ENV_PATH.write_text("", encoding="utf-8")
+        example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
+        if example_path is not None:
+            ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
+            return
+        ENV_PATH.write_text("", encoding="utf-8")
 
 
 def load_settings() -> Settings:
@@ -234,6 +296,7 @@ def load_settings() -> Settings:
 
 
 def save_settings(settings: Settings) -> None:
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     data = settings.model_dump()
 
