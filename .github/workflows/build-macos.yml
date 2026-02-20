@@ -30,16 +30,6 @@ jobs:
           pip install -e .
           pip install pyinstaller
 
-      - name: Build executable with PyInstaller
-        run: |
-          EXTRA_ARGS=()
-          if [ -d src/bug_resolution_radar/ui/assets ]; then
-            EXTRA_ARGS+=(--add-data "src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets")
-          else
-            echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."
-          fi
-          pyinstaller --noconfirm --clean --onefile --name bug-resolution-radar --icon "assets/app_icon/bug-resolution-radar.png" --add-data "app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all bug_resolution_radar run_streamlit.py
-
       - name: Build macOS .app bundle (icon-friendly)
         run: |
           EXTRA_ARGS=()
@@ -48,13 +38,18 @@ jobs:
           else
             echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."
           fi
+          if [ -f .env.example ]; then
+            EXTRA_ARGS+=(--add-data ".env.example:.")
+          fi
+          if [ -f .streamlit/config.toml ]; then
+            EXTRA_ARGS+=(--add-data ".streamlit/config.toml:.streamlit")
+          fi
           pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --add-data "app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all bug_resolution_radar run_streamlit.py
 
       - name: Prepare distributable bundle
         run: |
           BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"
           mkdir -p "$BUNDLE_DIR/dist"
-          cp dist/bug-resolution-radar "$BUNDLE_DIR/dist/bug-resolution-radar"
           if [ -d dist_app/bug-resolution-radar.app ]; then
             cp -R dist_app/bug-resolution-radar.app "$BUNDLE_DIR/dist/bug-resolution-radar.app"
           fi

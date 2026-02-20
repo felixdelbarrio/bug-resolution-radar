@@ -27,8 +27,6 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 def _set_workspace_mode(mode: str) -> None:
     """Switch top-level workspace mode and reset transient dashboard picker state."""
     mode_txt = str(mode or "").strip().lower()
-    if mode_txt == "report":
-        st.session_state["__report_autorun_requested"] = True
     st.session_state["workspace_mode"] = mode_txt
 
 

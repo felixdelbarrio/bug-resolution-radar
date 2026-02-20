@@ -72,7 +72,9 @@ def _candidate_env_example_paths() -> List[Path]:
             ):
                 bundle_dir = exe_dir.parent.parent  # <App>.app
                 out.append(bundle_dir.parent / ".env.example")  # alongside .app
-                out.append(bundle_dir.parent.parent / ".env.example")  # bundle root (e.g. .../dist/..)
+                out.append(
+                    bundle_dir.parent.parent / ".env.example"
+                )  # bundle root (e.g. .../dist/..)
         except Exception:
             pass
 
@@ -93,6 +95,8 @@ def _candidate_env_example_paths() -> List[Path]:
         seen.add(key)
         uniq.append(path)
     return uniq
+
+
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "México",
     "España",
@@ -118,6 +122,20 @@ def _decode_env_multiline(v: str) -> str:
 def _encode_env_multiline(v: str) -> str:
     # Normaliza y escapa saltos de línea
     return v.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+
+
+def _strip_legacy_inline_comment(value: object) -> str:
+    """
+    Backwards-compatibility: older .env.example used inline comments like:
+      THEME=light  # light|dark
+
+    python-dotenv may treat the comment as part of the value, so we strip it
+    for specific enum-like keys.
+    """
+    txt = str(value or "").strip()
+    if " #" in txt:
+        txt = txt.split(" #", 1)[0].strip()
+    return txt
 
 
 def _coerce_str(value: Any) -> str:
@@ -283,6 +301,10 @@ def ensure_env() -> None:
 
 def load_settings() -> Settings:
     vals = {k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None}
+
+    for key in ("THEME", "JIRA_BROWSER"):
+        if key in vals:
+            vals[key] = _strip_legacy_inline_comment(vals[key])
 
     # Decodificar multilínea
     if "JIRA_JQL" in vals:

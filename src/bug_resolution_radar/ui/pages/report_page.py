@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import base64
-import json
-
 import pandas as pd
 import streamlit as st
-from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.analysis_window import (
     effective_analysis_lookback_months,
@@ -142,44 +138,8 @@ def _render_alert(country: str, source_id: str) -> None:
             st.rerun()
 
 
-def _auto_download(result: ExecutiveReportResult) -> None:
-    payload = base64.b64encode(result.content).decode("ascii")
-    meta = json.dumps(
-        {
-            "b64": payload,
-            "file_name": result.file_name,
-            "mime": _PPT_MIME,
-        }
-    )
-    components_html(
-        f"""
-        <script>
-          (function() {{
-            const data = {meta};
-            const byteChars = atob(data.b64);
-            const bytes = new Uint8Array(byteChars.length);
-            for (let i = 0; i < byteChars.length; i++) {{
-              bytes[i] = byteChars.charCodeAt(i);
-            }}
-            const blob = new Blob([bytes], {{ type: data.mime }});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = data.file_name;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {{ URL.revokeObjectURL(url); a.remove(); }}, 400);
-          }})();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
-
-
 def render(settings: Settings) -> None:
     """Render one-click executive report generation for selected scope + active filters."""
-    auto_trigger = bool(st.session_state.pop("__report_autorun_requested", False))
     country, source_id = _current_scope()
     st.subheader("Informe PPT")
     st.caption(
@@ -214,7 +174,13 @@ def render(settings: Settings) -> None:
     )
     _render_alert(country, source_id)
 
-    run_generation = bool(auto_trigger)
+    run_generation = st.button(
+        "Generar informe",
+        key=f"btn_generate_scope_ppt_{_scope_key(country, source_id)}",
+        type="primary",
+        width="content",
+        help="Genera el PPT y habilita la descarga manual en esta misma pantalla.",
+    )
 
     if run_generation:
         try:
@@ -243,15 +209,15 @@ def render(settings: Settings) -> None:
                     assignee_filters=assignee_filters,
                     dff_override=ctx.dff,
                     open_df_override=ctx.open_df,
+                    scoped_source_df_override=scoped_df,
                 )
 
-            _auto_download(result)
             _store_alert(
                 country=country,
                 source_id=source_id,
                 kind="success",
                 message=(
-                    f"Informe generado y descarga lanzada: {result.slide_count} slides · "
+                    f"Informe generado: {result.slide_count} slides · "
                     f"{result.total_issues} issues ({result.open_issues} abiertas)."
                 ),
                 result=result,
