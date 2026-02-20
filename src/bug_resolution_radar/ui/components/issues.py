@@ -9,6 +9,7 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.status_semantics import effective_closed_mask
 from bug_resolution_radar.ui.common import (
     chip_palette_for_color,
     chip_style_from_color,
@@ -335,7 +336,7 @@ def prepare_issue_cards_df(dff: pd.DataFrame, *, max_cards: int) -> pd.DataFrame
     )
 
     card_df = safe_df.copy(deep=False)
-    card_df["__is_open"] = resolved.isna()
+    card_df["__is_open"] = ~effective_closed_mask(card_df)
     card_df["__open_age_days"] = (
         ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0).fillna(0.0)
     )

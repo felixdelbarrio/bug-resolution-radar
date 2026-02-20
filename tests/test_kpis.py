@@ -117,3 +117,33 @@ def test_kpis_top_open_table_is_sorted_by_frequency(monkeypatch: Any) -> None:
     assert not top.empty
     assert top.iloc[0]["summary"] == "timeout pago"
     assert int(top.iloc[0]["open_count"]) == 2
+
+
+def test_kpis_treats_accepted_without_resolved_as_closed() -> None:
+    now = datetime.now(timezone.utc)
+    df = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Bug abierto",
+                "status": "New",
+                "priority": "High",
+                "created": now - timedelta(days=3),
+                "updated": now - timedelta(days=1),
+                "resolved": pd.NaT,
+            },
+            {
+                "key": "A-2",
+                "summary": "Bug en accepted",
+                "status": "Accepted",
+                "priority": "Medium",
+                "created": now - timedelta(days=5),
+                "updated": now - timedelta(days=1),
+                "resolved": pd.NaT,
+            },
+        ]
+    )
+    k = compute_kpis(df, settings=Settings())
+    assert k["issues_total"] == 2
+    assert k["issues_open"] == 1
+    assert k["issues_closed"] == 1

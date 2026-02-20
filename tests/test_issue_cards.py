@@ -40,3 +40,23 @@ def test_prepare_issue_cards_df_respects_max_cards() -> None:
     )
     out = prepare_issue_cards_df(df, max_cards=7)
     assert len(out) == 7
+
+
+def test_prepare_issue_cards_df_treats_accepted_as_closed_without_resolved() -> None:
+    df = pd.DataFrame(
+        {
+            "key": ["A-1", "A-2"],
+            "summary": ["open", "accepted sin resolved"],
+            "status": ["New", "Accepted"],
+            "priority": ["High", "Medium"],
+            "assignee": ["ana", "ana"],
+            "created": ["2025-01-01", "2025-01-01"],
+            "updated": ["2025-01-10", "2025-01-10"],
+            "resolved": [pd.NaT, pd.NaT],
+            "url": ["u1", "u2"],
+        }
+    )
+    out = prepare_issue_cards_df(df, max_cards=10)
+    is_open_by_key = dict(zip(out["key"].astype(str), out["__is_open"].astype(bool)))
+    assert is_open_by_key["A-1"] is True
+    assert is_open_by_key["A-2"] is False

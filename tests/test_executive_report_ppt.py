@@ -16,6 +16,7 @@ from bug_resolution_radar.reports.executive_ppt import (
     _ChartSection,
     _fig_to_png,
     _is_finalist_status,
+    _open_closed,
     _select_actions_for_final_slide,
     _soften_insight_tone,
     _urgency_from_score,
@@ -273,7 +274,7 @@ def test_fig_to_png_renders_open_priority_pie() -> None:
     assert len(image) > 1_000
 
 
-def test_build_sections_creates_resolution_fallback_figure_when_no_closed_data() -> None:
+def test_build_sections_skips_resolution_chart_when_no_closed_data() -> None:
     dff = pd.DataFrame(
         [
             {
@@ -298,8 +299,7 @@ def test_build_sections_creates_resolution_fallback_figure_when_no_closed_data()
 
     sections = _build_sections(Settings(DATA_PATH="unused.json"), dff=dff, open_df=open_df)
     by_id = {sec.chart_id: sec for sec in sections}
-    assert "resolution_hist" in by_id
-    assert by_id["resolution_hist"].figure is not None
+    assert "resolution_hist" not in by_id
 
 
 def test_select_actions_for_final_slide_returns_4_when_text_fits() -> None:
@@ -385,3 +385,16 @@ def test_is_finalist_status_detects_terminal_flow_states() -> None:
     assert _is_finalist_status("Ready to deploy")
     assert _is_finalist_status("Deployed")
     assert not _is_finalist_status("Analysing")
+
+
+def test_open_closed_treats_accepted_without_resolved_as_closed() -> None:
+    df = pd.DataFrame(
+        {
+            "key": ["A-1", "A-2", "A-3"],
+            "status": ["New", "Accepted", "Blocked"],
+            "resolved": [pd.NaT, pd.NaT, "2026-02-01T00:00:00+00:00"],
+        }
+    )
+    open_df, closed_df = _open_closed(df)
+    assert set(open_df["key"].astype(str).tolist()) == {"A-1"}
+    assert set(closed_df["key"].astype(str).tolist()) == {"A-2", "A-3"}

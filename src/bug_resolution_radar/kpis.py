@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.express as px
 
 from .config import Settings
+from .status_semantics import effective_closed_mask
 
 _DT_COLS = ("created", "updated", "resolved")
 
@@ -88,7 +89,8 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
 
     created_notna = created.notna()
     resolved_notna = resolved.notna()
-    open_mask = ~resolved_notna
+    closed_mask = effective_closed_mask(work_df)
+    open_mask = ~closed_mask
     open_now_total = int(open_mask.sum())
     priority = work_df["priority"].fillna("").astype(str) if has_priority else pd.Series(dtype=str)
 

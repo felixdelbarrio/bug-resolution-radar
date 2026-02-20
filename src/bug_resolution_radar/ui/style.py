@@ -122,9 +122,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         tab_soft_bg = "#0A2E67"
         tab_soft_border = "rgba(133,200,255,0.44)"
         tab_soft_text = "#D8E8FF"
+        tab_nav_active_text = "#85C8FF"
         tab_active_bg = "#004481"
         tab_active_border = "#53A9EF"
         tab_active_text = "#FFFFFF"
+        icon_filter = "brightness(0) invert(1)"
         action_link = "#85C8FF"
         action_link_hover = "#8BE1E9"
     else:
@@ -136,9 +138,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         tab_soft_bg = "#EEF3FB"
         tab_soft_border = "#C8D6E8"
         tab_soft_text = "#5C6C84"
+        tab_nav_active_text = "#0051F1"
         tab_active_bg = "#004481"
         tab_active_border = "#53A9EF"
         tab_active_text = "#FFFFFF"
+        icon_filter = "brightness(0) invert(1)"
         action_link = "#0051F1"
         action_link_hover = "#004481"
 
@@ -161,9 +165,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-tab-soft-bg: {tab_soft_bg};
         --bbva-tab-soft-border: {tab_soft_border};
         --bbva-tab-soft-text: {tab_soft_text};
+        --bbva-tab-nav-active: {tab_nav_active_text};
         --bbva-tab-active-bg: {tab_active_bg};
         --bbva-tab-active-border: {tab_active_border};
         --bbva-tab-active-text: {tab_active_text};
+        --bbva-icon-filter: {icon_filter};
         --bbva-goal-green: {palette.serene_dark_blue};
         --bbva-goal-green-bg: {palette.serene_blue};
         --bbva-action-link: {action_link};
@@ -654,7 +660,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background-color: transparent !important;
             border: 0 !important;
             border-bottom: 2px solid var(--bbva-primary) !important;
-            color: var(--bbva-primary) !important;
+            color: var(--bbva-tab-nav-active) !important;
           }
           .st-key-workspace_nav_tabs .stButton > button[kind="secondary"],
           .st-key-workspace_nav_tabs [data-testid="baseButton-secondary"],
@@ -675,7 +681,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
           }
 
-          .st-key-workspace_nav_actions .stButton > button,
+          .st-key-workspace_nav_actions button,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"],
           .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button {
             min-height: 2.02rem !important;
             min-width: 2.02rem !important;
@@ -688,40 +695,49 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background-color: var(--bbva-tab-soft-bg) !important;
             color: var(--bbva-tab-soft-text) !important;
             box-shadow: none !important;
+            transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease !important;
           }
-          .st-key-workspace_nav_actions .stButton > button[kind="primary"],
+          .st-key-workspace_nav_actions button[kind="primary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"],
           .st-key-workspace_nav_actions [data-testid="baseButton-primary"] > button {
             border-color: var(--bbva-tab-active-border) !important;
             background: var(--bbva-tab-active-bg) !important;
             background-color: var(--bbva-tab-active-bg) !important;
             color: var(--bbva-tab-active-text) !important;
           }
-          .st-key-workspace_nav_actions .stButton > button[kind="secondary"],
+          .st-key-workspace_nav_actions button[kind="secondary"],
+          .st-key-workspace_nav_actions [data-testid="baseButton-secondary"],
           .st-key-workspace_nav_actions [data-testid="baseButton-secondary"] > button {
             border-color: var(--bbva-tab-soft-border) !important;
             background: var(--bbva-tab-soft-bg) !important;
             background-color: var(--bbva-tab-soft-bg) !important;
             color: var(--bbva-tab-soft-text) !important;
           }
-          .st-key-workspace_nav_actions .stButton > button:hover,
+          .st-key-workspace_nav_actions button:hover,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:hover,
           .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:hover {
             border-color: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-tab-soft-border)) !important;
             background: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
             background-color: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-tab-soft-bg)) !important;
           }
-          .st-key-workspace_nav_actions .stButton > button:focus,
-          .st-key-workspace_nav_actions .stButton > button:focus-visible,
+          .st-key-workspace_nav_actions button:focus,
+          .st-key-workspace_nav_actions button:focus-visible,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:focus,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:focus-visible,
           .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:focus,
           .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:focus-visible {
             outline: none !important;
             box-shadow: none !important;
           }
-          .st-key-workspace_nav_actions .stButton > button:active,
+          .st-key-workspace_nav_actions button:active,
+          .st-key-workspace_nav_actions [data-testid^="baseButton-"]:active,
           .st-key-workspace_nav_actions [data-testid^="baseButton-"] > button:active {
             transform: none !important;
           }
-          .st-key-workspace_nav_actions .stButton > button[kind="secondary"]:focus,
-          .st-key-workspace_nav_actions .stButton > button[kind="secondary"]:active,
+          .st-key-workspace_nav_actions button[kind="secondary"]:focus,
+          .st-key-workspace_nav_actions button[kind="secondary"]:active,
+          .st-key-workspace_nav_actions [data-testid="baseButton-secondary"]:focus,
+          .st-key-workspace_nav_actions [data-testid="baseButton-secondary"]:active,
           .st-key-workspace_nav_actions [data-testid="baseButton-secondary"] > button:focus,
           .st-key-workspace_nav_actions [data-testid="baseButton-secondary"] > button:active {
             border-color: var(--bbva-tab-soft-border) !important;
@@ -729,8 +745,10 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background-color: var(--bbva-tab-soft-bg) !important;
             color: var(--bbva-tab-soft-text) !important;
           }
-          .st-key-workspace_nav_actions .stButton > button[kind="primary"]:focus,
-          .st-key-workspace_nav_actions .stButton > button[kind="primary"]:active,
+          .st-key-workspace_nav_actions button[kind="primary"]:focus,
+          .st-key-workspace_nav_actions button[kind="primary"]:active,
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"]:focus,
+          .st-key-workspace_nav_actions [data-testid="baseButton-primary"]:active,
           .st-key-workspace_nav_actions [data-testid="baseButton-primary"] > button:focus,
           .st-key-workspace_nav_actions [data-testid="baseButton-primary"] > button:active {
             border-color: var(--bbva-tab-active-border) !important;
@@ -739,72 +757,68 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-tab-active-text) !important;
           }
           /* Keep top-right actions icon-only (avoid label text bleed/overlap). */
-          .st-key-workspace_btn_report .stButton > button,
-          .st-key-workspace_btn_ingest .stButton > button,
-          .st-key-workspace_btn_theme .stButton > button,
-          .st-key-workspace_btn_config .stButton > button,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button {
+          .st-key-workspace_btn_slot_report button,
+          .st-key-workspace_btn_slot_ingest button,
+          .st-key-workspace_btn_slot_theme button,
+          .st-key-workspace_btn_slot_config button,
+          .st-key-workspace_btn_report button,
+          .st-key-workspace_btn_ingest button,
+          .st-key-workspace_btn_theme button,
+          .st-key-workspace_btn_config button {
             font-size: 0 !important;
             line-height: 0 !important;
             letter-spacing: 0 !important;
-            text-indent: -9999px !important;
+            text-indent: 0 !important;
             overflow: hidden !important;
             position: relative !important;
+            color: inherit !important;
           }
-          .st-key-workspace_btn_report .stButton > button > div,
-          .st-key-workspace_btn_ingest .stButton > button > div,
-          .st-key-workspace_btn_theme .stButton > button > div,
-          .st-key-workspace_btn_config .stButton > button > div,
-          .st-key-workspace_btn_report .stButton > button > *,
-          .st-key-workspace_btn_ingest .stButton > button > *,
-          .st-key-workspace_btn_theme .stButton > button > *,
-          .st-key-workspace_btn_config .stButton > button > *,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button > div,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button > div,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button > div,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button > div {
-            display: none !important;
+          .st-key-workspace_btn_slot_report button > *,
+          .st-key-workspace_btn_slot_ingest button > *,
+          .st-key-workspace_btn_slot_theme button > *,
+          .st-key-workspace_btn_slot_config button > *,
+          .st-key-workspace_btn_report button > *,
+          .st-key-workspace_btn_ingest button > *,
+          .st-key-workspace_btn_theme button > *,
+          .st-key-workspace_btn_config button > * {
+            opacity: 0 !important;
           }
-          .st-key-workspace_btn_report .stButton > button::before,
-          .st-key-workspace_btn_ingest .stButton > button::before,
-          .st-key-workspace_btn_theme .stButton > button::before,
-          .st-key-workspace_btn_config .stButton > button::before,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button::before,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button::before,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button::before,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button::before {
+          .st-key-workspace_btn_slot_report button::before,
+          .st-key-workspace_btn_slot_ingest button::before,
+          .st-key-workspace_btn_slot_theme button::before,
+          .st-key-workspace_btn_slot_config button::before,
+          .st-key-workspace_btn_report button::before,
+          .st-key-workspace_btn_ingest button::before,
+          .st-key-workspace_btn_theme button::before,
+          .st-key-workspace_btn_config button::before {
             content: "" !important;
             display: block !important;
             width: 1.06rem !important;
             height: 1.06rem !important;
-            background-repeat: no-repeat !important;
-            background-position: center !important;
-            background-size: contain !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: var(--bbva-btn-icon) !important;
+            mask-image: var(--bbva-btn-icon) !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
             position: absolute !important;
             left: 50% !important;
             top: 50% !important;
             transform: translate(-50%, -50%) !important;
             text-indent: 0 !important;
+            opacity: 1 !important;
           }
-          .st-key-workspace_btn_report .stButton > button::before,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button::before {
-            background-image: url("__ICON_REPORT__") !important;
-          }
-          .st-key-workspace_btn_ingest .stButton > button::before,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button::before {
-            background-image: url("__ICON_INGEST__") !important;
-          }
-          .st-key-workspace_btn_theme .stButton > button::before,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button::before {
-            background-image: url("__ICON_THEME__") !important;
-          }
-          .st-key-workspace_btn_config .stButton > button::before,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button::before {
-            background-image: url("__ICON_CONFIG__") !important;
-          }
+          .st-key-workspace_btn_slot_report button,
+          .st-key-workspace_btn_report button { --bbva-btn-icon: url("__ICON_REPORT__"); }
+          .st-key-workspace_btn_slot_ingest button,
+          .st-key-workspace_btn_ingest button { --bbva-btn-icon: url("__ICON_INGEST__"); }
+          .st-key-workspace_btn_slot_theme button,
+          .st-key-workspace_btn_theme button { --bbva-btn-icon: url("__ICON_THEME__"); }
+          .st-key-workspace_btn_slot_config button,
+          .st-key-workspace_btn_config button { --bbva-btn-icon: url("__ICON_CONFIG__"); }
 
           /* Download button: unified pill style across CSV/HTML exports */
           .stDownloadButton {

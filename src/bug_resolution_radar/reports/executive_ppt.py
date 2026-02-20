@@ -32,6 +32,7 @@ from bug_resolution_radar.design_tokens import (
     BBVA_LIGHT,
 )
 from bug_resolution_radar.kpis import compute_kpis
+from bug_resolution_radar.status_semantics import effective_closed_mask, is_finalist_status
 from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
 from bug_resolution_radar.ui.insights.engine import (
@@ -138,16 +139,6 @@ CHART_BUSINESS_SUBTITLES: Dict[str, str] = {
     "timeseries": "Cómo evoluciona la carga semana a semana",
     "resolution_hist": "Dónde se alarga el cierre de incidencias",
 }
-FINALIST_STATUS_TOKENS: Tuple[str, ...] = (
-    "accepted",
-    "ready to deploy",
-    "deployed",
-    "closed",
-    "resolved",
-    "done",
-    "cancelled",
-    "canceled",
-)
 
 
 @dataclass(frozen=True)
@@ -262,10 +253,7 @@ def _to_dt_naive(series: pd.Series | None) -> pd.Series:
 
 
 def _is_finalist_status(value: object) -> bool:
-    token = str(value or "").strip().lower()
-    if not token:
-        return False
-    return any(t in token for t in FINALIST_STATUS_TOKENS)
+    return is_finalist_status(value)
 
 
 def _dominant_operational_status(open_df: pd.DataFrame) -> str:
@@ -339,12 +327,9 @@ def _apply_report_filters(df: pd.DataFrame, filters: _FilterSnapshot) -> pd.Data
 def _open_closed(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if df.empty:
         return pd.DataFrame(), pd.DataFrame()
-    if "resolved" not in df.columns:
-        return df.copy(deep=False), pd.DataFrame()
-
-    resolved = _to_dt_naive(df["resolved"])
-    open_df = df.loc[resolved.isna()].copy(deep=False)
-    closed_df = df.loc[resolved.notna()].copy(deep=False)
+    closed_mask = effective_closed_mask(df)
+    open_df = df.loc[~closed_mask].copy(deep=False)
+    closed_df = df.loc[closed_mask].copy(deep=False)
     return open_df, closed_df
 
 
@@ -543,16 +528,8 @@ def _build_sections(
         insight_pack = build_trend_insight_pack(chart_id, dff=dff, open_df=open_df)
         figure = spec.render(chart_ctx)
         if figure is None:
-            reason = "No hay datos suficientes para este gráfico con el filtro actual."
-            if insight_pack.cards:
-                first_body = str(insight_pack.cards[0].body or "").strip()
-                if first_body:
-                    reason = _clip_text(_soften_insight_tone(first_body), max_len=140)
-            figure = _fallback_chart_figure(
-                title=spec.title,
-                subtitle=CHART_BUSINESS_SUBTITLES.get(chart_id, spec.subtitle),
-                reason=reason,
-            )
+            # Skip chart section when scope/filter has insufficient data.
+            continue
         sections.append(
             _ChartSection(
                 chart_id=chart_id,
@@ -908,30 +885,6 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             return cast(bytes, image)
         except Exception:
             return None
-
-
-def _fallback_chart_figure(*, title: str, subtitle: str, reason: str) -> go.Figure:
-    fig = go.Figure()
-    fig.update_layout(
-        template="plotly_white",
-        title=dict(text=_clip_text(f"{title} · {subtitle}", max_len=100), x=0.02, xanchor="left"),
-        margin=dict(l=40, r=40, t=80, b=40),
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-    )
-    fig.add_annotation(
-        x=0.5,
-        y=0.52,
-        xref="paper",
-        yref="paper",
-        text=_clip_text(reason, max_len=170),
-        showarrow=False,
-        font=dict(family=FONT_BODY_MEDIUM, size=24, color=f"#{PALETTE['muted']}"),
-        align="center",
-    )
-    return fig
 
 
 def _add_bg(slide: Any, color_hex: str) -> None:
@@ -1450,6 +1403,46 @@ def _top_cards(pack: TrendInsightPack, *, limit: int = 3) -> List[ActionInsight]
     return cards[:limit]
 
 
+def _scaled_font(base: float, *, scale: float, min_size: float) -> float:
+    return max(min_size, float(base) * max(0.70, min(1.0, float(scale))))
+
+
+def _chart_insights_font_scale(
+    *,
+    tip_text: str,
+    context_text: str,
+    to_be_context_text: str,
+    cards: Sequence[ActionInsight],
+) -> float:
+    # Side panel available text height (~5.58 in - paddings) in points.
+    max_height_pt = 355.0
+    estimate = 20.0
+    estimate += 30.0  # As-is heading
+    estimate += (
+        _estimate_wrapped_lines(f"Mensaje clave: {tip_text}", max_chars_per_line=43) * 16.6 + 10.0
+    )
+    estimate += _estimate_wrapped_lines(context_text, max_chars_per_line=47) * 14.6 + 8.0
+    estimate += 30.0  # To-Be heading
+    estimate += _estimate_wrapped_lines(to_be_context_text, max_chars_per_line=47) * 14.0 + 8.0
+
+    for idx_card, card in enumerate(list(cards or []), start=1):
+        urgency_label, _ = _urgency_from_score(float(card.score))
+        title_line = (
+            f"{idx_card}. [{urgency_label.upper()}] "
+            f"{_clip_text(_soften_insight_tone(card.title), max_len=68)}"
+        )
+        body_line = _clip_text(
+            _soften_insight_tone(f"Recomendación de acción: {str(card.body or '').strip()}"),
+            max_len=178,
+        )
+        estimate += _estimate_wrapped_lines(title_line, max_chars_per_line=44) * 15.2 + 4.0
+        estimate += _estimate_wrapped_lines(body_line, max_chars_per_line=49) * 13.8 + 6.0
+
+    if estimate <= max_height_pt:
+        return 1.0
+    return max(0.72, max_height_pt / estimate)
+
+
 def _add_chart_insight_slide(
     prs: Any,
     *,
@@ -1550,13 +1543,14 @@ def _add_chart_insight_slide(
         if str(getattr(m, "label", "") or "").strip()
         and str(getattr(m, "value", "") or "").strip() not in {"", "—"}
     ]
+    cards = _top_cards(section.insight_pack, limit=2)
 
     p1 = itf.paragraphs[0]
     run1 = p1.add_run()
     run1.text = "As-is"
+    p1.alignment = PP_ALIGN.CENTER
     run1.font.name = FONT_HEAD
     run1.font.bold = True
-    run1.font.size = Pt(24)
     run1.font.color.rgb = _rgb(PALETTE["navy"])
 
     tip = _clip_text(
@@ -1565,6 +1559,32 @@ def _add_chart_insight_slide(
         ),
         max_len=170,
     )
+
+    if len(metric_items) >= 2:
+        to_be_ctx_text = _clip_text(
+            f"Dato de contexto: {metric_items[1].label}: {metric_items[1].value}.",
+            max_len=120,
+        )
+    else:
+        to_be_ctx_text = f"Dato de contexto: {len(cards)} acciones priorizadas para esta vista."
+
+    context_detail = _clip_text(
+        f"{CHART_BUSINESS_SUBTITLES.get(section.chart_id, section.subtitle)}. "
+        + (
+            f"{metric_items[0].label}: {metric_items[0].value}."
+            if metric_items
+            else "Las cifras más relevantes están en la banda KPI superior para facilitar la lectura."
+        ),
+        max_len=188,
+    )
+    panel_scale = _chart_insights_font_scale(
+        tip_text=tip,
+        context_text=context_detail,
+        to_be_context_text=to_be_ctx_text,
+        cards=cards,
+    )
+    run1.font.size = Pt(_scaled_font(24.0, scale=panel_scale, min_size=18.0))
+
     p_tip = itf.add_paragraph()
     p_tip.space_before = Pt(2)
     p_tip.space_after = Pt(8)
@@ -1572,7 +1592,7 @@ def _add_chart_insight_slide(
         p_tip,
         f"**Mensaje clave:** {tip}",
         font_name=FONT_BODY_BOOK,
-        font_size=14.4,
+        font_size=_scaled_font(14.4, scale=panel_scale, min_size=11.0),
         color_hex=PALETTE["ink"],
     )
 
@@ -1581,29 +1601,20 @@ def _add_chart_insight_slide(
     p_context.space_after = Pt(6)
     _set_rich_text(
         p_context,
-        _clip_text(
-            f"**Por qué importa:** {CHART_BUSINESS_SUBTITLES.get(section.chart_id, section.subtitle)}. "
-            + (
-                f"**Dato de contexto:** {metric_items[0].label}: {metric_items[0].value}."
-                if metric_items
-                else "Las cifras más relevantes están en la banda KPI superior para facilitar la lectura."
-            ),
-            max_len=188,
-        ),
+        f"**Por qué importa:** {context_detail}",
         font_name=FONT_BODY_BOOK,
-        font_size=12.8,
+        font_size=_scaled_font(12.8, scale=panel_scale, min_size=10.0),
         color_hex=PALETTE["muted"],
     )
 
-    cards = _top_cards(section.insight_pack, limit=2)
-
     p_actions = itf.add_paragraph()
     p_actions.text = "To-Be"
+    p_actions.alignment = PP_ALIGN.CENTER
     p_actions.space_before = Pt(4)
     p_actions.space_after = Pt(2)
     p_actions.font.name = FONT_HEAD
     p_actions.font.bold = True
-    p_actions.font.size = Pt(24)
+    p_actions.font.size = Pt(_scaled_font(24.0, scale=panel_scale, min_size=18.0))
     p_actions.font.color.rgb = _rgb(PALETTE["navy"])
 
     p_to_be_ctx = itf.add_paragraph()
@@ -1612,20 +1623,17 @@ def _add_chart_insight_slide(
     if len(metric_items) >= 2:
         _set_rich_text(
             p_to_be_ctx,
-            _clip_text(
-                f"**Dato de contexto:** {metric_items[1].label}: {metric_items[1].value}.",
-                max_len=120,
-            ),
+            f"**Dato de contexto:** {_clip_text(to_be_ctx_text.replace('Dato de contexto: ', ''), max_len=112)}",
             font_name=FONT_BODY_BOOK,
-            font_size=12.6,
+            font_size=_scaled_font(12.6, scale=panel_scale, min_size=10.0),
             color_hex=PALETTE["muted"],
         )
     else:
         _set_rich_text(
             p_to_be_ctx,
-            f"**Dato de contexto:** {len(cards)} acciones priorizadas para esta vista.",
+            f"**Dato de contexto:** {_clip_text(to_be_ctx_text.replace('Dato de contexto: ', ''), max_len=112)}",
             font_name=FONT_BODY_BOOK,
-            font_size=12.6,
+            font_size=_scaled_font(12.6, scale=panel_scale, min_size=10.0),
             color_hex=PALETTE["muted"],
         )
 
@@ -1634,7 +1642,7 @@ def _add_chart_insight_slide(
         p_none.text = "No se detectaron acciones concretas en este corte."
         p_none.space_after = Pt(4)
         p_none.font.name = FONT_BODY_BOOK
-        p_none.font.size = Pt(12)
+        p_none.font.size = Pt(_scaled_font(12.0, scale=panel_scale, min_size=10.0))
         p_none.font.color.rgb = _rgb(PALETTE["muted"])
 
     for idx_card, card in enumerate(cards, start=1):
@@ -1648,21 +1656,21 @@ def _add_chart_insight_slide(
         run_num.text = f"{idx_card}. "
         run_num.font.name = FONT_BODY_MEDIUM
         run_num.font.bold = True
-        run_num.font.size = Pt(13.2)
+        run_num.font.size = Pt(_scaled_font(13.2, scale=panel_scale, min_size=10.8))
         run_num.font.color.rgb = _rgb(PALETTE["ink"])
 
         run_tag = p_title.add_run()
         run_tag.text = f"[{urgency_label.upper()}] "
         run_tag.font.name = FONT_BODY_MEDIUM
         run_tag.font.bold = True
-        run_tag.font.size = Pt(11.8)
+        run_tag.font.size = Pt(_scaled_font(11.8, scale=panel_scale, min_size=9.8))
         run_tag.font.color.rgb = _rgb(urgency_txt)
 
         run_title = p_title.add_run()
         run_title.text = _clip_text(_soften_insight_tone(card.title), max_len=68)
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
-        run_title.font.size = Pt(14.2)
+        run_title.font.size = Pt(_scaled_font(14.2, scale=panel_scale, min_size=11.2))
         run_title.font.color.rgb = _rgb(PALETTE["ink"])
 
         p = itf.add_paragraph()
@@ -1673,7 +1681,7 @@ def _add_chart_insight_slide(
                 _soften_insight_tone(f"**Recomendación de acción:** {card.body}"), max_len=178
             ),
             font_name=FONT_BODY_BOOK,
-            font_size=13.0,
+            font_size=_scaled_font(13.0, scale=panel_scale, min_size=10.2),
             color_hex=PALETTE["muted"],
         )
 

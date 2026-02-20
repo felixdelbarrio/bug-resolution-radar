@@ -4,12 +4,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.security import mask_secret, safe_log_text
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     flow_signal_color_map,
+    open_issues_only,
     priority_color,
     priority_color_map,
     status_color,
@@ -149,6 +152,18 @@ def test_goal_state_chip_uses_stronger_fill() -> None:
     assert "background:#ECE6FF" in deployed_style
     assert "color:#5B3FD0" in deployed_style
     assert "rgba(76,175,80,0.160)" in accepted_style
+
+
+def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:
+    df = pd.DataFrame(
+        {
+            "key": ["A-1", "A-2", "A-3"],
+            "status": ["New", "Accepted", "Blocked"],
+            "resolved": [pd.NaT, pd.NaT, "2025-01-03T00:00:00+00:00"],
+        }
+    )
+    out = open_issues_only(df)
+    assert out["key"].astype(str).tolist() == ["A-1"]
 
 
 def test_multi_country_sources_parsing_and_ids() -> None:

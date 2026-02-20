@@ -421,7 +421,7 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
                 title="Sin capacidad de salida visible",
                 body=(
                     "No hay cierres suficientes en 30 dias para estimar vaciado. "
-                    "La prioridad ejecutiva es desbloquear el tramo final del flujo."
+                    "La prioridad de gestion es desbloquear el tramo final del flujo."
                 ),
                 score=28.0,
             )
@@ -563,7 +563,7 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
 
     tip: str | None
     if ratio_close_entry < 1.0:
-        tip = "Palanca ejecutiva: alinear compromiso semanal de cierres con entrada real para evitar crecimiento estructural."
+        tip = "Palanca de gestion: alinear compromiso semanal de cierres con entrada real para evitar crecimiento estructural."
     elif ratio_close_entry > 1.1:
         tip = (
             "Momento favorable: usar el superavit de cierre para recortar deuda de mas de 30 dias."
@@ -693,7 +693,7 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                         title="Criticas bloqueadas en entrada",
                         body=(
                             f"{early_old} High/Highest llevan mas de 7 dias en estados iniciales. "
-                            "Alinear diagnostico y decision ejecutiva evitara envejecimiento adicional."
+                            "Alinear diagnostico y decision de gestion evitara envejecimiento adicional."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                         status_filters=list(TRIAGE_STATUS_FILTERS),
@@ -1029,7 +1029,7 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                         title="Criticas con antiguedad elevada",
                         body=(
                             f"{crit_old} High/Highest superan 14 dias de antiguedad. "
-                            "Conviene forzar decision ejecutiva de desbloqueo o cierre."
+                            "Conviene forzar decision de gestion de desbloqueo o cierre."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                         score=20.0 + float(crit_old),

@@ -303,41 +303,49 @@ def _render_workspace_header() -> None:
             b_rep, b_ing, b_theme, b_cfg = st.columns(4, gap="small")
             # Keep labels visually empty: icons are injected via CSS and tooltips provide semantics.
             icon_label = "\u00a0"
-            b_rep.button(
-                icon_label,
-                key="workspace_btn_report",
-                type="primary" if mode == "report" else "secondary",
-                width="stretch",
-                help="Informe PPT",
-                on_click=_set_workspace_mode,
-                args=("report",),
-            )
-            b_ing.button(
-                icon_label,
-                key="workspace_btn_ingest",
-                type="primary" if mode == "ingest" else "secondary",
-                width="stretch",
-                help="Ingesta",
-                on_click=_set_workspace_mode,
-                args=("ingest",),
-            )
-            b_theme.button(
-                icon_label,
-                key="workspace_btn_theme",
-                type="secondary",
-                width="stretch",
-                help="Cambiar a tema claro" if is_dark_mode else "Cambiar a tema oscuro",
-                on_click=_toggle_dark_mode,
-            )
-            b_cfg.button(
-                icon_label,
-                key="workspace_btn_config",
-                type="primary" if mode == "config" else "secondary",
-                width="stretch",
-                help="Configuración",
-                on_click=_set_workspace_mode,
-                args=("config",),
-            )
+            with b_rep:
+                with st.container(key="workspace_btn_slot_report"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_report",
+                        type="primary" if mode == "report" else "secondary",
+                        width="stretch",
+                        help="Informe PPT",
+                        on_click=_set_workspace_mode,
+                        args=("report",),
+                    )
+            with b_ing:
+                with st.container(key="workspace_btn_slot_ingest"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_ingest",
+                        type="primary" if mode == "ingest" else "secondary",
+                        width="stretch",
+                        help="Ingesta",
+                        on_click=_set_workspace_mode,
+                        args=("ingest",),
+                    )
+            with b_theme:
+                with st.container(key="workspace_btn_slot_theme"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_theme",
+                        type="secondary",
+                        width="stretch",
+                        help="Cambiar a tema claro" if is_dark_mode else "Cambiar a tema oscuro",
+                        on_click=_toggle_dark_mode,
+                    )
+            with b_cfg:
+                with st.container(key="workspace_btn_slot_config"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_config",
+                        type="primary" if mode == "config" else "secondary",
+                        width="stretch",
+                        help="Configuración",
+                        on_click=_set_workspace_mode,
+                        args=("config",),
+                    )
 
 
 def _render_workspace_scope(settings: Settings) -> None:
