@@ -14,7 +14,11 @@ from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
+)
+from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
+    AGE_BUCKET_ORDER,
+    build_age_bucket_points,
+    build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
@@ -190,67 +194,20 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
 
 def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
-    open_df = ctx.open_df
-    if open_df is None or open_df.empty or "created" not in open_df.columns:
+    points = build_age_bucket_points(ctx.open_df)
+    if points.empty:
         return None
 
-    df = open_df.copy(deep=False)
-    df["__created_dt"] = _to_dt_naive(df["created"])
-    df = df[df["__created_dt"].notna()].copy(deep=False)
-    if df.empty:
-        return None
-
-    now = pd.Timestamp.utcnow().tz_localize(None)
-    df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
-    df["__age_days"] = df["__age_days"].clip(lower=0.0)
-    if "status" not in df.columns:
-        df["status"] = "(sin estado)"
-    else:
-        df["status"] = normalize_text_col(df["status"], "(sin estado)")
-
-    df["bucket"] = pd.cut(
-        df["__age_days"],
-        bins=[-float("inf"), 2, 7, 14, 30, float("inf")],
-        labels=["0-2", "3-7", "8-14", "15-30", ">30"],
-        right=True,
-        include_lowest=True,
-        ordered=True,
-    )
-
-    grouped = (
-        df.groupby(["bucket", "status"], dropna=False, observed=False)
-        .size()
-        .reset_index(name="count")
-        .sort_values(["bucket", "count"], ascending=[True, False])
-    )
-    if grouped.empty:
-        return None
-
-    statuses = grouped["status"].astype(str).unique().tolist()
+    statuses = points["status"].astype(str).unique().tolist()
     canon = canonical_status_order()
     canon_present = [s for s in canon if s in statuses]
     rest = [s for s in statuses if s not in set(canon_present)]
     status_order = canon_present + rest
-    bucket_order = ["0-2", "3-7", "8-14", "15-30", ">30"]
-
-    fig = px.bar(
-        grouped,
-        x="bucket",
-        y="count",
-        text="count",
-        color="status",
-        barmode="stack",
-        category_orders={"bucket": bucket_order, "status": status_order},
-        color_discrete_map=status_color_map(status_order),
-        title="Antigüedad por estado",
+    return build_age_buckets_issue_distribution(
+        issues=points,
+        status_order=status_order,
+        bucket_order=AGE_BUCKET_ORDER,
     )
-    fig.update_layout(
-        title_text="",
-        xaxis_title="Rango",
-        yaxis_title="Incidencias",
-    )
-    fig.update_traces(textposition="inside", textfont=dict(size=10))
-    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_age_buckets(ctx: ChartContext) -> List[str]:

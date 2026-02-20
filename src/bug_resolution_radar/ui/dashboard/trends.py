@@ -18,7 +18,11 @@ from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
+)
+from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
+    AGE_BUCKET_ORDER,
+    build_age_bucket_points,
+    build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
@@ -329,14 +333,6 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     return (priority_rank(p), pl)
 
 
-def _age_bucket_from_days(age_days: pd.Series) -> pd.Categorical:
-    """Build canonical age buckets: 0-2, 3-7, 8-14, 15-30, >30 days."""
-    bins = [-np.inf, 2, 7, 14, 30, np.inf]
-    labels = ["0-2", "3-7", "8-14", "15-30", ">30"]
-    cat = pd.cut(age_days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
-    return cat
-
-
 def _resolution_band(days: pd.Series) -> pd.Categorical:
     """Build resolution speed bands for semantic coloring."""
     bins = [-np.inf, 7, 30, np.inf]
@@ -462,35 +458,6 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
     # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
     daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
     return daily
-
-
-def _age_bucket_grouped(open_df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate open issues by age bucket and status."""
-    if open_df.empty or "created" not in open_df.columns:
-        return pd.DataFrame()
-
-    df = open_df.copy(deep=False)
-    df["__created_dt"] = _to_dt_naive(df["created"])
-    df = df[df["__created_dt"].notna()].copy(deep=False)
-    if df.empty:
-        return pd.DataFrame()
-
-    now = pd.Timestamp.utcnow().tz_localize(None)
-    df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
-    df["__age_days"] = df["__age_days"].clip(lower=0.0)
-
-    if "status" not in df.columns:
-        df["status"] = "(sin estado)"
-    else:
-        df["status"] = df["status"].astype(str)
-
-    df["bucket"] = _age_bucket_from_days(df["__age_days"])
-    return (
-        df.groupby(["bucket", "status"], dropna=False, observed=False)
-        .size()
-        .reset_index(name="count")
-        .sort_values(["bucket", "count"], ascending=[True, False])
-    )
 
 
 def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -703,66 +670,44 @@ def _render_trend_chart(
         return
 
     if chart_id == "age_buckets":
-        # ✅ NUEVO: barras apiladas por Status dentro de cada bucket de antigüedad
+        # Issue-level distribution by age bucket (one point per issue).
         if open_df.empty or "created" not in open_df.columns:
             st.info("No hay datos suficientes (created) para antigüedad con los filtros actuales.")
             return
 
         age_sig = dataframe_signature(
             open_df,
-            columns=("created", "status"),
-            salt="trends.age_buckets.v1",
+            columns=("created", "status", "key", "summary", "priority"),
+            salt="trends.age_buckets.issues.v1",
         )
-        grp, _ = cached_by_signature(
-            "trends.age_buckets.grouped",
+        points, _ = cached_by_signature(
+            "trends.age_buckets.points",
             age_sig,
-            lambda: _age_bucket_grouped(open_df),
+            lambda: build_age_bucket_points(open_df),
             max_entries=10,
         )
-        if not isinstance(grp, pd.DataFrame) or grp.empty:
+        if not isinstance(points, pd.DataFrame) or points.empty:
             st.info("No hay datos suficientes para este gráfico con los filtros actuales.")
             return
 
         # Orden canónico de status (y los desconocidos al final)
-        statuses = grp["status"].astype(str).unique().tolist()
+        statuses = points["status"].astype(str).unique().tolist()
         canon_status_order = canonical_status_order()
         # canon primero (si están), luego resto en orden estable
         canon_present = [s for s in canon_status_order if s in statuses]
         rest = [s for s in statuses if s not in set(canon_present)]
         status_order = canon_present + rest
 
-        bucket_order = ["0-2", "3-7", "8-14", "15-30", ">30"]
-
-        fig = px.bar(
-            grp,
-            x="bucket",
-            y="count",
-            text="count",
-            color="status",
-            barmode="stack",
-            category_orders={"bucket": bucket_order, "status": status_order},
-            color_discrete_map=status_color_map(status_order),
+        fig = build_age_buckets_issue_distribution(
+            issues=points,
+            status_order=status_order,
+            bucket_order=AGE_BUCKET_ORDER,
         )
-        fig.update_layout(
-            title_text="", xaxis_title="Rango de antiguedad", yaxis_title="Incidencias"
-        )
-        text_color = (
-            "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
-        )
-        fig.update_traces(textposition="inside", textfont=dict(size=10, color=text_color))
-        age_totals = grp.groupby("bucket", dropna=False, observed=False)["count"].sum()
-        _add_bar_totals(
-            fig,
-            x_values=bucket_order,
-            y_totals=[float(age_totals.get(b, 0)) for b in bucket_order],
-            font_size=12,
-        )
-        fig = apply_plotly_bbva(fig, showlegend=True)
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
             suffix=chart_id,
-            csv_df=grp.copy(deep=False),
+            csv_df=points.copy(deep=False),
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)

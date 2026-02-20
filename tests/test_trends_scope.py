@@ -4,6 +4,7 @@ import pandas as pd
 
 from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
+    _render_age_buckets,
     _render_open_priority_pie,
 )
 from bug_resolution_radar.ui.dashboard.trends import (
@@ -157,3 +158,38 @@ def test_render_open_priority_pie_excludes_deployed_rows() -> None:
     assert fig is not None
     labels = [str(x) for x in list(fig.data[0]["labels"])]
     assert set(labels) == {"High"}
+
+
+def test_render_age_buckets_renders_issue_level_distribution() -> None:
+    now = pd.Timestamp.utcnow()
+    open_df = pd.DataFrame(
+        {
+            "status": ["New", "Analysing", "Blocked", "En progreso", "To Rework", "Ready"],
+            "priority": ["Highest", "High", "Medium", "Low", "Lowest", "High"],
+            "created": [
+                now - pd.Timedelta(days=1),
+                now - pd.Timedelta(days=5),
+                now - pd.Timedelta(days=10),
+                now - pd.Timedelta(days=18),
+                now - pd.Timedelta(days=40),
+                now - pd.Timedelta(days=65),
+            ],
+        }
+    )
+    ctx = ChartContext(dff=open_df.copy(deep=False), open_df=open_df, kpis={})
+    fig = _render_age_buckets(ctx)
+    assert fig is not None
+    assert (
+        str(getattr(getattr(fig.layout, "xaxis", None), "title", None).text)
+        == "Rango de antigüedad (días)"
+    )
+    assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == "Criticidad"
+    marker_points = 0
+    for trace in list(fig.data):
+        if str(getattr(trace, "type", "") or "").strip().lower() != "scatter":
+            continue
+        mode = str(getattr(trace, "mode", "") or "").strip().lower()
+        if "markers" not in mode:
+            continue
+        marker_points += len(list(getattr(trace, "x", []) or []))
+    assert marker_points == len(open_df)

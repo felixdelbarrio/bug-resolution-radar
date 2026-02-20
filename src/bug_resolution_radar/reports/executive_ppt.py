@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -40,6 +41,8 @@ from bug_resolution_radar.ui.insights.engine import (
     TrendInsightPack,
     build_trend_insight_pack,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 SLIDE_WIDTH = int(Inches(13.333))
 SLIDE_HEIGHT = int(Inches(7.5))
@@ -108,6 +111,7 @@ SOFT_TONE_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
 )
 
 BUSINESS_PLAIN_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+    (r"\bPalanca ejecutiva:\s*", ""),
     (r"\bSLA\b", "tiempo objetivo"),
     (r"\bslas\b", "tiempos objetivo"),
     (r"\bP95\b", "tramo del 5% más lento"),
@@ -877,14 +881,42 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             export_fig, format="png", width=export_width, height=export_height, scale=3
         )
         return cast(bytes, image)
-    except Exception:
+    except Exception as primary_exc:
         try:
             image = pio.to_image(
                 fig, format="png", width=export_width, height=export_height, scale=2
             )
             return cast(bytes, image)
-        except Exception:
-            return None
+        except Exception as secondary_exc:
+            # Last-resort path: normalize figure payload to plain Plotly JSON and
+            # drop heavy/complex attrs that may break Kaleido in specific traces.
+            try:
+                payload = cast(dict, fig.to_plotly_json())
+                safe_fig = go.Figure(payload)
+                for trace in list(getattr(safe_fig, "data", []) or []):
+                    try:
+                        if hasattr(trace, "customdata"):
+                            trace.customdata = None
+                        if hasattr(trace, "meta"):
+                            trace.meta = None
+                        if hasattr(trace, "hovertemplate"):
+                            hover = getattr(trace, "hovertemplate", None)
+                            if isinstance(hover, str) and len(hover) > 600:
+                                trace.hovertemplate = None
+                    except Exception:
+                        continue
+                image = pio.to_image(
+                    safe_fig, format="png", width=export_width, height=export_height, scale=2
+                )
+                return cast(bytes, image)
+            except Exception as final_exc:
+                LOGGER.warning(
+                    "Plotly export failed for chart image (primary=%s, secondary=%s, final=%s)",
+                    primary_exc,
+                    secondary_exc,
+                    final_exc,
+                )
+                return None
 
 
 def _add_bg(slide: Any, color_hex: str) -> None:
@@ -1509,7 +1541,7 @@ def _add_chart_insight_slide(
         if section.figure is None:
             run.text = "No hay datos suficientes para este gráfico con el filtro actual."
         else:
-            run.text = "No se pudo exportar este gráfico para la presentación."
+            run.text = "No hay visualización disponible para esta vista con el filtro actual."
         run.font.name = FONT_BODY_BOOK
         run.font.size = Pt(13)
         run.font.color.rgb = _rgb(PALETTE["muted"])
@@ -1608,14 +1640,16 @@ def _add_chart_insight_slide(
     )
 
     p_actions = itf.add_paragraph()
-    p_actions.text = "To-Be"
-    p_actions.alignment = PP_ALIGN.CENTER
     p_actions.space_before = Pt(4)
     p_actions.space_after = Pt(2)
-    p_actions.font.name = FONT_HEAD
-    p_actions.font.bold = True
-    p_actions.font.size = Pt(_scaled_font(24.0, scale=panel_scale, min_size=18.0))
-    p_actions.font.color.rgb = _rgb(PALETTE["navy"])
+    p_actions.alignment = PP_ALIGN.CENTER
+    p_actions.clear()
+    run_actions = p_actions.add_run()
+    run_actions.text = "To-Be"
+    run_actions.font.name = FONT_HEAD
+    run_actions.font.bold = True
+    run_actions.font.size = Pt(_scaled_font(24.0, scale=panel_scale, min_size=18.0))
+    run_actions.font.color.rgb = _rgb(PALETTE["navy"])
 
     p_to_be_ctx = itf.add_paragraph()
     p_to_be_ctx.space_before = Pt(0)
