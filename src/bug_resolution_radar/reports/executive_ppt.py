@@ -115,6 +115,9 @@ SOFT_TONE_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
 
 BUSINESS_PLAIN_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
     (r"\bPalanca ejecutiva:\s*", ""),
+    (r"\bMensajes clave:\s*", ""),
+    (r"\bMensaje clave:\s*", ""),
+    (r"\bMensaje clave\b\s*:\s*", ""),
     (r"\bSLA\b", "tiempo objetivo"),
     (r"\bslas\b", "tiempos objetivo"),
     (r"\bP95\b", "tramo del 5% más lento"),
@@ -634,35 +637,57 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     fig = make_subplots(
         rows=1,
         cols=2,
-        column_widths=[0.64, 0.36],
+        specs=[[{"type": "domain"}, {"type": "xy"}]],
+        column_widths=[0.62, 0.38],
         subplot_titles=("Por funcionalidad", "Duplicados"),
         horizontal_spacing=0.10,
     )
 
     if has_topics:
-        view = top_tbl.copy(deep=False).head(10)
+        view = top_tbl.copy(deep=False)
         view["tema"] = view["tema"].astype(str)
         view["open_count"] = (
             pd.to_numeric(view["open_count"], errors="coerce").fillna(0).astype(int)
         )
-        view = view.sort_values("open_count", ascending=True)
+
+        # Keep the pie legible: top N + (optional) "Otros" if present.
+        view = view.sort_values("open_count", ascending=False)
+        max_slices = 7
+        head = view.head(max_slices).copy(deep=False)
+
+        labels = head["tema"].tolist()
+        values = head["open_count"].tolist()
+
+        bbva_seq = [
+            BBVA_LIGHT.core_blue,
+            BBVA_LIGHT.electric_blue,
+            BBVA_LIGHT.royal_blue,
+            BBVA_LIGHT.serene_dark_blue,
+            BBVA_LIGHT.serene_blue,
+            BBVA_LIGHT.aqua,
+            f"#{PALETTE['line']}",
+        ]
+        colors: list[str] = []
+        for idx, lbl in enumerate(labels):
+            if str(lbl).strip().lower() in {"otros", "other"}:
+                colors.append(f"#{PALETTE['line']}")
+            else:
+                colors.append(bbva_seq[idx % len(bbva_seq)])
+
         fig.add_trace(
-            go.Bar(
-                x=view["open_count"].tolist(),
-                y=view["tema"].tolist(),
-                orientation="h",
-                marker=dict(color="#0051F1"),
-                text=[f"{int(v)}" for v in view["open_count"].tolist()],
-                textposition="outside",
-                cliponaxis=False,
-                hovertemplate="Tema: %{y}<br>Abiertas: %{x}<extra></extra>",
-                showlegend=False,
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.55,
+                sort=False,
+                direction="clockwise",
+                marker=dict(colors=colors, line=dict(color="#FFFFFF", width=2)),
+                hovertemplate="Tema: %{label}<br>Abiertas: %{value}<br>%{percent}<extra></extra>",
+                showlegend=True,
             ),
             row=1,
             col=1,
         )
-        fig.update_xaxes(title_text="Incidencias abiertas", row=1, col=1)
-        fig.update_yaxes(title_text="", row=1, col=1)
 
     dup_names = ["Por título", "Por heurística"]
     dup_values = [int(duplicate_issues), int(heuristic_issues)]
@@ -670,7 +695,7 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         go.Bar(
             x=dup_names,
             y=dup_values,
-            marker=dict(color=["#D64550", "#F59E0B"]),
+            marker=dict(color=[f"#{PALETTE['red']}", f"#{PALETTE['amber']}"]),
             text=[str(v) if v > 0 else "" for v in dup_values],
             textposition="outside",
             cliponaxis=False,
@@ -681,8 +706,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         col=2,
     )
     fig.update_yaxes(title_text="Casos", row=1, col=2)
-    fig.update_layout(title_text="", margin=dict(l=16, r=16, t=52, b=56))
-    fig = apply_plotly_bbva(fig, showlegend=False)
+    fig.update_layout(title_text="", showlegend=True, margin=dict(l=16, r=16, t=52, b=56))
+    fig = apply_plotly_bbva(fig, showlegend=True)
 
     as_is_bits: List[str] = []
     if has_topics and top_theme != "-":
@@ -1677,9 +1702,7 @@ def _chart_insights_font_scale(
     max_height_pt = 355.0
     estimate = 20.0
     estimate += 30.0  # As-is heading
-    estimate += (
-        _estimate_wrapped_lines(f"Mensaje clave: {tip_text}", max_chars_per_line=43) * 16.6 + 10.0
-    )
+    estimate += _estimate_wrapped_lines(tip_text, max_chars_per_line=43) * 16.6 + 10.0
     estimate += _estimate_wrapped_lines(context_text, max_chars_per_line=47) * 14.6 + 8.0
     estimate += 30.0  # To-Be heading
     estimate += _estimate_wrapped_lines(to_be_context_text, max_chars_per_line=47) * 14.0 + 8.0
@@ -1849,7 +1872,7 @@ def _add_chart_insight_slide(
     p_tip.space_after = Pt(8)
     _set_rich_text(
         p_tip,
-        f"**Mensaje clave:** {tip}",
+        f"{tip}",
         font_name=FONT_BODY_BOOK,
         font_size=_scaled_font(14.4, scale=panel_scale, min_size=11.0),
         color_hex=PALETTE["ink"],
