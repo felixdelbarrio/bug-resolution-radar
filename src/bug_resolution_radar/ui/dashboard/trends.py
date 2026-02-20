@@ -670,7 +670,7 @@ def _render_trend_chart(
             csv_df=export_df,
             figure=fig,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         return
 
     if chart_id == "age_buckets":
@@ -714,7 +714,7 @@ def _render_trend_chart(
             csv_df=points.copy(deep=False),
             figure=fig,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         return
 
     if chart_id == "resolution_hist":
@@ -803,7 +803,7 @@ def _render_trend_chart(
             csv_df=export_df,
             figure=fig,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         return
 
     if chart_id == "open_priority_pie":
@@ -837,7 +837,7 @@ def _render_trend_chart(
             csv_df=pie_export,
             figure=fig,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         return
 
     if chart_id == "open_status_bar":
@@ -897,7 +897,7 @@ def _render_trend_chart(
             csv_df=grouped.copy(deep=False),
             figure=fig,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         return
 
     st.info("Gráfico no reconocido.")

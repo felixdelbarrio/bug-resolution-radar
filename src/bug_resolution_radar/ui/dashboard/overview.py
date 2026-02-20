@@ -159,7 +159,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
                         continue
 
                     st.caption(chart_title or chart_id)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
 
 def render_overview_tab(

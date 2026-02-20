@@ -586,7 +586,7 @@ def render_chart_with_insights(
         st.info("No hay datos suficientes para este gráfico con los filtros actuales.")
         return
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     bullets = spec.insights(ctx) or []
     if bullets:
