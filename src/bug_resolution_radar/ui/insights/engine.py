@@ -1140,17 +1140,46 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     active_mask = status_series.isin(ACTIVE_STATUS_FILTERS)
     active_share = float(active_mask.mean()) if total else 0.0
+    if "updated" in df.columns:
+        stale_days_all = _stale_days_from_updated(df)
+        active_stale_share = (
+            float((stale_days_all.loc[active_mask] > 7).mean())
+            if int(active_mask.sum()) > 0 and stale_days_all.notna().any()
+            else 0.0
+        )
+    else:
+        active_stale_share = 0.0
+
+    # Scoring: only elevate to Must when active WIP is genuinely high.
+    if active_share >= 0.60:
+        active_score = 18.0 + (active_share * 10.0)
+    elif active_share >= 0.50:
+        active_score = 11.0 + (active_share * 8.0)
+    else:
+        active_score = 8.0 + (active_share * 6.0)
+
+    active_msg = (
+        f"{_fmt_pct(active_share)} del backlog está en estados activos (trabajo en curso). "
+        "Cuando hay demasiado en curso, el foco se dispersa y los cierres se alargan."
+    )
+    if active_stale_share >= 0.20:
+        active_msg += (
+            f" Además, {_fmt_pct(active_stale_share)} de lo activo no se ha movido en >7 días: "
+            "señal de atasco o falta de decisión."
+        )
+    active_msg += (
+        " Palanca práctica: fija un límite de trabajo en curso (por equipo o por persona) y, "
+        "si se supera, no se inicia nada nuevo hasta cerrar o desbloquear 1–2 items prioritarios."
+    )
+
     cards.append(
         ActionInsight(
-            title="Carga activa del equipo",
-            body=(
-                f"{_fmt_pct(active_share)} del backlog esta en estados activos. "
-                "Por encima de 60% suele subir el cambio de contexto."
-            ),
+            title="Trabajo en curso elevado",
+            body=active_msg,
             status_filters=[
                 s for s in ACTIVE_STATUS_FILTERS if s in status_series.unique().tolist()
             ],
-            score=8.0 + (active_share * 100.0),
+            score=active_score,
         )
     )
 

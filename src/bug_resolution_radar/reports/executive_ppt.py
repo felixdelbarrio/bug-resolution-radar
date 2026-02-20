@@ -379,6 +379,34 @@ def _soften_insight_tone(text: str) -> str:
     return re.sub(r"\s+", " ", out).strip()
 
 
+def _cap_first(text: str) -> str:
+    txt = str(text or "").strip()
+    if not txt:
+        return ""
+    first = txt[0]
+    if first.isalpha() and first.islower():
+        return first.upper() + txt[1:]
+    return txt
+
+
+def _dedupe_urgency_title(title: str, urgency_label: str) -> str:
+    """Avoid repeating Must/Should/Nice-to-have when we already show a [TAG]."""
+    txt = str(title or "").strip()
+    if not txt:
+        return ""
+    # Remove explicit bracket tags if they exist at the beginning.
+    txt = re.sub(r"^\\[(must|should|nice\\s+to\\s+have)\\]\\s*", "", txt, flags=re.I).strip()
+    # Remove leading urgency word if present (e.g. "Must ...") to prevent duplication.
+    label = str(urgency_label or "").strip()
+    if label:
+        txt2 = re.sub(rf"^{re.escape(label)}\\s*(?:[:-]\\s*)?", "", txt, flags=re.I).strip()
+    else:
+        txt2 = re.sub(
+            r"^(must|should|nice\\s+to\\s+have)\\s*(?:[:-]\\s*)?", "", txt, flags=re.I
+        ).strip()
+    return _cap_first(txt2 or txt)
+
+
 def _fmt_int(value: int) -> str:
     return f"{int(value):,}".replace(",", ".")
 
@@ -1439,7 +1467,12 @@ def _section_ribbon_items(section: _ChartSection) -> List[Tuple[str, str, str]]:
         items.append(
             (
                 "Acción foco",
-                _clip_text(_soften_insight_tone(str(cards[0].title or "").strip()), max_len=30),
+                _clip_text(
+                    _dedupe_urgency_title(
+                        _soften_insight_tone(str(cards[0].title or "").strip()), urgency_label
+                    ),
+                    max_len=30,
+                ),
                 "teal",
             )
         )
@@ -1709,10 +1742,8 @@ def _chart_insights_font_scale(
 
     for idx_card, card in enumerate(list(cards or []), start=1):
         urgency_label, _ = _urgency_from_score(float(card.score))
-        title_line = (
-            f"{idx_card}. [{urgency_label.upper()}] "
-            f"{_clip_text(_soften_insight_tone(card.title), max_len=68)}"
-        )
+        title_txt = _dedupe_urgency_title(_soften_insight_tone(card.title), urgency_label)
+        title_line = f"{idx_card}. [{urgency_label.upper()}] {_clip_text(title_txt, max_len=68)}"
         body_line = _clip_text(
             _soften_insight_tone(f"Recomendación de acción: {str(card.body or '').strip()}"),
             max_len=178,
@@ -1951,7 +1982,10 @@ def _add_chart_insight_slide(
         run_tag.font.color.rgb = _rgb(urgency_txt)
 
         run_title = p_title.add_run()
-        run_title.text = _clip_text(_soften_insight_tone(card.title), max_len=68)
+        run_title.text = _clip_text(
+            _dedupe_urgency_title(_soften_insight_tone(card.title), urgency_label),
+            max_len=68,
+        )
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
         run_title.font.size = Pt(_scaled_font(14.2, scale=panel_scale, min_size=11.2))
@@ -2236,7 +2270,7 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
         run_tag.font.color.rgb = _rgb(urgency_txt)
 
         run_title = p_line.add_run()
-        run_title.text = str(action.title or "").strip()
+        run_title.text = _dedupe_urgency_title(_soften_insight_tone(action.title), urgency_label)
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
         run_title.font.size = Pt(17.2)
