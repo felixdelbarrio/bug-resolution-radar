@@ -376,106 +376,6 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             justify-content: flex-end !important;
             align-items: center !important;
           }
-          /* Fallback by specific button keys to avoid default Streamlit primary/secondary bleeding */
-          .st-key-workspace_btn_report div[data-testid="stButton"] > button,
-          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button,
-          .st-key-workspace_btn_theme div[data-testid="stButton"] > button,
-          .st-key-workspace_btn_config div[data-testid="stButton"] > button,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button {
-            min-height: 2.02rem !important;
-            min-width: 2.02rem !important;
-            padding: 0.08rem !important;
-            border-radius: 0 !important;
-            border: 0 !important;
-            background: transparent !important;
-            background-color: transparent !important;
-            color: var(--bbva-tab-soft-text) !important;
-            box-shadow: none !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-          }
-          .st-key-workspace_btn_report div[data-testid="stButton"] > button *,
-          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button *,
-          .st-key-workspace_btn_theme div[data-testid="stButton"] > button *,
-          .st-key-workspace_btn_config div[data-testid="stButton"] > button *,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button *,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button *,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button *,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button * {
-            color: inherit !important;
-            fill: currentColor !important;
-          }
-          .st-key-workspace_btn_report div[data-testid="stButton"] > button[kind="primary"],
-          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button[kind="primary"],
-          .st-key-workspace_btn_theme div[data-testid="stButton"] > button[kind="primary"],
-          .st-key-workspace_btn_config div[data-testid="stButton"] > button[kind="primary"],
-          .st-key-workspace_btn_report [data-testid="baseButton-primary"] > button,
-          .st-key-workspace_btn_ingest [data-testid="baseButton-primary"] > button,
-          .st-key-workspace_btn_theme [data-testid="baseButton-primary"] > button,
-          .st-key-workspace_btn_config [data-testid="baseButton-primary"] > button {
-            border: 0 !important;
-            background: transparent !important;
-            background-color: transparent !important;
-            color: var(--bbva-primary) !important;
-          }
-          .st-key-workspace_btn_report div[data-testid="stButton"] > button:hover,
-          .st-key-workspace_btn_ingest div[data-testid="stButton"] > button:hover,
-          .st-key-workspace_btn_theme div[data-testid="stButton"] > button:hover,
-          .st-key-workspace_btn_config div[data-testid="stButton"] > button:hover,
-          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button:hover,
-          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button:hover,
-          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button:hover,
-          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button:hover {
-            border: 0 !important;
-            background: transparent !important;
-            background-color: transparent !important;
-            color: color-mix(in srgb, var(--bbva-primary) 82%, var(--bbva-tab-soft-text)) !important;
-          }
-          /* Replace emoji labels with BBVA SVG icons in workspace actions */
-          .st-key-workspace_btn_report button,
-          .st-key-workspace_btn_ingest button,
-          .st-key-workspace_btn_theme button,
-          .st-key-workspace_btn_config button {
-            font-size: 0 !important;
-            line-height: 0 !important;
-            position: relative !important;
-          }
-          .st-key-workspace_btn_report button::before,
-          .st-key-workspace_btn_ingest button::before,
-          .st-key-workspace_btn_theme button::before,
-          .st-key-workspace_btn_config button::before {
-            content: "" !important;
-            display: inline-block !important;
-            width: 1.04rem !important;
-            height: 1.04rem !important;
-            background-color: currentColor !important;
-            -webkit-mask-repeat: no-repeat !important;
-            mask-repeat: no-repeat !important;
-            -webkit-mask-position: center !important;
-            mask-position: center !important;
-            -webkit-mask-size: contain !important;
-            mask-size: contain !important;
-          }
-          .st-key-workspace_btn_report button::before {
-            -webkit-mask-image: url("__ICON_REPORT__") !important;
-            mask-image: url("__ICON_REPORT__") !important;
-          }
-          .st-key-workspace_btn_ingest button::before {
-            -webkit-mask-image: url("__ICON_INGEST__") !important;
-            mask-image: url("__ICON_INGEST__") !important;
-          }
-          .st-key-workspace_btn_theme button::before {
-            -webkit-mask-image: url("__ICON_THEME__") !important;
-            mask-image: url("__ICON_THEME__") !important;
-          }
-          .st-key-workspace_btn_config button::before {
-            -webkit-mask-image: url("__ICON_CONFIG__") !important;
-            mask-image: url("__ICON_CONFIG__") !important;
-          }
           .st-key-workspace_dashboard_content_overview,
           .st-key-workspace_dashboard_content_notes {
             margin-top: -0.24rem;
@@ -876,11 +776,34 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button::before,
           .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button::before,
           .st-key-workspace_btn_config [data-testid^="baseButton-"] > button::before {
+            content: "" !important;
+            display: block !important;
+            width: 1.06rem !important;
+            height: 1.06rem !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            background-size: contain !important;
             position: absolute !important;
             left: 50% !important;
             top: 50% !important;
             transform: translate(-50%, -50%) !important;
             text-indent: 0 !important;
+          }
+          .st-key-workspace_btn_report .stButton > button::before,
+          .st-key-workspace_btn_report [data-testid^="baseButton-"] > button::before {
+            background-image: url("__ICON_REPORT__") !important;
+          }
+          .st-key-workspace_btn_ingest .stButton > button::before,
+          .st-key-workspace_btn_ingest [data-testid^="baseButton-"] > button::before {
+            background-image: url("__ICON_INGEST__") !important;
+          }
+          .st-key-workspace_btn_theme .stButton > button::before,
+          .st-key-workspace_btn_theme [data-testid^="baseButton-"] > button::before {
+            background-image: url("__ICON_THEME__") !important;
+          }
+          .st-key-workspace_btn_config .stButton > button::before,
+          .st-key-workspace_btn_config [data-testid^="baseButton-"] > button::before {
+            background-image: url("__ICON_CONFIG__") !important;
           }
 
           /* Download button: unified pill style across CSV/HTML exports */

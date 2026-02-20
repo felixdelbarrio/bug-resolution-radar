@@ -175,13 +175,7 @@ def render(settings: Settings) -> None:
     st.info(f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}")
     _render_alert(country, source_id)
 
-    trigger = st.button(
-        "📥 Generar y descargar informe (1 clic)",
-        key="btn_generate_download_scope_ppt",
-        type="primary",
-        width="stretch",
-    )
-    run_generation = bool(trigger or auto_trigger)
+    run_generation = bool(auto_trigger)
 
     if run_generation:
         try:

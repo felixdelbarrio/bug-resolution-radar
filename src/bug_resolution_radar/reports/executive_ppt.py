@@ -18,7 +18,11 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-from bug_resolution_radar.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analysis_window import (
+    apply_analysis_depth_filter,
+    effective_analysis_lookback_months,
+    max_available_backlog_months,
+)
 from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.design_tokens import (
     BBVA_FONT_HEADLINE_PPT,
@@ -102,20 +106,37 @@ SOFT_TONE_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
     (r"\bUrgente\b", "Prioritario"),
 )
 
+BUSINESS_PLAIN_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
+    (r"\bSLA\b", "tiempo objetivo"),
+    (r"\bslas\b", "tiempos objetivo"),
+    (r"\bP95\b", "tramo del 5% más lento"),
+    (r"\bpercentil\s*95\b", "tramo del 5% más lento"),
+    (r"\bmediana\b", "valor típico"),
+    (r"\bthroughput\b", "ritmo de salida"),
+)
+
 CHART_ORDER: Tuple[str, ...] = (
-    "timeseries",
-    "age_buckets",
     "open_status_bar",
     "open_priority_pie",
+    "age_buckets",
+    "timeseries",
     "resolution_hist",
 )
 
 CHART_THEMES: Dict[str, str] = {
-    "timeseries": "Flujo y tendencia",
-    "age_buckets": "Riesgo de backlog",
-    "open_status_bar": "Flujo y tendencia",
-    "open_priority_pie": "Riesgo de backlog",
-    "resolution_hist": "Eficiencia de cierre",
+    "open_status_bar": "Situación actual",
+    "open_priority_pie": "Riesgo y exposición",
+    "age_buckets": "Riesgo y exposición",
+    "timeseries": "Ritmo del flujo",
+    "resolution_hist": "Capacidad de cierre",
+}
+
+CHART_BUSINESS_SUBTITLES: Dict[str, str] = {
+    "open_status_bar": "Dónde se concentra hoy el trabajo pendiente",
+    "open_priority_pie": "Qué parte del backlog demanda más atención",
+    "age_buckets": "Qué volumen acumula mayor antigüedad",
+    "timeseries": "Cómo evoluciona la carga semana a semana",
+    "resolution_hist": "Dónde se alarga el cierre de incidencias",
 }
 FINALIST_STATUS_TOKENS: Tuple[str, ...] = (
     "accepted",
@@ -150,21 +171,42 @@ class _FilterSnapshot:
     status: Tuple[str, ...]
     priority: Tuple[str, ...]
     assignee: Tuple[str, ...]
+    analysis_lookback_months: int = 0
+    analysis_available_months: int = 0
 
     def is_active(self) -> bool:
         return bool(self.status or self.priority or self.assignee)
 
-    def summary(self) -> str:
-        if not self.is_active():
-            return "Sin filtros activos"
+    def _window_summary(self) -> str:
+        lookback = max(0, int(self.analysis_lookback_months or 0))
+        available = max(0, int(self.analysis_available_months or 0))
+        if lookback <= 0 and available <= 0:
+            return ""
+        if available <= 0:
+            available = max(1, lookback)
+        if lookback <= 0:
+            lookback = available
+        if lookback >= available:
+            return f"Ventana temporal: histórico completo ({available} meses)"
+        return f"Ventana temporal: últimos {lookback} de {available} meses"
 
+    @staticmethod
+    def _values_summary(values: Tuple[str, ...]) -> str:
+        if not values:
+            return "Todos"
+        vals = [str(v or "").strip() for v in values if str(v or "").strip()]
+        if len(vals) <= 3:
+            return ", ".join(vals)
+        return ", ".join(vals[:3]) + f" (+{len(vals) - 3})"
+
+    def summary(self) -> str:
         parts: List[str] = []
-        if self.status:
-            parts.append("Estado: " + ", ".join(self.status))
-        if self.priority:
-            parts.append("Prioridad: " + ", ".join(self.priority))
-        if self.assignee:
-            parts.append("Assignee: " + ", ".join(self.assignee))
+        win = self._window_summary()
+        if win:
+            parts.append(win)
+        parts.append(f"Estado: {self._values_summary(self.status)}")
+        parts.append(f"Prioridad: {self._values_summary(self.priority)}")
+        parts.append(f"Assignee: {self._values_summary(self.assignee)}")
         return " · ".join(parts)
 
 
@@ -323,9 +365,15 @@ def _soften_insight_tone(text: str) -> str:
     out = _fix_spanish_orthography(str(text or ""))
     for pattern, replacement in SOFT_TONE_REPLACEMENTS:
         out = re.sub(pattern, replacement, out)
+    for pattern, replacement in BUSINESS_PLAIN_REPLACEMENTS:
+        out = re.sub(pattern, replacement, out)
     out = out.replace("…", " ")
     out = re.sub(r"\.{3,}", ". ", out)
     return re.sub(r"\s+", " ", out).strip()
+
+
+def _fmt_int(value: int) -> str:
+    return f"{int(value):,}".replace(",", ".")
 
 
 def _legend_profile(fig: go.Figure, trace_count: int) -> Tuple[float, int]:
@@ -501,9 +549,13 @@ def _build_context(
     filters: _FilterSnapshot,
     dff_override: pd.DataFrame | None,
     open_df_override: pd.DataFrame | None,
+    scoped_source_df: pd.DataFrame | None,
 ) -> _ScopeContext:
     if dff_override is None:
-        base_df = _scope_df(load_issues_df(settings.DATA_PATH), country=country, source_id=source_id)
+        if scoped_source_df is None:
+            base_df = _scope_df(load_issues_df(settings.DATA_PATH), country=country, source_id=source_id)
+        else:
+            base_df = scoped_source_df.copy(deep=False)
         base_df = apply_analysis_depth_filter(base_df, settings=settings)
         dff = _apply_report_filters(base_df, filters)
         open_df, closed_df = _open_closed(dff)
@@ -832,7 +884,7 @@ def _add_header(slide, *, title: str, subtitle: str, dark: bool = False) -> None
     run.text = title
     run.font.name = FONT_HEAD
     run.font.bold = True
-    run.font.size = Pt(22 if dark else 17)
+    run.font.size = Pt(23 if dark else 20)
     run.font.color.rgb = _rgb("FFFFFF" if dark else PALETTE["navy"])
 
     subtitle_box = slide.shapes.add_textbox(Inches(0.52), Inches(0.50), Inches(11.9), Inches(0.20))
@@ -842,7 +894,7 @@ def _add_header(slide, *, title: str, subtitle: str, dark: bool = False) -> None
     run2 = p2.add_run()
     run2.text = subtitle
     run2.font.name = FONT_BODY_BOOK
-    run2.font.size = Pt(10.5)
+    run2.font.size = Pt(11.2)
     run2.font.color.rgb = _rgb("CFE2FF" if dark else PALETTE["muted"])
 
 
@@ -859,7 +911,7 @@ def _add_footer(slide, *, context: _ScopeContext) -> None:
         f"  |  {context.generated_at.strftime('%Y-%m-%d %H:%M UTC')}"
     )
     run.font.name = FONT_BODY_BOOK
-    run.font.size = Pt(8.5)
+    run.font.size = Pt(8.8)
     run.font.color.rgb = _rgb(PALETTE["muted"])
 
 
@@ -892,8 +944,8 @@ def _metric_card(slide, *, x: float, y: float, w: float, h: float, label: str, v
     p = tf.paragraphs[0]
     run = p.add_run()
     run.text = label
-    run.font.name = FONT_BODY_BOOK
-    run.font.size = Pt(10)
+    run.font.name = FONT_BODY_MEDIUM
+    run.font.size = Pt(10.8)
     run.font.color.rgb = _rgb(PALETTE["muted"])
 
     val = slide.shapes.add_textbox(Inches(x + 0.14), Inches(y + 0.44), Inches(w - 0.24), Inches(0.48))
@@ -904,7 +956,7 @@ def _metric_card(slide, *, x: float, y: float, w: float, h: float, label: str, v
     run2.text = value
     run2.font.name = FONT_HEAD
     run2.font.bold = True
-    run2.font.size = Pt(22)
+    run2.font.size = Pt(23)
     run2.font.color.rgb = _rgb(PALETTE["ink"])
 
 
@@ -913,8 +965,8 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
     _add_bg(slide, "001B4A")
     _add_header(
         slide,
-        title="Seguimiento Mensual · Radar de Incidencias",
-        subtitle="Estado actual, prioridades y acciones para la toma de decisiones",
+        title="Radar de Resolución de Incidencias",
+        subtitle="Lectura de negocio para priorizar decisiones y acelerar resultados",
         dark=True,
     )
 
@@ -945,7 +997,7 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
     tf.clear()
     p = tf.paragraphs[0]
     run = p.add_run()
-    run.text = f"{context.country}\nRadar para {context.source_label}"
+    run.text = f"{context.country}\n{context.source_label}"
     run.font.name = FONT_HEAD
     run.font.bold = True
     run.font.size = Pt(36)
@@ -957,8 +1009,8 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
         y=4.18,
         w=3.1,
         h=1.25,
-        label="Issues analizadas",
-        value=f"{len(context.dff):,}",
+        label="Casos analizados",
+        value=_fmt_int(len(context.dff)),
         tone="sky",
     )
     _metric_card(
@@ -967,8 +1019,8 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
         y=4.18,
         w=3.1,
         h=1.25,
-        label="Backlog abierto",
-        value=f"{len(context.open_df):,}",
+        label="Abiertas hoy",
+        value=_fmt_int(len(context.open_df)),
         tone="amber",
     )
     _metric_card(
@@ -977,8 +1029,8 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
         y=4.18,
         w=3.1,
         h=1.25,
-        label="Cerradas",
-        value=f"{len(context.closed_df):,}",
+        label="Resueltas",
+        value=_fmt_int(len(context.closed_df)),
         tone="green",
     )
 
@@ -987,27 +1039,36 @@ def _add_cover_slide(prs: Presentation, context: _ScopeContext) -> None:
         Inches(0.62),
         Inches(5.64),
         Inches(12.00),
-        Inches(1.14),
+        Inches(1.26),
     )
     scope_box.fill.solid()
     scope_box.fill.fore_color.rgb = _rgb("0A2E67")
     scope_box.line.color.rgb = _rgb("2A66B8")
     tf2 = scope_box.text_frame
     tf2.clear()
+    tf2.word_wrap = True
     p2 = tf2.paragraphs[0]
     p2.alignment = PP_ALIGN.LEFT
     run2 = p2.add_run()
-    run2.text = f"Filtros aplicados: {context.filters.summary()}"
+    run2.text = f"Scope: {context.country} · {context.source_label}"
     run2.font.name = FONT_BODY_MEDIUM
-    run2.font.size = Pt(12)
+    run2.font.size = Pt(12.5)
     run2.font.color.rgb = _rgb("FFFFFF")
+
+    p3 = tf2.add_paragraph()
+    p3.alignment = PP_ALIGN.LEFT
+    run3 = p3.add_run()
+    run3.text = f"Filtros aplicados: {context.filters.summary()}"
+    run3.font.name = FONT_BODY_BOOK
+    run3.font.size = Pt(11.2)
+    run3.font.color.rgb = _rgb("DDEBFF")
 
     foot = slide.shapes.add_textbox(Inches(0.62), Inches(6.97), Inches(12.0), Inches(0.20))
     ftf = foot.text_frame
     ftf.clear()
     fp = ftf.paragraphs[0]
     fr = fp.add_run()
-    fr.text = "Objetivo: identificar dónde actuar primero para reducir backlog y tiempo de resolución."
+    fr.text = "Objetivo del informe: concentrar esfuerzos donde el impacto en servicio y productividad es mayor."
     fr.font.name = FONT_BODY_BOOK
     fr.font.size = Pt(10)
     fr.font.color.rgb = _rgb("BDD8FF")
@@ -1108,11 +1169,11 @@ def _add_index_slide(prs: Presentation, context: _ScopeContext) -> None:
     _add_header(
         slide,
         title="Índice",
-        subtitle="Bloques temáticos del informe",
+        subtitle="Historia del análisis y decisiones sugeridas",
     )
     rows: List[Tuple[str, str, str, str]] = [
-        ("01", "Apertura", "Scope, origen y filtros aplicados al análisis", PALETTE["blue"]),
-        ("02", "Resumen general", "Volumen, dominancias y foco de lectura", PALETTE["teal"]),
+        ("01", "Apertura", "Alcance y reglas de lectura del análisis", PALETTE["blue"]),
+        ("02", "Panorama", "Tamaño del problema, foco y prioridades", PALETTE["teal"]),
     ]
     idx = 3
     for theme, themed_sections in _group_sections_by_theme(context.sections):
@@ -1123,7 +1184,7 @@ def _add_index_slide(prs: Presentation, context: _ScopeContext) -> None:
         (
             f"{idx:02d}",
             "Cierre y acciones",
-            "Síntesis final y acciones priorizadas para actuar",
+            "Plan de trabajo priorizado por impacto",
             PALETTE["blue"],
         )
     )
@@ -1167,8 +1228,8 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     _add_bg(slide, PALETTE["bg"])
     _add_header(
         slide,
-        title="Resumen general",
-        subtitle="Qué vamos a ver y dónde están las principales señales",
+        title="Panorama de negocio",
+        subtitle="Qué está pasando, por qué importa y dónde actuar primero",
     )
     total = int(len(context.dff))
     open_count = int(len(context.open_df))
@@ -1189,10 +1250,10 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
         )
 
     themes = [theme for theme, _ in _group_sections_by_theme(context.sections)]
-    _metric_card(slide, x=0.70, y=1.30, w=2.82, h=1.16, label="Estado dominante", value=top_status, tone="blue")
+    _metric_card(slide, x=0.70, y=1.30, w=2.82, h=1.16, label="Fase dominante", value=top_status, tone="blue")
     _metric_card(slide, x=3.64, y=1.30, w=2.82, h=1.16, label="Prioridad dominante", value=top_priority, tone="amber")
-    _metric_card(slide, x=6.58, y=1.30, w=2.82, h=1.16, label="Bloques temáticos", value=f"{len(themes)}", tone="green")
-    _metric_card(slide, x=9.52, y=1.30, w=2.82, h=1.16, label="% backlog", value=f"{open_ratio:.1f}%", tone="teal")
+    _metric_card(slide, x=6.58, y=1.30, w=2.82, h=1.16, label="Bloques de lectura", value=f"{len(themes)}", tone="green")
+    _metric_card(slide, x=9.52, y=1.30, w=2.82, h=1.16, label="% abiertas", value=f"{open_ratio:.1f}%", tone="teal")
 
     left_box = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
@@ -1209,18 +1270,18 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     ltf.clear()
     lp0 = ltf.paragraphs[0]
     lr0 = lp0.add_run()
-    lr0.text = "Temas del informe"
+    lr0.text = "Ruta de lectura"
     lr0.font.name = FONT_HEAD
     lr0.font.bold = True
-    lr0.font.size = Pt(17)
+    lr0.font.size = Pt(20)
     lr0.font.color.rgb = _rgb(PALETTE["navy"])
 
     for idx, theme in enumerate(themes, start=1):
         p = ltf.add_paragraph()
         p.text = f"{idx}. {theme}"
-        p.space_after = Pt(5)
+        p.space_after = Pt(7)
         p.font.name = FONT_BODY_BOOK
-        p.font.size = Pt(11.5)
+        p.font.size = Pt(13.0)
         p.font.color.rgb = _rgb(PALETTE["ink"])
 
     right_box = slide.shapes.add_shape(
@@ -1238,18 +1299,18 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     rtf.clear()
     rp0 = rtf.paragraphs[0]
     rr0 = rp0.add_run()
-    rr0.text = "Foco de gestión inicial"
+    rr0.text = "Lectura inicial"
     rr0.font.name = FONT_HEAD
     rr0.font.bold = True
-    rr0.font.size = Pt(17)
+    rr0.font.size = Pt(20)
     rr0.font.color.rgb = _rgb(PALETTE["navy"])
 
-    status_line = f"**Estado dominante (abiertas):** {top_status}"
+    status_line = f"**Fase dominante (abiertas):** {top_status}"
     if _is_finalist_status(top_status):
         status_line += " (tramo final del flujo; no se interpreta como cuello)"
 
     opening = [
-        f"**Scope activo:** {context.country} · {context.source_label}",
+        f"**Alcance activo:** {context.country} · {context.source_label}",
         f"**Filtros:** {context.filters.summary()}",
         status_line,
         f"**Prioridad dominante (abiertas):** {top_priority}",
@@ -1261,7 +1322,7 @@ def _add_exec_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
             p,
             line,
             font_name=FONT_BODY_BOOK,
-            font_size=10.5,
+            font_size=12.0,
             color_hex=PALETTE["ink"],
         )
 
@@ -1286,7 +1347,7 @@ def _add_chart_insight_slide(
     _add_header(
         slide,
         title=f"{index:02d}/{total:02d} · {section.title}",
-        subtitle=f"{section.theme} · {section.subtitle}",
+        subtitle=f"{section.theme} · {CHART_BUSINESS_SUBTITLES.get(section.chart_id, section.subtitle)}",
     )
     _add_mini_kpi_ribbons(
         slide,
@@ -1366,10 +1427,10 @@ def _add_chart_insight_slide(
 
     p1 = itf.paragraphs[0]
     run1 = p1.add_run()
-    run1.text = "Insights"
+    run1.text = "Qué significa"
     run1.font.name = FONT_HEAD
     run1.font.bold = True
-    run1.font.size = Pt(20)
+    run1.font.size = Pt(27)
     run1.font.color.rgb = _rgb(PALETTE["navy"])
 
     tip = _clip_text(
@@ -1383,9 +1444,9 @@ def _add_chart_insight_slide(
     p_tip.space_after = Pt(8)
     _set_rich_text(
         p_tip,
-        f"**Lectura:** {tip}",
+        f"**Mensaje clave:** {tip}",
         font_name=FONT_BODY_BOOK,
-        font_size=13.2,
+        font_size=14.4,
         color_hex=PALETTE["ink"],
     )
 
@@ -1395,22 +1456,22 @@ def _add_chart_insight_slide(
     _set_rich_text(
         p_context,
         _clip_text(
-            f"**Contexto del gráfico:** {section.subtitle}. "
-            "Las cifras destacadas se muestran en la banda KPI superior para evitar duplicidades.",
-            max_len=156,
+            f"**Por qué importa:** {CHART_BUSINESS_SUBTITLES.get(section.chart_id, section.subtitle)}. "
+            "Las cifras más relevantes están en la banda KPI superior para facilitar la lectura.",
+            max_len=188,
         ),
         font_name=FONT_BODY_BOOK,
-        font_size=12.0,
+        font_size=12.8,
         color_hex=PALETTE["muted"],
     )
 
     p_actions = itf.add_paragraph()
-    p_actions.text = "Implicaciones y acciones"
+    p_actions.text = "Qué hacer ahora"
     p_actions.space_before = Pt(4)
     p_actions.space_after = Pt(2)
     p_actions.font.name = FONT_HEAD
     p_actions.font.bold = True
-    p_actions.font.size = Pt(16)
+    p_actions.font.size = Pt(18)
     p_actions.font.color.rgb = _rgb(PALETTE["navy"])
 
     cards = _top_cards(section.insight_pack, limit=2)
@@ -1444,10 +1505,10 @@ def _add_chart_insight_slide(
         run_tag.font.color.rgb = _rgb(urgency_txt)
 
         run_title = p_title.add_run()
-        run_title.text = _clip_text(_soften_insight_tone(card.title), max_len=58)
+        run_title.text = _clip_text(_soften_insight_tone(card.title), max_len=68)
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
-        run_title.font.size = Pt(13.2)
+        run_title.font.size = Pt(14.2)
         run_title.font.color.rgb = _rgb(PALETTE["ink"])
 
         p = itf.add_paragraph()
@@ -1455,10 +1516,10 @@ def _add_chart_insight_slide(
         _set_rich_text(
             p,
             _clip_text(
-                _soften_insight_tone(f"**Recomendación de acción:** {card.body}"), max_len=152
+                _soften_insight_tone(f"**Recomendación de acción:** {card.body}"), max_len=178
             ),
             font_name=FONT_BODY_BOOK,
-            font_size=12.0,
+            font_size=13.0,
             color_hex=PALETTE["muted"],
         )
 
@@ -1633,8 +1694,8 @@ def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     _add_bg(slide, "001C4A")
     _add_header(
         slide,
-        title="Cierre y acciones",
-        subtitle="Síntesis y acciones prioritarias para ejecutar a corto plazo",
+        title="Plan de acción",
+        subtitle="Prioridades concretas para reducir backlog y acelerar el cierre",
         dark=True,
     )
     actions_panel = slide.shapes.add_shape(
@@ -1652,10 +1713,10 @@ def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
     atf.clear()
     p0 = atf.paragraphs[0]
     run0 = p0.add_run()
-    run0.text = "Acciones recomendadas"
+    run0.text = "Acciones recomendadas (ordenadas por valor)"
     run0.font.name = FONT_HEAD
     run0.font.bold = True
-    run0.font.size = Pt(27)
+    run0.font.size = Pt(29)
     run0.font.color.rgb = _rgb(PALETTE["navy"])
 
     final_actions = _select_actions_for_final_slide(
@@ -1673,7 +1734,7 @@ def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
         run_num.text = f"{idx}. "
         run_num.font.name = FONT_BODY_MEDIUM
         run_num.font.bold = True
-        run_num.font.size = Pt(16.2)
+        run_num.font.size = Pt(17.2)
         run_num.font.color.rgb = _rgb(PALETTE["ink"])
 
         run_tag = p_line.add_run()
@@ -1687,7 +1748,7 @@ def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
         run_title.text = str(action.title or "").strip()
         run_title.font.name = FONT_BODY_MEDIUM
         run_title.font.bold = True
-        run_title.font.size = Pt(16.2)
+        run_title.font.size = Pt(17.2)
         run_title.font.color.rgb = _rgb(PALETTE["ink"])
 
         p_body = atf.add_paragraph()
@@ -1695,9 +1756,9 @@ def _add_final_summary_slide(prs: Presentation, context: _ScopeContext) -> None:
         p_body.space_after = Pt(6)
         _set_rich_text(
             p_body,
-            f"**Acción:** {str(action.body or '').strip()}",
+            f"**Acción recomendada:** {str(action.body or '').strip()}",
             font_name=FONT_BODY_BOOK,
-            font_size=14.4,
+            font_size=15.0,
             color_hex=PALETTE["muted"],
         )
 
