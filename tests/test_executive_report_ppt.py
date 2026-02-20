@@ -362,7 +362,9 @@ def test_best_actions_prioritizes_resolution_value_over_raw_score() -> None:
 
     ranked = _best_actions([section], open_df=open_df, limit=2)
     assert "desbloqueo triage" in ranked[0].title.lower()
-    assert "must" in ranked[0].title.lower()
+    # The deck already shows urgency as a separate [MUST]/[SHOULD]/[NICE] tag, so titles
+    # should not repeat "Must" and must stay business-readable.
+    assert "must" not in ranked[0].title.lower()
 
 
 def test_urgency_uses_must_should_nice_to_have() -> None:
@@ -376,8 +378,8 @@ def test_soften_insight_tone_reduces_catastrophic_language() -> None:
     out = _soften_insight_tone(txt)
     assert "Urgencia" not in out
     assert "crítica" not in out.lower()
-    assert "Must" in out
     assert "priorización" in out.lower()
+    assert "mayor impacto" in out.lower()
 
 
 def test_is_finalist_status_detects_terminal_flow_states() -> None:
