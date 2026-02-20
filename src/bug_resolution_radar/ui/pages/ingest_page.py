@@ -121,7 +121,8 @@ def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:
 
 
 def render(settings: Settings) -> None:
-    t_jira, t_helix = st.tabs(["🟦 Jira", "🟩 Helix"])
+    # Avoid emoji icons in tab labels: some environments render them as empty squares.
+    t_jira, t_helix = st.tabs(["Jira", "Helix"])
 
     with t_jira:
         jira_cfg = jira_sources(settings)

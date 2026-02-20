@@ -492,7 +492,8 @@ def render(settings: Settings) -> None:
 
     st.subheader("Configuración")
 
-    t_jira, t_helix, t_prefs = st.tabs(["🟦 Jira", "🟩 Helix", "⭐ Preferencias"])
+    # Avoid emoji icons in tab labels: some environments render them as empty squares.
+    t_jira, t_helix, t_prefs = st.tabs(["Jira", "Helix", "Preferencias"])
 
     with t_jira:
         st.markdown("### Jira global")
@@ -678,7 +679,7 @@ def render(settings: Settings) -> None:
         )
 
     with t_prefs:
-        st.markdown("### ⭐ Favoritos (Tendencias)")
+        st.markdown("### Favoritos (Tendencias)")
         stored_theme_pref = str(getattr(settings, "THEME", "auto") or "auto").strip().lower()
         if stored_theme_pref in {"dark", "light"}:
             theme_default = stored_theme_pref
