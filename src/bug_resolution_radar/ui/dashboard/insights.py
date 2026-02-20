@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -21,6 +22,14 @@ class Insight:
     level: str  # "ok" | "info" | "warn"
     title: str
     body: str
+
+
+FINALIST_STATUS_TOKENS = ("accepted", "ready to deploy", "deployed", "closed", "resolved", "done")
+
+
+def _is_finalist_status(value: object) -> bool:
+    token = str(value or "").strip().lower()
+    return token in FINALIST_STATUS_TOKENS
 
 
 # ---------------------------------------------------------------------
@@ -148,14 +157,15 @@ def _daily_flow(df: pd.DataFrame, days: int = 90) -> Tuple[pd.DataFrame, Dict[st
 
 
 def _resolution_days(df: pd.DataFrame) -> pd.Series:
-    if df is None or df.empty or not _has_cols(df, ["created", "resolved"]):
+    if df is None or df.empty or not _has_cols(df, ["created"]):
         return pd.Series([], dtype=float)
     created = _safe_dt(df["created"])
-    resolved = _safe_dt(df["resolved"])
-    mask = created.notna() & resolved.notna()
+    finalized_at = effective_finalized_at(df, created_col="created", updated_col="updated")
+    finalized_at = _safe_dt(finalized_at)
+    mask = created.notna() & finalized_at.notna()
     if not mask.any():
         return pd.Series([], dtype=float)
-    days = ((resolved[mask] - created[mask]).dt.total_seconds() / 86400.0).clip(lower=0.0)
+    days = ((finalized_at[mask] - created[mask]).dt.total_seconds() / 86400.0).clip(lower=0.0)
     return days.astype(float)
 
 
@@ -334,7 +344,7 @@ def build_chart_insights(
                 Insight(
                     "info",
                     "Sin cierres con fechas suficientes",
-                    "Faltan created/resolved en cerradas para estimar tiempos de resolución.",
+                    "No hay incidencias en estado final con fechas suficientes para estimar tiempos de cierre.",
                 )
             ]
 
@@ -344,8 +354,8 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "Tiempo real de resolución",
-                f"Resolución habitual: {_fmt_days(median)} · casos lentos: {_fmt_days(p90)}. "
+                "Tiempo hasta estado final",
+                f"Tiempo habitual: {_fmt_days(median)} · casos lentos: {_fmt_days(p90)}. "
                 "Si bajas el tiempo de los casos lentos, la experiencia del cliente mejora más rápido.",
             )
         )
@@ -365,12 +375,15 @@ def build_chart_insights(
         if "priority" in dff.columns:
             closed = dff.copy()
             closed["created"] = _safe_dt(closed.get("created"))
-            closed["resolved"] = _safe_dt(closed.get("resolved"))
-            mask = closed["created"].notna() & closed["resolved"].notna()
+            closed["finalized_at"] = effective_finalized_at(
+                closed, created_col="created", updated_col="updated"
+            )
+            closed["finalized_at"] = _safe_dt(closed.get("finalized_at"))
+            mask = closed["created"].notna() & closed["finalized_at"].notna()
             closed = closed[mask].copy()
             if not closed.empty:
                 closed["resolution_days"] = (
-                    (closed["resolved"] - closed["created"]).dt.total_seconds() / 86400.0
+                    (closed["finalized_at"] - closed["created"]).dt.total_seconds() / 86400.0
                 ).clip(lower=0.0)
                 closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
                 g = closed.groupby("priority")["resolution_days"].median().sort_values()
@@ -456,8 +469,11 @@ def build_chart_insights(
             ]
 
         stc = normalize_text_col(open_df["status"], "(sin estado)")
+        stc_norm = stc.astype(str).str.strip().str.lower()
         vc = stc.value_counts()
         top_status = vc.index[0] if not vc.empty else None
+        non_final_vc = vc[[not _is_finalist_status(s) for s in vc.index.astype(str)]]
+        top_oper_status = non_final_vc.index[0] if not non_final_vc.empty else None
 
         # Bottleneck candidate: high count + high age
         ages = _age_days(open_df)
@@ -469,24 +485,35 @@ def build_chart_insights(
                 .sort_values(["count", "mean_age"], ascending=[False, False])
             )
             if not g.empty:
-                cand = g.index[0]
-                out.append(
-                    Insight(
-                        "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
-                        "Posible cuello de botella",
-                        f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
-                        "Acción: revisa si es un estado de espera ('blocked', 'waiting') y crea un carril explícito para dependencias.",
+                focus = g.loc[[not _is_finalist_status(s) for s in g.index.astype(str)]]
+                if not focus.empty:
+                    cand = focus.index[0]
+                    out.append(
+                        Insight(
+                            "warn" if g.loc[cand, "mean_age"] >= 30 else "info",
+                            "Posible cuello de botella",
+                            f"**{cand}** concentra {_fmt_int(g.loc[cand, 'count'])} issues con antigüedad media {_fmt_days(g.loc[cand, 'mean_age'])}. "
+                            "Acción: revisa si es un estado de espera ('blocked', 'waiting') y crea un carril explícito para dependencias.",
+                        )
                     )
-                )
 
-        if top_status:
-            share = float(vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
+        if top_oper_status:
+            share = float(non_final_vc.iloc[0] / vc.sum()) if vc.sum() else 0.0
             out.append(
                 Insight(
                     "warn" if share >= 0.45 else "info",
                     "Carga concentrada en un estado",
-                    f"El estado dominante es **{top_status}** con {_fmt_int(vc.iloc[0])} issues ({_fmt_pct(share)}). "
+                    f"El estado con más peso operativo es **{top_oper_status}** con {_fmt_int(non_final_vc.iloc[0])} issues ({_fmt_pct(share)}). "
                     "Si un estado supera ~45%, suele ser síntoma de demasiados casos acumulados o de un paso del flujo que no escala.",
+                )
+            )
+        elif top_status:
+            out.append(
+                Insight(
+                    "info",
+                    "Sin foco operativo dominante",
+                    "Con este filtro no hay concentración relevante en estados operativos. "
+                    "Para acciones de mejora, amplía el análisis a estados activos.",
                 )
             )
 
@@ -502,31 +529,6 @@ def build_chart_insights(
             )
         )
 
-        accepted_cnt = int((stc == "Accepted").sum())
-        rtd_cnt = int((stc == "Ready to deploy").sum())
-        deployed_cnt = int((stc == "Deployed").sum())
-        if accepted_cnt > 0:
-            rtd_conv = float(rtd_cnt) / float(accepted_cnt)
-            if rtd_conv < 0.35:
-                out.append(
-                    Insight(
-                        "warn",
-                        "Atasco de Accepted a Ready to deploy",
-                        f"Hay {_fmt_int(accepted_cnt)} en **Accepted** y {_fmt_int(rtd_cnt)} en **Ready to deploy** "
-                        f"(conversión {_fmt_pct(rtd_conv)}). Acción: define tiempo máximo de salida de Accepted y revisión diaria de bloqueos.",
-                    )
-                )
-        if rtd_cnt > 0:
-            dep_conv = float(deployed_cnt) / float(rtd_cnt)
-            if dep_conv < 0.70:
-                out.append(
-                    Insight(
-                        "warn",
-                        "Embudo en despliegue",
-                        f"Hay {_fmt_int(rtd_cnt)} en **Ready to deploy** y {_fmt_int(deployed_cnt)} en **Deployed** "
-                        f"(conversión {_fmt_pct(dep_conv)}). Acción: revisar capacidad de release y ventanas de despliegue.",
-                    )
-                )
         return out[:4]
 
     # Fallback

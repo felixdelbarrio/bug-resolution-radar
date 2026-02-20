@@ -147,7 +147,7 @@ def _tone(action_title: str) -> Tuple[str, str, str]:
         return ("SEÑAL DE CAPACIDAD", "#9A6510", "Control semanal")
     if "seguimiento" in t:
         return ("SEGUIMIENTO", "#1A8A5E", "Ritmo estable")
-    return ("ACCION RECOMENDADA", "#8F5C00", "Foco ejecutivo")
+    return ("ACCION RECOMENDADA", "#8F5C00", "Foco recomendado")
 
 
 def _apply_action(

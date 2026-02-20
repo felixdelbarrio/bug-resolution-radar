@@ -230,6 +230,8 @@ def render_overview_kpis(
 
     # Exit funnel must match the same filtered scope shown in "Issues por Estado" chart.
     accepted_count, ready_deploy_count, exit_buffer = _exit_funnel_counts_from_filtered(dff)
+    exit_state = "Accepted" if accepted_count >= ready_deploy_count else "Ready to deploy"
+    exit_state_count = accepted_count if exit_state == "Accepted" else ready_deploy_count
 
     if not open_df.empty and "created" in open_df.columns:
         created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
@@ -249,6 +251,7 @@ def render_overview_kpis(
     blocked_pct = (blocked_count / open_issues * 100.0) if open_issues else 0.0
     filtered_total = int(len(dff))
     exit_buffer_pct = (exit_buffer / filtered_total * 100.0) if filtered_total else 0.0
+    exit_state_pct = (exit_state_count / filtered_total * 100.0) if filtered_total else 0.0
     dup_groups = 0
     dup_issues = 0
     top_theme = "-"
@@ -487,11 +490,11 @@ def render_overview_kpis(
         focus_candidates.append(
             FocusCard(
                 card_id="exit",
-                title="Embudo de salida",
-                metric=f"{exit_buffer:,}",
+                title="Salida finalista",
+                metric=f"{exit_state_count:,}",
                 detail=(
-                    f"Accepted={accepted_count:,} + Ready={ready_deploy_count:,} "
-                    f"({exit_buffer_pct:.1f}% del total filtrado)."
+                    f"Estado: {exit_state}={exit_state_count:,} "
+                    f"({exit_state_pct:.1f}% del total filtrado)."
                 ),
                 score=float(exit_buffer_pct)
                 + (8.0 if accepted_count > (ready_deploy_count * 1.5) else 0.0),
@@ -603,9 +606,9 @@ def render_overview_kpis(
             ),
             FocusCard(
                 card_id="exit_f",
-                title="Embudo de salida",
-                metric=f"{exit_buffer:,}",
-                detail=f"Accepted={accepted_count:,} + Ready={ready_deploy_count:,}.",
+                title="Salida finalista",
+                metric=f"{exit_state_count:,}",
+                detail=f"Estado: {exit_state}={exit_state_count:,}.",
                 score=0.0,
                 section="trends",
                 trend_chart="open_status_bar",

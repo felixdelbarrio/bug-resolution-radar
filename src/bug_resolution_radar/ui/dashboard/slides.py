@@ -206,6 +206,8 @@ def build_default_slide_specs() -> List[SlideSpec]:
             "Señal de concentración: dónde se está acumulando el riesgo.",
         ),
         SlideSpec(
-            "open_status_bar", "Backlog por estado", "Cuellos de botella por fase del proceso."
+            "open_status_bar",
+            "Backlog por estado",
+            "Concentración por fase del proceso y avance del tramo final.",
         ),
     ]

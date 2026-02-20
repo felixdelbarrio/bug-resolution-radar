@@ -10,6 +10,7 @@ from typing import Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -49,7 +50,7 @@ THEME_RULES: List[Tuple[str, List[str]]] = [
 
 
 CRITICAL_PRIORITY_FILTERS = ["Supone un impedimento", "Highest", "High"]
-TRIAGE_STATUS_FILTERS = ["New", "Analysing", "Analyzing"]
+TRIAGE_STATUS_FILTERS = ["New", "Analysing", "Analyzing", "Ready"]
 ACTIVE_STATUS_FILTERS = [
     "En progreso",
     "In Progress",
@@ -59,6 +60,16 @@ ACTIVE_STATUS_FILTERS = [
     "To Rework",
     "Test",
 ]
+FINALIST_STATUS_FILTERS = [
+    "Accepted",
+    "Ready to deploy",
+    "Ready to Deploy",
+    "Deployed",
+    "Closed",
+    "Resolved",
+    "Done",
+]
+_FINALIST_STATUS_TOKENS = tuple({str(s).strip().lower() for s in FINALIST_STATUS_FILTERS})
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -114,6 +125,27 @@ def _norm_text(value: object) -> str:
     txt = unicodedata.normalize("NFKD", txt)
     txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
     return txt
+
+
+def _is_finalist_status(value: object) -> bool:
+    token = str(value or "").strip().lower()
+    return token in _FINALIST_STATUS_TOKENS
+
+
+def _top_non_final_status(
+    counts: pd.Series,
+    *,
+    total: int,
+) -> Tuple[str, int, float]:
+    if counts.empty or total <= 0:
+        return "—", 0, 0.0
+    for status_name, raw_count in counts.items():
+        if _is_finalist_status(status_name):
+            continue
+        count = int(raw_count)
+        share = float(count) / float(total)
+        return str(status_name), count, share
+    return "—", 0, 0.0
 
 
 def classify_theme(
@@ -237,25 +269,46 @@ def _stale_days_from_updated(df: pd.DataFrame) -> pd.Series:
 
 
 def _resolution_days(dff: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
-    if dff.empty or "created" not in dff.columns or "resolved" not in dff.columns:
+    if dff.empty or "created" not in dff.columns:
         return pd.Series([], dtype=float), pd.DataFrame()
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
+    finalized_at = _to_dt_naive(finalized_at)
     closed = dff.copy(deep=False)
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
     if closed.empty:
         return pd.Series([], dtype=float), closed
     closed["resolution_days"] = (
-        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     ).clip(lower=0.0)
     return closed["resolution_days"].astype(float), closed
 
 
 def _sorted_cards(cards: Iterable[ActionInsight], *, limit: int = 5) -> List[ActionInsight]:
     valid = [c for c in cards if str(c.title or "").strip() and str(c.body or "").strip()]
-    return sorted(valid, key=lambda c: float(c.score), reverse=True)[:limit]
+
+    def _is_critical_card(card: ActionInsight) -> bool:
+        filters = list(card.priority_filters or [])
+        if not filters:
+            return False
+        # Critical priorities: "Supone un impedimento" + Highest/High (+ variants).
+        for raw in filters:
+            p = str(raw or "").strip()
+            if not p:
+                continue
+            if priority_rank(p) <= 2:
+                return True
+        return False
+
+    # Business rule: if we have client-affecting priorities in play, show those first.
+    # Within each group, keep the original scoring order.
+    return sorted(
+        valid,
+        key=lambda c: (_is_critical_card(c), float(c.score)),
+        reverse=True,
+    )[:limit]
 
 
 def build_trend_insight_pack(
@@ -390,7 +443,7 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
                 title="Sin capacidad de salida visible",
                 body=(
                     "No hay cierres suficientes en 30 dias para estimar vaciado. "
-                    "La prioridad ejecutiva es desbloquear el tramo final del flujo."
+                    "La prioridad de gestion es desbloquear el tramo final del flujo."
                 ),
                 score=28.0,
             )
@@ -456,9 +509,9 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
         if crit_early > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin primer diagnostico",
+                    title="Incidencias de mayor impacto sin primer diagnóstico",
                     body=(
-                        f"Hay {crit_early} incidencias High/Highest en estados iniciales. "
+                        f"Hay {crit_early} incidencias de mayor impacto (Supone un impedimento / Highest / High) en estados iniciales. "
                         "Resolver esta bolsa reduce riesgo cliente de forma inmediata."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -532,7 +585,7 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
 
     tip: str | None
     if ratio_close_entry < 1.0:
-        tip = "Palanca ejecutiva: alinear compromiso semanal de cierres con entrada real para evitar crecimiento estructural."
+        tip = "Palanca de gestion: alinear compromiso semanal de cierres con entrada real para evitar crecimiento estructural."
     elif ratio_close_entry > 1.1:
         tip = (
             "Momento favorable: usar el superavit de cierre para recortar deuda de mas de 30 dias."
@@ -637,9 +690,9 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_old_count > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas envejecidas",
+                    title="Incidencias de mayor impacto envejecidas",
                     body=(
-                        f"{crit_old_count} incidencias High/Highest llevan mas de 14 dias abiertas. "
+                        f"{crit_old_count} incidencias de mayor impacto (Supone un impedimento / Highest / High) llevan más de 14 días abiertas. "
                         "Escalado selectivo y cierre de bloqueos deberia ser la accion del dia."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -659,10 +712,10 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             if early_old > 0:
                 cards.append(
                     ActionInsight(
-                        title="Criticas bloqueadas en entrada",
+                        title="Incidencias de mayor impacto atascadas en entrada",
                         body=(
-                            f"{early_old} High/Highest llevan mas de 7 dias en estados iniciales. "
-                            "Alinear diagnostico y decision ejecutiva evitara envejecimiento adicional."
+                            f"{early_old} incidencias de mayor impacto (Supone un impedimento / Highest / High) llevan más de 7 días en estados iniciales. "
+                            "Alinear diagnostico y decision de gestion evitara envejecimiento adicional."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                         status_filters=list(TRIAGE_STATUS_FILTERS),
@@ -724,15 +777,15 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
     if days.empty:
         return TrendInsightPack(
             metrics=[
-                InsightMetric("Resolucion habitual", "—"),
-                InsightMetric("Resolucion lenta", "—"),
+                InsightMetric("Cierre habitual", "—"),
+                InsightMetric("Cierre lento", "—"),
                 InsightMetric("Casos muy lentos", "—"),
             ],
             cards=[
                 ActionInsight(
                     title="Datos insuficientes",
                     body=(
-                        "No hay incidencias cerradas con fechas completas para medir tiempos de resolucion."
+                        "No hay incidencias en estado final con fechas suficientes para medir tiempos de cierre."
                     ),
                     score=1.0,
                 )
@@ -793,9 +846,9 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
-    if "__resolved" in closed.columns and not closed.empty:
+    if "__finalized_at" in closed.columns and not closed.empty:
         now = pd.Timestamp.utcnow().tz_localize(None)
-        resolved_30 = int((closed["__resolved"] >= (now - pd.Timedelta(days=30))).sum())
+        resolved_30 = int((closed["__finalized_at"] >= (now - pd.Timedelta(days=30))).sum())
         if resolved_30 <= 5:
             cards.append(
                 ActionInsight(
@@ -808,10 +861,10 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
-        recent = closed[closed["__resolved"] >= (now - pd.Timedelta(days=30))]
+        recent = closed[closed["__finalized_at"] >= (now - pd.Timedelta(days=30))]
         prev = closed[
-            (closed["__resolved"] >= (now - pd.Timedelta(days=60)))
-            & (closed["__resolved"] < (now - pd.Timedelta(days=30)))
+            (closed["__finalized_at"] >= (now - pd.Timedelta(days=60)))
+            & (closed["__finalized_at"] < (now - pd.Timedelta(days=30)))
         ]
         if len(recent) >= 5 and len(prev) >= 5:
             med_recent = float(recent["resolution_days"].median())
@@ -847,11 +900,16 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
             med_hi = float(hi.median())
             med_lo = float(lo.median())
             if med_hi > (med_lo * 1.30):
+                n_hi = int(hi.notna().sum())
+                n_lo = int(lo.notna().sum())
                 cards.append(
                     ActionInsight(
-                        title="Criticas cierran mas lento que el resto",
+                        title="Prioridades de mayor impacto: cierre mas lento",
                         body=(
-                            f"High/Highest cierran en {_fmt_days(med_hi)} de mediana vs {_fmt_days(med_lo)} en prioridades menores."
+                            "Las incidencias de mayor impacto (Supone un impedimento / Highest / High) "
+                            f"tardan {_fmt_days(med_hi)} de forma tipica en llegar a estado final "
+                            f"vs {_fmt_days(med_lo)} en el resto (muestra: {n_hi} vs {n_lo}). "
+                            "Palanca: limita el trabajo en curso de mayor impacto y prioriza desbloqueos/decisiones antes de iniciar nuevos casos de menor prioridad."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                         score=15.0 + (med_hi - med_lo),
@@ -860,8 +918,8 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
 
     return TrendInsightPack(
         metrics=[
-            InsightMetric("Resolucion habitual", _fmt_days(med)),
-            InsightMetric("Resolucion lenta", _fmt_days(p90)),
+            InsightMetric("Cierre habitual", _fmt_days(med)),
+            InsightMetric("Cierre lento", _fmt_days(p90)),
             InsightMetric("Casos muy lentos", _fmt_days(p95)),
         ],
         cards=_sorted_cards(cards),
@@ -960,9 +1018,9 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_early > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin arrancar",
+                    title="Incidencias de mayor impacto sin arrancar",
                     body=(
-                        f"{crit_early} incidencias High/Highest siguen en New/Analysing. "
+                        f"{crit_early} incidencias de mayor impacto (Supone un impedimento / Highest / High) siguen en New/Analysing. "
                         "Asignar owner y primer diagnostico hoy reduce impacto cliente."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -977,9 +1035,9 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_unassigned > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin owner",
+                    title="Incidencias de mayor impacto sin owner",
                     body=(
-                        f"{crit_unassigned} High/Highest no tienen asignacion explicita. "
+                        f"{crit_unassigned} incidencias de mayor impacto (Supone un impedimento / Highest / High) no tienen asignación explícita. "
                         "Asignar ownership es la decision con mayor retorno inmediato."
                     ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
@@ -995,10 +1053,10 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             if crit_old > 0:
                 cards.append(
                     ActionInsight(
-                        title="Criticas con antiguedad elevada",
+                        title="Incidencias de mayor impacto con antigüedad elevada",
                         body=(
-                            f"{crit_old} High/Highest superan 14 dias de antiguedad. "
-                            "Conviene forzar decision ejecutiva de desbloqueo o cierre."
+                            f"{crit_old} incidencias de mayor impacto (Supone un impedimento / Highest / High) superan 14 días de antigüedad. "
+                            "Conviene forzar decision de gestion de desbloqueo o cierre."
                         ),
                         priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                         score=20.0 + float(crit_old),
@@ -1011,8 +1069,11 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         if crit_stale > 0:
             cards.append(
                 ActionInsight(
-                    title="Criticas sin movimiento reciente",
-                    body=(f"{crit_stale} High/Highest no tienen actualizacion en mas de 7 dias."),
+                    title="Incidencias de mayor impacto sin movimiento reciente",
+                    body=(
+                        f"{crit_stale} incidencias de mayor impacto (Supone un impedimento / Highest / High) "
+                        "no se han actualizado en más de 7 días."
+                    ),
                     priority_filters=list(CRITICAL_PRIORITY_FILTERS),
                     score=14.0 + float(crit_stale),
                 )
@@ -1051,43 +1112,86 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     df = open_df.copy(deep=False)
     df["status"] = normalize_text_col(df["status"], "(sin estado)")
-    counts = df["status"].value_counts()
+    status_series = df["status"].astype(str)
+    status_norm = status_series.str.strip().str.lower()
+    counts = status_series.value_counts()
     total = int(len(df))
     top_status = str(counts.index[0]) if not counts.empty else "—"
     top_count = int(counts.iloc[0]) if not counts.empty else 0
     top_share = (top_count / total) if total else 0.0
+    focus_status, focus_count, focus_share = _top_non_final_status(counts, total=total)
 
     cards: List[ActionInsight] = []
-    if top_status != "—":
+    if focus_status != "—":
         cards.append(
             ActionInsight(
-                title="Cuello de botella probable",
+                title="Concentracion operativa",
                 body=(
-                    f"{_fmt_pct(top_share)} del backlog esta en {top_status} "
-                    f"({top_count} de {total})."
+                    f"{_fmt_pct(focus_share)} del backlog esta en {focus_status} "
+                    f"({focus_count} de {total})."
                 ),
-                status_filters=[top_status],
-                score=12.0 + (top_share * 100.0),
+                status_filters=[focus_status],
+                score=12.0 + (focus_share * 100.0),
+            )
+        )
+    elif top_status != "—":
+        cards.append(
+            ActionInsight(
+                title="Sin foco operativo dominante",
+                body=(
+                    "Con el filtro actual, la concentracion principal se da en estados de cierre. "
+                    "Para priorizar mejoras, conviene centrar el analisis en estados activos."
+                ),
+                score=4.0,
             )
         )
 
-    active_mask = df["status"].astype(str).isin(ACTIVE_STATUS_FILTERS)
+    active_mask = status_series.isin(ACTIVE_STATUS_FILTERS)
     active_share = float(active_mask.mean()) if total else 0.0
+    if "updated" in df.columns:
+        stale_days_all = _stale_days_from_updated(df)
+        active_stale_share = (
+            float((stale_days_all.loc[active_mask] > 7).mean())
+            if int(active_mask.sum()) > 0 and stale_days_all.notna().any()
+            else 0.0
+        )
+    else:
+        active_stale_share = 0.0
+
+    # Scoring: only elevate to Must when active WIP is genuinely high.
+    if active_share >= 0.60:
+        active_score = 18.0 + (active_share * 10.0)
+    elif active_share >= 0.50:
+        active_score = 11.0 + (active_share * 8.0)
+    else:
+        active_score = 8.0 + (active_share * 6.0)
+
+    active_msg = (
+        f"{_fmt_pct(active_share)} del backlog está en estados activos (trabajo en curso). "
+        "Cuando hay demasiado en curso, el foco se dispersa y los cierres se alargan."
+    )
+    if active_stale_share >= 0.20:
+        active_msg += (
+            f" Además, {_fmt_pct(active_stale_share)} de lo activo no se ha movido en >7 días: "
+            "señal de atasco o falta de decisión."
+        )
+    active_msg += (
+        " Palanca práctica: fija un límite de trabajo en curso (por equipo o por persona) y, "
+        "si se supera, no se inicia nada nuevo hasta cerrar o desbloquear 1–2 items prioritarios."
+    )
+
     cards.append(
         ActionInsight(
-            title="Carga activa del equipo",
-            body=(
-                f"{_fmt_pct(active_share)} del backlog esta en estados activos. "
-                "Por encima de 60% suele subir el cambio de contexto."
-            ),
+            title="Trabajo en curso elevado",
+            body=active_msg,
             status_filters=[
-                s for s in ACTIVE_STATUS_FILTERS if s in df["status"].astype(str).unique().tolist()
+                s for s in ACTIVE_STATUS_FILTERS if s in status_series.unique().tolist()
             ],
-            score=8.0 + (active_share * 100.0),
+            score=active_score,
         )
     )
 
-    triage_mask = df["status"].astype(str).isin(TRIAGE_STATUS_FILTERS)
+    triage_mask = status_series.isin(TRIAGE_STATUS_FILTERS)
     triage_share = float(triage_mask.mean()) if total else 0.0
     if triage_share >= 0.35:
         cards.append(
@@ -1102,9 +1206,7 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             )
         )
 
-    blocked_count = int(
-        df["status"].astype(str).str.lower().str.contains("blocked|bloque", regex=True).sum()
-    )
+    blocked_count = int(status_series.str.lower().str.contains("blocked|bloque", regex=True).sum())
     blocked_share = (blocked_count / total) if total else 0.0
     if blocked_count > 0:
         cards.append(
@@ -1120,8 +1222,8 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
         )
 
     stale_days = _stale_days_from_updated(df)
-    if stale_days.notna().any() and top_status != "—":
-        dom_mask = df["status"].astype(str).eq(top_status)
+    if stale_days.notna().any() and focus_status != "—":
+        dom_mask = status_series.eq(focus_status)
         dom_stale = stale_days.loc[dom_mask]
         if dom_stale.notna().any():
             dom_stale_med = float(dom_stale.median())
@@ -1130,10 +1232,10 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                     ActionInsight(
                         title="Estado dominante sin avance",
                         body=(
-                            f"Las incidencias en {top_status} llevan {_fmt_days(dom_stale_med)} "
+                            f"Las incidencias en {focus_status} llevan {_fmt_days(dom_stale_med)} "
                             "sin actualizacion mediana."
                         ),
-                        status_filters=[top_status],
+                        status_filters=[focus_status],
                         score=11.0 + (dom_stale_med / 2.0),
                     )
                 )
@@ -1159,47 +1261,23 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                         )
                     )
 
-    accepted = int((df["status"].astype(str) == "Accepted").sum())
-    ready = int((df["status"].astype(str) == "Ready to deploy").sum())
-    deployed = int((df["status"].astype(str) == "Deployed").sum())
-    if accepted > 0:
-        conv = (ready / accepted) if accepted else 0.0
-        if conv < 0.35:
-            cards.append(
-                ActionInsight(
-                    title="Friccion Accepted -> Ready",
-                    body=(
-                        f"Accepted={accepted} y Ready to deploy={ready} "
-                        f"(conversion {_fmt_pct(conv)})."
-                    ),
-                    status_filters=["Accepted", "Ready to deploy"],
-                    score=13.0 + float(accepted - ready),
-                )
-            )
-    if ready > 0:
-        conv_release = (deployed / ready) if ready else 0.0
-        if conv_release < 0.70:
-            cards.append(
-                ActionInsight(
-                    title="Embudo de release",
-                    body=(
-                        f"Ready to deploy={ready} y Deployed={deployed} "
-                        f"(conversion {_fmt_pct(conv_release)})."
-                    ),
-                    status_filters=["Ready to deploy", "Deployed"],
-                    score=12.0 + float(ready - deployed),
-                )
-            )
-
     tip = "Control de flujo recomendado: medir SLA por estado y revisar desvio diariamente."
-    if top_share > 0.45:
-        tip = f"Prioridad de gestion: descargar {top_status} hasta bajar por debajo de 35% del backlog."
+    if focus_share > 0.45 and focus_status != "—":
+        tip = (
+            f"Prioridad de gestion: descargar {focus_status} "
+            "hasta bajar por debajo de 35% del backlog."
+        )
+    elif focus_status == "—":
+        tip = "No se observa un foco dominante en estados activos con este filtro."
 
     return TrendInsightPack(
         metrics=[
             InsightMetric("Total incidencias", f"{total}"),
-            InsightMetric("Estado dominante", top_status),
-            InsightMetric("Concentracion top", _fmt_pct(top_share)),
+            InsightMetric(
+                "Estado foco",
+                focus_status if focus_status != "—" else "Sin foco operativo",
+            ),
+            InsightMetric("Concentracion foco", _fmt_pct(focus_share)),
         ],
         cards=_sorted_cards(cards),
         executive_tip=tip,
@@ -1225,7 +1303,7 @@ def build_people_plan_recommendations(
         )
     if critical_risk_pct >= 55.0:
         recs.append(
-            "Criticidad atrapada en entrada/bloqueado: fijar owners y fecha compromiso en las de mayor impacto."
+            "Prioridades de mayor impacto atrapadas en entrada/bloqueado: fijar owners y fecha compromiso."
         )
     if flow_risk_pct >= 60.0:
         recs.append(
@@ -1282,7 +1360,7 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
         critical_share = float((pr.map(priority_rank) <= 2).mean()) if open_total else 0.0
         if critical_share >= 0.30:
             lines.append(
-                f"Criticidad elevada: {_fmt_pct(critical_share)} del backlog abierto esta en High/Highest."
+                f"Prioridades de mayor impacto: {_fmt_pct(critical_share)} del backlog abierto está en Supone un impedimento / Highest / High."
             )
 
     if "updated" in safe_open.columns:

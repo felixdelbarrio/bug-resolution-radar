@@ -113,6 +113,17 @@ def test_route_copilot_action_routes_duplicates_to_insights_tab() -> None:
     assert route.insights_tab == "duplicates"
 
 
+def test_route_copilot_action_uses_operational_cta_for_terminal_status() -> None:
+    route = route_copilot_action(
+        question="Que cuello de botella tenemos ahora?",
+        snapshot={"blocked_count": 0, "top_status": "Accepted"},
+        next_action=None,
+    )
+    assert route.section == "issues"
+    assert route.cta == "Revisar estados operativos en Issues"
+    assert route.status_filters is None
+
+
 def test_resolve_filters_against_open_df_maps_blocked_variants() -> None:
     open_df = pd.DataFrame(
         {
@@ -165,3 +176,39 @@ def test_list_next_best_actions_returns_ordered_sequence() -> None:
     assert len(actions) >= 4
     assert actions[0].title == "Asignacion de ownership critico"
     assert any(a.title == "Revision de bloqueos activos" for a in actions)
+
+
+def test_answer_copilot_bottleneck_avoids_neck_language_for_final_status() -> None:
+    ans = answer_copilot_question(
+        question="Que cuello de botella tenemos?",
+        snapshot={
+            "top_status": "Accepted",
+            "top_status_share": 0.42,
+            "blocked_count": 0,
+            "open_total": 100,
+            "net_14": 2,
+            "critical_count": 12,
+        },
+    )
+    assert "estado operativo dominante" in ans.answer.lower()
+    assert "accepted" not in ans.answer.lower()
+
+
+def test_build_copilot_suggestions_uses_operational_wording_when_no_active_focus() -> None:
+    suggestions = build_copilot_suggestions(
+        snapshot={
+            "top_status": "Accepted",
+            "top_status_is_final": True,
+            "critical_pct": 0.0,
+            "critical_unassigned_count": 0,
+            "blocked_pct": 0.0,
+            "net_14": 0,
+            "duplicate_share": 0.0,
+        },
+        baseline_snapshot=None,
+        next_action=None,
+        intent_counts={"bottleneck": 3},
+        limit=4,
+    )
+    assert any("cuello de botella" in s.lower() for s in suggestions)
+    assert not any("tramo final" in s.lower() for s in suggestions)

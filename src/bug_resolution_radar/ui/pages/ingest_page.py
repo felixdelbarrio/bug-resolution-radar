@@ -70,22 +70,33 @@ def _is_closed_status(value: str) -> bool:
 
 def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
     status = str(item.status or "").strip() or "Open"
-    created = str(item.target_date or item.last_modified or "").strip() or None
-    updated = str(item.last_modified or item.target_date or "").strip() or None
-    resolved = updated if _is_closed_status(status) else None
+    created = (
+        str(item.start_datetime or item.target_date or item.last_modified or "").strip() or None
+    )
+    updated = (
+        str(item.last_modified or item.closed_date or item.start_datetime or "").strip() or None
+    )
+    closed_date = str(item.closed_date or "").strip() or None
+    resolved = closed_date or (updated if _is_closed_status(status) else None)
+    label = (
+        f"{str(item.matrix_service_n1 or '').strip()} "
+        f"{str(item.source_service_n1 or '').strip()}"
+    ).strip()
+    impacted = str(item.impacted_service or item.service or "").strip()
+    components = [impacted] if impacted else []
     return NormalizedIssue(
         key=str(item.id or "").strip(),
         summary=str(item.summary or "").strip(),
         status=status,
-        type="Helix",
+        type=str(item.incident_type or "").strip() or "Helix",
         priority=str(item.priority or "").strip(),
         created=created,
         updated=updated,
         resolved=resolved,
         assignee=str(item.assignee or "").strip(),
         reporter=str(item.customer_name or "").strip(),
-        labels=[],
-        components=[],
+        labels=[label] if label else [],
+        components=components,
         resolution="",
         resolution_type="",
         url=str(item.url or "").strip(),
@@ -110,7 +121,8 @@ def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:
 
 
 def render(settings: Settings) -> None:
-    t_jira, t_helix = st.tabs(["🟦 Jira", "🟩 Helix"])
+    # Avoid emoji icons in tab labels: some environments render them as empty squares.
+    t_jira, t_helix = st.tabs(["Jira", "Helix"])
 
     with t_jira:
         jira_cfg = jira_sources(settings)

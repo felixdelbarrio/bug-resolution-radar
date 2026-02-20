@@ -10,10 +10,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
+)
+from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
+    AGE_BUCKET_ORDER,
+    build_age_bucket_points,
+    build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
@@ -101,20 +107,20 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
 def _resolution_days_series(dff: pd.DataFrame) -> pd.Series:
     if dff is None or dff.empty:
         return pd.Series([], dtype=float)
-    if "resolved" not in dff.columns or "created" not in dff.columns:
+    if "created" not in dff.columns:
         return pd.Series([], dtype=float)
 
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
 
     closed = dff.copy()
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__resolved"].notna() & closed["__created"].notna()]
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__finalized_at"].notna() & closed["__created"].notna()]
     if closed.empty:
         return pd.Series([], dtype=float)
 
-    days = (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+    days = (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     return days.clip(lower=0.0)
 
 
@@ -148,7 +154,7 @@ def _render_timeseries(ctx: ChartContext) -> Optional[go.Figure]:
     if fig is None:
         return None
     # Already a plotly Figure produced by compute_kpis
-    return apply_plotly_bbva(fig)
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_timeseries(ctx: ChartContext) -> List[str]:
@@ -189,10 +195,20 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
 
 def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
-    fig = ctx.kpis.get("age_buckets_chart")
-    if fig is None:
+    points = build_age_bucket_points(ctx.open_df)
+    if points.empty:
         return None
-    return apply_plotly_bbva(fig)
+
+    statuses = points["status"].astype(str).unique().tolist()
+    canon = canonical_status_order()
+    canon_present = [s for s in canon if s in statuses]
+    rest = [s for s in statuses if s not in set(canon_present)]
+    status_order = canon_present + rest
+    return build_age_buckets_issue_distribution(
+        issues=points,
+        status_order=status_order,
+        bucket_order=AGE_BUCKET_ORDER,
+    )
 
 
 def _insights_age_buckets(ctx: ChartContext) -> List[str]:
@@ -239,25 +255,94 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
 
 
 def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
-    days = _resolution_days_series(ctx.dff)
-    if days.empty:
+    dff = ctx.dff
+    if dff is None or dff.empty or "created" not in dff.columns:
         return None
 
-    fig = px.histogram(
-        pd.DataFrame({"resolution_days": days}),
-        x="resolution_days",
-        nbins=30,
-        title="Histograma: días hasta resolución (cerradas)",
+    created = _to_dt_naive(dff["created"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
+    closed = dff.copy(deep=False)
+    closed["__created"] = created
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
+    if closed.empty:
+        return None
+
+    closed["resolution_days"] = (
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
+    ).clip(lower=0.0)
+    closed["priority"] = (
+        normalize_text_col(closed["priority"], "(sin priority)")
+        if "priority" in closed.columns
+        else "(sin priority)"
     )
-    return apply_plotly_bbva(fig)
+
+    closed["resolution_bucket"] = pd.cut(
+        closed["resolution_days"],
+        bins=[-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, float("inf")],
+        labels=[
+            "Mismo día (0d)",
+            "1-2d",
+            "3-7d",
+            "8-14d",
+            "15-30d",
+            "31-60d",
+            "61-90d",
+            ">90d",
+        ],
+        right=True,
+        include_lowest=True,
+        ordered=True,
+    )
+    grouped = (
+        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+    )
+    if grouped.empty:
+        return None
+
+    priority_order = sorted(
+        grouped["priority"].astype(str).unique().tolist(),
+        key=_priority_sort_key,
+    )
+    bucket_order = [
+        "Mismo día (0d)",
+        "1-2d",
+        "3-7d",
+        "8-14d",
+        "15-30d",
+        "31-60d",
+        "61-90d",
+        ">90d",
+    ]
+    fig = px.bar(
+        grouped,
+        x="resolution_bucket",
+        y="count",
+        text="count",
+        color="priority",
+        barmode="stack",
+        category_orders={"resolution_bucket": bucket_order, "priority": priority_order},
+        color_discrete_map=priority_color_map(),
+        title="Tiempo hasta estado final",
+    )
+    fig.update_layout(
+        title_text="",
+        xaxis_title="Tiempo hasta estado final",
+        yaxis_title="Incidencias",
+        bargap=0.10,
+    )
+    fig.update_traces(textposition="inside", textfont=dict(size=10))
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     days = _resolution_days_series(ctx.dff)
     if days.empty:
         return [
-            "No hay suficientes cierres con fechas para analizar tiempos de resolución.",
-            "Tip: asegura ‘created’ y ‘resolved’ en la ingesta y mide tiempo habitual vs casos lentos (mejor que mirar solo la media).",
+            "No hay suficientes incidencias en estado final con fechas para analizar tiempos de cierre.",
+            "Tip: asegura ‘created’ y algún marcador de cierre (‘resolved’ o estado final) en la ingesta, y mira tiempo habitual vs casos lentos (mejor que solo la media).",
         ]
 
     p50 = float(days.quantile(0.5))
@@ -265,7 +350,7 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     mean = float(days.mean())
 
     return [
-        f"Tiempo de resolución: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
+        f"Tiempo hasta estado final: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
         "Si la media queda muy por encima del tiempo habitual, hay pocos casos muy lentos que distorsionan el resultado.",
         "Acción: clasifica el 10% más lento por causa raíz (bloqueo externo, falta de reproducibilidad, dependencias) "
         "y ataca la causa, no el síntoma. Reducir los casos lentos suele mejorar satisfacción más que cerrar más casos fáciles.",
@@ -299,7 +384,7 @@ def _render_open_priority_pie(ctx: ChartContext) -> Optional[go.Figure]:
         title="Issues abiertos por prioridad",
     )
     fig.update_traces(sort=False)
-    return apply_plotly_bbva(fig)
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_open_priority_pie(ctx: ChartContext) -> List[str]:
@@ -374,13 +459,15 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         grouped,
         x="status",
         y="count",
+        text="count",
         color="priority",
         barmode="stack",
         title="Issues por Estado",
         category_orders={"status": ordered_statuses, "priority": priority_order},
         color_discrete_map=priority_color_map(),
     )
-    return apply_plotly_bbva(fig)
+    fig.update_traces(textposition="inside", textfont=dict(size=12))
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
@@ -394,37 +481,28 @@ def _insights_open_status_bar(ctx: ChartContext) -> List[str]:
     if total == 0:
         return ["No hay issues para este análisis."]
 
-    top_status = str(counts.index[0])
-    top_cnt = int(counts.iloc[0])
-    share = float(top_cnt) / float(total)
+    non_terminal_counts = counts[
+        [
+            not any(tok in str(status_name or "").strip().lower() for tok in TERMINAL_STATUS_TOKENS)
+            for status_name in counts.index
+        ]
+    ]
+    if non_terminal_counts.empty:
+        return [
+            "No hay concentración relevante en estados operativos con este filtro.",
+            "Acción ‘WOW’: abre foco en estados activos (New, Analysing, En progreso, Blocked) para detectar dónde se frena el flujo.",
+        ]
 
+    top_status = str(non_terminal_counts.index[0])
+    top_cnt = int(non_terminal_counts.iloc[0])
+    share = float(top_cnt) / float(total)
     insights = [
         f"Cuello de botella: el estado **{top_status}** concentra **{_fmt_pct(share)}** del conjunto analizado "
         f"({top_cnt}/{total}). Cuando un estado domina, suele ser un ‘waiting room’ (bloqueos, validación, dependencias).",
         "Acción ‘WOW’: define un límite de casos para ese estado (con revisión diaria de bloqueos). "
         "Reducir casos acumulados en el cuello suele acelerar el flujo sin aumentar capacidad.",
     ]
-
-    accepted_cnt = int((stc == "Accepted").sum())
-    rtd_cnt = int((stc == "Ready to deploy").sum())
-    deployed_cnt = int((stc == "Deployed").sum())
-
-    if accepted_cnt > 0:
-        rtd_conv = (rtd_cnt / accepted_cnt) * 100.0
-        if rtd_conv < 35.0:
-            insights.append(
-                f"Flujo final con fricción: **Accepted={accepted_cnt}** vs **Ready to deploy={rtd_cnt}** "
-                f"(conversión {rtd_conv:.1f}%). Revisa criterio de salida y fija un tiempo máximo para pasar a Ready to deploy."
-            )
-    if rtd_cnt > 0:
-        dep_conv = (deployed_cnt / rtd_cnt) * 100.0
-        if dep_conv < 70.0:
-            insights.append(
-                f"Embudo de despliegue: **Ready to deploy={rtd_cnt}** vs **Deployed={deployed_cnt}** "
-                f"(conversión {dep_conv:.1f}%). Revisa capacidad/ventana de release."
-            )
-
-    return insights[:4]
+    return insights[:3]
 
 
 # ---------------------------------------------------------------------
@@ -468,7 +546,7 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ChartSpec(
             chart_id="open_status_bar",
             title="Backlog por estado",
-            subtitle="Detecta cuellos de botella y ‘waiting rooms’",
+            subtitle="Concentración por fase y ritmo de salida del flujo",
             group="Flujo",
             render=_render_open_status_bar,
             insights=_insights_open_status_bar,

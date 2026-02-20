@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List
@@ -11,8 +13,23 @@ from typing import Any, Dict, List
 from dotenv import dotenv_values
 from pydantic import BaseModel
 
-ENV_PATH = Path(".env")
-ENV_EXAMPLE_PATH = Path(".env.example")
+
+def _runtime_home() -> Path:
+    override = str(os.getenv("BUG_RESOLUTION_RADAR_HOME", "") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        # Build artifacts commonly keep the binary in ./dist while config files sit one level up.
+        if exe_dir.name.lower() == "dist":
+            return exe_dir.parent
+        return exe_dir
+    return Path(__file__).resolve().parents[2]
+
+
+DEFAULT_CONFIG_HOME = _runtime_home()
+ENV_PATH = DEFAULT_CONFIG_HOME / ".env"
+ENV_EXAMPLE_PATH = DEFAULT_CONFIG_HOME / ".env.example"
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "México",
     "España",
@@ -21,6 +38,13 @@ DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
+_PATH_SETTING_KEYS = {
+    "DATA_PATH",
+    "NOTES_PATH",
+    "INSIGHTS_LEARNING_PATH",
+    "HELIX_DATA_PATH",
+    "HELIX_CA_BUNDLE",
+}
 
 
 def _decode_env_multiline(v: str) -> str:
@@ -35,6 +59,34 @@ def _encode_env_multiline(v: str) -> str:
 
 def _coerce_str(value: Any) -> str:
     return str(value or "").strip()
+
+
+def config_home() -> Path:
+    return ENV_PATH.expanduser().resolve().parent
+
+
+def _resolve_runtime_path(raw: str) -> str:
+    txt = _coerce_str(raw)
+    if not txt:
+        return ""
+    path = Path(txt).expanduser()
+    if not path.is_absolute():
+        path = config_home() / path
+    return str(path.resolve())
+
+
+def _to_storable_path(raw: str) -> str:
+    txt = _coerce_str(raw)
+    if not txt:
+        return ""
+    path = Path(txt).expanduser()
+    if not path.is_absolute():
+        return str(path)
+    try:
+        rel = path.resolve().relative_to(config_home())
+        return str(rel)
+    except Exception:
+        return str(path.resolve())
 
 
 def _ascii_fold(value: str) -> str:
@@ -97,6 +149,9 @@ class Settings(BaseModel):
     # legacy fallback (solo compatibilidad si no hay JIRA_SOURCES_JSON)
     JIRA_JQL: str = ""
     JIRA_BROWSER: str = "chrome"
+    JIRA_BROWSER_LOGIN_URL: str = ""
+    JIRA_BROWSER_LOGIN_WAIT_SECONDS: int = 90
+    JIRA_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
     # -------------------------
     # HELIX
@@ -107,6 +162,9 @@ class Settings(BaseModel):
     HELIX_ORGANIZATION: str = ""
     HELIX_BROWSER: str = "chrome"
     HELIX_DATA_PATH: str = "data/helix_dump.json"
+    HELIX_DASHBOARD_URL: str = (
+        "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
+    )
 
     # Proxy y SS
     HELIX_PROXY: str = ""
@@ -121,21 +179,33 @@ class Settings(BaseModel):
     HELIX_MIN_CHUNK_SIZE: int = 10
     HELIX_MAX_PAGES: int = 200
     HELIX_MAX_INGEST_SECONDS: int = 900
-
-    # -------------------------
-    # KPIs
-    # -------------------------
-    KPI_FORTNIGHT_DAYS: str = "15"
-    KPI_MONTH_DAYS: str = "30"
-    KPI_OPEN_AGE_X_DAYS: str = "7,14,30"
-    KPI_AGE_BUCKETS: str = "0-2,3-7,8-14,15-30,>30"
+    HELIX_QUERY_MODE: str = "arsql"  # person_workitems|arsql|auto
+    HELIX_ARSQL_BASE_URL: str = ""
+    HELIX_ARSQL_DATASOURCE_UID: str = ""
+    HELIX_ARSQL_SOURCE_SERVICE_N1: str = "ENTERPRISE WEB"
+    HELIX_ARSQL_LIMIT: int = 500
+    HELIX_ARSQL_DS_AUTH: str = "IMS-JWT JWT PLACEHOLDER"
+    HELIX_ARSQL_CLIENT_TYPE: str = "4021"
+    HELIX_ARSQL_GRAFANA_ORG_ID: str = ""
+    HELIX_ARSQL_GRAFANA_DEVICE_ID: str = ""
+    HELIX_ARSQL_DASHBOARD_URL: str = ""
+    HELIX_BROWSER_LOGIN_WAIT_SECONDS: int = 90
+    HELIX_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
     # -------------------------
     # Dashboard preferences
     # -------------------------
     DASHBOARD_SUMMARY_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
     TREND_SELECTED_CHARTS: str = "timeseries,open_priority_pie,resolution_hist"
+    DASHBOARD_FILTER_STATUS_JSON: str = "[]"
+    DASHBOARD_FILTER_PRIORITY_JSON: str = "[]"
+    DASHBOARD_FILTER_ASSIGNEE_JSON: str = "[]"
     KEEP_CACHE_ON_SOURCE_DELETE: str = "false"
+    # 0 = auto (máxima antigüedad disponible en backlog)
+    ANALYSIS_LOOKBACK_MONTHS: int = 0
+    # 0 = auto (máxima antigüedad disponible en backlog)
+    # Legacy fallback (mantenido por compatibilidad)
+    ANALYSIS_LOOKBACK_DAYS: int = 0
 
 
 def ensure_env() -> None:
@@ -155,8 +225,12 @@ def load_settings() -> Settings:
     # Decodificar multilínea
     if "JIRA_JQL" in vals:
         vals["JIRA_JQL"] = _decode_env_multiline(vals["JIRA_JQL"])
+    settings = Settings.model_validate(vals)
 
-    return Settings.model_validate(vals)
+    payload = settings.model_dump()
+    for key in _PATH_SETTING_KEYS:
+        payload[key] = _resolve_runtime_path(str(payload.get(key) or ""))
+    return Settings.model_validate(payload)
 
 
 def save_settings(settings: Settings) -> None:
@@ -165,6 +239,8 @@ def save_settings(settings: Settings) -> None:
 
     for k, v in data.items():
         if isinstance(v, str):
+            if k in _PATH_SETTING_KEYS:
+                v = _to_storable_path(v)
             v = _encode_env_multiline(v)
         lines.append(f"{k}={v}")
 

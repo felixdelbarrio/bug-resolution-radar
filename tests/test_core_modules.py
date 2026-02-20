@@ -4,16 +4,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.notes import NotesStore
 from bug_resolution_radar.security import mask_secret, safe_log_text
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     flow_signal_color_map,
+    open_issues_only,
     priority_color,
     priority_color_map,
     status_color,
 )
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.utils import now_iso, parse_age_buckets, parse_int_list
 
 
@@ -74,8 +78,42 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
     assert "JIRA_JQL=linea 1\\nlinea 2" in saved
 
 
+def test_config_resolves_relative_data_paths_against_env_location(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        (
+            "DATA_PATH=data/issues.json\n"
+            "NOTES_PATH=data/notes.json\n"
+            "INSIGHTS_LEARNING_PATH=data/insights_learning.json\n"
+            "HELIX_DATA_PATH=data/helix_dump.json\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    assert settings.DATA_PATH == str((tmp_path / "data/issues.json").resolve())
+    assert settings.NOTES_PATH == str((tmp_path / "data/notes.json").resolve())
+    assert settings.INSIGHTS_LEARNING_PATH == str(
+        (tmp_path / "data/insights_learning.json").resolve()
+    )
+    assert settings.HELIX_DATA_PATH == str((tmp_path / "data/helix_dump.json").resolve())
+
+    cfg.save_settings(settings)
+    saved = env_path.read_text(encoding="utf-8")
+    assert "DATA_PATH=data/issues.json" in saved
+    assert "NOTES_PATH=data/notes.json" in saved
+    assert "INSIGHTS_LEARNING_PATH=data/insights_learning.json" in saved
+    assert "HELIX_DATA_PATH=data/helix_dump.json" in saved
+
+
 def test_semantic_status_and_priority_colors() -> None:
     assert status_color("New") == "#E85D63"
+    assert status_color("Ready") == "#E85D63"
     assert status_color("Analysing") == "#D64550"
     assert status_color("Blocked") == "#B4232A"
     assert status_color("Open") == "#FBBF24"
@@ -88,6 +126,11 @@ def test_semantic_status_and_priority_colors() -> None:
     assert priority_color("Medium") == "#F59E0B"
     assert priority_color("Low") == "#22A447"
     assert priority_color("Lowest") == "#15803D"
+
+
+def test_canonical_status_order_includes_ready_after_analysing() -> None:
+    order = canonical_status_order()
+    assert order.index("Analysing") < order.index("Ready") < order.index("Blocked")
 
 
 def test_semantic_color_maps_include_flow_signals() -> None:
@@ -109,6 +152,18 @@ def test_goal_state_chip_uses_stronger_fill() -> None:
     assert "background:#ECE6FF" in deployed_style
     assert "color:#5B3FD0" in deployed_style
     assert "rgba(76,175,80,0.160)" in accepted_style
+
+
+def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:
+    df = pd.DataFrame(
+        {
+            "key": ["A-1", "A-2", "A-3"],
+            "status": ["New", "Accepted", "Blocked"],
+            "resolved": [pd.NaT, pd.NaT, "2025-01-03T00:00:00+00:00"],
+        }
+    )
+    out = open_issues_only(df)
+    assert out["key"].astype(str).tolist() == ["A-1"]
 
 
 def test_multi_country_sources_parsing_and_ids() -> None:

@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.analysis_window import (
+    effective_analysis_lookback_months,
+    max_available_backlog_months,
+)
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
@@ -20,6 +24,7 @@ from bug_resolution_radar.config import (
 from bug_resolution_radar.source_maintenance import (
     purge_source_cache,
 )
+from bug_resolution_radar.ui.common import load_issues_df
 
 
 def _boolish(value: Any, default: bool = True) -> bool:
@@ -41,7 +46,7 @@ def _trend_chart_catalog() -> List[Tuple[str, str]]:
     return [
         ("timeseries", "Evolución (últimos 90 días)"),
         ("age_buckets", "Distribución antigüedad (abiertas)"),
-        ("resolution_hist", "Distribución tiempos de resolución (cerradas)"),
+        ("resolution_hist", "Tiempo hasta estado final"),
         ("open_priority_pie", "Issues abiertos por prioridad (pie)"),
         ("open_status_bar", "Issues por Estado (bar)"),
     ]
@@ -426,6 +431,53 @@ def _clear_config_delete_widget_state() -> None:
         st.session_state.pop(key, None)
 
 
+def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    selected_country = str(st.session_state.get("workspace_country") or "").strip()
+    selected_source_id = str(st.session_state.get("workspace_source_id") or "").strip()
+    if not selected_country and not selected_source_id:
+        return df.copy(deep=False)
+
+    mask = pd.Series(True, index=df.index)
+    if selected_country and "country" in df.columns:
+        mask &= df["country"].fillna("").astype(str).eq(selected_country)
+    if selected_source_id and "source_id" in df.columns:
+        mask &= df["source_id"].fillna("").astype(str).eq(selected_source_id)
+    return df.loc[mask].copy(deep=False)
+
+
+def _analysis_window_defaults(settings: Settings) -> Tuple[int, int]:
+    try:
+        df_all = load_issues_df(settings.DATA_PATH)
+    except Exception:
+        return 1, 1
+
+    if df_all.empty:
+        return 1, 1
+
+    scoped_df = _apply_workspace_scope(df_all)
+    base_df = scoped_df if not scoped_df.empty else df_all
+    available_months = int(max_available_backlog_months(base_df))
+    current_months = int(effective_analysis_lookback_months(settings, df=base_df))
+    return max(1, available_months), max(1, min(current_months, available_months))
+
+
+def _analysis_month_steps(max_months: int) -> List[int]:
+    target = max(1, int(max_months))
+    base_steps = [1, 2, 3, 4, 6, 9, 12, 18, 24, 36, 48, 60]
+    options = sorted({m for m in base_steps if m <= target} | {target})
+    return options or [1]
+
+
+def _nearest_option(value: int, *, options: List[int]) -> int:
+    if not options:
+        return max(1, int(value))
+    tgt = max(1, int(value))
+    return min(options, key=lambda opt: abs(int(opt) - tgt))
+
+
 def render(settings: Settings) -> None:
     flash_success = str(st.session_state.pop("__cfg_flash_success", "") or "").strip()
     if flash_success:
@@ -434,13 +486,14 @@ def render(settings: Settings) -> None:
     countries = supported_countries(settings)
     jira_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
     helix_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
+    analysis_max_months = 1
+    analysis_selected_months = 1
     _inject_delete_zone_css()
 
     st.subheader("Configuración")
 
-    t_jira, t_helix, t_kpis, t_prefs = st.tabs(
-        ["🟦 Jira", "🟩 Helix", "📊 KPIs", "⭐ Preferencias"]
-    )
+    # Avoid emoji icons in tab labels: some environments render them as empty squares.
+    t_jira, t_helix, t_prefs = st.tabs(["Jira", "Helix", "Preferencias"])
 
     with t_jira:
         st.markdown("### Jira global")
@@ -503,7 +556,15 @@ def render(settings: Settings) -> None:
 
     with t_helix:
         st.markdown("### Helix defaults")
-        h1, h2, h3, h4 = st.columns(4)
+        query_mode_current = _as_str(getattr(settings, "HELIX_QUERY_MODE", "arsql")).lower()
+        if query_mode_current not in {"arsql", "person_workitems"}:
+            query_mode_current = "arsql"
+        helix_query_mode_labels = {
+            "arsql": "ARSQL (dashboards/report/arsqlquery)",
+            "person_workitems": "Helix API (/rest/v2/person/workitems/get)",
+        }
+
+        h1, h2, h3 = st.columns(3)
         with h1:
             helix_default_browser = st.selectbox(
                 "Browser default",
@@ -521,17 +582,42 @@ def render(settings: Settings) -> None:
                 key="cfg_helix_ssl_default",
             )
         with h3:
+            helix_query_mode = st.selectbox(
+                "Modo de ingesta",
+                options=["arsql", "person_workitems"],
+                index=0 if query_mode_current == "arsql" else 1,
+                format_func=lambda x: helix_query_mode_labels.get(x, x),
+                key="cfg_helix_query_mode",
+            )
+
+        h4, h5 = st.columns(2)
+        with h4:
             helix_default_proxy = st.text_input(
                 "Proxy default",
                 value=_as_str(getattr(settings, "HELIX_PROXY", "")),
                 key="cfg_helix_proxy_default",
             )
-        with h4:
+        with h5:
             helix_data_path = st.text_input(
                 "Helix Data Path",
                 value=_as_str(getattr(settings, "HELIX_DATA_PATH", "data/helix_dump.json")),
                 key="cfg_helix_data_path",
             )
+        helix_dashboard_url = st.text_input(
+            "Helix Dashboard URL (base apertura ticket)",
+            value=_as_str(
+                getattr(
+                    settings,
+                    "HELIX_DASHBOARD_URL",
+                    "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+                )
+            ),
+            key="cfg_helix_dashboard_url",
+        )
+        if helix_query_mode == "arsql":
+            st.caption("Modo activo: ARSQL (por defecto).")
+        else:
+            st.caption("Modo activo: endpoint Helix clásico person/workitems/get.")
 
         st.markdown("### Fuentes Helix por país")
         helix_rows = _rows_from_helix_settings(settings, countries)
@@ -592,39 +678,8 @@ def render(settings: Settings) -> None:
             key_prefix="cfg_helix",
         )
 
-    with t_kpis:
-        st.markdown("### KPIs")
-
-        k1, k2, k3 = st.columns(3)
-        with k1:
-            fort = st.number_input(
-                "Días quincena (rodante)",
-                min_value=1,
-                value=int(settings.KPI_FORTNIGHT_DAYS),
-                key="cfg_kpi_fortnight",
-            )
-        with k2:
-            month = st.number_input(
-                "Días mes (rodante)",
-                min_value=1,
-                value=int(settings.KPI_MONTH_DAYS),
-                key="cfg_kpi_month",
-            )
-        with k3:
-            open_age = st.text_input(
-                "X días para '% abiertas > X' (coma)",
-                value=settings.KPI_OPEN_AGE_X_DAYS,
-                key="cfg_kpi_open_age",
-            )
-
-        age_buckets = st.text_input(
-            "Buckets antigüedad (0-2,3-7,8-14,15-30,>30)",
-            value=settings.KPI_AGE_BUCKETS,
-            key="cfg_kpi_age_buckets",
-        )
-
     with t_prefs:
-        st.markdown("### ⭐ Favoritos (Tendencias)")
+        st.markdown("### Favoritos (Tendencias)")
         stored_theme_pref = str(getattr(settings, "THEME", "auto") or "auto").strip().lower()
         if stored_theme_pref in {"dark", "light"}:
             theme_default = stored_theme_pref
@@ -643,6 +698,27 @@ def render(settings: Settings) -> None:
             key="cfg_workspace_theme_mode",
         )
         st.caption("Se guarda en el .env como preferencia del usuario.")
+        st.markdown("#### Profundidad del análisis")
+        analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
+        month_options = _analysis_month_steps(analysis_max_months)
+        analysis_selected_months = st.select_slider(
+            "Meses analizados en backlog",
+            options=month_options,
+            value=_nearest_option(analysis_selected_months, options=month_options),
+            key="cfg_analysis_depth_months",
+            format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
+            help=(
+                "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
+                "Si lo dejas al máximo, se usa toda la profundidad disponible."
+            ),
+        )
+        if int(analysis_selected_months) >= int(analysis_max_months):
+            st.caption("Estado: profundidad máxima disponible (modo automático).")
+        else:
+            st.caption(
+                f"Estado: últimos {int(analysis_selected_months)} "
+                f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
+            )
         st.caption("Define los 3 gráficos favoritos.")
 
         catalog = _trend_chart_catalog()
@@ -712,6 +788,11 @@ def render(settings: Settings) -> None:
             return
 
         summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
+        analysis_lookback_months_to_store = (
+            0
+            if int(analysis_selected_months) >= int(analysis_max_months)
+            else int(analysis_selected_months)
+        )
         update = dict(
             THEME=str(theme_mode).strip().lower(),
             SUPPORTED_COUNTRIES=",".join(countries),
@@ -722,13 +803,13 @@ def render(settings: Settings) -> None:
             HELIX_BROWSER=helix_default_browser,
             HELIX_PROXY=str(helix_default_proxy).strip(),
             HELIX_SSL_VERIFY=str(helix_default_ssl_verify).strip().lower(),
+            HELIX_QUERY_MODE=str(helix_query_mode).strip().lower(),
             HELIX_DATA_PATH=str(helix_data_path).strip(),
-            KPI_FORTNIGHT_DAYS=str(fort),
-            KPI_MONTH_DAYS=str(month),
-            KPI_OPEN_AGE_X_DAYS=open_age.strip(),
-            KPI_AGE_BUCKETS=age_buckets.strip(),
+            HELIX_DASHBOARD_URL=str(helix_dashboard_url).strip(),
             DASHBOARD_SUMMARY_CHARTS=summary_csv,
             TREND_SELECTED_CHARTS=summary_csv,
+            ANALYSIS_LOOKBACK_MONTHS=analysis_lookback_months_to_store,
+            ANALYSIS_LOOKBACK_DAYS=0,
         )
 
         new_settings = _safe_update_settings(settings, update)

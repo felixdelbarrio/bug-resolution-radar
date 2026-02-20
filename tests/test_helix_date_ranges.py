@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from bug_resolution_radar.ingest.helix_ingest import (
+    _build_arsql_sql,
     _build_filter_criteria,
     _utc_year_create_date_range_ms,
 )
@@ -36,3 +37,47 @@ def test_build_filter_criteria_includes_create_date_ranges() -> None:
         "organizations": ["ENTERPRISE WEB SYSTEMS SERVICE OWNER"],
         "createDateRanges": [{"start": 1, "end": 2}],
     }
+
+
+def test_build_filter_criteria_includes_optional_filters() -> None:
+    criteria = _build_filter_criteria(
+        "ENTERPRISE WEB SYSTEMS SERVICE OWNER",
+        1,
+        2,
+        status_mappings=["open", "close"],
+        incident_types=["User Service Restoration", "Security Incident"],
+        priorities=["High", "Low"],
+        companies=[{"name": "BBVA México"}],
+        risk_level=["Risk Level 1", "Risk Level 2"],
+    )
+
+    assert criteria == {
+        "organizations": ["ENTERPRISE WEB SYSTEMS SERVICE OWNER"],
+        "createDateRanges": [{"start": 1, "end": 2}],
+        "statusMappings": ["open", "close"],
+        "incidentTypes": ["User Service Restoration", "Security Incident"],
+        "priorities": ["High", "Low"],
+        "companies": [{"name": "BBVA México"}],
+        "riskLevel": ["Risk Level 1", "Risk Level 2"],
+    }
+
+
+def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=75,
+        offset=150,
+        source_service_n1=["ENTERPRISE WEB"],
+        incident_types=["User Service Restoration", "Security Incident"],
+        companies=["BBVA México"],
+    )
+
+    assert "`HPD:Help Desk`.`Incident Number` AS `id`" in sql
+    assert "`HPD:Help Desk`.`Incident Number` IS NOT NULL" in sql
+    assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
+    assert (
+        "`HPD:Help Desk`.`Service Type` IN ('User Service Restoration', 'Security Incident')" in sql
+    )
+    assert "`HPD:Help Desk`.`Contact Company` IN ('BBVA México')" in sql
+    assert "LIMIT 75 OFFSET 150" in sql

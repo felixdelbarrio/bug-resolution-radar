@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 import pandas as pd
 
+from bug_resolution_radar.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.kpis import compute_kpis
 from bug_resolution_radar.ui.components.filters import apply_filters
@@ -38,7 +39,7 @@ def build_dashboard_data_context(
     Every tab consumes the same filtered dataframe/open subset/KPIs to avoid
     duplicated computations and data divergence across widgets.
     """
-    safe_all = _safe_df(df_all)
+    safe_all = apply_analysis_depth_filter(_safe_df(df_all), settings=settings)
     fs = get_filter_state()
     dff = apply_filters(safe_all, fs)
     open_df = open_only(dff)

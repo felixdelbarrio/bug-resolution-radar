@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 import time
+import webbrowser
 from datetime import datetime, timezone
+from platform import system as platform_system
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
@@ -16,6 +20,7 @@ from ..config import build_source_id
 from ..schema_helix import HelixDocument, HelixWorkItem
 from ..security import sanitize_cookie_header, validate_service_base_url
 from ..utils import now_iso
+from .helix_mapper import map_helix_values_to_item
 from .helix_session import get_helix_session_cookie
 
 
@@ -48,6 +53,16 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _csv_list(value: Any, default: str = "") -> List[str]:
+    raw = default if value is None else value
+    if isinstance(raw, (list, tuple, set)):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    txt = str(raw or "").strip()
+    if not txt:
+        return []
+    return [x.strip() for x in txt.split(",") if x.strip()]
+
+
 def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int, int]:
     year_int = _coerce_int(year, 0) if year is not None else 0
     if year_int < 1970:
@@ -61,16 +76,350 @@ def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int
 
 
 def _build_filter_criteria(
-    organization: str, create_start_ms: int, create_end_ms: int
+    organization: str,
+    create_start_ms: int,
+    create_end_ms: int,
+    *,
+    status_mappings: Optional[List[str]] = None,
+    incident_types: Optional[List[str]] = None,
+    priorities: Optional[List[str]] = None,
+    companies: Optional[List[Dict[str, str]]] = None,
+    risk_level: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    return {
+    criteria: Dict[str, Any] = {
         "organizations": [str(organization or "").strip()],
         "createDateRanges": [{"start": int(create_start_ms), "end": int(create_end_ms)}],
     }
+    if status_mappings:
+        criteria["statusMappings"] = [str(x).strip() for x in status_mappings if str(x).strip()]
+    if incident_types:
+        criteria["incidentTypes"] = [str(x).strip() for x in incident_types if str(x).strip()]
+    if priorities:
+        criteria["priorities"] = [str(x).strip() for x in priorities if str(x).strip()]
+    if companies:
+        valid_companies: List[Dict[str, str]] = []
+        for row in companies:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "").strip()
+            if name:
+                valid_companies.append({"name": name})
+        if valid_companies:
+            criteria["companies"] = valid_companies
+    if risk_level:
+        criteria["riskLevel"] = [str(x).strip() for x in risk_level if str(x).strip()]
+    return criteria
 
 
 def _iso_from_epoch_ms(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
+
+
+def _open_url_in_configured_browser(url: str, browser: str) -> bool:
+    b = str(browser or "").strip().lower()
+    browser_names = (
+        ["chrome", "google-chrome", "google chrome"]
+        if b == "chrome"
+        else ["edge", "msedge", "microsoft-edge", "microsoft edge"]
+    )
+    for name in browser_names:
+        try:
+            ctl = webbrowser.get(name)
+            if ctl.open(url, new=2, autoraise=True):
+                return True
+        except Exception:
+            continue
+
+    platform = platform_system().lower()
+    if platform == "darwin":
+        app_name = "Google Chrome" if b == "chrome" else "Microsoft Edge"
+        try:
+            subprocess.Popen(
+                ["open", "-a", app_name, url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            pass
+
+    if platform == "linux":
+        bins = (
+            ["google-chrome", "chrome", "chromium"]
+            if b == "chrome"
+            else ["microsoft-edge", "msedge"]
+        )
+        for bin_name in bins:
+            try:
+                subprocess.Popen(
+                    [bin_name, url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return True
+            except Exception:
+                continue
+
+    try:
+        return bool(webbrowser.open(url, new=2, autoraise=True))
+    except Exception:
+        return False
+
+
+_ARSQL_SELECT_ALIASES: List[str] = [
+    "id",
+    "priority",
+    "summary",
+    "status",
+    "assignee",
+    "incidentType",
+    "service",
+    "impactedService",
+    "customerName",
+    "bbva_matrixservicen1",
+    "bbva_sourceservicen1",
+    "bbva_startdatetime",
+    "bbva_closeddate",
+    "lastModifiedDate",
+    "targetDate",
+]
+
+
+def _resolve_helix_query_mode(value: Any, *, has_arsql_uid: bool) -> str:
+    token = str(value or "").strip().lower()
+    if token in {"person_workitems", "person", "workitems", "v2"}:
+        return "person_workitems"
+    if token in {"arsql", "arsqlquery", "report_arsql", "dashboard_arsql"}:
+        return "arsql"
+    if token == "auto":
+        return "arsql" if has_arsql_uid else "person_workitems"
+    return "arsql" if has_arsql_uid else "person_workitems"
+
+
+def _sql_quote(value: str) -> str:
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _sql_in_filter(field_sql: str, values: Optional[List[str]]) -> Optional[str]:
+    cleaned = [str(v or "").strip() for v in (values or []) if str(v or "").strip()]
+    if not cleaned:
+        return None
+    quoted = ", ".join(_sql_quote(v) for v in cleaned)
+    return f"{field_sql} IN ({quoted})"
+
+
+def _build_arsql_endpoint(base_root: str, datasource_uid: str) -> str:
+    root = str(base_root or "").strip().rstrip("/")
+    uid = str(datasource_uid or "").strip()
+    return f"{root}/dashboards/api/datasources/proxy/uid/{uid}/api/arsys/v1.0/report/arsqlquery"
+
+
+def _root_from_url(url: str) -> str:
+    txt = str(url or "").strip()
+    if not txt:
+        return ""
+    parsed = urlparse(txt)
+    scheme = str(parsed.scheme or "").strip()
+    host = str(parsed.hostname or "").strip()
+    if not scheme or not host:
+        return ""
+    return f"{scheme}://{host}"
+
+
+def _dedup_non_empty(items: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in items:
+        txt = str(item or "").strip()
+        if not txt or txt in seen:
+            continue
+        out.append(txt)
+        seen.add(txt)
+    return out
+
+
+def _uid_from_path(value: str) -> str:
+    txt = str(value or "").strip()
+    if not txt:
+        return ""
+    m = re.search(r"/uid/([A-Za-z0-9_-]{4,})", txt)
+    if m:
+        return str(m.group(1)).strip()
+    return ""
+
+
+def _pick_arsql_datasource_uid(payload: Any) -> str:
+    rows: List[Dict[str, Any]] = []
+    stack: List[Any] = [payload]
+    seen_ids: set[int] = set()
+
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            nid = id(node)
+            if nid in seen_ids:
+                continue
+            seen_ids.add(nid)
+            rows.append(node)
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+            continue
+        if isinstance(node, list):
+            nid = id(node)
+            if nid in seen_ids:
+                continue
+            seen_ids.add(nid)
+            for value in node:
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+
+    best_uid = ""
+    best_score = -1
+    fallback_uids: List[str] = []
+    for row in rows:
+        uid = str(row.get("uid") or "").strip()
+        if not uid:
+            uid = _uid_from_path(
+                str(
+                    row.get("url")
+                    or row.get("path")
+                    or row.get("apiUrl")
+                    or row.get("proxyUrl")
+                    or ""
+                ).strip()
+            )
+        if not uid:
+            continue
+        fallback_uids.append(uid)
+
+        blob = " ".join(
+            str(row.get(k) or "")
+            for k in ("type", "name", "pluginId", "typeName", "url", "path", "apiUrl", "access")
+        ).lower()
+        score = 0
+        if "datasource" in blob:
+            score += 2
+        if "bmchelix-ade-datasource" in blob:
+            score += 8
+        if "arsys" in blob:
+            score += 12
+        if "/api/arsys/" in blob:
+            score += 8
+        if "report/arsqlquery" in blob:
+            score += 8
+        if str(row.get("isDefault")).strip().lower() == "true":
+            score += 1
+        if str(row.get("access") or "").strip().lower() == "proxy":
+            score += 1
+        if score <= 0:
+            continue
+        if score > best_score:
+            best_uid = uid
+            best_score = score
+
+    if best_uid:
+        return best_uid
+
+    dedup_fallback = _dedup_non_empty(fallback_uids)
+    if len(dedup_fallback) == 1:
+        return dedup_fallback[0]
+    return ""
+
+
+def _discover_arsql_datasource_uid(
+    session: requests.Session,
+    *,
+    scheme: str,
+    host: str,
+    timeout: Tuple[float, float],
+) -> str:
+    base = f"{scheme}://{host}"
+    urls = [
+        f"{base}/dashboards/api/datasources",
+        f"{base}/dashboards/api/frontend/settings",
+    ]
+    for url in urls:
+        try:
+            resp = session.get(url, timeout=timeout)
+        except requests.exceptions.RequestException:
+            continue
+        if resp.status_code != 200:
+            continue
+        try:
+            payload = resp.json()
+        except Exception:
+            continue
+        uid = _pick_arsql_datasource_uid(payload)
+        if uid:
+            return uid
+    return ""
+
+
+def _build_arsql_sql(
+    *,
+    create_start_ms: int,
+    create_end_ms: int,
+    limit: int,
+    offset: int,
+    source_service_n1: Optional[List[str]] = None,
+    incident_types: Optional[List[str]] = None,
+    companies: Optional[List[str]] = None,
+) -> str:
+    start_sec = int(max(0, create_start_ms) // 1000)
+    end_sec = int(max(start_sec, create_end_ms) // 1000)
+
+    where_parts: List[str] = [
+        "`HPD:Help Desk`.`BBVA_MarcaSmartIT` = 'SmartIT'",
+        "`HPD:Help Desk`.`Incident Number` IS NOT NULL",
+        "("
+        f"`HPD:Help Desk`.`Submit Date` BETWEEN {start_sec} AND {end_sec}"
+        f" OR `HPD:Help Desk`.`Last Modified Date` BETWEEN {start_sec} AND {end_sec}"
+        f" OR `HPD:Help Desk`.`BBVA_StartDateTime` BETWEEN {start_sec} AND {end_sec}"
+        f" OR `HPD:Help Desk`.`Closed Date` BETWEEN {start_sec} AND {end_sec}"
+        f" OR `HPD:Help Desk`.`Last Resolved Date` BETWEEN {start_sec} AND {end_sec}"
+        ")",
+    ]
+
+    source_filter = _sql_in_filter("`HPD:Help Desk`.`BBVA_SourceServiceN1`", source_service_n1)
+    if source_filter:
+        where_parts.append(source_filter)
+
+    incident_type_filter = _sql_in_filter("`HPD:Help Desk`.`Service Type`", incident_types)
+    if incident_type_filter:
+        where_parts.append(incident_type_filter)
+
+    company_filter = _sql_in_filter("`HPD:Help Desk`.`Contact Company`", companies)
+    if company_filter:
+        where_parts.append(company_filter)
+
+    where_sql = " AND ".join(where_parts)
+    safe_limit = max(1, int(limit))
+    safe_offset = max(0, int(offset))
+
+    return (
+        "SELECT "
+        "`HPD:Help Desk`.`Incident Number` AS `id`, "
+        "`HPD:Help Desk`.`Priority` AS `priority`, "
+        "`HPD:Help Desk`.`Description` AS `summary`, "
+        "`HPD:Help Desk`.`Status` AS `status`, "
+        "CASE WHEN `HPD:Help Desk`.`Assignee` IS NULL THEN ' ' "
+        "ELSE `HPD:Help Desk`.`Assignee` END AS `assignee`, "
+        "`HPD:Help Desk`.`Service Type` AS `incidentType`, "
+        "`HPD:Help Desk`.`ServiceCI` AS `service`, "
+        "`HPD:Help Desk`.`HPD_CI` AS `impactedService`, "
+        "`HPD:Help Desk`.`Contact Company` AS `customerName`, "
+        "`HPD:Help Desk`.`BBVA_MatrixServiceN1` AS `bbva_matrixservicen1`, "
+        "`HPD:Help Desk`.`BBVA_SourceServiceN1` AS `bbva_sourceservicen1`, "
+        "`HPD:Help Desk`.`BBVA_StartDateTime` AS `bbva_startdatetime`, "
+        "`HPD:Help Desk`.`Closed Date` AS `bbva_closeddate`, "
+        "`HPD:Help Desk`.`Last Modified Date` AS `lastModifiedDate`, "
+        "`HPD:Help Desk`.`Submit Date` AS `targetDate` "
+        "FROM `HPD:Help Desk` "
+        f"WHERE {where_sql} "
+        "ORDER BY `HPD:Help Desk`.`Submit Date` DESC "
+        f"LIMIT {safe_limit} OFFSET {safe_offset}"
+    )
 
 
 def _get_timeouts(
@@ -209,6 +558,138 @@ def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _column_name(column: Any, idx: int) -> str:
+    if isinstance(column, str):
+        name = column.strip()
+        if name:
+            return name
+    if isinstance(column, dict):
+        for key in ("name", "text", "title", "label", "field", "id"):
+            name = str(column.get(key) or "").strip()
+            if name:
+                return name
+    if idx < len(_ARSQL_SELECT_ALIASES):
+        return _ARSQL_SELECT_ALIASES[idx]
+    return f"col_{idx}"
+
+
+def _rows_to_dicts(rows: List[Any], columns: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    names = (
+        [_column_name(col, idx) for idx, col in enumerate(columns or [])]
+        if columns is not None
+        else list(_ARSQL_SELECT_ALIASES)
+    )
+    for row in rows:
+        if isinstance(row, dict):
+            out.append(dict(row))
+            continue
+        if not isinstance(row, (list, tuple)):
+            continue
+        item: Dict[str, Any] = {}
+        for idx, value in enumerate(row):
+            key = names[idx] if idx < len(names) else _column_name(None, idx)
+            item[key] = value
+        out.append(item)
+    return out
+
+
+def _frame_to_rows(frame: Dict[str, Any]) -> List[Dict[str, Any]]:
+    schema = frame.get("schema")
+    data = frame.get("data")
+    fields = (schema or {}).get("fields") if isinstance(schema, dict) else None
+    values = (data or {}).get("values") if isinstance(data, dict) else None
+    if not isinstance(values, list):
+        return []
+
+    field_names = (
+        [_column_name(col, idx) for idx, col in enumerate(fields)]
+        if isinstance(fields, list)
+        else []
+    )
+    row_count = 0
+    for col in values:
+        if isinstance(col, list):
+            row_count = max(row_count, len(col))
+    if row_count <= 0:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for ridx in range(row_count):
+        row: Dict[str, Any] = {}
+        for cidx, col_values in enumerate(values):
+            if not isinstance(col_values, list):
+                continue
+            key = field_names[cidx] if cidx < len(field_names) else _column_name(None, cidx)
+            row[key] = col_values[ridx] if ridx < len(col_values) else None
+        rows.append(row)
+    return rows
+
+
+def _extract_arsql_rows(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, list):
+        out: List[Dict[str, Any]] = []
+        for x in payload:
+            out.extend(_extract_arsql_rows(x))
+        return out
+
+    if not isinstance(payload, dict):
+        return []
+
+    # AR API style
+    entries = payload.get("entries")
+    if isinstance(entries, list):
+        out_entries: List[Dict[str, Any]] = []
+        for row in entries:
+            if not isinstance(row, dict):
+                continue
+            values = row.get("values")
+            if isinstance(values, dict):
+                out_entries.append(values)
+            else:
+                out_entries.append(row)
+        if out_entries:
+            return out_entries
+
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        columns_raw = (
+            payload.get("columns")
+            or payload.get("fields")
+            or payload.get("columnMetadata")
+            or payload.get("meta")
+        )
+        columns = columns_raw if isinstance(columns_raw, list) else None
+        got_rows = _rows_to_dicts(rows, columns)
+        if got_rows:
+            return got_rows
+
+    frames = payload.get("frames")
+    if isinstance(frames, list):
+        out_frames: List[Dict[str, Any]] = []
+        for frame in frames:
+            if isinstance(frame, dict):
+                out_frames.extend(_frame_to_rows(frame))
+        if out_frames:
+            return out_frames
+
+    results = payload.get("results")
+    if isinstance(results, dict):
+        out_results: List[Dict[str, Any]] = []
+        for v in results.values():
+            out_results.extend(_extract_arsql_rows(v))
+        if out_results:
+            return out_results
+
+    for vv in payload.values():
+        if isinstance(vv, (dict, list)):
+            got = _extract_arsql_rows(vv)
+            if got:
+                return got
+
+    return []
+
+
 def _extract_total(payload: Any) -> Optional[int]:
     if isinstance(payload, dict):
         for k in ("total", "totalSize", "totalCount", "countTotal"):
@@ -262,6 +743,18 @@ def _cookies_to_jar(session: requests.Session, cookie_header: str, host: str) ->
     return sorted(set(names))
 
 
+def _cookie_names_from_header(cookie_header: str) -> List[str]:
+    names: List[str] = []
+    for part in (cookie_header or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name = part.split("=", 1)[0].strip()
+        if name:
+            names.append(name)
+    return sorted(set(names))
+
+
 def _get_cookie_anywhere(session: requests.Session, name: str) -> Optional[str]:
     try:
         v = session.cookies.get(name)  # type: ignore[arg-type]
@@ -300,6 +793,37 @@ def _looks_like_sso_redirect(resp: requests.Response) -> bool:
     return any(m in body for m in markers)
 
 
+def _looks_like_session_expired_text(text: str) -> bool:
+    body = (text or "").lower()
+    markers = (
+        "mobility_error_session_expired",
+        "session_expired",
+        "session expired",
+        "sesion expirada",
+    )
+    return any(m in body for m in markers)
+
+
+def _is_session_expired_response(resp: requests.Response) -> bool:
+    if getattr(resp, "status_code", 0) not in (401, 403):
+        return False
+
+    if _looks_like_session_expired_text(getattr(resp, "text", "") or ""):
+        return True
+
+    try:
+        payload = resp.json()
+    except Exception:
+        return False
+
+    if isinstance(payload, dict):
+        joined = " ".join(
+            str(payload.get(k) or "") for k in ("error", "message", "detail", "code")
+        ).strip()
+        return _looks_like_session_expired_text(joined)
+    return False
+
+
 def _short_text(s: str, max_chars: int = 240) -> str:
     txt = (s or "").replace("\n", " ").replace("\r", " ").strip()
     if len(txt) <= max_chars:
@@ -313,9 +837,32 @@ def _is_timeout_text(s: str) -> bool:
 
 
 def _has_auth_cookie(cookie_names: List[str]) -> bool:
-    wanted = {"jsessionid", "xsrf-token", "loginid", "sso.session.restore.cookies", "route"}
+    wanted = {
+        "jsessionid",
+        "xsrf-token",
+        "loginid",
+        "sso.session.restore.cookies",
+        "route",
+        "apt.uid",
+        "apt.sid",
+    }
     got = {str(x).strip().lower() for x in cookie_names}
-    return any(x in got for x in wanted)
+    if any(x in got for x in wanted):
+        return True
+    if any(name.startswith("rsso_oidc_") for name in got):
+        return True
+    if any(name.endswith("_prod") for name in got):
+        return True
+    return False
+
+
+def _apply_xsrf_headers(session: requests.Session) -> None:
+    xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
+    if not xsrf:
+        return
+    session.headers["X-Xsrf-Token"] = xsrf
+    session.headers["X-XSRF-TOKEN"] = xsrf
+    session.headers["X-CSRF-Token"] = xsrf
 
 
 def _item_merge_key(item: HelixWorkItem) -> str:
@@ -368,10 +915,79 @@ def ingest_helix(
     if base.endswith("/app"):
         base = base[:-4]
 
-    endpoint = f"{base}/rest/v2/person/workitems/get"
     parsed = urlparse(base)
-    host = parsed.hostname or ""
-    scheme = parsed.scheme or "https"
+    base_host = parsed.hostname or ""
+    base_scheme = parsed.scheme or "https"
+
+    arsql_uid = str(os.getenv("HELIX_ARSQL_DATASOURCE_UID", "")).strip()
+    query_mode = _resolve_helix_query_mode(
+        os.getenv("HELIX_QUERY_MODE", "arsql"),
+        has_arsql_uid=bool(arsql_uid),
+    )
+
+    host = base_host
+    scheme = base_scheme
+    endpoint = f"{base}/rest/v2/person/workitems/get"
+    preflight_url = f"{base}/app/"
+    preflight_name = "/app/"
+    arsql_base_root = ""
+    arsql_base_candidates: List[str] = []
+    ticket_console_url = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip() or (
+        f"{base}/app/#/ticket-console"
+    )
+    login_bootstrap_url = ticket_console_url
+    arsql_dashboard_path_default = "/dashboards/"
+
+    if query_mode == "arsql":
+        grafana_org_id_cfg = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
+        arsql_dashboard_url_cfg = str(os.getenv("HELIX_ARSQL_DASHBOARD_URL", "")).strip()
+        if not arsql_dashboard_url_cfg:
+            generic_dashboard_url = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
+            if "/dashboards/" in generic_dashboard_url:
+                arsql_dashboard_url_cfg = generic_dashboard_url
+        arsql_base_url_raw = str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip()
+        if arsql_base_url_raw:
+            try:
+                arsql_base_url = validate_service_base_url(
+                    arsql_base_url_raw, service_name="Helix ARSQL"
+                )
+            except ValueError as e:
+                return False, f"{source_label}: {e}", None
+            arsql_base_candidates = [arsql_base_url]
+        else:
+            inferred_roots: List[str] = []
+            dashboard_root = _root_from_url(arsql_dashboard_url_cfg)
+            if dashboard_root:
+                inferred_roots.append(dashboard_root)
+            if "-smartit." in base_host:
+                inferred_roots.append(
+                    f"{base_scheme}://{base_host.replace('-smartit.', '-ir1.', 1)}"
+                )
+            inferred_roots.append(f"{base_scheme}://{base_host}")
+            arsql_base_candidates = _dedup_non_empty(inferred_roots)
+            arsql_base_url = arsql_base_candidates[0] if arsql_base_candidates else ""
+            if not arsql_base_url:
+                return False, f"{source_label}: no se pudo resolver host ARSQL.", None
+
+        arsql_parsed = urlparse(arsql_base_url)
+        host = arsql_parsed.hostname or base_host
+        scheme = arsql_parsed.scheme or base_scheme
+        arsql_base_root = f"{scheme}://{host}"
+        if not arsql_base_candidates:
+            arsql_base_candidates = [arsql_base_root]
+        endpoint = _build_arsql_endpoint(arsql_base_root, arsql_uid) if arsql_uid else ""
+        preflight_url = f"{arsql_base_root}/dashboards/"
+        preflight_name = "/dashboards/"
+
+        if host == "itsmhelixbbva-ir1.onbmc.com":
+            org_id = grafana_org_id_cfg or "1175563307"
+            arsql_dashboard_path_default = (
+                "/dashboards/d/c6683c35-c8e4-4192-ac83-b63feab9599d/"
+                f"bbva-incident-report?orgId={org_id}"
+            )
+        login_bootstrap_url = (
+            arsql_dashboard_url_cfg or f"{arsql_base_root}{arsql_dashboard_path_default}"
+        )
 
     session = requests.Session()
 
@@ -404,25 +1020,79 @@ def ingest_helix(
             "Content-Type": "application/json;charset=UTF-8",
             "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
             "Origin": f"{scheme}://{host}",
-            "Referer": f"{base}/app/",
+            "Referer": preflight_url,
             "X-Requested-With": "XMLHttpRequest",
-            "X-Requested-By": "SmartIT",
+            "X-Requested-By": "undefined" if query_mode == "arsql" else "SmartIT",
             "Pragma": "no-cache",
             "Cache-Control": "no-cache",
         }
     )
+    if query_mode == "arsql":
+        session.headers["X-AR-Client-Type"] = str(
+            os.getenv("HELIX_ARSQL_CLIENT_TYPE", "4021")
+        ).strip()
+        ds_auth = str(os.getenv("HELIX_ARSQL_DS_AUTH", "IMS-JWT JWT PLACEHOLDER")).strip()
+        if ds_auth:
+            session.headers["X-DS-Authorization"] = ds_auth
+        grafana_org_id = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
+        if grafana_org_id:
+            session.headers["X-Grafana-Org-Id"] = grafana_org_id
+        grafana_device_id = str(os.getenv("HELIX_ARSQL_GRAFANA_DEVICE_ID", "")).strip()
+        if grafana_device_id:
+            session.headers["X-Grafana-Device-Id"] = grafana_device_id
+
+    login_wait_seconds = max(
+        5,
+        _coerce_int(os.getenv("HELIX_BROWSER_LOGIN_WAIT_SECONDS", "90"), 90),
+    )
+    login_poll_seconds = max(
+        0.5,
+        _coerce_float(os.getenv("HELIX_BROWSER_LOGIN_POLL_SECONDS", "2"), 2.0),
+    )
+
+    def _bootstrap_cookie_from_browser() -> Optional[str]:
+        try:
+            existing = get_helix_session_cookie(browser=browser, host=host)
+        except Exception:
+            existing = None
+        existing = sanitize_cookie_header(existing)
+        if existing and _has_auth_cookie(_cookie_names_from_header(existing)):
+            return existing
+
+        _open_url_in_configured_browser(login_bootstrap_url, browser)
+        deadline = time.monotonic() + float(login_wait_seconds)
+        while time.monotonic() < deadline:
+            try:
+                candidate = get_helix_session_cookie(browser=browser, host=host)
+            except Exception:
+                candidate = None
+            candidate = sanitize_cookie_header(candidate)
+            if candidate and _has_auth_cookie(_cookie_names_from_header(candidate)):
+                return candidate
+            time.sleep(login_poll_seconds)
+        return None
 
     try:
         cookie = get_helix_session_cookie(browser=browser, host=host)
+        cookie_error = ""
     except Exception as e:
+        cookie = None
+        cookie_error = str(e)
+    cookie = sanitize_cookie_header(cookie)
+    cookie_names_from_header = _cookie_names_from_header(cookie or "")
+    if not cookie or not _has_auth_cookie(cookie_names_from_header):
+        bootstrapped_cookie = _bootstrap_cookie_from_browser()
+        if bootstrapped_cookie:
+            cookie = bootstrapped_cookie
+            cookie_names_from_header = _cookie_names_from_header(cookie)
+
+    if not cookie:
+        details = f" Detalle: {cookie_error}" if cookie_error else ""
         return (
             False,
-            f"{source_label}: no se pudo leer cookie Helix en '{browser}'. Detalle: {e}",
+            f"{source_label}: no se encontró cookie Helix válida en '{browser}'.{details}",
             None,
         )
-    cookie = sanitize_cookie_header(cookie)
-    if not cookie:
-        return False, f"{source_label}: no se encontró cookie Helix válida en '{browser}'.", None
 
     cookie_names = _cookies_to_jar(session, cookie, host=host)
     if not _has_auth_cookie(cookie_names):
@@ -434,42 +1104,188 @@ def ingest_helix(
             None,
         )
 
+    def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
+        try:
+            fresh_cookie = get_helix_session_cookie(browser=browser, host=host)
+            cookie_refresh_error = ""
+        except Exception as e:
+            fresh_cookie = None
+            cookie_refresh_error = str(e)
+
+        fresh_cookie = sanitize_cookie_header(fresh_cookie)
+        if not fresh_cookie or not _has_auth_cookie(_cookie_names_from_header(fresh_cookie)):
+            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            if bootstrapped_cookie:
+                fresh_cookie = bootstrapped_cookie
+
+        if not fresh_cookie:
+            detail = f" Detalle: {cookie_refresh_error}" if cookie_refresh_error else ""
+            return (
+                False,
+                f"{source_label}: no se encontró cookie Helix válida en '{browser}' ({trigger})."
+                f"{detail}",
+            )
+
+        try:
+            session.cookies.clear()
+        except Exception:
+            pass
+
+        refreshed_cookie_names = _cookies_to_jar(session, fresh_cookie, host=host)
+        if not _has_auth_cookie(refreshed_cookie_names):
+            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            if bootstrapped_cookie:
+                try:
+                    session.cookies.clear()
+                except Exception:
+                    pass
+                refreshed_cookie_names = _cookies_to_jar(session, bootstrapped_cookie, host=host)
+            if not _has_auth_cookie(refreshed_cookie_names):
+                return (
+                    False,
+                    f"{source_label}: no se detectaron cookies de sesión Helix/SmartIT válidas tras "
+                    f"refresco ({trigger}). cookies_cargadas={refreshed_cookie_names}.",
+                )
+
+        try:
+            refresh_preflight = session.get(preflight_url, timeout=(5, 15))
+        except requests.exceptions.Timeout as e:
+            return (
+                False,
+                f"{source_label}: timeout validando sesión Helix tras refresco ({trigger}). "
+                f"Detalle: {e}",
+            )
+        except SSLError as e:
+            return (
+                False,
+                f"{source_label}: error SSL validando sesión Helix tras refresco ({trigger}): {e}",
+            )
+        except requests.exceptions.RequestException as e:
+            return (
+                False,
+                f"{source_label}: error de red validando sesión Helix tras refresco ({trigger}): "
+                f"{type(e).__name__}: {e}",
+            )
+
+        if _looks_like_sso_redirect(refresh_preflight):
+            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            if bootstrapped_cookie:
+                try:
+                    session.cookies.clear()
+                except Exception:
+                    pass
+                _cookies_to_jar(session, bootstrapped_cookie, host=host)
+                _apply_xsrf_headers(session)
+                retry_preflight: Optional[requests.Response]
+                try:
+                    retry_preflight = session.get(preflight_url, timeout=(5, 15))
+                except requests.exceptions.RequestException:
+                    retry_preflight = None
+                if retry_preflight is not None:
+                    refresh_preflight = retry_preflight
+            if _looks_like_sso_redirect(refresh_preflight):
+                return (
+                    False,
+                    f"{source_label}: Helix no autenticado tras refresco ({trigger}). "
+                    f"Abre Helix en '{browser}' y vuelve a autenticarte.",
+                )
+
+        if refresh_preflight.status_code >= 400:
+            return (
+                False,
+                f"{source_label}: Helix devolvió {refresh_preflight.status_code} en "
+                f"{preflight_name} tras refresco ({trigger}): {_short_text(refresh_preflight.text)}",
+            )
+
+        _apply_xsrf_headers(session)
+        return True, ""
+
     preflight: Optional[requests.Response] = None
     if not dry_run:
         try:
-            preflight = session.get(f"{base}/app/", timeout=(5, 15))
+            preflight = session.get(preflight_url, timeout=(5, 15))
         except requests.RequestException:
             preflight = None
 
-    xsrf = _get_cookie_anywhere(session, "XSRF-TOKEN")
-    if xsrf:
-        session.headers["X-Xsrf-Token"] = xsrf
-        session.headers["X-XSRF-TOKEN"] = xsrf
-        session.headers["X-CSRF-Token"] = xsrf
+    _apply_xsrf_headers(session)
 
-    attribute_names = [
-        "priority",
-        "id",
-        "targetDate",
-        "slaStatus",
-        "customerName",
-        "assignee",
-        "summary",
-        "status",
-        "lastModifiedDate",
-    ]
+    if not dry_run and preflight is not None and _looks_like_sso_redirect(preflight):
+        refreshed_ok, refreshed_msg = _refresh_auth_session("preflight_sso_redirect")
+        if not refreshed_ok:
+            return (
+                False,
+                f"{refreshed_msg} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                None,
+            )
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    filter_criteria = _build_filter_criteria(org, create_start_ms, create_end_ms)
+    incident_types_filter = _csv_list(
+        os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
+        "User Service Restoration,Security Incident",
+    )
+    companies_filter = [
+        {"name": name} for name in _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
+    ]
+
+    attribute_names = [
+        "slaStatus",
+        "priority",
+        "incidentType",
+        "id",
+        "assignee",
+        "status",
+        "summary",
+        "service",
+    ]
+    custom_attribute_names = [
+        "bbva_closeddate",
+        "bbva_matrixservicen1",
+        "bbva_sourceservicen1",
+        "bbva_startdatetime",
+    ]
+
+    filter_criteria = _build_filter_criteria(
+        org,
+        create_start_ms,
+        create_end_ms,
+        status_mappings=_csv_list(os.getenv("HELIX_FILTER_STATUS_MAPPINGS"), "open,close"),
+        incident_types=incident_types_filter,
+        # Some Helix tenants reject unknown priority literals (ARException 1588).
+        # Keep priorities unfiltered by default; allow opt-in through env override.
+        priorities=_csv_list(os.getenv("HELIX_FILTER_PRIORITIES"), ""),
+        companies=companies_filter,
+    )
+
+    arsql_source_service_n1 = _csv_list(
+        os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1"),
+        "ENTERPRISE WEB" if query_mode == "arsql" else "",
+    )
+    arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
 
     def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
         size = int(page_chunk_size if page_chunk_size is not None else chunk_size)
+        if query_mode == "arsql":
+            sql = _build_arsql_sql(
+                create_start_ms=create_start_ms,
+                create_end_ms=create_end_ms,
+                limit=size,
+                offset=int(start_index),
+                source_service_n1=arsql_source_service_n1,
+                incident_types=incident_types_filter,
+                companies=arsql_companies,
+            )
+            return {
+                "date_format": "DD/MM/YYYY",
+                "date_time_format": "DD/MM/YYYY HH:MM:SS",
+                "output_type": "Table",
+                "sql": sql,
+            }
         return {
             "filterCriteria": filter_criteria,
             "attributeNames": attribute_names,
             "chunkInfo": {"startIndex": int(start_index), "chunkSize": size},
-            "customAttributeNames": [],
+            "customAttributeNames": custom_attribute_names,
             "sortInfo": {},
         }
 
@@ -479,6 +1295,85 @@ def ingest_helix(
         read_timeout=read_timeout,
         proxy_min_read_timeout=proxy_min_read_timeout,
     )
+    discovery_timeout = (min(connect_to, 5.0), min(max(read_to, 5.0), 20.0))
+
+    def _sync_arsql_origin_headers() -> None:
+        session.headers["Origin"] = f"{scheme}://{host}"
+        session.headers["Referer"] = preflight_url
+
+    def _load_cookie_for_host(target_host: str) -> bool:
+        host_value = str(target_host or "").strip()
+        if not host_value:
+            return False
+        try:
+            fresh = get_helix_session_cookie(browser=browser, host=host_value)
+        except Exception:
+            fresh = None
+        fresh = sanitize_cookie_header(fresh)
+        if not fresh or not _has_auth_cookie(_cookie_names_from_header(fresh)):
+            return False
+        _cookies_to_jar(session, fresh, host=host_value)
+        _apply_xsrf_headers(session)
+        return True
+
+    def _discover_uid_across_candidates() -> Tuple[str, str]:
+        roots = _dedup_non_empty(arsql_base_candidates + [arsql_base_root])
+        for root in roots:
+            parsed_root = urlparse(root)
+            candidate_scheme = str(parsed_root.scheme or "").strip() or scheme
+            candidate_host = str(parsed_root.hostname or "").strip() or host
+            if not candidate_host:
+                continue
+            _load_cookie_for_host(candidate_host)
+            uid = _discover_arsql_datasource_uid(
+                session,
+                scheme=candidate_scheme,
+                host=candidate_host,
+                timeout=discovery_timeout,
+            )
+            if uid:
+                return uid, f"{candidate_scheme}://{candidate_host}"
+        return "", arsql_base_root
+
+    if query_mode == "arsql" and not arsql_uid:
+        arsql_uid, discovered_root = _discover_uid_across_candidates()
+        if arsql_uid:
+            arsql_base_root = discovered_root or arsql_base_root
+            discovered_parsed = urlparse(arsql_base_root)
+            host = discovered_parsed.hostname or host
+            scheme = discovered_parsed.scheme or scheme
+            preflight_url = f"{arsql_base_root}/dashboards/"
+            preflight_name = "/dashboards/"
+            _sync_arsql_origin_headers()
+        if not arsql_uid:
+            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            if bootstrapped_cookie:
+                try:
+                    session.cookies.clear()
+                except Exception:
+                    pass
+                _cookies_to_jar(session, bootstrapped_cookie, host=host)
+                _apply_xsrf_headers(session)
+                arsql_uid, discovered_root = _discover_uid_across_candidates()
+                if arsql_uid:
+                    arsql_base_root = discovered_root or arsql_base_root
+                    discovered_parsed = urlparse(arsql_base_root)
+                    host = discovered_parsed.hostname or host
+                    scheme = discovered_parsed.scheme or scheme
+                    preflight_url = f"{arsql_base_root}/dashboards/"
+                    preflight_name = "/dashboards/"
+                    _sync_arsql_origin_headers()
+        if not arsql_uid:
+            return (
+                False,
+                f"{source_label}: HELIX_QUERY_MODE=arsql no pudo autodetectar datasource uid. "
+                "Configura HELIX_ARSQL_DATASOURCE_UID o abre antes un dashboard Helix y reintenta.",
+                None,
+            )
+        endpoint = _build_arsql_endpoint(
+            arsql_base_root or f"{scheme}://{host}",
+            arsql_uid,
+        )
 
     # -----------------------------
     # Dry-run
@@ -491,18 +1386,18 @@ def ingest_helix(
             dryrun_read_timeout=dryrun_read_timeout,
         )
 
-        # Test rápido: valida sesión/autenticación contra la app web.
-        # Evita ejecutar la query pesada de workitems solo para probar conexión.
+        # Test rápido: valida sesión/autenticación contra una URL ligera.
+        # Evita ejecutar la query pesada solo para probar conexión.
         probe_connect = max(1.0, min(dry_c, 5.0))
         probe_read = max(3.0, min(dry_r, 15.0))
 
         if preflight is None:
             try:
-                preflight = session.get(f"{base}/app/", timeout=(probe_connect, probe_read))
+                preflight = session.get(preflight_url, timeout=(probe_connect, probe_read))
             except requests.exceptions.Timeout as e:
                 return (
                     False,
-                    f"{source_label}: timeout Helix (dry-run rápido) en /app/. "
+                    f"{source_label}: timeout Helix (dry-run rápido) en {preflight_name}. "
                     f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
                     f"timeout(connect/read)={probe_connect}/{probe_read}",
                     None,
@@ -525,7 +1420,7 @@ def ingest_helix(
         if _looks_like_sso_redirect(preflight):
             return (
                 False,
-                f"{source_label}: Helix no autenticado (redirección a SSO en /app/). "
+                f"{source_label}: Helix no autenticado (redirección a SSO en {preflight_name}). "
                 f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
@@ -534,18 +1429,14 @@ def ingest_helix(
         if preflight.status_code >= 400:
             return (
                 False,
-                f"{source_label}: Helix dry-run rápido falló en /app/ "
+                f"{source_label}: Helix dry-run rápido falló en {preflight_name} "
                 f"({preflight.status_code}): {_short_text(preflight.text)} | "
                 f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
 
-        xsrf_now = _get_cookie_anywhere(session, "XSRF-TOKEN")
-        if xsrf_now:
-            session.headers["X-Xsrf-Token"] = xsrf_now
-            session.headers["X-XSRF-TOKEN"] = xsrf_now
-            session.headers["X-CSRF-Token"] = xsrf_now
+        _apply_xsrf_headers(session)
 
         return (
             True,
@@ -558,7 +1449,14 @@ def ingest_helix(
     # -----------------------------
     items: List[HelixWorkItem] = []
     start = 0
-    base_chunk_size = max(1, int(chunk_size))
+    arsql_limit = max(
+        1,
+        _coerce_int(
+            os.getenv("HELIX_ARSQL_LIMIT", str(chunk_size)),
+            max(1, int(chunk_size)),
+        ),
+    )
+    base_chunk_size = arsql_limit if query_mode == "arsql" else max(1, int(chunk_size))
     current_chunk_size = base_chunk_size
     min_chunk_limit = max(
         1,
@@ -600,6 +1498,11 @@ def ingest_helix(
         900.0,
     )
     page = 0
+    max_session_refreshes = max(
+        0,
+        _coerce_int(os.getenv("HELIX_MAX_SESSION_REFRESHES", "1"), 1),
+    )
+    session_refreshes = 0
 
     while True:
         elapsed = time.monotonic() - started_at
@@ -692,9 +1595,26 @@ def ingest_helix(
                 None,
             )
 
-        page += 1
-
         if r.status_code != 200:
+            if _is_session_expired_response(r):
+                if session_refreshes >= max_session_refreshes:
+                    return (
+                        False,
+                        f"{source_label}: error Helix ({r.status_code}) por sesión expirada "
+                        f"y se agotaron los refrescos de sesión. "
+                        f"Detalle: {_short_text(r.text)} | proxy={helix_proxy or '(sin proxy)'} | "
+                        f"verify={verify_desc}",
+                        None,
+                    )
+                refreshed_ok, refreshed_msg = _refresh_auth_session("session_expired")
+                if not refreshed_ok:
+                    return (
+                        False,
+                        f"{refreshed_msg} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
+                        None,
+                    )
+                session_refreshes += 1
+                continue
             return (
                 False,
                 f"{source_label}: error Helix ({r.status_code}): {r.text[:800]} | "
@@ -702,8 +1622,10 @@ def ingest_helix(
                 None,
             )
 
+        page += 1
+
         data = r.json()
-        batch = _extract_objects(data)
+        batch = _extract_arsql_rows(data) if query_mode == "arsql" else _extract_objects(data)
         if not batch:
             break
 
@@ -711,76 +1633,73 @@ def ingest_helix(
 
         new_in_page = 0
         for it in batch:
-            values_raw = it.get("values")
-            values: Dict[str, Any] = cast(
-                Dict[str, Any], values_raw if isinstance(values_raw, dict) else it
+            if query_mode == "arsql":
+                values = cast(Dict[str, Any], it if isinstance(it, dict) else {})
+            else:
+                values_raw = it.get("values")
+                values = cast(Dict[str, Any], values_raw if isinstance(values_raw, dict) else it)
+            mapped_item = map_helix_values_to_item(
+                values=values,
+                base_url=base,
+                country=country_value,
+                source_alias=alias_value,
+                source_id=source_id_value,
+                ticket_console_url=ticket_console_url,
             )
-            wid = str(
-                values.get("displayId") or values.get("id") or values.get("workItemId") or ""
-            ).strip()
-            if not wid:
+            if mapped_item is None:
                 continue
+            wid = str(mapped_item.id or "").strip()
             if wid in seen_ids:
                 continue
 
             seen_ids.add(wid)
             new_in_page += 1
-
-            assignee = values.get("assignee") or values.get("assigneeName") or ""
-            if isinstance(assignee, dict):
-                assignee = (
-                    assignee.get("fullName")
-                    or assignee.get("displayName")
-                    or assignee.get("name")
-                    or ""
-                )
-
-            customer_name = values.get("customerName") or values.get("customer") or ""
-            if isinstance(customer_name, dict):
-                customer_name = (
-                    customer_name.get("fullName")
-                    or customer_name.get("displayName")
-                    or customer_name.get("name")
-                    or ""
-                )
-
-            items.append(
-                HelixWorkItem(
-                    id=wid,
-                    summary=str(values.get("summary") or values.get("description") or "").strip(),
-                    status=str(values.get("status") or "").strip(),
-                    priority=str(values.get("priority") or "").strip(),
-                    assignee=str(assignee or "").strip(),
-                    customer_name=str(customer_name or "").strip(),
-                    target_date=values.get("targetDate"),
-                    last_modified=values.get("lastModifiedDate") or values.get("lastModified"),
-                    url=f"{base}/app/#/ticket-console",
-                    country=country_value,
-                    source_alias=alias_value,
-                    source_id=source_id_value,
-                )
-            )
+            items.append(mapped_item)
 
         if new_in_page == 0:
             break
 
-        start += int(current_chunk_size)
+        batch_size = len(batch)
+        if batch_size <= 0:
+            break
+        # Advance using the effective batch size returned by Helix. Some tenants ignore
+        # requested chunkSize and return a fixed page size.
+        start += int(batch_size)
 
         if total is not None and (start >= total or len(seen_ids) >= total):
             break
-        if len(batch) < int(current_chunk_size):
+        if total is None and batch_size < current_chunk_size:
             break
 
     doc = existing_doc or HelixDocument.empty()
     doc.schema_version = "1.0"
     doc.ingested_at = now_iso()
-    doc.helix_base_url = base
+    doc.helix_base_url = f"{scheme}://{host}" if query_mode == "arsql" else base
     create_start_iso = _iso_from_epoch_ms(create_start_ms)
     create_end_iso = _iso_from_epoch_ms(create_end_ms)
-    doc.query = (
-        f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
-        f" (year={create_year})"
+    status_mappings_q = (
+        ",".join(cast(List[str], filter_criteria.get("statusMappings", []))) or "all"
     )
+    incident_types_q = ",".join(cast(List[str], filter_criteria.get("incidentTypes", []))) or "all"
+    priorities_q = ",".join(cast(List[str], filter_criteria.get("priorities", []))) or "all"
+    company_rows = cast(List[Dict[str, str]], filter_criteria.get("companies", []))
+    companies_q = ",".join(str(r.get("name") or "").strip() for r in company_rows if r) or "all"
+    if query_mode == "arsql":
+        source_service_q = ",".join(arsql_source_service_n1) or "all"
+        doc.query = (
+            "mode=arsql; "
+            f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
+            f"sourceServiceN1=[{source_service_q}]; "
+            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; "
+            f"page_limit={base_chunk_size}"
+        )
+    else:
+        doc.query = (
+            f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
+            f" (year={create_year}); statusMappings=[{status_mappings_q}]; "
+            f"incidentTypes=[{incident_types_q}]; priorities=[{priorities_q}]; "
+            f"companies=[{companies_q}]"
+        )
 
     merged = {_item_merge_key(i): i for i in doc.items}
     for i in items:

@@ -15,14 +15,21 @@ from bug_resolution_radar.config import (
     save_settings,
 )
 from bug_resolution_radar.ui.common import load_issues_df
-from bug_resolution_radar.ui.dashboard.state import clear_all_filters
-from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page
+from bug_resolution_radar.ui.dashboard.state import (
+    bootstrap_filters_from_env,
+    clear_all_filters,
+    persist_filters_in_env,
+)
+from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page, report_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 
 def _set_workspace_mode(mode: str) -> None:
     """Switch top-level workspace mode and reset transient dashboard picker state."""
-    st.session_state["workspace_mode"] = mode
+    mode_txt = str(mode or "").strip().lower()
+    if mode_txt == "report":
+        st.session_state["__report_autorun_requested"] = True
+    st.session_state["workspace_mode"] = mode_txt
 
 
 def _dashboard_labels() -> Dict[str, str]:
@@ -157,7 +164,7 @@ def _ensure_nav_state() -> None:
     name_by_label = {label: name for name, label in labels.items()}
     section_names: List[str] = dashboard_page.dashboard_sections()
     default_section = "overview" if "overview" in section_names else section_names[0]
-    allowed_modes = {"dashboard", "ingest", "config"}
+    allowed_modes = {"dashboard", "report", "ingest", "config"}
 
     if "workspace_mode" not in st.session_state:
         st.session_state["workspace_mode"] = "dashboard"
@@ -269,8 +276,9 @@ def _render_workspace_header() -> None:
     current_section = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
+    is_dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
 
-    left, right = st.columns([5.0, 0.9], gap="small")
+    left, right = st.columns([5.0, 1.3], gap="small")
 
     with left:
         with st.container(key="workspace_nav_tabs"):
@@ -292,33 +300,52 @@ def _render_workspace_header() -> None:
 
     with right:
         with st.container(key="workspace_nav_actions"):
-            b_ing, b_theme, b_cfg = st.columns(3, gap="small")
-            b_ing.button(
-                "🛰️",
-                key="workspace_btn_ingest",
-                type="primary" if mode == "ingest" else "secondary",
-                width="stretch",
-                help="Ingesta",
-                on_click=_set_workspace_mode,
-                args=("ingest",),
-            )
-            b_theme.button(
-                "◐",
-                key="workspace_btn_theme",
-                type="secondary",
-                width="stretch",
-                help="Tema oscuro",
-                on_click=_toggle_dark_mode,
-            )
-            b_cfg.button(
-                "⚙️",
-                key="workspace_btn_config",
-                type="primary" if mode == "config" else "secondary",
-                width="stretch",
-                help="Configuración",
-                on_click=_set_workspace_mode,
-                args=("config",),
-            )
+            b_rep, b_ing, b_theme, b_cfg = st.columns(4, gap="small")
+            # Keep labels visually empty: icons are injected via CSS and tooltips provide semantics.
+            icon_label = "\u00a0"
+            with b_rep:
+                with st.container(key="workspace_btn_slot_report"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_report",
+                        type="primary" if mode == "report" else "secondary",
+                        width="stretch",
+                        help="Informe PPT",
+                        on_click=_set_workspace_mode,
+                        args=("report",),
+                    )
+            with b_ing:
+                with st.container(key="workspace_btn_slot_ingest"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_ingest",
+                        type="primary" if mode == "ingest" else "secondary",
+                        width="stretch",
+                        help="Ingesta",
+                        on_click=_set_workspace_mode,
+                        args=("ingest",),
+                    )
+            with b_theme:
+                with st.container(key="workspace_btn_slot_theme"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_theme",
+                        type="secondary",
+                        width="stretch",
+                        help="Cambiar a tema claro" if is_dark_mode else "Cambiar a tema oscuro",
+                        on_click=_toggle_dark_mode,
+                    )
+            with b_cfg:
+                with st.container(key="workspace_btn_slot_config"):
+                    st.button(
+                        icon_label,
+                        key="workspace_btn_config",
+                        type="primary" if mode == "config" else "secondary",
+                        width="stretch",
+                        help="Configuración",
+                        on_click=_set_workspace_mode,
+                        args=("config",),
+                    )
 
 
 def _render_workspace_scope(settings: Settings) -> None:
@@ -373,6 +400,7 @@ def main() -> None:
     """Boot application, render hero/shell and dispatch the selected page."""
     ensure_env()
     settings = load_settings()
+    bootstrap_filters_from_env(settings)
     if "workspace_dark_mode" not in st.session_state:
         streamlit_dark_fallback = (
             str(st_config.get_option("theme.base") or "").strip().lower() == "dark"
@@ -381,15 +409,12 @@ def main() -> None:
             str(getattr(settings, "THEME", "auto") or "auto"),
             fallback=streamlit_dark_fallback,
         )
-    theme_changed = _sync_streamlit_theme_from_workspace()
+    _sync_streamlit_theme_from_workspace()
     hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
     if hero_title.lower() in {"", "bug resolution radar"}:
         hero_title = "Cuadro de mando de incidencias"
 
     st.set_page_config(page_title=hero_title, layout="wide")
-    if theme_changed:
-        st.rerun()
-
     inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)
     _ensure_scope_state(settings)
@@ -411,10 +436,12 @@ def main() -> None:
 
     if mode == "ingest":
         ingest_page.render(settings)
-        return
-    if mode == "config":
+    elif mode == "report":
+        report_page.render(settings)
+    elif mode == "config":
         config_page.render(settings)
-        return
+    else:
+        with st.container(key=f"workspace_dashboard_content_{section}"):
+            dashboard_page.render(settings, active_section=section)
 
-    with st.container(key=f"workspace_dashboard_content_{section}"):
-        dashboard_page.render(settings, active_section=section)
+    persist_filters_in_env(settings)
