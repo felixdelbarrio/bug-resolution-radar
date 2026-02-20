@@ -130,7 +130,7 @@ def build_age_buckets_issue_distribution(
 
         xs: list[float] = []
         ys: list[float] = []
-        customdata: list[list[str]] = []
+        customdata: list[list[object]] = []
         for row in sub.itertuples(index=False):
             bucket_name = str(getattr(row, "bucket", "") or "")
             base_x = bucket_to_x.get(bucket_name)

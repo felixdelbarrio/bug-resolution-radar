@@ -86,7 +86,6 @@ def effective_finalized_at(
     Timestamp selection priority:
     1) resolved (most precise for closure)
     2) updated (proxy for reaching the final state)
-    3) created (last-resort to avoid dropping rows when status is final but dates are sparse)
     """
     if not isinstance(df, pd.DataFrame) or df.empty:
         return pd.Series([], dtype="datetime64[ns]")
@@ -113,13 +112,10 @@ def effective_finalized_at(
     closed_for_metric = resolved.notna() | core_final
 
     finalized = resolved.copy()
-    # If it's in a core final state but lacks resolved, use updated/created as best-effort proxy.
+    # If it's in a core final state but lacks resolved, use updated as best-effort proxy.
     missing = finalized.isna() & core_final
     if missing.any():
         finalized.loc[missing] = updated.loc[missing]
-    missing = finalized.isna() & core_final
-    if missing.any():
-        finalized.loc[missing] = created.loc[missing]
 
     return finalized.where(closed_for_metric)
 
