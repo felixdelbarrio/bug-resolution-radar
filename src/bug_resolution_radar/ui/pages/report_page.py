@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -10,7 +14,7 @@ from bug_resolution_radar.analysis_window import (
     max_available_backlog_months,
     parse_analysis_lookback_months,
 )
-from bug_resolution_radar.config import Settings
+from bug_resolution_radar.config import Settings, config_home
 from bug_resolution_radar.reports import ExecutiveReportResult, generate_scope_executive_ppt
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
@@ -22,6 +26,55 @@ from bug_resolution_radar.ui.dashboard.state import (
 
 _REPORT_ALERT_KEY = "workspace_report_alert"
 _PPT_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+
+def _default_report_export_dir() -> Path:
+    """Pick a user-friendly, writable export directory for local builds."""
+    candidates = [
+        Path.home() / "Downloads",
+        config_home() / "exports",
+    ]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            if candidate.is_dir():
+                return candidate
+        except Exception:
+            continue
+    return Path.cwd()
+
+
+def _unique_export_path(export_dir: Path, *, file_name: str) -> Path:
+    name = str(file_name or "").strip() or "radar-export.pptx"
+    target = export_dir / name
+    if not target.exists():
+        return target
+    stem = target.stem or "radar-export"
+    suffix = target.suffix or ".pptx"
+    for i in range(1, 1000):
+        candidate = export_dir / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    return export_dir / f"{stem}_{os.getpid()}{suffix}"
+
+
+def _reveal_in_file_manager(path: Path) -> None:
+    try:
+        if sys.platform == "darwin":
+            import subprocess
+
+            subprocess.Popen(["open", "-R", str(path)])
+            return
+        if os.name == "nt":
+            import subprocess
+
+            subprocess.Popen(["explorer", "/select,", str(path)])
+            return
+        import subprocess
+
+        subprocess.Popen(["xdg-open", str(path.parent)])
+    except Exception:
+        return
 
 
 def _scope_key(country: str, source_id: str) -> str:
@@ -107,6 +160,10 @@ def _render_alert(country: str, source_id: str) -> None:
     message = str(payload.get("message") or "").strip()
     result = payload.get("result")
 
+    scope_key = _scope_key(country, source_id)
+    saved_path_state_key = f"workspace_report_saved_path::{scope_key}"
+    saved_path_value = str(st.session_state.get(saved_path_state_key) or "").strip()
+
     content_col, close_col = st.columns([0.96, 0.04], gap="small")
     with content_col:
         if level == "success":
@@ -117,20 +174,56 @@ def _render_alert(country: str, source_id: str) -> None:
             st.info(message or "Estado de informe actualizado.")
 
         if isinstance(result, ExecutiveReportResult):
-            st.caption("Si tu navegador bloqueó la descarga automática, usa la descarga manual.")
-            st.download_button(
-                "Descarga manual",
-                data=result.content,
-                file_name=result.file_name,
-                mime=_PPT_MIME,
-                key=f"btn_download_scope_ppt_alert_{_scope_key(country, source_id)}",
-                type="secondary",
-                width="content",
+            st.caption(
+                "Si la descarga falla en la build (pestaña nueva con spinner), usa 'Guardar en disco'."
             )
+            a1, a2, a3 = st.columns([1.0, 1.0, 1.0], gap="small")
+            with a1:
+                st.download_button(
+                    "Descarga manual",
+                    data=result.content,
+                    file_name=result.file_name,
+                    mime=_PPT_MIME,
+                    key=f"btn_download_scope_ppt_alert_{scope_key}",
+                    type="secondary",
+                    width="content",
+                )
+            with a2:
+                if st.button(
+                    "Guardar en disco",
+                    key=f"btn_save_scope_ppt_alert_{scope_key}",
+                    type="secondary",
+                    width="content",
+                    help="Guarda el PPT en una carpeta local (por defecto, Descargas).",
+                ):
+                    try:
+                        export_dir = _default_report_export_dir()
+                        export_path = _unique_export_path(export_dir, file_name=result.file_name)
+                        export_path.write_bytes(result.content)
+                        st.session_state[saved_path_state_key] = str(export_path)
+                        saved_path_value = str(export_path)
+                        st.success(f"Informe guardado en: {export_path}")
+                    except Exception as exc:
+                        st.error(f"No se pudo guardar el informe en disco: {exc}")
+            with a3:
+                if st.button(
+                    "Abrir carpeta",
+                    key=f"btn_reveal_scope_ppt_alert_{scope_key}",
+                    type="secondary",
+                    width="content",
+                    disabled=not bool(saved_path_value),
+                    help="Abre Finder/Explorer en el archivo guardado.",
+                ):
+                    try:
+                        _reveal_in_file_manager(Path(saved_path_value))
+                    except Exception:
+                        pass
+            if saved_path_value:
+                st.caption(f"Último guardado local: {saved_path_value}")
     with close_col:
         if st.button(
             "✕",
-            key=f"btn_close_report_alert_{_scope_key(country, source_id)}",
+            key=f"btn_close_report_alert_{scope_key}",
             help="Cerrar alerta",
             type="secondary",
         ):
@@ -211,6 +304,17 @@ def render(settings: Settings) -> None:
                     open_df_override=ctx.open_df,
                     scoped_source_df_override=scoped_df,
                 )
+
+            if getattr(sys, "frozen", False):
+                try:
+                    export_dir = _default_report_export_dir()
+                    export_path = _unique_export_path(export_dir, file_name=result.file_name)
+                    export_path.write_bytes(result.content)
+                    st.session_state[
+                        f"workspace_report_saved_path::{_scope_key(country, source_id)}"
+                    ] = str(export_path)
+                except Exception:
+                    pass
 
             _store_alert(
                 country=country,

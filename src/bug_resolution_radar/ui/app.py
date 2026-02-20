@@ -407,12 +407,26 @@ def main() -> None:
             str(getattr(settings, "THEME", "auto") or "auto"),
             fallback=streamlit_dark_fallback,
         )
-    _sync_streamlit_theme_from_workspace()
     hero_title = str(getattr(settings, "APP_TITLE", "") or "").strip()
     if hero_title.lower() in {"", "bug resolution radar"}:
         hero_title = "Cuadro de mando de incidencias"
 
     st.set_page_config(page_title=hero_title, layout="wide")
+
+    theme_changed = _sync_streamlit_theme_from_workspace()
+    theme_rerun_key = "__theme_config_sync_rerun"
+    if theme_changed:
+        # Streamlit applies some theme settings on the next rerun; force it once so
+        # users don't need to click twice when switching light/dark.
+        if not bool(st.session_state.get(theme_rerun_key, False)):
+            st.session_state[theme_rerun_key] = True
+            st.rerun()
+        else:
+            # Avoid rerun loops if a runtime/host ignores theme updates.
+            st.session_state.pop(theme_rerun_key, None)
+    else:
+        st.session_state.pop(theme_rerun_key, None)
+
     inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)
     _ensure_scope_state(settings)

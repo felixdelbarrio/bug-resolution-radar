@@ -1227,13 +1227,23 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     )
 
         image = pio.to_image(
-            export_fig, format="png", width=export_width, height=export_height, scale=3
+            export_fig,
+            format="png",
+            width=export_width,
+            height=export_height,
+            scale=3,
+            engine="kaleido",
         )
         return cast(bytes, image)
     except Exception as primary_exc:
         try:
             image = pio.to_image(
-                fig, format="png", width=export_width, height=export_height, scale=2
+                fig,
+                format="png",
+                width=export_width,
+                height=export_height,
+                scale=2,
+                engine="kaleido",
             )
             return cast(bytes, image)
         except Exception as secondary_exc:
@@ -1255,7 +1265,12 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     except Exception:
                         continue
                 image = pio.to_image(
-                    safe_fig, format="png", width=export_width, height=export_height, scale=2
+                    safe_fig,
+                    format="png",
+                    width=export_width,
+                    height=export_height,
+                    scale=2,
+                    engine="kaleido",
                 )
                 return cast(bytes, image)
             except Exception as final_exc:
