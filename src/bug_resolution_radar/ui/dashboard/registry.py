@@ -10,11 +10,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from bug_resolution_radar.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
+)
+from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
+    AGE_BUCKET_ORDER,
+    build_age_bucket_points,
+    build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import apply_plotly_bbva
@@ -102,20 +107,20 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
 def _resolution_days_series(dff: pd.DataFrame) -> pd.Series:
     if dff is None or dff.empty:
         return pd.Series([], dtype=float)
-    if "resolved" not in dff.columns or "created" not in dff.columns:
+    if "created" not in dff.columns:
         return pd.Series([], dtype=float)
 
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
 
     closed = dff.copy()
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__resolved"].notna() & closed["__created"].notna()]
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__finalized_at"].notna() & closed["__created"].notna()]
     if closed.empty:
         return pd.Series([], dtype=float)
 
-    days = (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+    days = (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     return days.clip(lower=0.0)
 
 
@@ -190,67 +195,20 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
 
 def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
-    open_df = ctx.open_df
-    if open_df is None or open_df.empty or "created" not in open_df.columns:
+    points = build_age_bucket_points(ctx.open_df)
+    if points.empty:
         return None
 
-    df = open_df.copy(deep=False)
-    df["__created_dt"] = _to_dt_naive(df["created"])
-    df = df[df["__created_dt"].notna()].copy(deep=False)
-    if df.empty:
-        return None
-
-    now = pd.Timestamp.utcnow().tz_localize(None)
-    df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
-    df["__age_days"] = df["__age_days"].clip(lower=0.0)
-    if "status" not in df.columns:
-        df["status"] = "(sin estado)"
-    else:
-        df["status"] = normalize_text_col(df["status"], "(sin estado)")
-
-    df["bucket"] = pd.cut(
-        df["__age_days"],
-        bins=[-float("inf"), 2, 7, 14, 30, float("inf")],
-        labels=["0-2", "3-7", "8-14", "15-30", ">30"],
-        right=True,
-        include_lowest=True,
-        ordered=True,
-    )
-
-    grouped = (
-        df.groupby(["bucket", "status"], dropna=False, observed=False)
-        .size()
-        .reset_index(name="count")
-        .sort_values(["bucket", "count"], ascending=[True, False])
-    )
-    if grouped.empty:
-        return None
-
-    statuses = grouped["status"].astype(str).unique().tolist()
+    statuses = points["status"].astype(str).unique().tolist()
     canon = canonical_status_order()
     canon_present = [s for s in canon if s in statuses]
     rest = [s for s in statuses if s not in set(canon_present)]
     status_order = canon_present + rest
-    bucket_order = ["0-2", "3-7", "8-14", "15-30", ">30"]
-
-    fig = px.bar(
-        grouped,
-        x="bucket",
-        y="count",
-        text="count",
-        color="status",
-        barmode="stack",
-        category_orders={"bucket": bucket_order, "status": status_order},
-        color_discrete_map=status_color_map(status_order),
-        title="Antigüedad por estado",
+    return build_age_buckets_issue_distribution(
+        issues=points,
+        status_order=status_order,
+        bucket_order=AGE_BUCKET_ORDER,
     )
-    fig.update_layout(
-        title_text="",
-        xaxis_title="Rango",
-        yaxis_title="Incidencias",
-    )
-    fig.update_traces(textposition="inside", textfont=dict(size=10))
-    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_age_buckets(ctx: ChartContext) -> List[str]:
@@ -298,20 +256,20 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
 
 def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
     dff = ctx.dff
-    if dff is None or dff.empty or "resolved" not in dff.columns or "created" not in dff.columns:
+    if dff is None or dff.empty or "created" not in dff.columns:
         return None
 
     created = _to_dt_naive(dff["created"])
-    resolved = _to_dt_naive(dff["resolved"])
+    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
     closed = dff.copy(deep=False)
     closed["__created"] = created
-    closed["__resolved"] = resolved
-    closed = closed[closed["__created"].notna() & closed["__resolved"].notna()].copy(deep=False)
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
     if closed.empty:
         return None
 
     closed["resolution_days"] = (
-        (closed["__resolved"] - closed["__created"]).dt.total_seconds() / 86400.0
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
     ).clip(lower=0.0)
     closed["priority"] = (
         normalize_text_col(closed["priority"], "(sin priority)")
@@ -367,11 +325,11 @@ def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
         barmode="stack",
         category_orders={"resolution_bucket": bucket_order, "priority": priority_order},
         color_discrete_map=priority_color_map(),
-        title="Distribución tiempos de resolución (cerradas)",
+        title="Tiempo hasta estado final",
     )
     fig.update_layout(
         title_text="",
-        xaxis_title="Tiempo de resolución",
+        xaxis_title="Tiempo hasta estado final",
         yaxis_title="Incidencias",
         bargap=0.10,
     )
@@ -383,8 +341,8 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     days = _resolution_days_series(ctx.dff)
     if days.empty:
         return [
-            "No hay suficientes cierres con fechas para analizar tiempos de resolución.",
-            "Tip: asegura ‘created’ y ‘resolved’ en la ingesta y mide tiempo habitual vs casos lentos (mejor que mirar solo la media).",
+            "No hay suficientes incidencias en estado final con fechas para analizar tiempos de cierre.",
+            "Tip: asegura ‘created’ y algún marcador de cierre (‘resolved’ o estado final) en la ingesta, y mira tiempo habitual vs casos lentos (mejor que solo la media).",
         ]
 
     p50 = float(days.quantile(0.5))
@@ -392,7 +350,7 @@ def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
     mean = float(days.mean())
 
     return [
-        f"Tiempo de resolución: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
+        f"Tiempo hasta estado final: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
         "Si la media queda muy por encima del tiempo habitual, hay pocos casos muy lentos que distorsionan el resultado.",
         "Acción: clasifica el 10% más lento por causa raíz (bloqueo externo, falta de reproducibilidad, dependencias) "
         "y ataca la causa, no el síntoma. Reducir los casos lentos suele mejorar satisfacción más que cerrar más casos fáciles.",
