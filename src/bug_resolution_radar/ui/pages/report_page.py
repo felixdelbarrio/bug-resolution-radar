@@ -15,7 +15,7 @@ from bug_resolution_radar.analysis_window import (
     parse_analysis_lookback_months,
 )
 from bug_resolution_radar.config import Settings, config_home
-from bug_resolution_radar.reports import ExecutiveReportResult, generate_scope_executive_ppt
+from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.dashboard.state import (
@@ -24,8 +24,9 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_STATUS_KEY,
 )
 
-_REPORT_ALERT_KEY = "workspace_report_alert"
-_PPT_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+_REPORT_STATUS_KEY = "workspace_report_status"
+_REPORT_SAVED_PATH_KEY_PREFIX = "workspace_report_saved_path"
+_REPORT_SAVE_DONE_KEY_PREFIX = "workspace_report_save_done"
 
 
 def _default_report_export_dir() -> Path:
@@ -60,19 +61,23 @@ def _unique_export_path(export_dir: Path, *, file_name: str) -> Path:
 
 def _reveal_in_file_manager(path: Path) -> None:
     try:
-        if sys.platform == "darwin":
-            import subprocess
-
-            subprocess.Popen(["open", "-R", str(path)])
-            return
-        if os.name == "nt":
-            import subprocess
-
-            subprocess.Popen(["explorer", "/select,", str(path)])
-            return
         import subprocess
 
-        subprocess.Popen(["xdg-open", str(path.parent)])
+        target_path = Path(path)
+        target_dir = target_path.parent if str(target_path.parent) else Path.cwd()
+        if sys.platform == "darwin":
+            if target_path.exists():
+                subprocess.Popen(["open", "-R", str(target_path)])
+            else:
+                subprocess.Popen(["open", str(target_dir)])
+            return
+        if os.name == "nt":
+            if target_path.exists():
+                subprocess.Popen(["explorer", "/select,", str(target_path)])
+            else:
+                subprocess.Popen(["explorer", str(target_dir)])
+            return
+        subprocess.Popen(["xdg-open", str(target_dir)])
     except Exception:
         return
 
@@ -122,113 +127,54 @@ def _visible_filter_label(values: list[str], *, name: str) -> str:
     return f"{name}={', '.join(clean[:3])} (+{len(clean) - 3})"
 
 
-def _store_alert(
-    *,
-    country: str,
-    source_id: str,
-    kind: str,
-    message: str,
-    result: ExecutiveReportResult | None = None,
-) -> None:
-    st.session_state[_REPORT_ALERT_KEY] = {
-        "scope_key": _scope_key(country, source_id),
+def _saved_path_state_key(scope_key: str) -> str:
+    return f"{_REPORT_SAVED_PATH_KEY_PREFIX}::{scope_key}"
+
+
+def _save_done_state_key(scope_key: str) -> str:
+    return f"{_REPORT_SAVE_DONE_KEY_PREFIX}::{scope_key}"
+
+
+def _store_status(*, scope_key: str, kind: str, message: str) -> None:
+    st.session_state[_REPORT_STATUS_KEY] = {
+        "scope_key": str(scope_key or "").strip(),
         "kind": str(kind or "info").strip().lower(),
         "message": str(message or "").strip(),
-        "result": result,
     }
 
 
-def _load_alert_for_scope(country: str, source_id: str) -> dict | None:
-    payload = st.session_state.get(_REPORT_ALERT_KEY)
+def _render_status(scope_key: str) -> None:
+    payload = st.session_state.get(_REPORT_STATUS_KEY)
     if not isinstance(payload, dict):
-        return None
-    if str(payload.get("scope_key") or "") != _scope_key(country, source_id):
-        return None
-    return payload
-
-
-def _clear_alert() -> None:
-    st.session_state.pop(_REPORT_ALERT_KEY, None)
-
-
-def _render_alert(country: str, source_id: str) -> None:
-    payload = _load_alert_for_scope(country, source_id)
-    if not isinstance(payload, dict):
+        return
+    if str(payload.get("scope_key") or "") != str(scope_key or "").strip():
         return
 
     level = str(payload.get("kind") or "info").strip().lower()
     message = str(payload.get("message") or "").strip()
-    result = payload.get("result")
 
-    scope_key = _scope_key(country, source_id)
-    saved_path_state_key = f"workspace_report_saved_path::{scope_key}"
-    saved_path_value = str(st.session_state.get(saved_path_state_key) or "").strip()
+    if level == "success":
+        st.success(message or "Informe guardado.")
+    elif level == "error":
+        st.error(message or "No se pudo guardar el informe.")
+    else:
+        st.info(message or "Estado de informe actualizado.")
 
-    content_col, close_col = st.columns([0.96, 0.04], gap="small")
-    with content_col:
-        if level == "success":
-            st.success(message or "Informe generado.")
-        elif level == "error":
-            st.error(message or "No se pudo generar el informe.")
-        else:
-            st.info(message or "Estado de informe actualizado.")
-
-        if isinstance(result, ExecutiveReportResult):
-            st.caption(
-                "Si la descarga falla en la build (pestaña nueva con spinner), usa 'Guardar en disco'."
-            )
-            a1, a2, a3 = st.columns([1.0, 1.0, 1.0], gap="small")
-            with a1:
-                st.download_button(
-                    "Descarga manual",
-                    data=result.content,
-                    file_name=result.file_name,
-                    mime=_PPT_MIME,
-                    key=f"btn_download_scope_ppt_alert_{scope_key}",
-                    type="secondary",
-                    width="content",
-                )
-            with a2:
+    saved_path_value = str(st.session_state.get(_saved_path_state_key(scope_key)) or "").strip()
+    if saved_path_value:
+        label_col, path_col = st.columns([0.25, 0.75], gap="small")
+        with label_col:
+            st.caption("Último guardado local:")
+        with path_col:
+            with st.container(key="workspace_report_saved_path_link"):
                 if st.button(
-                    "Guardar en disco",
-                    key=f"btn_save_scope_ppt_alert_{scope_key}",
+                    saved_path_value,
+                    key=f"btn_open_saved_report::{scope_key}::{saved_path_value}",
                     type="secondary",
                     width="content",
-                    help="Guarda el PPT en una carpeta local (por defecto, Descargas).",
+                    help="Abrir carpeta del informe",
                 ):
-                    try:
-                        export_dir = _default_report_export_dir()
-                        export_path = _unique_export_path(export_dir, file_name=result.file_name)
-                        export_path.write_bytes(result.content)
-                        st.session_state[saved_path_state_key] = str(export_path)
-                        saved_path_value = str(export_path)
-                        st.success(f"Informe guardado en: {export_path}")
-                    except Exception as exc:
-                        st.error(f"No se pudo guardar el informe en disco: {exc}")
-            with a3:
-                if st.button(
-                    "Abrir carpeta",
-                    key=f"btn_reveal_scope_ppt_alert_{scope_key}",
-                    type="secondary",
-                    width="content",
-                    disabled=not bool(saved_path_value),
-                    help="Abre Finder/Explorer en el archivo guardado.",
-                ):
-                    try:
-                        _reveal_in_file_manager(Path(saved_path_value))
-                    except Exception:
-                        pass
-            if saved_path_value:
-                st.caption(f"Último guardado local: {saved_path_value}")
-    with close_col:
-        if st.button(
-            "✕",
-            key=f"btn_close_report_alert_{scope_key}",
-            help="Cerrar alerta",
-            type="secondary",
-        ):
-            _clear_alert()
-            st.rerun()
+                    _reveal_in_file_manager(Path(saved_path_value))
 
 
 def render(settings: Settings) -> None:
@@ -265,19 +211,28 @@ def render(settings: Settings) -> None:
     st.info(
         f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}"
     )
-    _render_alert(country, source_id)
+    scope_key = _scope_key(country, source_id)
+    save_done_key = _save_done_state_key(scope_key)
 
-    run_generation = st.button(
-        "Generar informe",
-        key=f"btn_generate_scope_ppt_{_scope_key(country, source_id)}",
-        type="primary",
-        width="content",
-        help="Genera el PPT y habilita la descarga manual en esta misma pantalla.",
-    )
+    export_dir = _default_report_export_dir()
+    export_dir_label = str(export_dir)
 
-    if run_generation:
+    button_slot = st.empty()
+    run_save = False
+    if not bool(st.session_state.get(save_done_key, False)):
+        with button_slot:
+            run_save = st.button(
+                "Guardar en disco",
+                key=f"btn_save_scope_ppt_{scope_key}",
+                type="primary",
+                width="content",
+                help=f"Guarda el PPT en: {export_dir_label}",
+            )
+
+    if run_save:
+        saved_ok = False
         try:
-            with st.spinner("Preparando gráficos e insights del scope activo..."):
+            with st.spinner("Generando el informe PPT del scope activo..."):
                 all_df = (
                     all_df_for_scope
                     if all_df_for_scope is not None
@@ -305,33 +260,29 @@ def render(settings: Settings) -> None:
                     scoped_source_df_override=scoped_df,
                 )
 
-            if getattr(sys, "frozen", False):
-                try:
-                    export_dir = _default_report_export_dir()
-                    export_path = _unique_export_path(export_dir, file_name=result.file_name)
-                    export_path.write_bytes(result.content)
-                    st.session_state[
-                        f"workspace_report_saved_path::{_scope_key(country, source_id)}"
-                    ] = str(export_path)
-                except Exception:
-                    pass
+                export_path = _unique_export_path(export_dir, file_name=result.file_name)
+                export_path.write_bytes(result.content)
+                st.session_state[_saved_path_state_key(scope_key)] = str(export_path)
+                saved_ok = True
 
-            _store_alert(
-                country=country,
-                source_id=source_id,
+            _store_status(
+                scope_key=scope_key,
                 kind="success",
                 message=(
-                    f"Informe generado: {result.slide_count} slides · "
+                    f"Informe guardado · {result.slide_count} slides · "
                     f"{result.total_issues} issues ({result.open_issues} abiertas)."
                 ),
-                result=result,
             )
         except Exception as exc:
-            _store_alert(
-                country=country,
-                source_id=source_id,
+            _store_status(
+                scope_key=scope_key,
                 kind="error",
-                message=f"No se pudo generar/descargar la PPT para el scope activo: {exc}",
-                result=None,
+                message=f"No se pudo generar/guardar el informe PPT: {exc}",
             )
-        st.rerun()
+        if saved_ok:
+            st.session_state[save_done_key] = True
+            button_slot.empty()
+
+    status_slot = st.empty()
+    with status_slot:
+        _render_status(scope_key)
