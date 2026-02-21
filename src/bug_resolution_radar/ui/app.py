@@ -27,6 +27,11 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 def _set_workspace_mode(mode: str) -> None:
     """Switch top-level workspace mode and reset transient dashboard picker state."""
     mode_txt = str(mode or "").strip().lower()
+    previous_mode = str(st.session_state.get("workspace_mode") or "").strip().lower()
+    if mode_txt == "report" and previous_mode != "report":
+        for key in list(st.session_state.keys()):
+            if str(key or "").startswith("workspace_report_save_done::"):
+                st.session_state.pop(key, None)
     st.session_state["workspace_mode"] = mode_txt
 
 
