@@ -888,6 +888,40 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             opacity: 0.45 !important;
           }
 
+          /* Report saved path: link-like control */
+          .st-key-workspace_report_saved_path_link button,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"],
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"] > button {
+            padding: 0 !important;
+            border: none !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+            min-height: auto !important;
+            color: var(--bbva-primary) !important;
+            font-weight: 700 !important;
+            text-decoration: underline !important;
+            text-align: left !important;
+            white-space: normal !important;
+            cursor: pointer !important;
+          }
+          .st-key-workspace_report_saved_path_link button:hover,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"]:hover,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"] > button:hover {
+            background: transparent !important;
+            background-color: transparent !important;
+            color: color-mix(in srgb, var(--bbva-primary) 72%, white) !important;
+          }
+          .st-key-workspace_report_saved_path_link button:focus,
+          .st-key-workspace_report_saved_path_link button:focus-visible,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"]:focus,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"]:focus-visible,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"] > button:focus,
+          .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"] > button:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+          }
+
           /* Pills */
           div[data-testid="stPills"] button {
             background: var(--bbva-surface) !important;
