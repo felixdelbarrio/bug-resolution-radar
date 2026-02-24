@@ -402,6 +402,8 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
         alias = _coerce_str(row.get("alias"))
         base_url = _coerce_str(row.get("base_url"))
         organization = _coerce_str(row.get("organization"))
+        service_origin_buug = _coerce_str(row.get("service_origin_buug"))
+        service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
         browser = _coerce_str(row.get("browser")) or _coerce_str(settings.HELIX_BROWSER) or "chrome"
         proxy = _coerce_str(row.get("proxy")) or _coerce_str(settings.HELIX_PROXY)
         ssl_verify = (
@@ -413,19 +415,22 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
         if sid in seen:
             continue
         seen.add(sid)
-        out.append(
-            {
-                "source_type": "helix",
-                "source_id": sid,
-                "country": country,
-                "alias": alias,
-                "base_url": base_url,
-                "organization": organization,
-                "browser": browser,
-                "proxy": proxy,
-                "ssl_verify": ssl_verify,
-            }
-        )
+        payload = {
+            "source_type": "helix",
+            "source_id": sid,
+            "country": country,
+            "alias": alias,
+            "base_url": base_url,
+            "organization": organization,
+            "browser": browser,
+            "proxy": proxy,
+            "ssl_verify": ssl_verify,
+        }
+        if service_origin_buug:
+            payload["service_origin_buug"] = service_origin_buug
+        if service_origin_n1:
+            payload["service_origin_n1"] = service_origin_n1
+        out.append(payload)
 
     if out:
         return out

@@ -201,7 +201,17 @@ def render(settings: Settings) -> None:
         st.caption(f"Fuentes Helix configuradas: {len(helix_cfg)}")
         _render_sources_preview(
             helix_cfg,
-            ["country", "alias", "base_url", "organization", "browser", "proxy", "ssl_verify"],
+            [
+                "country",
+                "alias",
+                "base_url",
+                "organization",
+                "service_origin_buug",
+                "service_origin_n1",
+                "browser",
+                "proxy",
+                "ssl_verify",
+            ],
         )
 
         helix_path = _get_helix_path(settings)
@@ -230,6 +240,8 @@ def render(settings: Settings) -> None:
                             source_id=str(src.get("source_id", "")).strip(),
                             proxy=str(src.get("proxy", "")).strip(),
                             ssl_verify=str(src.get("ssl_verify", "true")).strip(),
+                            service_origin_buug=src.get("service_origin_buug"),
+                            service_origin_n1=src.get("service_origin_n1"),
                             dry_run=True,
                             existing_doc=HelixDocument.empty(),
                         )
@@ -255,6 +267,8 @@ def render(settings: Settings) -> None:
                             source_id=str(src.get("source_id", "")).strip(),
                             proxy=str(src.get("proxy", "")).strip(),
                             ssl_verify=str(src.get("ssl_verify", "true")).strip(),
+                            service_origin_buug=src.get("service_origin_buug"),
+                            service_origin_n1=src.get("service_origin_n1"),
                             dry_run=False,
                             existing_doc=HelixDocument.empty(),
                         )

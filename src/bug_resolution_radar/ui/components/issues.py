@@ -19,6 +19,7 @@ from bug_resolution_radar.ui.common import (
 )
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
+_SOURCE_TYPE_TOKENS = {"jira": "Jira", "helix": "Helix"}
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
 
@@ -72,6 +73,21 @@ def _safe_cell_text(value: object) -> str:
     if txt.lower() in null_tokens:
         return "—"
     return txt
+
+
+def _origin_link_header(df: pd.DataFrame) -> str:
+    if df is None or df.empty or "source_type" not in df.columns:
+        return "Origen"
+    types: list[str] = [
+        str(x).strip().lower()
+        for x in df["source_type"].fillna("").astype(str).tolist()
+        if str(x).strip()
+    ]
+    uniq = {t for t in types if t}
+    if len(uniq) == 1:
+        token = next(iter(uniq))
+        return _SOURCE_TYPE_TOKENS.get(token, token.upper())
+    return "Origen"
 
 
 def _jira_label_from_row(row: dict[str, object] | pd.Series) -> str:
@@ -130,8 +146,9 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
 
 
 def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> None:
+    origin_header = _origin_link_header(display_df)
     title_by_col = {
-        "jira": "Jira",
+        "key": origin_header,
         "summary": "summary",
         "status": "status",
         "type": "type",
@@ -148,17 +165,19 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
     header_cells.extend([f"<th>{html.escape(title_by_col.get(c, c))}</th>" for c in show_cols])
 
     rows_html: List[str] = []
-    records = display_df[show_cols].to_dict(orient="records")
+    records = display_df.to_dict(orient="records")
     for idx, row in zip(display_df.index.tolist(), records):
         row_cells = [f'<td class="issue-table-index">{html.escape(str(idx))}</td>']
         for col in show_cols:
-            if col == "jira":
-                url = str(row.get("jira") or row.get("url") or "").strip()
-                label = _jira_label_from_row(row)
+            if col == "key":
+                url = str(row.get("url") or "").strip()
+                label = _safe_cell_text(row.get("key"))
+                if label == "—":
+                    label = _jira_label_from_row(row)
                 if url:
                     row_cells.append(
                         "<td>"
-                        f'<a class="issue-table-jira" href="{html.escape(url)}" '
+                        f'<a class="issue-table-origin" href="{html.escape(url)}" '
                         f'target="_blank" rel="noopener noreferrer">{html.escape(label)}</a>'
                         "</td>"
                     )
@@ -238,8 +257,14 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
             font-weight: 700;
             text-decoration: none;
           }}
-          .issue-table-jira:hover {{
+          .issue-table-jira:hover,
+          .issue-table-origin:hover {{
             text-decoration: underline;
+          }}
+          .issue-table-origin {{
+            color: var(--bbva-primary) !important;
+            font-weight: 800;
+            text-decoration: none;
           }}
           .issue-table-chip {{
             display: inline-flex;
@@ -273,8 +298,11 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
     df_show = display_df[show_cols].copy(deep=False)
     col_cfg = {}
-    if "jira" in df_show.columns:
-        col_cfg["jira"] = st.column_config.LinkColumn("Jira", display_text=r".*/browse/([^/?#]+)")
+    origin_header = _origin_link_header(display_df)
+    if "key" in df_show.columns:
+        col_cfg["key"] = st.column_config.TextColumn(origin_header, width="small")
+    if "url" in df_show.columns:
+        col_cfg["url"] = st.column_config.LinkColumn("Abrir", display_text="Abrir")
     if "summary" in df_show.columns:
         col_cfg["summary"] = st.column_config.TextColumn("summary", width="large")
     if "status" in df_show.columns:
@@ -442,12 +470,8 @@ def render_issue_table(dff: pd.DataFrame) -> None:
 
     display_df = dff.copy(deep=False)
 
-    # Make a clickable Jira link using stored URL
-    if "url" in display_df.columns:
-        display_df["jira"] = display_df["url"]
-
     show_cols = [
-        "jira",
+        "key",
         "summary",
         "status",
         "type",
@@ -476,7 +500,10 @@ def render_issue_table(dff: pd.DataFrame) -> None:
                 "Usa CSV para el dataset completo."
             )
             display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
-        _render_issue_table_native(display_df, show_cols)
+        native_cols = list(show_cols)
+        if "url" in display_df.columns and "url" not in native_cols:
+            native_cols.insert(1 if "key" in native_cols else 0, "url")
+        _render_issue_table_native(display_df, native_cols)
         return
 
     _render_issue_table_html(display_df, show_cols)
