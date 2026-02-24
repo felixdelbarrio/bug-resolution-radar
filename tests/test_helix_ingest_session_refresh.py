@@ -251,6 +251,7 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
                         None,
                         1704067200000,
                         1704067200000,
+                        "IDGE189LA8XVSATJYQ1ATJYQ1AVIXN",
                     ],
                     [
                         "INC1002",
@@ -268,6 +269,7 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
                         1704153600000,
                         1704153600000,
                         1704067200000,
+                        "IDGEXAMPLE0000002",
                     ],
                 ],
             },
@@ -293,10 +295,12 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
                         None,
                         1704240000000,
                         1704067200000,
+                        "IDGEXAMPLE0000003",
                     ]
                 ],
             },
         ),
+        _FakeResponse(200, payload={"columns": columns, "rows": []}),
     ]
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
@@ -335,7 +339,94 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
     assert "ingesta Helix OK" in msg
     assert doc is not None
     assert len(doc.items) == 3
-    assert offsets == [0, 2]
+    assert doc.items[0].url.endswith("/app/#/incident/IDGE189LA8XVSATJYQ1ATJYQ1AVIXN")
+    assert offsets == [0, 2, 3]
+
+
+def test_ingest_helix_arsql_pages_when_tenant_ignores_requested_limit(monkeypatch: Any) -> None:
+    offsets: list[int] = []
+    columns = list(helix_mod._ARSQL_SELECT_ALIASES)
+    base_row = [
+        "INC",
+        "Low",
+        "Issue",
+        "Assigned",
+        "Ana",
+        "User Service Restoration",
+        "Service A",
+        "Impact A",
+        "BBVA México",
+        "ENTERPRISE WEB",
+        "ENTERPRISE WEB",
+        1704067200000,
+        None,
+        1704067200000,
+        1704067200000,
+        "IDGBASE0000",
+    ]
+
+    def make_row(prefix: str, idx: int) -> list[Any]:
+        row = list(base_row)
+        row[0] = f"{prefix}{idx}"
+        row[2] = f"Issue {prefix}{idx}"
+        row[-1] = f"IDG{prefix}{idx}"
+        return row
+
+    responses = [
+        _FakeResponse(
+            200,
+            payload={
+                "columns": columns,
+                "rows": [make_row("INC-A-", i) for i in range(25)],
+            },
+        ),
+        _FakeResponse(
+            200,
+            payload={
+                "columns": columns,
+                "rows": [make_row("INC-B-", i) for i in range(25)],
+            },
+        ),
+        _FakeResponse(200, payload={"columns": columns, "rows": []}),
+    ]
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        body = kwargs.get("json") or {}
+        sql = str(body.get("sql") or "")
+        match = re.search(r"OFFSET\s+(\d+)", sql, flags=re.IGNORECASE)
+        offsets.append(int(match.group(1)) if match else -1)
+        return responses.pop(0)
+
+    def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
+        return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
+
+    monkeypatch.setattr(helix_mod, "_request", fake_request)
+    monkeypatch.setattr(
+        helix_mod,
+        "get_helix_session_cookie",
+        lambda browser, host: "apt.uid=abc; apt.sid=def; RSSO_OIDC_1=ghi",
+    )
+    monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
+    monkeypatch.setenv("HELIX_QUERY_MODE", "arsql")
+    monkeypatch.setenv("HELIX_ARSQL_DATASOURCE_UID", "ZFPVLzQnz")
+    monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "https://itsmhelixbbva-ir1.onbmc.com")
+    monkeypatch.setenv("HELIX_ARSQL_LIMIT", "500")
+    monkeypatch.setenv("HELIX_ARSQL_SOURCE_SERVICE_N1", "ENTERPRISE WEB")
+
+    ok, msg, doc = helix_mod.ingest_helix(
+        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
+        browser="chrome",
+        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
+        chunk_size=500,
+        dry_run=False,
+        create_date_year=2026,
+    )
+
+    assert ok is True
+    assert "ingesta Helix OK" in msg
+    assert doc is not None
+    assert len(doc.items) == 50
+    assert offsets == [0, 25, 50]
 
 
 def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> None:

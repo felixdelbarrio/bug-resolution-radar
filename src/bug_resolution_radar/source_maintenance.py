@@ -65,8 +65,9 @@ def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tup
     if not removed:
         return settings, False
 
-    payload = [
-        {
+    payload = []
+    for row in kept:
+        source_payload = {
             "country": str(row.get("country") or "").strip(),
             "alias": str(row.get("alias") or "").strip(),
             "base_url": str(row.get("base_url") or "").strip(),
@@ -75,8 +76,13 @@ def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tup
             "proxy": str(row.get("proxy") or "").strip(),
             "ssl_verify": str(row.get("ssl_verify") or "").strip() or "true",
         }
-        for row in kept
-    ]
+        service_origin_buug = str(row.get("service_origin_buug") or "").strip()
+        service_origin_n1 = str(row.get("service_origin_n1") or "").strip()
+        if service_origin_buug:
+            source_payload["service_origin_buug"] = service_origin_buug
+        if service_origin_n1:
+            source_payload["service_origin_n1"] = service_origin_n1
+        payload.append(source_payload)
     updated = settings.model_copy(
         update={
             "HELIX_SOURCES_JSON": to_env_json(payload),

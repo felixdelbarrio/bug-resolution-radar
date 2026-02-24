@@ -14,7 +14,13 @@ from urllib.parse import urlparse
 
 import requests
 from requests.exceptions import SSLError
-from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ..config import build_source_id
 from ..schema_helix import HelixDocument, HelixWorkItem
@@ -182,6 +188,7 @@ _ARSQL_SELECT_ALIASES: List[str] = [
     "bbva_closeddate",
     "lastModifiedDate",
     "targetDate",
+    "workItemId",
 ]
 
 
@@ -295,7 +302,16 @@ def _pick_arsql_datasource_uid(payload: Any) -> str:
 
         blob = " ".join(
             str(row.get(k) or "")
-            for k in ("type", "name", "pluginId", "typeName", "url", "path", "apiUrl", "access")
+            for k in (
+                "type",
+                "name",
+                "pluginId",
+                "typeName",
+                "url",
+                "path",
+                "apiUrl",
+                "access",
+            )
         ).lower()
         score = 0
         if "datasource" in blob:
@@ -368,16 +384,26 @@ def _build_arsql_sql(
 ) -> str:
     start_sec = int(max(0, create_start_ms) // 1000)
     end_sec = int(max(start_sec, create_end_ms) // 1000)
+    start_ms = int(max(0, create_start_ms))
+    end_ms = int(max(start_ms, create_end_ms))
+
+    def _time_window(field_sql: str) -> str:
+        # Tenants differ on whether epoch fields are returned/stored in seconds or milliseconds.
+        # Keep the window unit-agnostic by matching both ranges.
+        return (
+            f"({field_sql} BETWEEN {start_sec} AND {end_sec} "
+            f"OR {field_sql} BETWEEN {start_ms} AND {end_ms})"
+        )
 
     where_parts: List[str] = [
         "`HPD:Help Desk`.`BBVA_MarcaSmartIT` = 'SmartIT'",
         "`HPD:Help Desk`.`Incident Number` IS NOT NULL",
         "("
-        f"`HPD:Help Desk`.`Submit Date` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`Last Modified Date` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`BBVA_StartDateTime` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`Closed Date` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`Last Resolved Date` BETWEEN {start_sec} AND {end_sec}"
+        f"{_time_window('`HPD:Help Desk`.`Submit Date`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`Last Modified Date`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`BBVA_StartDateTime`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`Closed Date`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`Last Resolved Date`')}"
         ")",
     ]
 
@@ -414,7 +440,8 @@ def _build_arsql_sql(
         "`HPD:Help Desk`.`BBVA_StartDateTime` AS `bbva_startdatetime`, "
         "`HPD:Help Desk`.`Closed Date` AS `bbva_closeddate`, "
         "`HPD:Help Desk`.`Last Modified Date` AS `lastModifiedDate`, "
-        "`HPD:Help Desk`.`Submit Date` AS `targetDate` "
+        "`HPD:Help Desk`.`Submit Date` AS `targetDate`, "
+        "`HPD:Help Desk`.`InstanceId` AS `workItemId` "
         "FROM `HPD:Help Desk` "
         f"WHERE {where_sql} "
         "ORDER BY `HPD:Help Desk`.`Submit Date` DESC "
@@ -443,7 +470,7 @@ def _get_timeouts(
 
     # base read (sin proxy)
     read = _coerce_float(
-        read_timeout if read_timeout is not None else os.getenv("HELIX_READ_TIMEOUT", "30"),
+        (read_timeout if read_timeout is not None else os.getenv("HELIX_READ_TIMEOUT", "30")),
         30.0,
     )
 
@@ -882,6 +909,8 @@ def ingest_helix(
     source_id: str = "",
     proxy: str = "",
     ssl_verify: str = "",
+    service_origin_buug: Any = None,
+    service_origin_n1: Any = None,
     ca_bundle: str = "",
     chunk_size: int = 75,
     create_date_year: Any = None,
@@ -932,9 +961,10 @@ def ingest_helix(
     preflight_name = "/app/"
     arsql_base_root = ""
     arsql_base_candidates: List[str] = []
-    ticket_console_url = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip() or (
-        f"{base}/app/#/ticket-console"
-    )
+    # SmartIT ticket console is the right "safe landing" URL for work items.
+    # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
+    ticket_console_url = f"{base}/app/#/ticket-console"
+    dashboard_url_cfg = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
     login_bootstrap_url = ticket_console_url
     arsql_dashboard_path_default = "/dashboards/"
 
@@ -942,7 +972,7 @@ def ingest_helix(
         grafana_org_id_cfg = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
         arsql_dashboard_url_cfg = str(os.getenv("HELIX_ARSQL_DASHBOARD_URL", "")).strip()
         if not arsql_dashboard_url_cfg:
-            generic_dashboard_url = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
+            generic_dashboard_url = dashboard_url_cfg
             if "/dashboards/" in generic_dashboard_url:
                 arsql_dashboard_url_cfg = generic_dashboard_url
         arsql_base_url_raw = str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip()
@@ -985,8 +1015,10 @@ def ingest_helix(
                 "/dashboards/d/c6683c35-c8e4-4192-ac83-b63feab9599d/"
                 f"bbva-incident-report?orgId={org_id}"
             )
-        login_bootstrap_url = (
-            arsql_dashboard_url_cfg or f"{arsql_base_root}{arsql_dashboard_path_default}"
+        login_bootstrap_url = arsql_dashboard_url_cfg or (
+            dashboard_url_cfg
+            if dashboard_url_cfg
+            else f"{arsql_base_root}{arsql_dashboard_path_default}"
         )
 
     session = requests.Session()
@@ -1220,13 +1252,18 @@ def ingest_helix(
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    incident_types_filter = _csv_list(
-        os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
-        "User Service Restoration,Security Incident",
+    incident_types_default = (
+        "" if query_mode == "arsql" else "User Service Restoration,Security Incident"
     )
-    companies_filter = [
-        {"name": name} for name in _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
-    ]
+    incident_types_filter = _csv_list(
+        os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default
+    )
+    buug_names = (
+        _csv_list(service_origin_buug, "")
+        if service_origin_buug is not None
+        else _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
+    )
+    companies_filter = [{"name": name} for name in buug_names]
 
     attribute_names = [
         "slaStatus",
@@ -1258,7 +1295,11 @@ def ingest_helix(
     )
 
     arsql_source_service_n1 = _csv_list(
-        os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1"),
+        (
+            service_origin_n1
+            if service_origin_n1 is not None
+            else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1")
+        ),
         "ENTERPRISE WEB" if query_mode == "arsql" else "",
     )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
@@ -1669,12 +1710,17 @@ def ingest_helix(
         if total is not None and (start >= total or len(seen_ids) >= total):
             break
         if total is None and batch_size < current_chunk_size:
-            break
+            if query_mode != "arsql":
+                break
+            # Some tenants enforce a fixed page size (e.g. 25 rows) regardless of requested LIMIT.
+            # In that case, keep paging using the effective page size until the API returns empty.
+            current_chunk_size = int(batch_size)
 
     doc = existing_doc or HelixDocument.empty()
     doc.schema_version = "1.0"
     doc.ingested_at = now_iso()
-    doc.helix_base_url = f"{scheme}://{host}" if query_mode == "arsql" else base
+    # Persist SmartIT base URL so UI links always land in the incident console.
+    doc.helix_base_url = base
     create_start_iso = _iso_from_epoch_ms(create_start_ms)
     create_end_iso = _iso_from_epoch_ms(create_end_ms)
     status_mappings_q = (
@@ -1688,6 +1734,7 @@ def ingest_helix(
         source_service_q = ",".join(arsql_source_service_n1) or "all"
         doc.query = (
             "mode=arsql; "
+            f"arsql_root={arsql_base_root}; "
             f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
             f"sourceServiceN1=[{source_service_q}]; "
             f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; "
