@@ -286,6 +286,8 @@ def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[
                 "alias": _as_str(src.get("alias")),
                 "base_url": _as_str(src.get("base_url")),
                 "organization": _as_str(src.get("organization")),
+                "service_origin_buug": _as_str(src.get("service_origin_buug")),
+                "service_origin_n1": _as_str(src.get("service_origin_n1")),
                 "browser": _as_str(src.get("browser")) or "chrome",
                 "proxy": _as_str(src.get("proxy")),
                 "ssl_verify": _as_str(src.get("ssl_verify")) or "true",
@@ -344,11 +346,13 @@ def _normalize_helix_rows(
         alias = _as_str(row.get("alias"))
         base_url = _as_str(row.get("base_url"))
         organization = _as_str(row.get("organization"))
+        service_origin_buug = _as_str(row.get("service_origin_buug"))
+        service_origin_n1 = _as_str(row.get("service_origin_n1"))
         browser = _as_str(row.get("browser")) or "chrome"
         proxy = _as_str(row.get("proxy"))
         ssl_verify = _as_str(row.get("ssl_verify")) or "true"
 
-        if not any([country, alias, base_url, organization, proxy]):
+        if not any([country, alias, base_url, organization, proxy, service_origin_buug, service_origin_n1]):
             continue
         if country not in countries:
             errors.append(f"Helix fila {idx}: país inválido.")
@@ -374,17 +378,20 @@ def _normalize_helix_rows(
             errors.append(f"Helix fila {idx}: alias duplicado para {country}.")
             continue
         seen.add(dedup_key)
-        out.append(
-            {
-                "country": country,
-                "alias": alias,
-                "base_url": base_url,
-                "organization": organization,
-                "browser": browser,
-                "proxy": proxy,
-                "ssl_verify": ssl_verify,
-            }
-        )
+        payload = {
+            "country": country,
+            "alias": alias,
+            "base_url": base_url,
+            "organization": organization,
+            "browser": browser,
+            "proxy": proxy,
+            "ssl_verify": ssl_verify,
+        }
+        if service_origin_buug:
+            payload["service_origin_buug"] = service_origin_buug
+        if service_origin_n1:
+            payload["service_origin_n1"] = service_origin_n1
+        out.append(payload)
 
     return out, errors
 
@@ -631,6 +638,8 @@ def render(settings: Settings) -> None:
                     "alias": "",
                     "base_url": "",
                     "organization": "",
+                    "service_origin_buug": "BBVA México",
+                    "service_origin_n1": "ENTERPRISE WEB",
                     "browser": helix_default_browser,
                     "proxy": helix_default_proxy,
                     "ssl_verify": helix_default_ssl_verify,
@@ -649,6 +658,8 @@ def render(settings: Settings) -> None:
                 "alias",
                 "base_url",
                 "organization",
+                "service_origin_buug",
+                "service_origin_n1",
                 "browser",
                 "proxy",
                 "ssl_verify",
@@ -659,6 +670,8 @@ def render(settings: Settings) -> None:
                 "alias": st.column_config.TextColumn("alias"),
                 "base_url": st.column_config.TextColumn("base_url"),
                 "organization": st.column_config.TextColumn("organization"),
+                "service_origin_buug": st.column_config.TextColumn("Servicio Origen BU/UG"),
+                "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1"),
                 "browser": st.column_config.SelectboxColumn("browser", options=["chrome", "edge"]),
                 "proxy": st.column_config.TextColumn("proxy"),
                 "ssl_verify": st.column_config.SelectboxColumn(

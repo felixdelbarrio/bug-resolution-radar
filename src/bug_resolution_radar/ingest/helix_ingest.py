@@ -182,6 +182,7 @@ _ARSQL_SELECT_ALIASES: List[str] = [
     "bbva_closeddate",
     "lastModifiedDate",
     "targetDate",
+    "workItemId",
 ]
 
 
@@ -368,16 +369,26 @@ def _build_arsql_sql(
 ) -> str:
     start_sec = int(max(0, create_start_ms) // 1000)
     end_sec = int(max(start_sec, create_end_ms) // 1000)
+    start_ms = int(max(0, create_start_ms))
+    end_ms = int(max(start_ms, create_end_ms))
+
+    def _time_window(field_sql: str) -> str:
+        # Tenants differ on whether epoch fields are returned/stored in seconds or milliseconds.
+        # Keep the window unit-agnostic by matching both ranges.
+        return (
+            f"({field_sql} BETWEEN {start_sec} AND {end_sec} "
+            f"OR {field_sql} BETWEEN {start_ms} AND {end_ms})"
+        )
 
     where_parts: List[str] = [
         "`HPD:Help Desk`.`BBVA_MarcaSmartIT` = 'SmartIT'",
         "`HPD:Help Desk`.`Incident Number` IS NOT NULL",
         "("
-        f"`HPD:Help Desk`.`Submit Date` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`Last Modified Date` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`BBVA_StartDateTime` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`Closed Date` BETWEEN {start_sec} AND {end_sec}"
-        f" OR `HPD:Help Desk`.`Last Resolved Date` BETWEEN {start_sec} AND {end_sec}"
+        f"{_time_window('`HPD:Help Desk`.`Submit Date`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`Last Modified Date`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`BBVA_StartDateTime`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`Closed Date`')}"
+        f" OR {_time_window('`HPD:Help Desk`.`Last Resolved Date`')}"
         ")",
     ]
 
@@ -414,7 +425,8 @@ def _build_arsql_sql(
         "`HPD:Help Desk`.`BBVA_StartDateTime` AS `bbva_startdatetime`, "
         "`HPD:Help Desk`.`Closed Date` AS `bbva_closeddate`, "
         "`HPD:Help Desk`.`Last Modified Date` AS `lastModifiedDate`, "
-        "`HPD:Help Desk`.`Submit Date` AS `targetDate` "
+        "`HPD:Help Desk`.`Submit Date` AS `targetDate`, "
+        "`HPD:Help Desk`.`InstanceId` AS `workItemId` "
         "FROM `HPD:Help Desk` "
         f"WHERE {where_sql} "
         "ORDER BY `HPD:Help Desk`.`Submit Date` DESC "
@@ -882,6 +894,8 @@ def ingest_helix(
     source_id: str = "",
     proxy: str = "",
     ssl_verify: str = "",
+    service_origin_buug: Any = None,
+    service_origin_n1: Any = None,
     ca_bundle: str = "",
     chunk_size: int = 75,
     create_date_year: Any = None,
@@ -1220,13 +1234,16 @@ def ingest_helix(
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    incident_types_filter = _csv_list(
-        os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
-        "User Service Restoration,Security Incident",
+    incident_types_default = (
+        "" if query_mode == "arsql" else "User Service Restoration,Security Incident"
     )
-    companies_filter = [
-        {"name": name} for name in _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
-    ]
+    incident_types_filter = _csv_list(os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default)
+    buug_names = (
+        _csv_list(service_origin_buug, "")
+        if service_origin_buug is not None
+        else _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
+    )
+    companies_filter = [{"name": name} for name in buug_names]
 
     attribute_names = [
         "slaStatus",
@@ -1258,7 +1275,9 @@ def ingest_helix(
     )
 
     arsql_source_service_n1 = _csv_list(
-        os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1"),
+        service_origin_n1
+        if service_origin_n1 is not None
+        else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1"),
         "ENTERPRISE WEB" if query_mode == "arsql" else "",
     )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
@@ -1669,7 +1688,11 @@ def ingest_helix(
         if total is not None and (start >= total or len(seen_ids) >= total):
             break
         if total is None and batch_size < current_chunk_size:
-            break
+            if query_mode != "arsql":
+                break
+            # Some tenants enforce a fixed page size (e.g. 25 rows) regardless of requested LIMIT.
+            # In that case, keep paging using the effective page size until the API returns empty.
+            current_chunk_size = int(batch_size)
 
     doc = existing_doc or HelixDocument.empty()
     doc.schema_version = "1.0"
