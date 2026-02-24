@@ -1113,12 +1113,9 @@ def _status_pack(open_df: pd.DataFrame) -> TrendInsightPack:
     df = open_df.copy(deep=False)
     df["status"] = normalize_text_col(df["status"], "(sin estado)")
     status_series = df["status"].astype(str)
-    status_norm = status_series.str.strip().str.lower()
     counts = status_series.value_counts()
     total = int(len(df))
     top_status = str(counts.index[0]) if not counts.empty else "—"
-    top_count = int(counts.iloc[0]) if not counts.empty else 0
-    top_share = (top_count / total) if total else 0.0
     focus_status, focus_count, focus_share = _top_non_final_status(counts, total=total)
 
     cards: List[ActionInsight] = []

@@ -92,7 +92,6 @@ def effective_finalized_at(
     if created_col not in df.columns:
         return pd.Series([pd.NaT] * len(df), index=df.index, dtype="datetime64[ns]")
 
-    created = _to_dt_naive_utc(df[created_col])
     resolved = (
         _to_dt_naive_utc(df[resolved_col])
         if resolved_col in df.columns
