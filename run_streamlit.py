@@ -142,10 +142,15 @@ def _configure_streamlit_browser_env() -> None:
         for hint in _BROWSER_HINTS:
             if hint.token != token:
                 continue
+            chosen: str | None = None
             for app in hint.macos_apps:
                 if _macos_has_app(app):
-                    os.environ["BROWSER"] = f'open -a "{app}"'
-                    return
+                    chosen = app
+                    break
+            if chosen is None:
+                chosen = hint.macos_apps[0]
+            os.environ["BROWSER"] = f'open -a "{chosen}"'
+            return
         return
 
     if token == "edge":
