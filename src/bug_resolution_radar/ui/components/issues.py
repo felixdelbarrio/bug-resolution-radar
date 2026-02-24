@@ -78,13 +78,11 @@ def _safe_cell_text(value: object) -> str:
 def _origin_link_header(df: pd.DataFrame) -> str:
     if df is None or df.empty or "source_type" not in df.columns:
         return "Origen"
-    types = (
-        df["source_type"]
-        .fillna("")
-        .astype(str)
-        .map(lambda x: x.strip().lower())
-        .tolist()
-    )
+    types: list[str] = [
+        str(x).strip().lower()
+        for x in df["source_type"].fillna("").astype(str).tolist()
+        if str(x).strip()
+    ]
     uniq = {t for t in types if t}
     if len(uniq) == 1:
         token = next(iter(uniq))
