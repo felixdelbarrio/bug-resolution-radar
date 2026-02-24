@@ -469,7 +469,6 @@ def build_chart_insights(
             ]
 
         stc = normalize_text_col(open_df["status"], "(sin estado)")
-        stc_norm = stc.astype(str).str.strip().str.lower()
         vc = stc.value_counts()
         top_status = vc.index[0] if not vc.empty else None
         non_final_vc = vc[[not _is_finalist_status(s) for s in vc.index.astype(str)]]

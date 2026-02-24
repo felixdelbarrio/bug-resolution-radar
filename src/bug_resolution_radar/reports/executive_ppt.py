@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import math
 import logging
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -606,8 +606,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         return None
 
     try:
-        from bug_resolution_radar.ui.insights.top_topics import _prepare_top_topics_payload
         from bug_resolution_radar.ui.insights.duplicates import _prepare_duplicates_payload
+        from bug_resolution_radar.ui.insights.top_topics import _prepare_top_topics_payload
     except Exception:
         return None
 
@@ -624,7 +624,6 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     clusters = dup_payload.get("clusters") if isinstance(dup_payload, dict) else None
     clusters = clusters if isinstance(clusters, list) else []
 
-    duplicate_groups = 0
     duplicate_issues = 0
     if "summary" in open_df.columns and "key" in open_df.columns:
         title_groups = (
@@ -634,7 +633,6 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
             .to_dict()
         )
         groups = [keys for keys in title_groups.values() if len(keys) > 1]
-        duplicate_groups = int(len(groups))
         duplicate_issues = int(sum(len(keys) for keys in groups))
 
     heuristic_clusters = int(len([c for c in clusters if int(getattr(c, "size", 0) or 0) > 1]))
@@ -887,6 +885,57 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         return None
     export_width = 1280
     export_height = 820
+
+    def _kaleido_png_bytes(fig_obj: go.Figure, *, scale: float) -> bytes:
+        """
+        Export Plotly figure to PNG using Kaleido with MathJax disabled.
+
+        In packaged builds, Kaleido/Chromium can hang while trying to load MathJax from CDN.
+        Disabling MathJax avoids that network dependency and makes export more reliable offline.
+        """
+        import os
+
+        try:
+            import kaleido
+        except Exception:
+            return cast(
+                bytes,
+                pio.to_image(
+                    fig_obj,
+                    format="png",
+                    width=export_width,
+                    height=export_height,
+                    scale=scale,
+                    engine="kaleido",
+                ),
+            )
+
+        try:
+            from plotly.io._utils import validate_coerce_fig_to_dict
+
+            fig_dict = validate_coerce_fig_to_dict(fig_obj, validate=False)
+        except Exception:
+            fig_dict = cast(dict, fig_obj.to_plotly_json())
+
+        timeout_s = int(os.getenv("BUG_RESOLUTION_RADAR_PPT_RENDER_TIMEOUT_S", "90") or "90")
+        return cast(
+            bytes,
+            kaleido.calc_fig_sync(
+                fig_dict,
+                opts=dict(
+                    format="png",
+                    width=export_width,
+                    height=export_height,
+                    scale=scale,
+                ),
+                kopts=dict(
+                    # Avoid CDN fetches (common source of hangs in locked-down environments).
+                    mathjax=False,
+                    timeout=timeout_s,
+                ),
+            ),
+        )
+
     try:
 
         def _trace_values(trace: object, attr: str) -> List[object]:
@@ -1226,26 +1275,10 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                         color=f"#{PALETTE['ink']}",
                     )
 
-        image = pio.to_image(
-            export_fig,
-            format="png",
-            width=export_width,
-            height=export_height,
-            scale=3,
-            engine="kaleido",
-        )
-        return cast(bytes, image)
+        return _kaleido_png_bytes(export_fig, scale=3)
     except Exception as primary_exc:
         try:
-            image = pio.to_image(
-                fig,
-                format="png",
-                width=export_width,
-                height=export_height,
-                scale=2,
-                engine="kaleido",
-            )
-            return cast(bytes, image)
+            return _kaleido_png_bytes(go.Figure(fig), scale=2)
         except Exception as secondary_exc:
             # Last-resort path: normalize figure payload to plain Plotly JSON and
             # drop heavy/complex attrs that may break Kaleido in specific traces.
@@ -1264,15 +1297,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                                 trace.hovertemplate = None
                     except Exception:
                         continue
-                image = pio.to_image(
-                    safe_fig,
-                    format="png",
-                    width=export_width,
-                    height=export_height,
-                    scale=2,
-                    engine="kaleido",
-                )
-                return cast(bytes, image)
+                return _kaleido_png_bytes(safe_fig, scale=2)
             except Exception as final_exc:
                 LOGGER.warning(
                     "Plotly export failed for chart image (primary=%s, secondary=%s, final=%s)",
@@ -1929,7 +1954,10 @@ def _add_chart_insight_slide(
         if section.figure is None:
             run.text = "No hay datos suficientes para este gráfico con el filtro actual."
         else:
-            run.text = "No hay visualización disponible para esta vista con el filtro actual."
+            run.text = (
+                "No se pudo exportar la imagen del gráfico en este entorno. "
+                "Revisa que Chrome esté instalado y accesible."
+            )
         run.font.name = FONT_BODY_BOOK
         run.font.size = Pt(13)
         run.font.color.rgb = _rgb(PALETTE["muted"])

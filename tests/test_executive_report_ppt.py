@@ -11,8 +11,8 @@ from pptx import Presentation
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.reports.executive_ppt import (
-    _build_sections,
     _best_actions,
+    _build_sections,
     _ChartSection,
     _fig_to_png,
     _is_finalist_status,
