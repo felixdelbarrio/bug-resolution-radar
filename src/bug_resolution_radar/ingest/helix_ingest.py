@@ -14,7 +14,13 @@ from urllib.parse import urlparse
 
 import requests
 from requests.exceptions import SSLError
-from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ..config import build_source_id
 from ..schema_helix import HelixDocument, HelixWorkItem
@@ -296,7 +302,16 @@ def _pick_arsql_datasource_uid(payload: Any) -> str:
 
         blob = " ".join(
             str(row.get(k) or "")
-            for k in ("type", "name", "pluginId", "typeName", "url", "path", "apiUrl", "access")
+            for k in (
+                "type",
+                "name",
+                "pluginId",
+                "typeName",
+                "url",
+                "path",
+                "apiUrl",
+                "access",
+            )
         ).lower()
         score = 0
         if "datasource" in blob:
@@ -455,7 +470,7 @@ def _get_timeouts(
 
     # base read (sin proxy)
     read = _coerce_float(
-        read_timeout if read_timeout is not None else os.getenv("HELIX_READ_TIMEOUT", "30"),
+        (read_timeout if read_timeout is not None else os.getenv("HELIX_READ_TIMEOUT", "30")),
         30.0,
     )
 
