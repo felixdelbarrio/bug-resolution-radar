@@ -353,7 +353,15 @@ def _normalize_helix_rows(
         ssl_verify = _as_str(row.get("ssl_verify")) or "true"
 
         if not any(
-            [country, alias, base_url, organization, proxy, service_origin_buug, service_origin_n1]
+            [
+                country,
+                alias,
+                base_url,
+                organization,
+                proxy,
+                service_origin_buug,
+                service_origin_n1,
+            ]
         ):
             continue
         if country not in countries:
