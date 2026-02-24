@@ -352,7 +352,9 @@ def _normalize_helix_rows(
         proxy = _as_str(row.get("proxy"))
         ssl_verify = _as_str(row.get("ssl_verify")) or "true"
 
-        if not any([country, alias, base_url, organization, proxy, service_origin_buug, service_origin_n1]):
+        if not any(
+            [country, alias, base_url, organization, proxy, service_origin_buug, service_origin_n1]
+        ):
             continue
         if country not in countries:
             errors.append(f"Helix fila {idx}: país inválido.")

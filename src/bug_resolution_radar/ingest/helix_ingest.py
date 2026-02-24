@@ -1237,7 +1237,9 @@ def ingest_helix(
     incident_types_default = (
         "" if query_mode == "arsql" else "User Service Restoration,Security Incident"
     )
-    incident_types_filter = _csv_list(os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default)
+    incident_types_filter = _csv_list(
+        os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default
+    )
     buug_names = (
         _csv_list(service_origin_buug, "")
         if service_origin_buug is not None
@@ -1275,9 +1277,11 @@ def ingest_helix(
     )
 
     arsql_source_service_n1 = _csv_list(
-        service_origin_n1
-        if service_origin_n1 is not None
-        else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1"),
+        (
+            service_origin_n1
+            if service_origin_n1 is not None
+            else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1")
+        ),
         "ENTERPRISE WEB" if query_mode == "arsql" else "",
     )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
