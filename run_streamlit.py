@@ -56,6 +56,78 @@ def _candidate_streamlit_config_paths() -> list[Path]:
     return uniq
 
 
+def _load_dotenv_if_present(dotenv_path: Path) -> None:
+    """
+    Load a minimal `.env` file before starting Streamlit.
+
+    Streamlit opens the UI browser before `app.py` runs, so bundled builds need
+    environment configuration in place ahead of time (paths, proxies, Helix/Jira
+    settings, etc.).
+    """
+    try:
+        path = Path(dotenv_path)
+        if not path.exists() or not path.is_file():
+            return
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            k = key.strip()
+            if not k or k in os.environ:
+                continue
+            v = value.strip().strip("'").strip('"')
+            os.environ[k] = v
+    except Exception:
+        return
+
+
+def _macos_has_app(app_name: str) -> bool:
+    for base in (Path("/Applications"), Path.home() / "Applications"):
+        try:
+            if (base / f"{app_name}.app").exists():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _configure_streamlit_ui_browser_env() -> None:
+    """
+    Keep Streamlit UI browser selection independent from Helix/Jira ingestion browsers.
+
+    - Default: open the system default browser (Safari, etc.).
+    - Optional: set `BUG_RESOLUTION_RADAR_UI_BROWSER=chrome|edge` to force.
+    """
+    ui_browser = str(os.environ.get("BUG_RESOLUTION_RADAR_UI_BROWSER") or "").strip().lower()
+
+    # Avoid "bounce" behavior when BROWSER is set to ambiguous tokens (e.g. "chrome")
+    # and the bundle cannot resolve it.
+    if not ui_browser or ui_browser == "default":
+        current = str(os.environ.get("BROWSER") or "").strip().lower()
+        if current in {
+            "chrome",
+            "google-chrome",
+            "google chrome",
+            "edge",
+            "msedge",
+            "microsoft-edge",
+            "microsoft edge",
+        }:
+            os.environ.pop("BROWSER", None)
+        return
+
+    if ui_browser not in {"chrome", "edge"}:
+        return
+
+    if sys.platform == "darwin":
+        app = "Google Chrome" if ui_browser == "chrome" else "Microsoft Edge"
+        os.environ["BROWSER"] = f'open -a "{app}"'
+        return
+
+    os.environ["BROWSER"] = "microsoft-edge" if ui_browser == "edge" else "google-chrome"
+
+
 def _ensure_streamlit_config(runtime_home: Path) -> None:
     target = runtime_home / ".streamlit" / "config.toml"
     if target.exists():
@@ -91,6 +163,8 @@ def main() -> int:
         runtime_home.mkdir(parents=True, exist_ok=True)
         _ensure_streamlit_config(runtime_home)
         os.chdir(runtime_home)
+        _load_dotenv_if_present(runtime_home / ".env")
+        _configure_streamlit_ui_browser_env()
     script = _resolve_app_script()
     sys.argv = [
         "streamlit",
