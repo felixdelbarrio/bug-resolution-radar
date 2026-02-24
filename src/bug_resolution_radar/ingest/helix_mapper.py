@@ -39,6 +39,37 @@ def _looks_like_smartit_id(value: str) -> bool:
     return bool(_SMARTIT_ID_RE.fullmatch(txt))
 
 
+def _detect_smartit_id(values: Dict[str, Any]) -> str:
+    """
+    Best-effort detection of the SmartIT internal id used in `/incident/<id>`.
+
+    ARSQL tenants may return the internal id under different column names, or even
+    as an unnamed trailing column (e.g. `col_14`). Prefer IDs starting with `IDG`,
+    then fall back to keys that "sound like" ids.
+    """
+    for value in values.values():
+        txt = _as_text(value)
+        if txt.upper().startswith("IDG") and _looks_like_smartit_id(txt):
+            return txt
+
+    id_like_tokens = ("instance", "work", "guid", "entry", "id")
+    for key, value in values.items():
+        key_norm = _normalize_token(key)
+        if not key_norm:
+            continue
+        if not any(tok in key_norm for tok in id_like_tokens):
+            continue
+        txt = _as_text(value)
+        if _looks_like_smartit_id(txt):
+            return txt
+
+    for value in values.values():
+        txt = _as_text(value)
+        if _looks_like_smartit_id(txt):
+            return txt
+    return ""
+
+
 def _extract_text(value: Any) -> str:
     if isinstance(value, dict):
         return _as_text(
@@ -288,6 +319,8 @@ def map_helix_values_to_item(
         if _looks_like_smartit_id(candidate):
             smartit_id = candidate
             break
+    if not smartit_id:
+        smartit_id = _detect_smartit_id(values)
 
     base = str(base_url or "").strip().rstrip("/")
     if smartit_id and base:

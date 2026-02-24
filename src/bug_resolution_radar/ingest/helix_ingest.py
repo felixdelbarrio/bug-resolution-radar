@@ -961,9 +961,10 @@ def ingest_helix(
     preflight_name = "/app/"
     arsql_base_root = ""
     arsql_base_candidates: List[str] = []
-    ticket_console_url = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip() or (
-        f"{base}/app/#/ticket-console"
-    )
+    # SmartIT ticket console is the right "safe landing" URL for work items.
+    # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
+    ticket_console_url = f"{base}/app/#/ticket-console"
+    dashboard_url_cfg = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
     login_bootstrap_url = ticket_console_url
     arsql_dashboard_path_default = "/dashboards/"
 
@@ -971,7 +972,7 @@ def ingest_helix(
         grafana_org_id_cfg = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
         arsql_dashboard_url_cfg = str(os.getenv("HELIX_ARSQL_DASHBOARD_URL", "")).strip()
         if not arsql_dashboard_url_cfg:
-            generic_dashboard_url = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
+            generic_dashboard_url = dashboard_url_cfg
             if "/dashboards/" in generic_dashboard_url:
                 arsql_dashboard_url_cfg = generic_dashboard_url
         arsql_base_url_raw = str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip()
@@ -1014,8 +1015,10 @@ def ingest_helix(
                 "/dashboards/d/c6683c35-c8e4-4192-ac83-b63feab9599d/"
                 f"bbva-incident-report?orgId={org_id}"
             )
-        login_bootstrap_url = (
-            arsql_dashboard_url_cfg or f"{arsql_base_root}{arsql_dashboard_path_default}"
+        login_bootstrap_url = arsql_dashboard_url_cfg or (
+            dashboard_url_cfg
+            if dashboard_url_cfg
+            else f"{arsql_base_root}{arsql_dashboard_path_default}"
         )
 
     session = requests.Session()
@@ -1716,7 +1719,8 @@ def ingest_helix(
     doc = existing_doc or HelixDocument.empty()
     doc.schema_version = "1.0"
     doc.ingested_at = now_iso()
-    doc.helix_base_url = f"{scheme}://{host}" if query_mode == "arsql" else base
+    # Persist SmartIT base URL so UI links always land in the incident console.
+    doc.helix_base_url = base
     create_start_iso = _iso_from_epoch_ms(create_start_ms)
     create_end_iso = _iso_from_epoch_ms(create_end_ms)
     status_mappings_q = (
@@ -1730,6 +1734,7 @@ def ingest_helix(
         source_service_q = ",".join(arsql_source_service_n1) or "all"
         doc.query = (
             "mode=arsql; "
+            f"arsql_root={arsql_base_root}; "
             f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
             f"sourceServiceN1=[{source_service_q}]; "
             f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; "

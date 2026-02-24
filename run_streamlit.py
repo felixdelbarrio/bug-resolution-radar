@@ -4,22 +4,9 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from streamlit.web import cli as stcli
-
-
-@dataclass(frozen=True)
-class _BrowserHint:
-    token: str
-    macos_apps: tuple[str, ...]
-
-
-_BROWSER_HINTS: tuple[_BrowserHint, ...] = (
-    _BrowserHint(token="chrome", macos_apps=("Google Chrome", "Google Chrome Canary", "Chromium")),
-    _BrowserHint(token="edge", macos_apps=("Microsoft Edge",)),
-)
 
 
 def _resolve_app_script() -> Path:
@@ -104,59 +91,41 @@ def _macos_has_app(app_name: str) -> bool:
     return False
 
 
-def _configure_streamlit_browser_env() -> None:
+def _configure_streamlit_ui_browser_env() -> None:
     """
-    Encourage Streamlit to open the UI in Chrome/Edge instead of the default browser.
+    Keep Streamlit UI browser selection independent from Helix/Jira ingestion browsers.
 
-    Streamlit uses Python's `webbrowser` module; on macOS, setting `BROWSER` to an
-    `open -a "<App>"` command reliably opens the chosen app, while plain tokens
-    like "chrome" often fall back to the system default browser (Safari).
+    For packaged builds, users may work in Safari (or any default browser). If
+    `BUG_RESOLUTION_RADAR_UI_BROWSER` is set, Streamlit will open that app; otherwise
+    we clear ambiguous `BROWSER` tokens that often cause multi-browser "bounce".
     """
-    current = str(os.environ.get("BROWSER") or "").strip()
-    current_token = current.lower()
-
-    prefer = (
-        str(os.environ.get("BUG_RESOLUTION_RADAR_BROWSER") or "").strip()
-        or str(os.environ.get("HELIX_BROWSER") or "").strip()
-        or str(os.environ.get("JIRA_BROWSER") or "").strip()
-        or ""
-    ).lower()
-
-    # Only override empty/ambiguous values that often make `webbrowser` fall back.
-    if current and current_token not in {
-        "chrome",
-        "google-chrome",
-        "google chrome",
-        "edge",
-        "msedge",
-        "microsoft-edge",
-        "microsoft edge",
-    }:
+    ui_browser = str(os.environ.get("BUG_RESOLUTION_RADAR_UI_BROWSER") or "").strip().lower()
+    if not ui_browser or ui_browser == "default":
+        current = str(os.environ.get("BROWSER") or "").strip().lower()
+        if current in {
+            "chrome",
+            "google-chrome",
+            "google chrome",
+            "edge",
+            "msedge",
+            "microsoft-edge",
+            "microsoft edge",
+        }:
+            os.environ.pop("BROWSER", None)
         return
 
-    token = prefer or current_token or "chrome"
-    if token not in {"chrome", "edge"}:
-        token = "chrome"
+    if ui_browser not in {"chrome", "edge"}:
+        return
 
     if sys.platform == "darwin":
-        for hint in _BROWSER_HINTS:
-            if hint.token != token:
-                continue
-            chosen: str | None = None
-            for app in hint.macos_apps:
-                if _macos_has_app(app):
-                    chosen = app
-                    break
-            if chosen is None:
-                chosen = hint.macos_apps[0]
-            os.environ["BROWSER"] = f'open -a "{chosen}"'
-            return
+        app = "Google Chrome" if ui_browser == "chrome" else "Microsoft Edge"
+        if _macos_has_app(app):
+            os.environ["BROWSER"] = f'open -a "{app}"'
+        else:
+            os.environ["BROWSER"] = f'open -a "{app}"'
         return
 
-    if token == "edge":
-        os.environ["BROWSER"] = "microsoft-edge"
-        return
-    os.environ["BROWSER"] = "google-chrome"
+    os.environ["BROWSER"] = "microsoft-edge" if ui_browser == "edge" else "google-chrome"
 
 
 def _ensure_streamlit_config(runtime_home: Path) -> None:
@@ -195,7 +164,7 @@ def main() -> int:
         _ensure_streamlit_config(runtime_home)
         os.chdir(runtime_home)
         _load_dotenv_if_present(runtime_home / ".env")
-        _configure_streamlit_browser_env()
+        _configure_streamlit_ui_browser_env()
     script = _resolve_app_script()
     sys.argv = [
         "streamlit",
