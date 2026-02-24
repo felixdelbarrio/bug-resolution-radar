@@ -4,9 +4,22 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from streamlit.web import cli as stcli
+
+
+@dataclass(frozen=True)
+class _BrowserHint:
+    token: str
+    macos_apps: tuple[str, ...]
+
+
+_BROWSER_HINTS: tuple[_BrowserHint, ...] = (
+    _BrowserHint(token="chrome", macos_apps=("Google Chrome", "Google Chrome Canary", "Chromium")),
+    _BrowserHint(token="edge", macos_apps=("Microsoft Edge",)),
+)
 
 
 def _resolve_app_script() -> Path:
@@ -56,6 +69,91 @@ def _candidate_streamlit_config_paths() -> list[Path]:
     return uniq
 
 
+def _load_dotenv_if_present(dotenv_path: Path) -> None:
+    """
+    Load a minimal .env file before starting Streamlit.
+
+    This is important for the PyInstaller bundle because Streamlit tries to open
+    the UI browser before our app code runs (so Settings/.env aren't loaded yet).
+    """
+    try:
+        path = Path(dotenv_path)
+        if not path.exists() or not path.is_file():
+            return
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            k = key.strip()
+            if not k or k in os.environ:
+                continue
+            v = value.strip().strip("'").strip('"')
+            os.environ[k] = v
+    except Exception:
+        return
+
+
+def _macos_has_app(app_name: str) -> bool:
+    for base in (Path("/Applications"), Path.home() / "Applications"):
+        try:
+            if (base / f"{app_name}.app").exists():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _configure_streamlit_browser_env() -> None:
+    """
+    Encourage Streamlit to open the UI in Chrome/Edge instead of the default browser.
+
+    Streamlit uses Python's `webbrowser` module; on macOS, setting `BROWSER` to an
+    `open -a "<App>"` command reliably opens the chosen app, while plain tokens
+    like "chrome" often fall back to the system default browser (Safari).
+    """
+    current = str(os.environ.get("BROWSER") or "").strip()
+    current_token = current.lower()
+
+    prefer = (
+        str(os.environ.get("BUG_RESOLUTION_RADAR_BROWSER") or "").strip()
+        or str(os.environ.get("HELIX_BROWSER") or "").strip()
+        or str(os.environ.get("JIRA_BROWSER") or "").strip()
+        or ""
+    ).lower()
+
+    # Only override empty/ambiguous values that often make `webbrowser` fall back.
+    if current and current_token not in {
+        "chrome",
+        "google-chrome",
+        "google chrome",
+        "edge",
+        "msedge",
+        "microsoft-edge",
+        "microsoft edge",
+    }:
+        return
+
+    token = prefer or current_token or "chrome"
+    if token not in {"chrome", "edge"}:
+        token = "chrome"
+
+    if sys.platform == "darwin":
+        for hint in _BROWSER_HINTS:
+            if hint.token != token:
+                continue
+            for app in hint.macos_apps:
+                if _macos_has_app(app):
+                    os.environ["BROWSER"] = f'open -a "{app}"'
+                    return
+        return
+
+    if token == "edge":
+        os.environ["BROWSER"] = "microsoft-edge"
+        return
+    os.environ["BROWSER"] = "google-chrome"
+
+
 def _ensure_streamlit_config(runtime_home: Path) -> None:
     target = runtime_home / ".streamlit" / "config.toml"
     if target.exists():
@@ -91,6 +189,8 @@ def main() -> int:
         runtime_home.mkdir(parents=True, exist_ok=True)
         _ensure_streamlit_config(runtime_home)
         os.chdir(runtime_home)
+        _load_dotenv_if_present(runtime_home / ".env")
+        _configure_streamlit_browser_env()
     script = _resolve_app_script()
     sys.argv = [
         "streamlit",
