@@ -10,7 +10,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
-from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
+from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
     neutral_chip_html,

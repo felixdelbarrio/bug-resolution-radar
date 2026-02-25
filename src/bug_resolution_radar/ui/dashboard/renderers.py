@@ -15,7 +15,7 @@ from bug_resolution_radar.ui.common import (
 )
 from bug_resolution_radar.ui.components.filters import render_filters
 from bug_resolution_radar.ui.components.issues import render_issue_cards, render_issue_table
-from bug_resolution_radar.ui.dashboard.downloads import df_to_excel_bytes
+from bug_resolution_radar.ui.dashboard.exports.downloads import df_to_excel_bytes
 from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
     ChartSpec,
