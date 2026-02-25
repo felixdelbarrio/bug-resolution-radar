@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -17,16 +16,15 @@ class HelixRepo:
     def load(self) -> Optional[HelixDocument]:
         if not self._path.exists():
             return None
-        with self._path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return HelixDocument.model_validate(data)
+        return HelixDocument.model_validate_json(self._path.read_text(encoding="utf-8"))
 
     def save(self, doc: HelixDocument) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        payload = doc.model_dump_json(ensure_ascii=False)
         with tmp.open("w", encoding="utf-8") as f:
-            json.dump(doc.model_dump(mode="json"), f, ensure_ascii=False, indent=2)
+            f.write(payload)
             f.flush()
             os.fsync(f.fileno())
         tmp.replace(self._path)

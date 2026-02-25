@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -301,7 +302,29 @@ def _raw_fields_snapshot(values: Dict[str, Any]) -> Dict[str, Any]:
         key = str(k or "").strip()
         if not key:
             continue
-        out[key] = _json_safe_scalar(v)
+        # Keep snapshot sparse: most ARQL `SELECT *` fields are null/blank and storing
+        # them inflates `helix_dump.json` (disk, memory, serialization time) without
+        # adding value to the official export, which already creates headers even when
+        # row values are missing.
+        if v is None:
+            continue
+        if isinstance(v, str):
+            if not v.strip():
+                continue
+            out[key] = v
+            continue
+        if isinstance(v, (bool, int)):
+            out[key] = v
+            continue
+        if isinstance(v, float):
+            if math.isnan(v) or math.isinf(v):
+                continue
+            out[key] = v
+            continue
+        safe_value = _json_safe_scalar(v)
+        if safe_value in (None, "", [], {}):
+            continue
+        out[key] = safe_value
     return out
 
 
