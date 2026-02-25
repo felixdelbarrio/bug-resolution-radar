@@ -8,7 +8,6 @@ import multiprocessing as mp
 import os
 import queue
 import re
-import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -31,6 +30,11 @@ from bug_resolution_radar.analytics.analysis_window import (
     effective_analysis_lookback_months,
     max_available_backlog_months,
 )
+from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.analytics.status_semantics import (
+    effective_closed_mask,
+    is_finalist_status,
+)
 from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_HEADLINE_PPT,
@@ -38,11 +42,6 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_SANS_MEDIUM_PPT,
     BBVA_FONT_SANS_PPT,
     BBVA_LIGHT,
-)
-from bug_resolution_radar.analytics.kpis import compute_kpis
-from bug_resolution_radar.analytics.status_semantics import (
-    effective_closed_mask,
-    is_finalist_status,
 )
 from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
@@ -957,7 +956,10 @@ def _call_in_subprocess_with_timeout(
     """
 
     safe_timeout_s = max(1.0, float(hard_timeout_s))
-    ctx = mp.get_context("spawn")
+    # Keep a stable default method here. The packaged-app relaunch issue is solved
+    # at the binary entrypoint (run_streamlit.py), so we do not need start-method
+    # branching or environment overrides in the report code anymore.
+    ctx = cast(Any, mp.get_context("spawn"))
     result_queue = ctx.Queue(maxsize=1)
     proc = ctx.Process(
         target=_subprocess_call_worker, args=(result_queue, fn, tuple(args), dict(kwargs))
@@ -1057,7 +1059,11 @@ def _kaleido_png_bytes(
 
     use_isolated_process = _bool_env(
         "BUG_RESOLUTION_RADAR_PPT_RENDER_ISOLATED_PROCESS",
-        bool(getattr(sys, "frozen", False)),
+        # With the binary launcher passthrough in place, non-isolated rendering is
+        # faster and avoids spawning a fresh helper process for every chart. Keep
+        # the isolated path as an opt-in for environments that still need the hard
+        # timeout protection.
+        False,
     )
     if not use_isolated_process:
         return _kaleido_calc_fig_sync_png(

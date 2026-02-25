@@ -73,8 +73,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pyinstaller
+          pip install -e ".[dev]"
+
+      - name: Run POSIX PPT binary regression tests
+        if: matrix.archive_suffix != 'windows'
+        run: |
+          pytest -q tests/test_executive_report_ppt.py -k "subprocess_with_timeout"
+          pytest -q tests/test_run_streamlit_entrypoint.py
+          pytest -q tests/test_executive_report_ppt.py::test_generate_scope_executive_ppt_is_scoped_and_valid_ppt
 
       - name: Generate Windows .ico from PNG (Windows only)
         shell: bash
@@ -86,30 +92,32 @@ jobs:
       - name: Build executable with PyInstaller
         shell: bash
         run: |
+          if [ "${{ matrix.archive_suffix }}" = "windows" ]; then
+            ROOT_DIR="$(pwd -W)"
+            SEP=";"
+          else
+            ROOT_DIR="$PWD"
+            SEP=":"
+          fi
+          APP_DATA_ARG="$ROOT_DIR/app.py${SEP}."
+          ASSETS_DATA_ARG="$ROOT_DIR/src/bug_resolution_radar/ui/assets${SEP}bug_resolution_radar/ui/assets"
+          ICON_PATH="$ROOT_DIR/${{ matrix.icon_path }}"
           EXTRA_ARGS=()
           if [ -d src/bug_resolution_radar/ui/assets ]; then
-            EXTRA_ARGS+=(--add-data "${{ matrix.add_data_assets }}")
+            EXTRA_ARGS+=(--add-data "$ASSETS_DATA_ARG")
           else
             echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."
           fi
           if [ -f .env.example ]; then
-            if [ "${{ matrix.archive_suffix }}" = "windows" ]; then
-              EXTRA_ARGS+=(--add-data ".env.example;.")
-            else
-              EXTRA_ARGS+=(--add-data ".env.example:.")
-            fi
+            EXTRA_ARGS+=(--add-data "$ROOT_DIR/.env.example${SEP}.")
           fi
           if [ -f .streamlit/config.toml ]; then
-            if [ "${{ matrix.archive_suffix }}" = "windows" ]; then
-              EXTRA_ARGS+=(--add-data ".streamlit/config.toml;.streamlit")
-            else
-              EXTRA_ARGS+=(--add-data ".streamlit/config.toml:.streamlit")
-            fi
+            EXTRA_ARGS+=(--add-data "$ROOT_DIR/.streamlit/config.toml${SEP}.streamlit")
           fi
           if [ "${{ matrix.archive_suffix }}" = "macos" ]; then
-            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --distpath dist_app --workpath build_app --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar run_streamlit.py
+            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "$ICON_PATH" --distpath dist_app --workpath build_app --specpath build_app --add-data "$APP_DATA_ARG" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
           else
-            pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar run_streamlit.py
+            pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$ICON_PATH" --workpath build --specpath build --add-data "$APP_DATA_ARG" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
           fi
 
       - name: Package release archive

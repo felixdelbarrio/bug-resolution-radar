@@ -7,12 +7,14 @@ import re
 import subprocess
 import time
 import webbrowser
+import warnings
 from datetime import datetime, timezone
 from platform import system as platform_system
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
 import requests
+import urllib3
 from requests.exceptions import SSLError
 from tenacity import (
     RetryError,
@@ -52,6 +54,7 @@ _ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES: tuple[str, ...] = (
 )
 _ARSQL_OFFICIAL_ENVIRONMENTS: tuple[str, ...] = ("Production",)
 _ARSQL_OFFICIAL_TIME_FIELDS: tuple[str, ...] = ("Submit Date",)
+_INSECURE_TLS_WARNING_SUPPRESSED = False
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
@@ -67,6 +70,15 @@ def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
     if s in {"0", "false", "f", "no", "n", "off"}:
         return False
     return default
+
+
+def _suppress_insecure_request_warning_once() -> None:
+    """Hide repeated urllib3 TLS warnings only when verify=False is intentional."""
+    global _INSECURE_TLS_WARNING_SUPPRESSED
+    if _INSECURE_TLS_WARNING_SUPPRESSED:
+        return
+    warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
+    _INSECURE_TLS_WARNING_SUPPRESSED = True
 
 
 def _coerce_float(value: Any, default: float) -> float:
@@ -1261,6 +1273,8 @@ def ingest_helix(
     else:
         session.verify = verify_bool
         verify_desc = "true" if verify_bool else "false"
+        if not verify_bool:
+            _suppress_insecure_request_warning_once()
 
     session.headers.update(
         {
