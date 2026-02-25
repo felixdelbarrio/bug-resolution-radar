@@ -227,11 +227,11 @@ def reset_cache_store(settings: Settings, cache_id: str) -> Dict[str, Any]:
     elif target == "helix":
         path = _helix_data_path(settings)
         repo = HelixRepo(path)
-        before_doc = repo.load()
-        before = len(before_doc.items) if before_doc is not None else 0
+        before_helix_doc = repo.load()
+        before = len(before_helix_doc.items) if before_helix_doc is not None else 0
         repo.save(HelixDocument.empty())
-        after_doc = repo.load()
-        after = len(after_doc.items) if after_doc is not None else 0
+        after_helix_doc = repo.load()
+        after = len(after_helix_doc.items) if after_helix_doc is not None else 0
     elif target == "learning":
         path = default_learning_path(settings)
         store = InsightsLearningStore(path)
