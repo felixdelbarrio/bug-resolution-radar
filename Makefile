@@ -1,12 +1,38 @@
-PY=python3
-VENV=.venv
+SHELL := /bin/bash
+
+PY ?= python3
+VENV ?= .venv
 PIP=$(VENV)/bin/pip
 PYTHON=$(VENV)/bin/python
 RUN=$(VENV)/bin/streamlit
+PYTEST=$(VENV)/bin/pytest
+PYINSTALLER=$(VENV)/bin/pyinstaller
+
+HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
+PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout or kaleido_worker_mp_start_method
+
+PYINSTALLER_COLLECT_ALL_ARGS = \
+	--collect-all streamlit \
+	--collect-all watchdog \
+	--collect-all plotly \
+	--collect-all pptx \
+	--collect-all lxml \
+	--collect-all PIL \
+	--collect-all kaleido \
+	--collect-all choreographer \
+	--collect-all logistro \
+	--collect-all simplejson \
+	--collect-all orjson \
+	--collect-all openpyxl \
+	--collect-all xlsxwriter \
+	--collect-all numpy \
+	--collect-all browser_cookie3 \
+	--collect-all bug_resolution_radar
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup format lint typecheck test run clean
+.PHONY: help setup format lint typecheck test run clean clean-build \
+	ensure-build-tools test-ppt-regression build-local build-macos build-linux
 
 help:
 	@echo ""
@@ -18,6 +44,11 @@ help:
 	@echo "  make lint        Lint (ruff, si está instalado)"
 	@echo "  make typecheck   Typecheck (mypy, si está instalado)"
 	@echo "  make test        Tests (pytest, si está instalado)"
+	@echo "  make test-ppt-regression  Regresión PPT/Kaleido (igual que en workflows POSIX)"
+	@echo "  make build-local Auto-detecta OS (macOS/Linux) y construye binario local"
+	@echo "  make build-macos Construye .app + zip local (igual a .github/workflows/build-macos.yml)"
+	@echo "  make build-linux Construye binario Linux + bundle local (igual a .github/workflows/build-linux.yml)"
+	@echo "  make clean-build Borra artefactos de build de binarios"
 	@echo "  make clean       Borra venv y cachés"
 	@echo ""
 	@echo "Variables útiles:"
@@ -60,8 +91,119 @@ test:
 		echo "pytest no está instalado en el venv."; \
 	fi
 
+ensure-build-tools:
+	@if [ ! -x "$(PYTHON)" ]; then \
+		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(PYTEST)" ]; then \
+		echo "No se encontró $(PYTEST). Ejecuta: make setup"; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(PYINSTALLER)" ]; then \
+		echo "No se encontró $(PYINSTALLER). Ejecuta: make setup"; \
+		exit 1; \
+	fi
+
+test-ppt-regression: ensure-build-tools
+	$(PYTEST) -q tests/test_executive_report_ppt.py -k "$(PPT_REGRESSION_TEST_EXPR)"
+
+build-local:
+	@case "$(HOST_UNAME)" in \
+		Darwin) $(MAKE) build-macos ;; \
+		Linux) $(MAKE) build-linux ;; \
+		*) echo "OS no soportado para build-local: $(HOST_UNAME)"; exit 1 ;; \
+	esac
+
+build-macos: test-ppt-regression
+	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
+		echo "El target build-macos requiere ejecutarse en macOS."; \
+		exit 1; \
+	fi
+	rm -rf dist_app build_app build_bundle/bug-resolution-radar-macos bug-resolution-radar-macos.zip
+	EXTRA_ARGS=(); \
+	if [ -d src/bug_resolution_radar/ui/assets ]; then \
+		EXTRA_ARGS+=(--add-data "src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets"); \
+	else \
+		echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."; \
+	fi; \
+	if [ -f .env.example ]; then \
+		EXTRA_ARGS+=(--add-data ".env.example:."); \
+	fi; \
+	if [ -f .streamlit/config.toml ]; then \
+		EXTRA_ARGS+=(--add-data ".streamlit/config.toml:.streamlit"); \
+	fi; \
+	$(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) run_streamlit.py
+	BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"; \
+	mkdir -p "$$BUNDLE_DIR/dist"; \
+	if [ -d dist_app/bug-resolution-radar.app ]; then \
+		cp -R dist_app/bug-resolution-radar.app "$$BUNDLE_DIR/dist/bug-resolution-radar.app"; \
+	fi; \
+	cp README.md "$$BUNDLE_DIR/README.md"; \
+	if [ -f assets/app_icon/bug-resolution-radar.png ]; then \
+		mkdir -p "$$BUNDLE_DIR/assets/app_icon"; \
+		cp assets/app_icon/bug-resolution-radar.png "$$BUNDLE_DIR/assets/app_icon/bug-resolution-radar.png"; \
+	fi; \
+	if [ -f .env.example ]; then \
+		cp .env.example "$$BUNDLE_DIR/.env.example"; \
+	fi; \
+	if [ -f .streamlit/config.toml ]; then \
+		mkdir -p "$$BUNDLE_DIR/.streamlit"; \
+		cp .streamlit/config.toml "$$BUNDLE_DIR/.streamlit/config.toml"; \
+	fi
+	ditto -c -k --sequesterRsrc --keepParent \
+		"build_bundle/bug-resolution-radar-macos" \
+		"bug-resolution-radar-macos.zip"
+	@echo "Build macOS completado:"
+	@echo "  - dist_app/bug-resolution-radar.app"
+	@echo "  - bug-resolution-radar-macos.zip"
+
+build-linux: test-ppt-regression
+	@if [ "$(HOST_UNAME)" != "Linux" ]; then \
+		echo "El target build-linux requiere ejecutarse en Linux."; \
+		exit 1; \
+	fi
+	rm -rf dist build build_bundle/bug-resolution-radar-linux
+	EXTRA_ARGS=(); \
+	if [ -d src/bug_resolution_radar/ui/assets ]; then \
+		EXTRA_ARGS+=(--add-data "src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets"); \
+	else \
+		echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."; \
+	fi; \
+	if [ -f .env.example ]; then \
+		EXTRA_ARGS+=(--add-data ".env.example:."); \
+	fi; \
+	if [ -f .streamlit/config.toml ]; then \
+		EXTRA_ARGS+=(--add-data ".streamlit/config.toml:.streamlit"); \
+	fi; \
+	$(PYINSTALLER) --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) run_streamlit.py
+	BUNDLE_DIR="build_bundle/bug-resolution-radar-linux"; \
+	mkdir -p "$$BUNDLE_DIR/dist"; \
+	cp dist/bug-resolution-radar "$$BUNDLE_DIR/dist/bug-resolution-radar"; \
+	cp README.md "$$BUNDLE_DIR/README.md"; \
+	if [ -f assets/app_icon/bug-resolution-radar.desktop ]; then \
+		cp assets/app_icon/bug-resolution-radar.desktop "$$BUNDLE_DIR/bug-resolution-radar.desktop"; \
+	fi; \
+	if [ -f assets/app_icon/bug-resolution-radar.png ]; then \
+		mkdir -p "$$BUNDLE_DIR/assets/app_icon"; \
+		cp assets/app_icon/bug-resolution-radar.png "$$BUNDLE_DIR/assets/app_icon/bug-resolution-radar.png"; \
+	fi; \
+	if [ -f .env.example ]; then \
+		cp .env.example "$$BUNDLE_DIR/.env.example"; \
+	fi; \
+	if [ -f .streamlit/config.toml ]; then \
+		mkdir -p "$$BUNDLE_DIR/.streamlit"; \
+		cp .streamlit/config.toml "$$BUNDLE_DIR/.streamlit/config.toml"; \
+	fi
+	@echo "Build Linux completado:"
+	@echo "  - dist/bug-resolution-radar"
+	@echo "  - build_bundle/bug-resolution-radar-linux"
+
 run:
 	$(RUN) run app.py
+
+clean-build:
+	rm -rf dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip
 
 clean:
 	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache .coverage htmlcov

@@ -943,6 +943,27 @@ def _subprocess_call_worker(
         cast(Any, result_queue).put(("err", f"{exc.__class__.__name__}: {exc}"))
 
 
+def _kaleido_worker_mp_start_method() -> str:
+    """
+    Pick a multiprocessing start method compatible with packaged apps.
+
+    PyInstaller macOS/Linux binaries can misbehave with ``spawn`` when this code
+    runs inside Streamlit, because each worker may relaunch the frozen entrypoint
+    instead of executing only the target function. That looks like repeated
+    browser tabs and an endless spinner during PPT generation.
+    """
+    forced = str(os.getenv("BUG_RESOLUTION_RADAR_PPT_RENDER_MP_START_METHOD", "") or "").strip()
+    if forced:
+        return forced
+
+    if getattr(sys, "frozen", False) and os.name == "posix":
+        # Prefer fork in frozen POSIX builds to avoid relaunching the full app
+        # executable for every isolated Kaleido render.
+        return "fork"
+
+    return "spawn"
+
+
 def _call_in_subprocess_with_timeout(
     fn: Callable[..., _T],
     *args: object,
@@ -957,7 +978,14 @@ def _call_in_subprocess_with_timeout(
     """
 
     safe_timeout_s = max(1.0, float(hard_timeout_s))
-    ctx = mp.get_context("spawn")
+    start_method = _kaleido_worker_mp_start_method()
+    try:
+        ctx = mp.get_context(start_method)
+    except ValueError:
+        LOGGER.warning(
+            "Start method %s no disponible; usando 'spawn' para render PPT.", start_method
+        )
+        ctx = mp.get_context("spawn")
     result_queue = ctx.Queue(maxsize=1)
     proc = ctx.Process(
         target=_subprocess_call_worker, args=(result_queue, fn, tuple(args), dict(kwargs))
