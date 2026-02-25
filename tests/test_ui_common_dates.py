@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.ui.common import df_from_issues_doc
 
 

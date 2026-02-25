@@ -20,21 +20,24 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-from bug_resolution_radar.analysis_window import (
+from bug_resolution_radar.analytics.analysis_window import (
     apply_analysis_depth_filter,
     effective_analysis_lookback_months,
     max_available_backlog_months,
 )
 from bug_resolution_radar.config import Settings, all_configured_sources
-from bug_resolution_radar.design_tokens import (
+from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_HEADLINE_PPT,
     BBVA_FONT_SANS_BOOK_PPT,
     BBVA_FONT_SANS_MEDIUM_PPT,
     BBVA_FONT_SANS_PPT,
     BBVA_LIGHT,
 )
-from bug_resolution_radar.kpis import compute_kpis
-from bug_resolution_radar.status_semantics import effective_closed_mask, is_finalist_status
+from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.analytics.status_semantics import (
+    effective_closed_mask,
+    is_finalist_status,
+)
 from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
 from bug_resolution_radar.ui.insights.engine import (

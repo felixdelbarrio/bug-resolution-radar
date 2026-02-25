@@ -5,7 +5,7 @@ from io import BytesIO
 import pandas as pd
 from openpyxl import load_workbook
 
-from bug_resolution_radar.ui.dashboard.downloads import df_to_csv_bytes, df_to_excel_bytes
+from bug_resolution_radar.ui.dashboard.exports.downloads import df_to_csv_bytes, df_to_excel_bytes
 
 
 def test_df_to_csv_bytes_encodes_key_as_hyperlink_formula_when_url_exists() -> None:

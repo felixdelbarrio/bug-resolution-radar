@@ -9,7 +9,7 @@ from typing import Any, Dict, Tuple
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.utils import now_iso
+from bug_resolution_radar.common.utils import now_iso
 
 LEARNING_STATE_KEY = "__insights_learning_state"
 LEARNING_INTERACTIONS_KEY = "__insights_interactions"
@@ -170,6 +170,18 @@ class InsightsLearningStore:
             if rec_source_id == sid or (not rec_source_id and scope_txt.endswith(suffix)):
                 count += 1
         return count
+
+    def count_all_scopes(self) -> int:
+        """Count all persisted scope records."""
+        scopes = _as_dict(self._raw.get("scopes"))
+        return len(scopes)
+
+    def clear_all(self) -> int:
+        """Remove all persisted scopes and return the number of deleted records."""
+        scopes = _as_dict(self._raw.get("scopes"))
+        removed = len(scopes)
+        self._raw = {"version": 1, "scopes": {}}
+        return removed
 
 
 def ensure_learning_session_loaded(*, settings: Settings) -> None:

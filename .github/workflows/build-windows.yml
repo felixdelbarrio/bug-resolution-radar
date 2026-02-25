@@ -68,6 +68,8 @@ jobs:
             "--collect-all", "kaleido",
             "--collect-all", "openpyxl",
             "--collect-all", "xlsxwriter",
+            "--collect-all", "numpy",
+            "--collect-all", "browser_cookie3",
             "--collect-all", "bug_resolution_radar",
             "run_streamlit.py"
           )

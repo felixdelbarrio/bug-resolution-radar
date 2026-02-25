@@ -17,11 +17,12 @@ import math
 import re
 import unicodedata
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 
 HELIX_OFFICIAL_EXCEL_COLUMNS: list[str] = [
     "Mes",
@@ -242,6 +243,7 @@ _OFFICIAL_DATE_HEADERS: set[str] = {
 }
 
 
+@lru_cache(maxsize=4096)
 def _norm_key(value: object) -> str:
     txt = str(value or "").strip()
     if not txt:
@@ -276,7 +278,11 @@ def _jsonable_text(value: Any) -> Any:
 
 def _raw_lookup_build(raw_fields: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     exact = {str(k): v for k, v in raw_fields.items()}
-    norm = {_norm_key(k): v for k, v in exact.items() if _norm_key(k)}
+    norm: dict[str, Any] = {}
+    for k, v in exact.items():
+        nk = _norm_key(k)
+        if nk:
+            norm[nk] = v
     return exact, norm
 
 
@@ -438,8 +444,9 @@ def build_helix_official_export_frames(
     raw_rows: list[dict[str, Any]] = []
     raw_fields_populated = False
 
-    for _, issue in filtered_issues_df.iterrows():
-        issue_row = issue.to_dict()
+    issue_columns = list(filtered_issues_df.columns)
+    for row_values in filtered_issues_df.itertuples(index=False, name=None):
+        issue_row = dict(zip(issue_columns, row_values))
         source_id = str(issue_row.get("source_id") or "").strip().lower()
         key = str(issue_row.get("key") or "").strip().upper()
         merge_key = f"{source_id}::{key}" if source_id else key
@@ -447,7 +454,7 @@ def build_helix_official_export_frames(
         if item is None:
             continue
 
-        raw_fields = dict(item.raw_fields or {})
+        raw_fields = item.raw_fields or {}
         if raw_fields:
             raw_fields_populated = True
         raw_exact, raw_norm = _raw_lookup_build(raw_fields)

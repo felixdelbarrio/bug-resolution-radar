@@ -107,9 +107,9 @@ jobs:
             fi
           fi
           if [ "${{ matrix.archive_suffix }}" = "macos" ]; then
-            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --distpath dist_app --workpath build_app --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all openpyxl --collect-all xlsxwriter --collect-all bug_resolution_radar run_streamlit.py
+            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --distpath dist_app --workpath build_app --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar run_streamlit.py
           else
-            pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all openpyxl --collect-all xlsxwriter --collect-all bug_resolution_radar run_streamlit.py
+            pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "${{ matrix.icon_path }}" --add-data "${{ matrix.add_data_app }}" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar run_streamlit.py
           fi
 
       - name: Package release archive

@@ -7,7 +7,7 @@ from bug_resolution_radar.ingest.helix_mapper import (
     map_helix_status,
     map_helix_values_to_item,
 )
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.ui.pages.ingest_page import _helix_item_to_issue
 
 
@@ -100,6 +100,8 @@ def test_map_helix_values_to_item_keeps_query_fields_and_raw_status() -> None:
                 "bbva_matrixservicen1": "Matriz N1",
                 "bbva_sourceservicen1": "Source N1",
             },
+            "EmptyField": "",
+            "NoneField": None,
         },
         base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         country="México",
@@ -126,6 +128,8 @@ def test_map_helix_values_to_item_keeps_query_fields_and_raw_status() -> None:
     assert item.url == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
     assert item.raw_fields.get("id") == "INC0001"
     assert item.raw_fields.get("priority") == "Moderate"
+    assert "EmptyField" not in item.raw_fields
+    assert "NoneField" not in item.raw_fields
 
 
 def test_map_helix_values_to_item_reads_custom_attributes_container() -> None:

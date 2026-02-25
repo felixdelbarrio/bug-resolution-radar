@@ -11,7 +11,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
-from bug_resolution_radar.ui.dashboard.downloads import (
+from bug_resolution_radar.ui.dashboard.exports.downloads import (
     figures_to_html_bytes,
     render_minimal_export_actions,
 )

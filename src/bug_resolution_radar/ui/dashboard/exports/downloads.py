@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 from openpyxl.utils import get_column_letter
 
-from bug_resolution_radar.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+from bug_resolution_radar.theme.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
 
 EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
 EXCEL_DEFAULT_DATA_ROW_HEIGHT = 18.0
@@ -178,6 +178,23 @@ def _safe_excel_sheet_name(name: str, *, used: set[str]) -> str:
     return candidate
 
 
+def _normalize_link_specs_cache_key(
+    hyperlink_columns_by_sheet: Optional[dict[str, Sequence[tuple[str, str]]]],
+) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...]:
+    if not hyperlink_columns_by_sheet:
+        return ()
+    out: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+    for sheet_name in sorted(hyperlink_columns_by_sheet.keys()):
+        specs = hyperlink_columns_by_sheet.get(sheet_name) or ()
+        out.append(
+            (
+                str(sheet_name),
+                tuple((str(visible), str(url_col)) for visible, url_col in specs),
+            )
+        )
+    return tuple(out)
+
+
 def _excel_text_len(value: Any) -> int:
     if value is None:
         return 0
@@ -272,13 +289,17 @@ def _write_excel_sheet(
             cell.style = "Hyperlink"
 
 
-def dfs_to_excel_bytes(
+@st.cache_data(show_spinner=False, max_entries=64)
+def _dfs_to_excel_bytes_cached(
     sheets: Sequence[tuple[str, pd.DataFrame]],
     *,
     include_index: bool = False,
-    hyperlink_columns_by_sheet: Optional[dict[str, Sequence[tuple[str, str]]]] = None,
+    hyperlink_columns_cache_key: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (),
 ) -> bytes:
-    """Convert multiple DataFrames into a single XLSX workbook."""
+    hyperlinks: dict[str, Sequence[tuple[str, str]]] | None = None
+    if hyperlink_columns_cache_key:
+        hyperlinks = {sheet_name: list(specs) for sheet_name, specs in hyperlink_columns_cache_key}
+
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         used_sheet_names: set[str] = set()
@@ -293,10 +314,10 @@ def dfs_to_excel_bytes(
         for raw_sheet_name, df in sheets:
             safe_sheet = _safe_excel_sheet_name(raw_sheet_name, used=used_sheet_names)
             sheet_links = None
-            if hyperlink_columns_by_sheet:
-                sheet_links = hyperlink_columns_by_sheet.get(raw_sheet_name)
+            if hyperlinks:
+                sheet_links = hyperlinks.get(raw_sheet_name)
                 if sheet_links is None:
-                    sheet_links = hyperlink_columns_by_sheet.get(safe_sheet)
+                    sheet_links = hyperlinks.get(safe_sheet)
             _write_excel_sheet(
                 writer,
                 sheet_name=safe_sheet,
@@ -305,6 +326,21 @@ def dfs_to_excel_bytes(
                 hyperlink_columns=sheet_links,
             )
     return bio.getvalue()
+
+
+def dfs_to_excel_bytes(
+    sheets: Sequence[tuple[str, pd.DataFrame]],
+    *,
+    include_index: bool = False,
+    hyperlink_columns_by_sheet: Optional[dict[str, Sequence[tuple[str, str]]]] = None,
+) -> bytes:
+    """Convert multiple DataFrames into a single XLSX workbook."""
+    safe_sheets = tuple((str(name), pd.DataFrame() if df is None else df) for name, df in sheets)
+    return _dfs_to_excel_bytes_cached(
+        safe_sheets,
+        include_index=include_index,
+        hyperlink_columns_cache_key=_normalize_link_specs_cache_key(hyperlink_columns_by_sheet),
+    )
 
 
 def df_to_excel_bytes(

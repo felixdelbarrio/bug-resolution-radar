@@ -8,22 +8,21 @@ from typing import Final, List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.notes import NotesStore
+from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
-from bug_resolution_radar.ui.dashboard.issues import render_issues_tab
-from bug_resolution_radar.ui.dashboard.kanban import render_kanban_tab
+from bug_resolution_radar.ui.dashboard.tabs.issues_tab import render_issues_tab
+from bug_resolution_radar.ui.dashboard.tabs.kanban_tab import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
 from bug_resolution_radar.ui.dashboard.next_best_banner import render_next_best_banner
-from bug_resolution_radar.ui.dashboard.notes import render_notes_tab
-from bug_resolution_radar.ui.dashboard.overview import (
+from bug_resolution_radar.ui.dashboard.tabs.notes_tab import render_notes_tab
+from bug_resolution_radar.ui.dashboard.tabs.overview_tab import (
     render_overview_kpis,
     render_overview_tab,
 )
-from bug_resolution_radar.ui.dashboard.trends import render_trends_tab
+from bug_resolution_radar.ui.dashboard.tabs.trends_tab import render_trends_tab
 from bug_resolution_radar.ui.pages.insights_page import render as render_insights_page
 
 DASHBOARD_SECTIONS: Final[List[str]] = [
@@ -80,16 +79,8 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         st.caption(f"Detalle técnico: {exc}")
         return section
     scoped_df = _apply_workspace_source_scope(df)
-    analysis_df = apply_analysis_depth_filter(scoped_df, settings=settings)
-
     if scoped_df.empty:
         st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
-        return section
-    if analysis_df.empty:
-        st.warning(
-            "No hay datos en la ventana de análisis configurada. "
-            "Amplía los meses en Configuración → Preferencias → Favoritos."
-        )
         return section
 
     notes: NotesStore | None = None
@@ -97,15 +88,21 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         notes = NotesStore(Path(settings.NOTES_PATH))
         notes.load()
 
-    if section in {"issues", "kanban"}:
-        render_next_best_banner(df_all=analysis_df, section=section)
-        render_filters(analysis_df, key_prefix="dashboard")
-
     ctx = build_dashboard_data_context(
-        df_all=analysis_df,
+        df_all=scoped_df,
         settings=settings,
         include_kpis=section in {"overview", "trends", "insights"},
     )
+    if ctx.df_all.empty:
+        st.warning(
+            "No hay datos en la ventana de análisis configurada. "
+            "Amplía los meses en Configuración → Preferencias → Favoritos."
+        )
+        return section
+
+    if section in {"issues", "kanban"}:
+        render_next_best_banner(df_all=ctx.df_all, section=section)
+        render_filters(ctx.df_all, key_prefix="dashboard")
 
     if section == "overview":
         render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)

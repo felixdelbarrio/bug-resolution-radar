@@ -17,7 +17,7 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
-from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
+from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
 MAX_KANBAN_ITEMS_PER_COLUMN = 220

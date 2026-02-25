@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.insights import _tokenize_summary, find_similar_issue_clusters
+from bug_resolution_radar.analytics.insights import _tokenize_summary, find_similar_issue_clusters
 
 
 def test_tokenize_summary_removes_stopwords_and_short_tokens() -> None:

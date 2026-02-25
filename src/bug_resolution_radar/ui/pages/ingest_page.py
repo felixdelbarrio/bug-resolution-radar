@@ -12,10 +12,10 @@ from bug_resolution_radar.config import Settings, helix_sources, jira_sources
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
-from bug_resolution_radar.schema import IssuesDocument, NormalizedIssue
-from bug_resolution_radar.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
-from bug_resolution_radar.utils import now_iso
+from bug_resolution_radar.common.utils import now_iso
 
 
 def _get_helix_path(settings: Settings) -> str:
