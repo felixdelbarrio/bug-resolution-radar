@@ -534,7 +534,9 @@ def _build_arsql_sql(
     if source_filter:
         where_parts.append(source_filter)
 
-    source_filter_field_n2 = _first_available_field(["BBVA_SourceServiceN2", "BBVA_MatrixServiceN2"])
+    source_filter_field_n2 = _first_available_field(
+        ["BBVA_SourceServiceN2", "BBVA_MatrixServiceN2"]
+    )
     source_filter_n2 = (
         _sql_in_filter(_field_ref(source_filter_field_n2), source_service_n2)
         if source_filter_field_n2

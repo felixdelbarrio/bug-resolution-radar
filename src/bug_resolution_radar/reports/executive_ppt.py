@@ -959,7 +959,9 @@ def _call_in_subprocess_with_timeout(
     safe_timeout_s = max(1.0, float(hard_timeout_s))
     ctx = mp.get_context("spawn")
     result_queue = ctx.Queue(maxsize=1)
-    proc = ctx.Process(target=_subprocess_call_worker, args=(result_queue, fn, tuple(args), dict(kwargs)))
+    proc = ctx.Process(
+        target=_subprocess_call_worker, args=(result_queue, fn, tuple(args), dict(kwargs))
+    )
     proc.start()
 
     try:
@@ -1043,9 +1045,13 @@ def _kaleido_calc_fig_sync_png(
     )
 
 
-def _kaleido_png_bytes(fig_obj: go.Figure, *, scale: float, export_width: int, export_height: int) -> bytes:
+def _kaleido_png_bytes(
+    fig_obj: go.Figure, *, scale: float, export_width: int, export_height: int
+) -> bytes:
     timeout_s = max(5, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_TIMEOUT_S", 90))
-    hard_timeout_s = max(timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20))
+    hard_timeout_s = max(
+        timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20)
+    )
     fig_dict = _validate_plotly_fig_to_dict(fig_obj)
     tmp_dir = _kaleido_tmp_dir()
 
