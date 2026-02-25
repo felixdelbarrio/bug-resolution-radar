@@ -90,10 +90,13 @@ def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tup
         }
         service_origin_buug = str(row.get("service_origin_buug") or "").strip()
         service_origin_n1 = str(row.get("service_origin_n1") or "").strip()
+        service_origin_n2 = str(row.get("service_origin_n2") or "").strip()
         if service_origin_buug:
             source_payload["service_origin_buug"] = service_origin_buug
         if service_origin_n1:
             source_payload["service_origin_n1"] = service_origin_n1
+        if service_origin_n2:
+            source_payload["service_origin_n2"] = service_origin_n2
         payload.append(source_payload)
     updated = settings.model_copy(
         update={

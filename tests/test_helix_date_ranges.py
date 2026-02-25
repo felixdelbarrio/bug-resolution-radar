@@ -70,6 +70,7 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
         limit=75,
         offset=150,
         source_service_n1=["ENTERPRISE WEB"],
+        source_service_n2=["WEB BBVA EMPRESAS", "APP - BBVA EMPRESAS"],
         incident_types=["User Service Restoration", "Security Incident"],
         companies=["BBVA México"],
     )
@@ -77,6 +78,10 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
     assert "`HPD:Help Desk`.`Incident Number` AS `id`" in sql
     assert "`HPD:Help Desk`.`Incident Number` IS NOT NULL" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
+    assert (
+        "`HPD:Help Desk`.`BBVA_SourceServiceN2` IN ('WEB BBVA EMPRESAS', "
+        "'APP - BBVA EMPRESAS')" in sql
+    )
     assert (
         "`HPD:Help Desk`.`BBVA_Tipo_de_Incidencia` IN ('User Service Restoration', "
         "'Security Incident')" in sql

@@ -406,6 +406,7 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
         organization = _coerce_str(row.get("organization"))
         service_origin_buug = _coerce_str(row.get("service_origin_buug"))
         service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
+        service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
         browser = _coerce_str(row.get("browser")) or _coerce_str(settings.HELIX_BROWSER) or "chrome"
         proxy = _coerce_str(row.get("proxy")) or _coerce_str(settings.HELIX_PROXY)
         ssl_verify = (
@@ -432,6 +433,8 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             payload["service_origin_buug"] = service_origin_buug
         if service_origin_n1:
             payload["service_origin_n1"] = service_origin_n1
+        if service_origin_n2:
+            payload["service_origin_n2"] = service_origin_n2
         out.append(payload)
 
     if out:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
+import time
 
 import pandas as pd
 import pytest
@@ -13,6 +14,7 @@ from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.reports.executive_ppt import (
     _best_actions,
     _build_sections,
+    _call_in_subprocess_with_timeout,
     _ChartSection,
     _fig_to_png,
     _is_finalist_status,
@@ -121,6 +123,19 @@ def _slide_text(slide: object) -> str:
         if txt:
             lines.append(txt)
     return "\n".join(lines)
+
+
+def test_call_in_subprocess_with_timeout_returns_result() -> None:
+    out = _call_in_subprocess_with_timeout(sum, [2, 3, 5], hard_timeout_s=5)
+    assert out == 10
+
+
+def test_call_in_subprocess_with_timeout_raises_timeout() -> None:
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        _call_in_subprocess_with_timeout(time.sleep, 5, hard_timeout_s=1)
+    elapsed = time.monotonic() - started
+    assert elapsed < 4.0
 
 
 def test_generate_scope_executive_ppt_is_scoped_and_valid_ppt(tmp_path: Path) -> None:

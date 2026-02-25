@@ -405,6 +405,7 @@ def _build_arsql_sql(
     include_all_fields: bool = True,
     disabled_fields: Optional[set[str]] = None,
     source_service_n1: Optional[List[str]] = None,
+    source_service_n2: Optional[List[str]] = None,
     incident_types: Optional[List[str]] = None,
     companies: Optional[List[str]] = None,
     environments: Optional[List[str]] = None,
@@ -532,6 +533,17 @@ def _build_arsql_sql(
     )
     if source_filter:
         where_parts.append(source_filter)
+
+    source_filter_field_n2 = _first_available_field(
+        ["BBVA_SourceServiceN2", "BBVA_MatrixServiceN2"]
+    )
+    source_filter_n2 = (
+        _sql_in_filter(_field_ref(source_filter_field_n2), source_service_n2)
+        if source_filter_field_n2
+        else None
+    )
+    if source_filter_n2:
+        where_parts.append(source_filter_n2)
 
     incident_type_field = _first_available_field(
         list(_ARSQL_BUSINESS_INCIDENT_TYPE_FIELD_CANDIDATES) + ["Service Type"]
@@ -1119,6 +1131,7 @@ def ingest_helix(
     ssl_verify: str = "",
     service_origin_buug: Any = None,
     service_origin_n1: Any = None,
+    service_origin_n2: Any = None,
     ca_bundle: str = "",
     chunk_size: int = 75,
     create_date_year: Any = None,
@@ -1521,6 +1534,14 @@ def ingest_helix(
         ),
         "ENTERPRISE WEB" if query_mode == "arsql" else "",
     )
+    arsql_source_service_n2 = _csv_list(
+        (
+            service_origin_n2
+            if service_origin_n2 is not None
+            else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N2")
+        ),
+        "",
+    )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
     arsql_include_all_fields = _parse_bool(
         os.getenv("HELIX_ARSQL_SELECT_ALL_FIELDS", "true"),
@@ -1540,6 +1561,7 @@ def ingest_helix(
                 include_all_fields=arsql_include_all_fields,
                 disabled_fields=arsql_disabled_fields,
                 source_service_n1=arsql_source_service_n1,
+                source_service_n2=arsql_source_service_n2,
                 incident_types=incident_types_filter,
                 companies=arsql_companies,
                 environments=arsql_environments_filter,
@@ -2005,7 +2027,8 @@ def ingest_helix(
     company_rows = cast(List[Dict[str, str]], filter_criteria.get("companies", []))
     companies_q = ",".join(str(r.get("name") or "").strip() for r in company_rows if r) or "all"
     if query_mode == "arsql":
-        source_service_q = ",".join(arsql_source_service_n1) or "all"
+        source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
+        source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
         arsql_environments_q = ",".join(arsql_environments_filter) or "all"
         arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
         select_mode_q = "wide" if arsql_include_all_fields else "narrow"
@@ -2015,7 +2038,8 @@ def ingest_helix(
             f"arsql_root={arsql_base_root}; "
             f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
             f"timeFields=[{arsql_time_fields_q}]; "
-            f"sourceServiceN1=[{source_service_q}]; "
+            f"sourceServiceN1=[{source_service_n1_q}]; "
+            f"sourceServiceN2=[{source_service_n2_q}]; "
             f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
             f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
             f"page_limit={base_chunk_size}; "
