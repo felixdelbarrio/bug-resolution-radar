@@ -168,6 +168,63 @@ def _inject_delete_zone_css() -> None:
     )
 
 
+def _inject_preferences_zone_css() -> None:
+    st.markdown(
+        """
+        <style>
+          [class*="st-key-cfg_tabs_shell"] div[data-baseweb="tab-list"] {
+            gap: .35rem;
+            padding: .28rem;
+            border-radius: 14px;
+            background:
+              linear-gradient(180deg,
+                color-mix(in srgb, var(--bbva-surface-elevated) 92%, #0E234C 8%),
+                color-mix(in srgb, var(--bbva-surface) 97%, transparent)
+              );
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 78%, #9BBBFF 22%);
+            box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 8%, transparent);
+            width: fit-content;
+          }
+          [class*="st-key-cfg_tabs_shell"] button[role="tab"] {
+            border-radius: 11px !important;
+            border: 1px solid transparent !important;
+            padding-inline: .95rem !important;
+            transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+          }
+          [class*="st-key-cfg_tabs_shell"] button[role="tab"][aria-selected="true"] {
+            border-color: color-mix(in srgb, var(--bbva-primary) 52%, #8FB7FF 48%) !important;
+            box-shadow: 0 0 0 1px color-mix(in srgb, var(--bbva-primary) 10%, transparent) inset;
+            background:
+              linear-gradient(180deg,
+                color-mix(in srgb, var(--bbva-primary) 10%, var(--bbva-surface-elevated)),
+                color-mix(in srgb, var(--bbva-primary) 4%, var(--bbva-surface))
+              ) !important;
+          }
+          [class*="st-key-cfg_prefs_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 82%, #A2C1FF 18%) !important;
+            border-radius: 16px !important;
+            padding: .35rem .55rem .5rem !important;
+            background:
+              radial-gradient(900px 220px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 60%),
+              linear-gradient(165deg, color-mix(in srgb, var(--bbva-surface) 97%, #0E234C 3%), var(--bbva-surface));
+            box-shadow: 0 10px 26px color-mix(in srgb, var(--bbva-text) 6%, transparent) !important;
+            margin-bottom: .7rem;
+          }
+          [class*="st-key-cfg_prefs_card_"] [data-testid="stMarkdownContainer"] h4 {
+            letter-spacing: -.01em;
+          }
+          [class*="st-key-cfg_prefs_card_ppt"] input {
+            font-weight: 600;
+          }
+          [class*="st-key-cfg_prefs_card_favs"] [data-testid="column"] {
+            align-self: end;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_selected_source_chips(
     selected_source_ids: List[str], source_label_by_id: Dict[str, str]
 ) -> None:
@@ -507,11 +564,13 @@ def render(settings: Settings) -> None:
     analysis_max_months = 1
     analysis_selected_months = 1
     _inject_delete_zone_css()
+    _inject_preferences_zone_css()
 
     st.subheader("Configuración")
 
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
-    t_jira, t_helix, t_prefs = st.tabs(["Jira", "Helix", "Preferencias"])
+    with st.container(key="cfg_tabs_shell"):
+        t_prefs, t_jira, t_helix = st.tabs(["Preferencias", "Jira", "Helix"])
 
     with t_jira:
         st.markdown("### Jira global")
@@ -703,103 +762,113 @@ def render(settings: Settings) -> None:
         )
 
     with t_prefs:
-        st.markdown("### Favoritos (Tendencias)")
-        stored_theme_pref = str(getattr(settings, "THEME", "auto") or "auto").strip().lower()
-        if stored_theme_pref in {"dark", "light"}:
-            theme_default = stored_theme_pref
-        else:
-            theme_default = (
-                "dark" if bool(st.session_state.get("workspace_dark_mode", False)) else "light"
-            )
+        with st.container(key="cfg_prefs_shell"):
+            st.markdown("### Favoritos (Tendencias)")
+            stored_theme_pref = str(getattr(settings, "THEME", "auto") or "auto").strip().lower()
+            if stored_theme_pref in {"dark", "light"}:
+                theme_default = stored_theme_pref
+            else:
+                theme_default = (
+                    "dark" if bool(st.session_state.get("workspace_dark_mode", False)) else "light"
+                )
 
-        st.markdown("#### Ambiente de trabajo")
-        theme_mode = st.radio(
-            "Modo visual",
-            options=["light", "dark"],
-            index=0 if theme_default == "light" else 1,
-            format_func=lambda v: "Claro" if v == "light" else "Oscuro",
-            horizontal=True,
-            key="cfg_workspace_theme_mode",
-        )
-        st.caption("Se guarda en el .env como preferencia del usuario.")
-        st.markdown("#### Profundidad del análisis")
-        analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
-        month_options = _analysis_month_steps(analysis_max_months)
-        analysis_selected_months = st.select_slider(
-            "Meses analizados en backlog",
-            options=month_options,
-            value=_nearest_option(analysis_selected_months, options=month_options),
-            key="cfg_analysis_depth_months",
-            format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
-            help=(
-                "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
-                "Si lo dejas al máximo, se usa toda la profundidad disponible."
-            ),
-        )
-        if int(analysis_selected_months) >= int(analysis_max_months):
-            st.caption("Estado: profundidad máxima disponible (modo automático).")
-        else:
-            st.caption(
-                f"Estado: últimos {int(analysis_selected_months)} "
-                f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
-            )
-        st.markdown("#### Descargas del informe PPT")
-        report_ppt_download_dir_default = str(
-            getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
-        ).strip() or str((Path.home() / "Downloads").expanduser())
-        report_ppt_download_dir = st.text_input(
-            "Ruta por defecto de descarga (Informe PPT)",
-            value=report_ppt_download_dir_default,
-            key="cfg_report_ppt_download_dir",
-            help=(
-                "Ruta local donde el botón 'Descargar informe' guardará el PPT. "
-                "Si no existe, se intentará crear automáticamente."
-            ),
-        )
-        st.caption("Se aplica al flujo manual de descarga del Informe PPT.")
-        st.caption("Define los 3 gráficos favoritos.")
+            with st.container(key="cfg_prefs_card_workspace"):
+                st.markdown("#### Ambiente de trabajo")
+                theme_mode = st.radio(
+                    "Modo visual",
+                    options=["light", "dark"],
+                    index=0 if theme_default == "light" else 1,
+                    format_func=lambda v: "Claro" if v == "light" else "Oscuro",
+                    horizontal=True,
+                    key="cfg_workspace_theme_mode",
+                )
+                st.caption("Se guarda en el .env como preferencia del usuario.")
 
-        catalog = _trend_chart_catalog()
-        all_ids = [cid for cid, _ in catalog]
-        id_to_label = {cid: label for cid, label in catalog}
+            with st.container(key="cfg_prefs_card_analysis"):
+                st.markdown("#### Profundidad del análisis")
+                analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
+                month_options = _analysis_month_steps(analysis_max_months)
+                analysis_selected_months = st.select_slider(
+                    "Meses analizados en backlog",
+                    options=month_options,
+                    value=_nearest_option(analysis_selected_months, options=month_options),
+                    key="cfg_analysis_depth_months",
+                    format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
+                    help=(
+                        "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
+                        "Si lo dejas al máximo, se usa toda la profundidad disponible."
+                    ),
+                )
+                if int(analysis_selected_months) >= int(analysis_max_months):
+                    st.caption("Estado: profundidad máxima disponible (modo automático).")
+                else:
+                    st.caption(
+                        f"Estado: últimos {int(analysis_selected_months)} "
+                        f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
+                    )
 
-        stored = _parse_csv_ids(getattr(settings, "DASHBOARD_SUMMARY_CHARTS", ""), all_ids)
-        if not stored:
-            stored = _parse_csv_ids(getattr(settings, "TREND_SELECTED_CHARTS", ""), all_ids)
+            with st.container(key="cfg_prefs_card_ppt"):
+                st.markdown("#### Descargas del informe PPT")
+                st.markdown("**Carpeta de guardado**")
+                report_ppt_download_dir_default = str(
+                    getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
+                ).strip() or str((Path.home() / "Downloads").expanduser())
+                report_ppt_download_dir = st.text_input(
+                    "Carpeta de guardado del informe PPT",
+                    value=report_ppt_download_dir_default,
+                    key="cfg_report_ppt_download_dir",
+                    label_visibility="collapsed",
+                    placeholder=str((Path.home() / "Downloads").expanduser()),
+                )
 
-        fav1_default = stored[0] if len(stored) > 0 else all_ids[0]
-        fav2_default = (
-            stored[1] if len(stored) > 1 else (all_ids[1] if len(all_ids) > 1 else all_ids[0])
-        )
-        fav3_default = (
-            stored[2] if len(stored) > 2 else (all_ids[2] if len(all_ids) > 2 else all_ids[0])
-        )
+            with st.container(key="cfg_prefs_card_favs"):
+                st.markdown("**Define los 3 gráficos favoritos**")
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            fav1 = st.selectbox(
-                "Favorito 1",
-                options=all_ids,
-                index=all_ids.index(fav1_default),
-                format_func=lambda x: id_to_label.get(x, x),
-                key="cfg_trend_fav_1",
-            )
-        with c2:
-            fav2 = st.selectbox(
-                "Favorito 2",
-                options=all_ids,
-                index=all_ids.index(fav2_default),
-                format_func=lambda x: id_to_label.get(x, x),
-                key="cfg_trend_fav_2",
-            )
-        with c3:
-            fav3 = st.selectbox(
-                "Favorito 3",
-                options=all_ids,
-                index=all_ids.index(fav3_default),
-                format_func=lambda x: id_to_label.get(x, x),
-                key="cfg_trend_fav_3",
-            )
+                catalog = _trend_chart_catalog()
+                all_ids = [cid for cid, _ in catalog]
+                id_to_label = {cid: label for cid, label in catalog}
+
+                stored = _parse_csv_ids(getattr(settings, "DASHBOARD_SUMMARY_CHARTS", ""), all_ids)
+                if not stored:
+                    stored = _parse_csv_ids(getattr(settings, "TREND_SELECTED_CHARTS", ""), all_ids)
+
+                fav1_default = stored[0] if len(stored) > 0 else all_ids[0]
+                fav2_default = (
+                    stored[1]
+                    if len(stored) > 1
+                    else (all_ids[1] if len(all_ids) > 1 else all_ids[0])
+                )
+                fav3_default = (
+                    stored[2]
+                    if len(stored) > 2
+                    else (all_ids[2] if len(all_ids) > 2 else all_ids[0])
+                )
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    fav1 = st.selectbox(
+                        "Favorito 1",
+                        options=all_ids,
+                        index=all_ids.index(fav1_default),
+                        format_func=lambda x: id_to_label.get(x, x),
+                        key="cfg_trend_fav_1",
+                    )
+                with c2:
+                    fav2 = st.selectbox(
+                        "Favorito 2",
+                        options=all_ids,
+                        index=all_ids.index(fav2_default),
+                        format_func=lambda x: id_to_label.get(x, x),
+                        key="cfg_trend_fav_2",
+                    )
+                with c3:
+                    fav3 = st.selectbox(
+                        "Favorito 3",
+                        options=all_ids,
+                        index=all_ids.index(fav3_default),
+                        format_func=lambda x: id_to_label.get(x, x),
+                        key="cfg_trend_fav_3",
+                    )
 
     delete_forms_valid = bool(
         jira_delete_cfg.get("valid", True) and helix_delete_cfg.get("valid", True)
