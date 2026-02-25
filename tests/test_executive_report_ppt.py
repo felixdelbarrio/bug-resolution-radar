@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-import time
 
 import pandas as pd
 import pytest
 from pptx import Presentation
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.reports.executive_ppt import (
     _best_actions,
@@ -23,7 +24,6 @@ from bug_resolution_radar.reports.executive_ppt import (
     _soften_insight_tone,
     _urgency_from_score,
 )
-from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.ui.common import save_issues_doc
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, _render_open_priority_pie
 from bug_resolution_radar.ui.insights.engine import ActionInsight, TrendInsightPack

@@ -2,11 +2,18 @@ __pycache__/
 *.py[cod]
 *.so
 *.egg-info/
+
+# PyInstaller / binary build artifacts (local + CI packaging)
 dist/
 build/
 dist_app/
 build_app/
 build_bundle/
+release_bundle/
+bug-resolution-radar-macos.zip
+bug-resolution-radar-*.zip
+bug-resolution-radar.pkg
+
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
