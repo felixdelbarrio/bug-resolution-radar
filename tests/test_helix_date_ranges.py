@@ -19,7 +19,8 @@ def test_utc_year_create_date_range_ms_uses_full_year_boundaries() -> None:
     assert end_ms == expected_end
 
 
-def test_utc_year_create_date_range_ms_falls_back_to_current_year_on_invalid_input() -> None:
+def test_utc_year_create_date_range_ms_falls_back_to_current_year_on_invalid_input(
+) -> None:
     _, _, year = _utc_year_create_date_range_ms("abc")
 
     assert year == datetime.now(timezone.utc).year
@@ -78,7 +79,8 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
     assert "`HPD:Help Desk`.`Incident Number` IS NOT NULL" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
     assert (
-        "`HPD:Help Desk`.`BBVA_Tipo_de_Incidencia` IN ('User Service Restoration', 'Security Incident')"
+        "`HPD:Help Desk`.`BBVA_Tipo_de_Incidencia` IN ('User Service Restoration', "
+        "'Security Incident')"
         in sql
     )
     assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
@@ -86,7 +88,8 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
     assert "LIMIT 75 OFFSET 150" in sql
 
 
-def test_build_arsql_sql_falls_back_incident_type_filter_to_service_type_with_mapped_values() -> None:
+def test_build_arsql_sql_falls_back_incident_type_filter_to_service_type_with_mapped_values(
+) -> None:
     sql = _build_arsql_sql(
         create_start_ms=1000,
         create_end_ms=2000,
@@ -129,7 +132,9 @@ def test_build_arsql_sql_can_filter_submit_date_only_and_environment() -> None:
 
     assert "`HPD:Help Desk`.`Submit Date` BETWEEN" in sql
     assert "`HPD:Help Desk`.`Last Modified Date` BETWEEN" not in sql
-    assert "`HPD:Help Desk`.`BBVA_Environment` IN ('Production', 'Producción')" in sql
+    assert (
+        "`HPD:Help Desk`.`BBVA_Environment` IN ('Production', 'Producción')" in sql
+    )
 
 
 def test_build_arsql_sql_can_disable_wide_select() -> None:
@@ -144,7 +149,8 @@ def test_build_arsql_sql_can_disable_wide_select() -> None:
     assert ", * FROM `HPD:Help Desk`" not in sql
 
 
-def test_build_arsql_sql_falls_back_company_filter_when_source_buug_field_missing() -> None:
+def test_build_arsql_sql_falls_back_company_filter_when_source_buug_field_missing(
+) -> None:
     sql = _build_arsql_sql(
         create_start_ms=1000,
         create_end_ms=2000,
@@ -158,7 +164,8 @@ def test_build_arsql_sql_falls_back_company_filter_when_source_buug_field_missin
     assert "`HPD:Help Desk`.`BBVA_SourceServiceCompany` IN ('BBVA México')" in sql
 
 
-def test_build_arsql_sql_falls_back_company_filter_to_contact_company_as_last_resort() -> None:
+def test_build_arsql_sql_falls_back_company_filter_to_contact_company_as_last_resort(
+) -> None:
     sql = _build_arsql_sql(
         create_start_ms=1000,
         create_end_ms=2000,

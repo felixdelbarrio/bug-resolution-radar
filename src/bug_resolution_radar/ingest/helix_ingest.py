@@ -1931,8 +1931,10 @@ def ingest_helix(
             )
             if mapped_item is None:
                 continue
-            if allowed_business_incident_types and not is_allowed_helix_business_incident_type(
-                mapped_item.incident_type
+            if (
+                query_mode == "arsql"
+                and allowed_business_incident_types
+                and not is_allowed_helix_business_incident_type(mapped_item.incident_type)
             ):
                 filtered_out_by_business_incident_type += 1
                 continue
