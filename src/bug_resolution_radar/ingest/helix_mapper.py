@@ -160,6 +160,16 @@ _CLOSED_TOKENS = (
 
 _OPEN_TOKENS = ("open", "abierto", "abierta")
 
+_BUSINESS_INCIDENT_TYPE_CANDIDATES = (
+    "BBVA_Tipo_de_Incidencia",
+    "BBVA_TipoDeIncidencia",
+    "BBVA_TipoIncidencia",
+    "BBVA_TypeOfIncident",
+    "BBVA_IncidentType",
+    "Tipo_de_Incidencia",
+    "Tipo de Incidencia",
+)
+
 
 def map_helix_status(raw_status: Any) -> str:
     """Map Helix workflow statuses into dashboard canonical statuses."""
@@ -196,6 +206,63 @@ def map_helix_priority(raw_priority: Any) -> str:
     if token in {"very low", "lowest", "muy baja", "muy bajo"}:
         return "Lowest"
     return txt
+
+
+def _extract_business_incident_type(values: Dict[str, Any]) -> str:
+    for candidate in _BUSINESS_INCIDENT_TYPE_CANDIDATES:
+        val = _extract_custom_attr(values, candidate)
+        if val:
+            return val
+        direct = values.get(candidate)
+        if direct not in (None, ""):
+            txt = _extract_text(direct)
+            if txt:
+                return txt
+
+    for key, val in values.items():
+        key_token = _normalize_token(key)
+        if not key_token:
+            continue
+        if "tecnolog" in key_token:
+            continue
+        if "tipo" in key_token and ("incid" in key_token or "incident" in key_token):
+            txt = _extract_text(val)
+            if txt:
+                return txt
+    return ""
+
+
+def map_helix_incident_type(raw_incident_type: Any, values: Optional[Dict[str, Any]] = None) -> str:
+    """Normalize business incident type to 'Incidencia' / 'Consulta' when detectable."""
+    business_raw = _extract_business_incident_type(values or {})
+    fallback_raw = _extract_text(raw_incident_type)
+
+    for txt in (business_raw, fallback_raw):
+        token = _normalize_token(txt)
+        if not token:
+            continue
+        if (
+            "evento" in token
+            and "monitor" in token
+            or token in {"monitoring event", "event monitoring"}
+        ):
+            return "Evento Monitorización"
+        if "consulta" in token or token in {"consultation", "query", "question", "inquiry"}:
+            return "Consulta"
+        if (
+            "incidencia" in token
+            or "incident" in token
+            or token in {"user service restoration", "security incident"}
+        ):
+            return "Incidencia"
+        if txt:
+            return txt
+    return ""
+
+
+def is_allowed_helix_business_incident_type(value: Any) -> bool:
+    token = _normalize_token(value)
+    return token in {"incidencia", "consulta", "evento monitorizacion"}
 
 
 def _extract_person_name(value: Any) -> str:
@@ -384,7 +451,7 @@ def map_helix_values_to_item(
         status=map_helix_status(raw_status),
         status_raw=raw_status,
         priority=map_helix_priority(raw_priority),
-        incident_type=_extract_text(values.get("incidentType")),
+        incident_type=map_helix_incident_type(values.get("incidentType"), values),
         service=_extract_text(values.get("service")),
         impacted_service=_extract_text(values.get("impactedService")),
         assignee=_extract_person_name(values.get("assignee") or values.get("assigneeName")),

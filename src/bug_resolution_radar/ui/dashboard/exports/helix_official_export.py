@@ -242,6 +242,22 @@ _OFFICIAL_DATE_HEADERS: set[str] = {
     "Fecha Modificación DORA",
 }
 
+_MONTH_NAMES_ES: tuple[str, ...] = (
+    "",
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+)
+
 
 @lru_cache(maxsize=4096)
 def _norm_key(value: object) -> str:
@@ -395,7 +411,12 @@ def _month_from_value(value: Any) -> str:
     if isinstance(value, pd.Timestamp):
         if pd.isna(value):
             return ""
-        return f"{int(value.month):02d}"
+        month_num = int(value.month)
+        return (
+            _MONTH_NAMES_ES[month_num]
+            if 1 <= month_num < len(_MONTH_NAMES_ES)
+            else f"{month_num:02d}"
+        )
     txt = str(value).strip()
     if not txt:
         return ""
@@ -406,7 +427,12 @@ def _month_from_value(value: Any) -> str:
     if pd.isna(dt):
         return ""
     if isinstance(dt, pd.Timestamp):
-        return f"{int(dt.month):02d}"
+        month_num = int(dt.month)
+        return (
+            _MONTH_NAMES_ES[month_num]
+            if 1 <= month_num < len(_MONTH_NAMES_ES)
+            else f"{month_num:02d}"
+        )
     return ""
 
 

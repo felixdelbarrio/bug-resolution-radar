@@ -26,8 +26,32 @@ from ..config import build_source_id
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
 from ..models.schema_helix import HelixDocument, HelixWorkItem
-from .helix_mapper import map_helix_values_to_item
+from .helix_mapper import (
+    is_allowed_helix_business_incident_type,
+    map_helix_values_to_item,
+)
 from .helix_session import get_helix_session_cookie
+
+_ARSQL_BUSINESS_INCIDENT_TYPE_FIELD_CANDIDATES: tuple[str, ...] = (
+    "BBVA_Tipo_de_Incidencia",
+    "BBVA_TipoDeIncidencia",
+    "BBVA_TipoIncidencia",
+    "BBVA_TypeOfIncident",
+    "BBVA_IncidentType",
+    "Tipo_de_Incidencia",
+)
+_ARSQL_ENVIRONMENT_FIELD_CANDIDATES: tuple[str, ...] = (
+    "BBVA_Environment",
+    "BBVA_Entorno",
+    "Entorno",
+)
+_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES: tuple[str, ...] = (
+    "Incidencia",
+    "Consulta",
+    "Evento Monitorización",
+)
+_ARSQL_OFFICIAL_ENVIRONMENTS: tuple[str, ...] = ("Production",)
+_ARSQL_OFFICIAL_TIME_FIELDS: tuple[str, ...] = ("Submit Date",)
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
@@ -383,6 +407,8 @@ def _build_arsql_sql(
     source_service_n1: Optional[List[str]] = None,
     incident_types: Optional[List[str]] = None,
     companies: Optional[List[str]] = None,
+    environments: Optional[List[str]] = None,
+    time_fields: Optional[List[str]] = None,
 ) -> str:
     disabled = {str(x or "").strip() for x in (disabled_fields or set()) if str(x or "").strip()}
 
@@ -397,6 +423,57 @@ def _build_arsql_sql(
             if not _is_disabled(name):
                 return name
         return None
+
+    def _incident_type_filter_values(
+        field_name: Optional[str], values: Optional[List[str]]
+    ) -> List[str]:
+        raw_vals = [str(x).strip() for x in (values or []) if str(x).strip()]
+        if not raw_vals:
+            return []
+        if str(field_name or "").strip() != "Service Type":
+            return raw_vals
+        out: List[str] = []
+        seen: set[str] = set()
+        for txt in raw_vals:
+            token = re.sub(r"\s+", " ", txt.strip().lower())
+            mapped: List[str]
+            if token in {"incidencia", "incident", "incidence"}:
+                mapped = ["Incident"]
+            elif token in {"evento monitorizacion", "evento monitorización", "monitoring event"}:
+                mapped = ["Monitoring Event", "Event", "Incident", "Evento Monitorización"]
+            elif token in {"consulta", "consultation", "query", "question", "inquiry"}:
+                mapped = ["Question", "Consultation", "Request", "Service Request"]
+            else:
+                mapped = [txt]
+            for candidate in mapped:
+                if candidate not in seen:
+                    seen.add(candidate)
+                    out.append(candidate)
+        return out
+
+    def _environment_filter_values(
+        field_name: Optional[str], values: Optional[List[str]]
+    ) -> List[str]:
+        raw_vals = [str(x).strip() for x in (values or []) if str(x).strip()]
+        if not raw_vals:
+            return []
+        # Canonicalize Spanish/English variants to tenant-friendly values.
+        if str(field_name or "").strip() in {"BBVA_Environment", "BBVA_Entorno", "Entorno"}:
+            out: List[str] = []
+            seen: set[str] = set()
+            for txt in raw_vals:
+                token = re.sub(r"\s+", " ", txt.strip().lower())
+                mapped: List[str]
+                if token in {"produccion", "producción", "production"}:
+                    mapped = ["Production", "Producción"]
+                else:
+                    mapped = [txt]
+                for candidate in mapped:
+                    if candidate not in seen:
+                        seen.add(candidate)
+                        out.append(candidate)
+            return out
+        return raw_vals
 
     def _select_alias(
         field_name: str,
@@ -430,13 +507,15 @@ def _build_arsql_sql(
         where_parts.append(f"{_field_ref('BBVA_MarcaSmartIT')} = 'SmartIT'")
     where_parts.append(f"{_field_ref('Incident Number')} IS NOT NULL")
 
-    time_field_candidates = [
+    default_time_field_candidates = [
         "Submit Date",
         "Last Modified Date",
         "BBVA_StartDateTime",
         "Closed Date",
         "Last Resolved Date",
     ]
+    requested_time_fields = [str(x).strip() for x in (time_fields or []) if str(x).strip()]
+    time_field_candidates = requested_time_fields or default_time_field_candidates
     time_clauses = [
         _time_window(_field_ref(field_name))
         for field_name in time_field_candidates
@@ -454,10 +533,14 @@ def _build_arsql_sql(
     if source_filter:
         where_parts.append(source_filter)
 
+    incident_type_field = _first_available_field(
+        list(_ARSQL_BUSINESS_INCIDENT_TYPE_FIELD_CANDIDATES) + ["Service Type"]
+    )
+    incident_type_filter_values = _incident_type_filter_values(incident_type_field, incident_types)
     incident_type_filter = (
-        None
-        if _is_disabled("Service Type")
-        else _sql_in_filter(_field_ref("Service Type"), incident_types)
+        _sql_in_filter(_field_ref(incident_type_field), incident_type_filter_values)
+        if incident_type_field
+        else None
     )
     if incident_type_filter:
         where_parts.append(incident_type_filter)
@@ -473,6 +556,16 @@ def _build_arsql_sql(
     )
     if company_filter:
         where_parts.append(company_filter)
+
+    environment_filter_field = _first_available_field(list(_ARSQL_ENVIRONMENT_FIELD_CANDIDATES))
+    environment_filter_values = _environment_filter_values(environment_filter_field, environments)
+    environment_filter = (
+        _sql_in_filter(_field_ref(environment_filter_field), environment_filter_values)
+        if environment_filter_field
+        else None
+    )
+    if environment_filter:
+        where_parts.append(environment_filter)
 
     where_sql = " AND ".join(where_parts)
     safe_limit = max(1, int(limit))
@@ -491,6 +584,11 @@ def _build_arsql_sql(
         )
         or "Incident Number"
     )
+    incident_type_select_sql = (
+        _select_alias(incident_type_field, "incidentType")
+        if incident_type_field
+        else "'' AS `incidentType`"
+    )
 
     return (
         "SELECT "
@@ -499,7 +597,7 @@ def _build_arsql_sql(
         f"{_select_alias('Description', 'summary')}, "
         f"{_select_alias('Status', 'status')}, "
         f"{_select_alias('Assignee', 'assignee', assignee_case_when_blank=True)}, "
-        f"{_select_alias('Service Type', 'incidentType')}, "
+        f"{incident_type_select_sql}, "
         f"{_select_alias('ServiceCI', 'service')}, "
         f"{_select_alias('HPD_CI', 'impactedService')}, "
         f"{_select_alias('Contact Company', 'customerName')}, "
@@ -1362,12 +1460,23 @@ def ingest_helix(
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    incident_types_default = (
-        "" if query_mode == "arsql" else "User Service Restoration,Security Incident"
-    )
-    incident_types_filter = _csv_list(
-        os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default
-    )
+    if query_mode == "arsql":
+        # Enterprise Web official extraction criteria: current natural year by creation date
+        # (Submit Date), Production environment, and business types present in the official
+        # workbook. Keep these fixed to avoid drift between app ingestion/export and the
+        # reference Excel.
+        incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+        allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+        arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
+        arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
+    else:
+        incident_types_filter = _csv_list(
+            os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
+            "User Service Restoration,Security Incident",
+        )
+        allowed_business_incident_types = []
+        arsql_environments_filter = []
+        arsql_time_fields = []
     buug_names = (
         _csv_list(service_origin_buug, "")
         if service_origin_buug is not None
@@ -1433,6 +1542,8 @@ def ingest_helix(
                 source_service_n1=arsql_source_service_n1,
                 incident_types=incident_types_filter,
                 companies=arsql_companies,
+                environments=arsql_environments_filter,
+                time_fields=arsql_time_fields,
             )
             return {
                 "date_format": "DD/MM/YYYY",
@@ -1657,6 +1768,8 @@ def ingest_helix(
         900.0,
     )
     page = 0
+    filtered_out_by_business_incident_type = 0
+    filtered_out_by_environment = 0
     max_session_refreshes = max(
         0,
         _coerce_int(os.getenv("HELIX_MAX_SESSION_REFRESHES", "1"), 1),
@@ -1822,6 +1935,34 @@ def ingest_helix(
             )
             if mapped_item is None:
                 continue
+            if (
+                query_mode == "arsql"
+                and allowed_business_incident_types
+                and not is_allowed_helix_business_incident_type(mapped_item.incident_type)
+            ):
+                filtered_out_by_business_incident_type += 1
+                continue
+            if query_mode == "arsql" and arsql_environments_filter:
+                env_raw = ""
+                raw_fields = mapped_item.raw_fields or {}
+                for env_key in ("BBVA_Environment", "BBVA_Entorno", "Entorno"):
+                    env_candidate = str(raw_fields.get(env_key) or "").strip()
+                    if env_candidate:
+                        env_raw = env_candidate
+                        break
+                env_token = re.sub(r"\s+", " ", env_raw.strip().lower())
+                allowed_env_tokens = {
+                    re.sub(r"\s+", " ", str(x).strip().lower())
+                    for x in arsql_environments_filter
+                    if str(x).strip()
+                }
+                if env_token in {"producción", "produccion"}:
+                    env_token = "production"
+                if "produccion" in allowed_env_tokens or "producción" in allowed_env_tokens:
+                    allowed_env_tokens.add("production")
+                if allowed_env_tokens and env_token and env_token not in allowed_env_tokens:
+                    filtered_out_by_environment += 1
+                    continue
             wid = str(mapped_item.id or "").strip()
             if wid in seen_ids:
                 continue
@@ -1865,14 +2006,18 @@ def ingest_helix(
     companies_q = ",".join(str(r.get("name") or "").strip() for r in company_rows if r) or "all"
     if query_mode == "arsql":
         source_service_q = ",".join(arsql_source_service_n1) or "all"
+        arsql_environments_q = ",".join(arsql_environments_filter) or "all"
+        arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
         select_mode_q = "wide" if arsql_include_all_fields else "narrow"
         disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
         doc.query = (
             "mode=arsql; "
             f"arsql_root={arsql_base_root}; "
             f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
+            f"timeFields=[{arsql_time_fields_q}]; "
             f"sourceServiceN1=[{source_service_q}]; "
-            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; "
+            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
+            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
             f"page_limit={base_chunk_size}; "
             f"select={select_mode_q}; "
             f"disabled_fields=[{disabled_fields_q}]"
@@ -1882,7 +2027,8 @@ def ingest_helix(
             f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
             f" (year={create_year}); statusMappings=[{status_mappings_q}]; "
             f"incidentTypes=[{incident_types_q}]; priorities=[{priorities_q}]; "
-            f"companies=[{companies_q}]"
+            f"companies=[{companies_q}]; "
+            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]"
         )
 
     merged = {_item_merge_key(i): i for i in doc.items}
@@ -1892,6 +2038,10 @@ def ingest_helix(
 
     return (
         True,
-        f"{source_label}: ingesta Helix OK ({len(items)} items, merge total {len(doc.items)}).",
+        (
+            f"{source_label}: ingesta Helix OK ({len(items)} items, merge total {len(doc.items)}). "
+            f"Filtrados por tipo (negocio): {filtered_out_by_business_incident_type}. "
+            f"Filtrados por entorno: {filtered_out_by_environment}."
+        ),
         doc,
     )
