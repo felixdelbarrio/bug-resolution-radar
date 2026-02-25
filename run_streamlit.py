@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import sys
 from pathlib import Path
@@ -193,4 +194,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    mp.freeze_support()
     raise SystemExit(main())
