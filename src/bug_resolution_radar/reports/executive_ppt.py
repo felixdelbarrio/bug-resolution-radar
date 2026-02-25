@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -921,6 +922,11 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             fig_dict = cast(dict, fig_obj.to_plotly_json())
 
         timeout_s = int(os.getenv("BUG_RESOLUTION_RADAR_PPT_RENDER_TIMEOUT_S", "90") or "90")
+        kaleido_tmp_dir = os.path.join(tempfile.gettempdir(), "bug-resolution-radar-kaleido")
+        try:
+            os.makedirs(kaleido_tmp_dir, exist_ok=True)
+        except Exception:
+            kaleido_tmp_dir = tempfile.gettempdir()
         return cast(
             bytes,
             kaleido.calc_fig_sync(
@@ -935,6 +941,10 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     # Avoid CDN fetches (common source of hangs in locked-down environments).
                     mathjax=False,
                     timeout=timeout_s,
+                    headless=True,
+                    enable_gpu=False,
+                    enable_sandbox=False,
+                    tmp_dir=kaleido_tmp_dir,
                 ),
             ),
         )
