@@ -88,6 +88,7 @@ def test_config_resolves_relative_data_paths_against_env_location(
             "NOTES_PATH=data/notes.json\n"
             "INSIGHTS_LEARNING_PATH=data/insights_learning.json\n"
             "HELIX_DATA_PATH=data/helix_dump.json\n"
+            "REPORT_PPT_DOWNLOAD_DIR=exports/ppt\n"
         ),
         encoding="utf-8",
     )
@@ -102,6 +103,7 @@ def test_config_resolves_relative_data_paths_against_env_location(
         (tmp_path / "data/insights_learning.json").resolve()
     )
     assert settings.HELIX_DATA_PATH == str((tmp_path / "data/helix_dump.json").resolve())
+    assert settings.REPORT_PPT_DOWNLOAD_DIR == str((tmp_path / "exports/ppt").resolve())
 
     cfg.save_settings(settings)
     saved = env_path.read_text(encoding="utf-8")
@@ -109,6 +111,7 @@ def test_config_resolves_relative_data_paths_against_env_location(
     assert "NOTES_PATH=data/notes.json" in saved
     assert "INSIGHTS_LEARNING_PATH=data/insights_learning.json" in saved
     assert "HELIX_DATA_PATH=data/helix_dump.json" in saved
+    assert "REPORT_PPT_DOWNLOAD_DIR=exports/ppt" in saved
 
 
 def test_semantic_status_and_priority_colors() -> None:
