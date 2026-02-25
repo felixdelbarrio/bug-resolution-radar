@@ -45,6 +45,9 @@ jobs:
             "--windowed",
             "--name", "bug-resolution-radar",
             "--icon", "assets/app_icon/bug-resolution-radar.ico",
+            "--workpath", "build",
+            "--specpath", "build",
+            "--distpath", "dist",
             "--add-data", "app.py;."
           )
           if (Test-Path "src/bug_resolution_radar/ui/assets" -PathType Container) {

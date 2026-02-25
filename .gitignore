@@ -10,6 +10,7 @@ dist_app/
 build_app/
 build_bundle/
 release_bundle/
+*.spec
 bug-resolution-radar-macos.zip
 bug-resolution-radar-*.zip
 bug-resolution-radar.pkg
