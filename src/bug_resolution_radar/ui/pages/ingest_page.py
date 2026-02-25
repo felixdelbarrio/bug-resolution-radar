@@ -208,6 +208,7 @@ def render(settings: Settings) -> None:
                 "organization",
                 "service_origin_buug",
                 "service_origin_n1",
+                "service_origin_n2",
                 "browser",
                 "proxy",
                 "ssl_verify",
@@ -242,6 +243,7 @@ def render(settings: Settings) -> None:
                             ssl_verify=str(src.get("ssl_verify", "true")).strip(),
                             service_origin_buug=src.get("service_origin_buug"),
                             service_origin_n1=src.get("service_origin_n1"),
+                            service_origin_n2=src.get("service_origin_n2"),
                             dry_run=True,
                             existing_doc=HelixDocument.empty(),
                         )
@@ -269,6 +271,7 @@ def render(settings: Settings) -> None:
                             ssl_verify=str(src.get("ssl_verify", "true")).strip(),
                             service_origin_buug=src.get("service_origin_buug"),
                             service_origin_n1=src.get("service_origin_n1"),
+                            service_origin_n2=src.get("service_origin_n2"),
                             dry_run=False,
                             existing_doc=HelixDocument.empty(),
                         )

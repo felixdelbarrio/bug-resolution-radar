@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import logging
 import math
+import multiprocessing as mp
+import os
+import queue
 import re
+import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -50,6 +55,7 @@ from bug_resolution_radar.ui.insights.engine import (
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 SLIDE_WIDTH = int(Inches(13.333))
 SLIDE_HEIGHT = int(Inches(7.5))
@@ -884,70 +890,202 @@ def _build_context(
     )
 
 
+def _int_env(name: str, default: int) -> int:
+    raw = str(os.getenv(name, "") or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _kaleido_tmp_dir() -> str:
+    kaleido_tmp_dir = os.path.join(tempfile.gettempdir(), "bug-resolution-radar-kaleido")
+    try:
+        os.makedirs(kaleido_tmp_dir, exist_ok=True)
+    except Exception:
+        kaleido_tmp_dir = tempfile.gettempdir()
+    return kaleido_tmp_dir
+
+
+def _validate_plotly_fig_to_dict(fig_obj: go.Figure) -> dict[str, object]:
+    try:
+        from plotly.io._utils import validate_coerce_fig_to_dict
+
+        fig_dict = validate_coerce_fig_to_dict(fig_obj, validate=False)
+    except Exception:
+        fig_dict = cast(dict[str, object], fig_obj.to_plotly_json())
+    return cast(dict[str, object], fig_dict)
+
+
+def _subprocess_call_worker(
+    result_queue: object,
+    target: Callable[..., object],
+    call_args: tuple[object, ...],
+    call_kwargs: dict[str, object],
+) -> None:
+    try:
+        result = target(*call_args, **call_kwargs)
+        cast(Any, result_queue).put(("ok", result))
+    except Exception as exc:
+        cast(Any, result_queue).put(("err", f"{exc.__class__.__name__}: {exc}"))
+
+
+def _call_in_subprocess_with_timeout(
+    fn: Callable[..., _T],
+    *args: object,
+    hard_timeout_s: float,
+    **kwargs: object,
+) -> _T:
+    """
+    Execute a callable in an isolated process and apply a hard timeout.
+
+    This protects the Streamlit app from native/browser hangs (e.g. Chromium startup
+    inside Kaleido) that can block forever before library-level timeouts fire.
+    """
+
+    safe_timeout_s = max(1.0, float(hard_timeout_s))
+    ctx = mp.get_context("spawn")
+    result_queue = ctx.Queue(maxsize=1)
+    proc = ctx.Process(
+        target=_subprocess_call_worker, args=(result_queue, fn, tuple(args), dict(kwargs))
+    )
+    proc.start()
+
+    try:
+        try:
+            status, payload = result_queue.get(timeout=safe_timeout_s)
+        except queue.Empty as exc:
+            proc.terminate()
+            proc.join(timeout=2.0)
+            if proc.is_alive() and hasattr(proc, "kill"):
+                proc.kill()  # type: ignore[attr-defined]
+                proc.join(timeout=1.0)
+            raise TimeoutError(f"Timeout duro agotado tras {safe_timeout_s:.0f}s") from exc
+        finally:
+            proc.join(timeout=1.0)
+
+        if status == "ok":
+            return cast(_T, payload)
+        raise RuntimeError(str(payload or "Fallo desconocido en proceso de render"))
+    finally:
+        try:
+            result_queue.close()
+        except Exception:
+            pass
+        try:
+            result_queue.join_thread()
+        except Exception:
+            pass
+
+
+def _kaleido_calc_fig_sync_png(
+    fig_dict: dict[str, object],
+    *,
+    scale: float,
+    export_width: int,
+    export_height: int,
+    timeout_s: int,
+    tmp_dir: str,
+) -> bytes:
+    """
+    Export Plotly figure to PNG using Kaleido with MathJax disabled.
+
+    In packaged builds, Kaleido/Chromium can hang while trying to start the
+    browser process or initialize a tab. Kaleido's internal timeout does not
+    always cover the full startup path, so callers wrap this in a hard timeout.
+    """
+    try:
+        import kaleido
+    except Exception:
+        return cast(
+            bytes,
+            pio.to_image(
+                fig_dict,
+                format="png",
+                width=export_width,
+                height=export_height,
+                scale=scale,
+                engine="kaleido",
+            ),
+        )
+
+    return cast(
+        bytes,
+        kaleido.calc_fig_sync(
+            fig_dict,
+            opts=dict(
+                format="png",
+                width=export_width,
+                height=export_height,
+                scale=scale,
+            ),
+            kopts=dict(
+                # Avoid CDN fetches (common source of hangs in locked-down environments).
+                mathjax=False,
+                timeout=timeout_s,
+                headless=True,
+                enable_gpu=False,
+                enable_sandbox=False,
+                tmp_dir=tmp_dir,
+            ),
+        ),
+    )
+
+
+def _kaleido_png_bytes(
+    fig_obj: go.Figure, *, scale: float, export_width: int, export_height: int
+) -> bytes:
+    timeout_s = max(5, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_TIMEOUT_S", 90))
+    hard_timeout_s = max(
+        timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20)
+    )
+    fig_dict = _validate_plotly_fig_to_dict(fig_obj)
+    tmp_dir = _kaleido_tmp_dir()
+
+    use_isolated_process = _bool_env(
+        "BUG_RESOLUTION_RADAR_PPT_RENDER_ISOLATED_PROCESS",
+        bool(getattr(sys, "frozen", False)),
+    )
+    if not use_isolated_process:
+        return _kaleido_calc_fig_sync_png(
+            fig_dict,
+            scale=scale,
+            export_width=export_width,
+            export_height=export_height,
+            timeout_s=timeout_s,
+            tmp_dir=tmp_dir,
+        )
+
+    return _call_in_subprocess_with_timeout(
+        _kaleido_calc_fig_sync_png,
+        fig_dict,
+        scale=scale,
+        export_width=export_width,
+        export_height=export_height,
+        timeout_s=timeout_s,
+        tmp_dir=tmp_dir,
+        hard_timeout_s=float(hard_timeout_s),
+    )
+
+
 def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
     if fig is None:
         return None
     export_width = 1280
     export_height = 820
-
-    def _kaleido_png_bytes(fig_obj: go.Figure, *, scale: float) -> bytes:
-        """
-        Export Plotly figure to PNG using Kaleido with MathJax disabled.
-
-        In packaged builds, Kaleido/Chromium can hang while trying to load MathJax from CDN.
-        Disabling MathJax avoids that network dependency and makes export more reliable offline.
-        """
-        import os
-
-        try:
-            import kaleido
-        except Exception:
-            return cast(
-                bytes,
-                pio.to_image(
-                    fig_obj,
-                    format="png",
-                    width=export_width,
-                    height=export_height,
-                    scale=scale,
-                    engine="kaleido",
-                ),
-            )
-
-        try:
-            from plotly.io._utils import validate_coerce_fig_to_dict
-
-            fig_dict = validate_coerce_fig_to_dict(fig_obj, validate=False)
-        except Exception:
-            fig_dict = cast(dict, fig_obj.to_plotly_json())
-
-        timeout_s = int(os.getenv("BUG_RESOLUTION_RADAR_PPT_RENDER_TIMEOUT_S", "90") or "90")
-        kaleido_tmp_dir = os.path.join(tempfile.gettempdir(), "bug-resolution-radar-kaleido")
-        try:
-            os.makedirs(kaleido_tmp_dir, exist_ok=True)
-        except Exception:
-            kaleido_tmp_dir = tempfile.gettempdir()
-        return cast(
-            bytes,
-            kaleido.calc_fig_sync(
-                fig_dict,
-                opts=dict(
-                    format="png",
-                    width=export_width,
-                    height=export_height,
-                    scale=scale,
-                ),
-                kopts=dict(
-                    # Avoid CDN fetches (common source of hangs in locked-down environments).
-                    mathjax=False,
-                    timeout=timeout_s,
-                    headless=True,
-                    enable_gpu=False,
-                    enable_sandbox=False,
-                    tmp_dir=kaleido_tmp_dir,
-                ),
-            ),
-        )
 
     try:
 
@@ -1288,10 +1426,20 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                         color=f"#{PALETTE['ink']}",
                     )
 
-        return _kaleido_png_bytes(export_fig, scale=3)
+        return _kaleido_png_bytes(
+            export_fig,
+            scale=3,
+            export_width=export_width,
+            export_height=export_height,
+        )
     except Exception as primary_exc:
         try:
-            return _kaleido_png_bytes(go.Figure(fig), scale=2)
+            return _kaleido_png_bytes(
+                go.Figure(fig),
+                scale=2,
+                export_width=export_width,
+                export_height=export_height,
+            )
         except Exception as secondary_exc:
             # Last-resort path: normalize figure payload to plain Plotly JSON and
             # drop heavy/complex attrs that may break Kaleido in specific traces.
@@ -1310,7 +1458,12 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                                 trace.hovertemplate = None
                     except Exception:
                         continue
-                return _kaleido_png_bytes(safe_fig, scale=2)
+                return _kaleido_png_bytes(
+                    safe_fig,
+                    scale=2,
+                    export_width=export_width,
+                    export_height=export_height,
+                )
             except Exception as final_exc:
                 LOGGER.warning(
                     "Plotly export failed for chart image (primary=%s, secondary=%s, final=%s)",
@@ -1957,7 +2110,15 @@ def _add_chart_insight_slide(
     chart_frame.fill.fore_color.rgb = _rgb(PALETTE["panel"])
     chart_frame.line.color.rgb = _rgb(PALETTE["line"])
 
+    chart_render_started = time.monotonic()
+    LOGGER.info("PPT chart render started: %s", section.chart_id)
     image = _fig_to_png(section.figure)
+    LOGGER.info(
+        "PPT chart render finished: %s (ok=%s, %.2fs)",
+        section.chart_id,
+        image is not None,
+        max(0.0, time.monotonic() - chart_render_started),
+    )
     if image is None:
         tf = chart_frame.text_frame
         tf.clear()

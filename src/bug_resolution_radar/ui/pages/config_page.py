@@ -459,6 +459,7 @@ def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[
                 "organization": _as_str(src.get("organization")),
                 "service_origin_buug": _as_str(src.get("service_origin_buug")),
                 "service_origin_n1": _as_str(src.get("service_origin_n1")),
+                "service_origin_n2": _as_str(src.get("service_origin_n2")),
                 "browser": _as_str(src.get("browser")) or "chrome",
                 "proxy": _as_str(src.get("proxy")),
                 "ssl_verify": _as_str(src.get("ssl_verify")) or "true",
@@ -519,6 +520,7 @@ def _normalize_helix_rows(
         organization = _as_str(row.get("organization"))
         service_origin_buug = _as_str(row.get("service_origin_buug"))
         service_origin_n1 = _as_str(row.get("service_origin_n1"))
+        service_origin_n2 = _as_str(row.get("service_origin_n2"))
         browser = _as_str(row.get("browser")) or "chrome"
         proxy = _as_str(row.get("proxy"))
         ssl_verify = _as_str(row.get("ssl_verify")) or "true"
@@ -532,6 +534,7 @@ def _normalize_helix_rows(
                 proxy,
                 service_origin_buug,
                 service_origin_n1,
+                service_origin_n2,
             ]
         ):
             continue
@@ -572,6 +575,8 @@ def _normalize_helix_rows(
             payload["service_origin_buug"] = service_origin_buug
         if service_origin_n1:
             payload["service_origin_n1"] = service_origin_n1
+        if service_origin_n2:
+            payload["service_origin_n2"] = service_origin_n2
         out.append(payload)
 
     return out, errors
@@ -904,6 +909,7 @@ def render(settings: Settings) -> None:
                     "organization": "",
                     "service_origin_buug": "BBVA México",
                     "service_origin_n1": "ENTERPRISE WEB",
+                    "service_origin_n2": "",
                     "browser": helix_default_browser,
                     "proxy": helix_default_proxy,
                     "ssl_verify": helix_default_ssl_verify,
@@ -924,6 +930,7 @@ def render(settings: Settings) -> None:
                 "organization",
                 "service_origin_buug",
                 "service_origin_n1",
+                "service_origin_n2",
                 "browser",
                 "proxy",
                 "ssl_verify",
@@ -935,7 +942,8 @@ def render(settings: Settings) -> None:
                 "base_url": st.column_config.TextColumn("base_url"),
                 "organization": st.column_config.TextColumn("organization"),
                 "service_origin_buug": st.column_config.TextColumn("Servicio Origen BU/UG"),
-                "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1"),
+                "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1 (CSV)"),
+                "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
                 "browser": st.column_config.SelectboxColumn("browser", options=["chrome", "edge"]),
                 "proxy": st.column_config.TextColumn("proxy"),
                 "ssl_verify": st.column_config.SelectboxColumn(
