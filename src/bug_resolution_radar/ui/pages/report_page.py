@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -26,16 +27,30 @@ from bug_resolution_radar.ui.dashboard.state import (
 
 _REPORT_STATUS_KEY = "workspace_report_status"
 _REPORT_SAVED_PATH_KEY_PREFIX = "workspace_report_saved_path"
-_REPORT_SAVE_DONE_KEY_PREFIX = "workspace_report_save_done"
+_REPORT_PHASE_KEY_PREFIX = "workspace_report_phase"
+_REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
+_REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
 
 
-def _default_report_export_dir() -> Path:
-    """Pick a user-friendly, writable export directory for local builds."""
-    candidates = [
-        Path.home() / "Downloads",
-        config_home() / "exports",
-    ]
+def _default_report_export_dir(settings: Settings) -> Path:
+    """Pick a user-friendly, writable export directory for manual PPT downloads."""
+    configured = str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(
+        [
+            Path.home() / "Downloads",
+            config_home() / "exports",
+        ]
+    )
+
+    seen: set[str] = set()
     for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             if candidate.is_dir():
@@ -131,8 +146,102 @@ def _saved_path_state_key(scope_key: str) -> str:
     return f"{_REPORT_SAVED_PATH_KEY_PREFIX}::{scope_key}"
 
 
-def _save_done_state_key(scope_key: str) -> str:
-    return f"{_REPORT_SAVE_DONE_KEY_PREFIX}::{scope_key}"
+def _phase_state_key(scope_key: str) -> str:
+    return f"{_REPORT_PHASE_KEY_PREFIX}::{scope_key}"
+
+
+def _request_sig_state_key(scope_key: str) -> str:
+    return f"{_REPORT_REQUEST_SIG_KEY_PREFIX}::{scope_key}"
+
+
+def _artifact_state_key(scope_key: str) -> str:
+    return f"{_REPORT_ARTIFACT_KEY_PREFIX}::{scope_key}"
+
+
+def _normalize_filter_values(values: list[str]) -> list[str]:
+    clean = [str(v or "").strip() for v in list(values or []) if str(v or "").strip()]
+    return sorted(set(clean))
+
+
+def _data_path_mtime_ns(path_like: object) -> int:
+    path_text = str(path_like or "").strip()
+    if not path_text:
+        return 0
+    try:
+        return int(Path(path_text).expanduser().stat().st_mtime_ns)
+    except Exception:
+        return 0
+
+
+def _report_request_signature(
+    settings: Settings,
+    *,
+    country: str,
+    source_id: str,
+    status_filters: list[str],
+    priority_filters: list[str],
+    assignee_filters: list[str],
+) -> str:
+    payload = {
+        "country": str(country or "").strip(),
+        "source_id": str(source_id or "").strip(),
+        "status_filters": _normalize_filter_values(status_filters),
+        "priority_filters": _normalize_filter_values(priority_filters),
+        "assignee_filters": _normalize_filter_values(assignee_filters),
+        "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
+        "data_path": str(getattr(settings, "DATA_PATH", "") or "").strip(),
+        "data_mtime_ns": _data_path_mtime_ns(getattr(settings, "DATA_PATH", "")),
+    }
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _clear_generated_report_state(scope_key: str) -> None:
+    st.session_state.pop(_artifact_state_key(scope_key), None)
+    st.session_state.pop(_request_sig_state_key(scope_key), None)
+    st.session_state[_phase_state_key(scope_key)] = "idle"
+
+
+def _ready_artifact(scope_key: str, *, request_sig: str) -> dict[str, object] | None:
+    payload = st.session_state.get(_artifact_state_key(scope_key))
+    if not isinstance(payload, dict):
+        return None
+
+    payload_sig = str(payload.get("request_sig") or "").strip()
+    if payload_sig != str(request_sig or "").strip():
+        return None
+
+    content = payload.get("content")
+    if not isinstance(content, (bytes, bytearray)):
+        return None
+    return payload
+
+
+def _int_from_obj(value: object, *, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _bytes_from_obj(value: object) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    return b""
 
 
 def _store_status(*, scope_key: str, kind: str, message: str) -> None:
@@ -162,19 +271,17 @@ def _render_status(scope_key: str) -> None:
 
     saved_path_value = str(st.session_state.get(_saved_path_state_key(scope_key)) or "").strip()
     if saved_path_value:
-        label_col, path_col = st.columns([0.25, 0.75], gap="small")
-        with label_col:
-            st.caption("Último guardado local:")
-        with path_col:
-            with st.container(key="workspace_report_saved_path_link"):
-                if st.button(
-                    saved_path_value,
-                    key=f"btn_open_saved_report::{scope_key}::{saved_path_value}",
-                    type="secondary",
-                    width="content",
-                    help="Abrir carpeta del informe",
-                ):
-                    _reveal_in_file_manager(Path(saved_path_value))
+        saved_path = Path(saved_path_value)
+        link_label = saved_path.name or saved_path_value
+        with st.container():
+            if st.button(
+                link_label,
+                key=f"btn_open_saved_report::{scope_key}::{saved_path_value}",
+                type="secondary",
+                width="content",
+                help=f"Abrir carpeta del informe\n{saved_path_value}",
+            ):
+                _reveal_in_file_manager(saved_path)
 
 
 def render(settings: Settings) -> None:
@@ -211,26 +318,122 @@ def render(settings: Settings) -> None:
     st.info(
         f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}"
     )
-    scope_key = _scope_key(country, source_id)
-    save_done_key = _save_done_state_key(scope_key)
 
-    export_dir = _default_report_export_dir()
+    scope_key = _scope_key(country, source_id)
+    phase_key = _phase_state_key(scope_key)
+    request_sig_key = _request_sig_state_key(scope_key)
+
+    export_dir = _default_report_export_dir(settings)
     export_dir_label = str(export_dir)
 
-    button_slot = st.empty()
+    current_request_sig = _report_request_signature(
+        settings,
+        country=country,
+        source_id=source_id,
+        status_filters=status_filters,
+        priority_filters=priority_filters,
+        assignee_filters=assignee_filters,
+    )
+
+    stored_request_sig = str(st.session_state.get(request_sig_key) or "").strip()
+    phase = str(st.session_state.get(phase_key) or "idle").strip().lower()
+    if phase not in {"idle", "generating", "ready"}:
+        phase = "idle"
+        st.session_state[phase_key] = phase
+
+    if (
+        phase in {"generating", "ready"}
+        and stored_request_sig
+        and stored_request_sig != current_request_sig
+    ):
+        _clear_generated_report_state(scope_key)
+        phase = "idle"
+        stored_request_sig = ""
+
+    artifact = _ready_artifact(scope_key, request_sig=current_request_sig)
+    if phase == "ready" and artifact is None:
+        _clear_generated_report_state(scope_key)
+        phase = "idle"
+
+    # Auto-genera el informe al entrar en la pantalla (o al cambiar scope/filtros).
+    if phase == "idle" and artifact is None:
+        st.session_state.pop(_saved_path_state_key(scope_key), None)
+        st.session_state[request_sig_key] = current_request_sig
+        st.session_state[phase_key] = "generating"
+        st.session_state.pop(_artifact_state_key(scope_key), None)
+        phase = "generating"
+        _store_status(
+            scope_key=scope_key,
+            kind="info",
+            message="Generación automática del informe PPT iniciada.",
+        )
+
+    status_slot = st.empty()
+
+    saved_path_for_scope = str(st.session_state.get(_saved_path_state_key(scope_key)) or "").strip()
+    save_already_done_in_visit = bool(saved_path_for_scope)
     run_save = False
-    if not bool(st.session_state.get(save_done_key, False)):
-        with button_slot:
-            run_save = st.button(
-                "Guardar en disco",
-                key=f"btn_save_scope_ppt_{scope_key}",
-                type="primary",
-                width="content",
-                help=f"Guarda el PPT en: {export_dir_label}",
-            )
+    if not save_already_done_in_visit:
+        run_save = st.button(
+            "Guardar en disco",
+            key=f"btn_save_scope_ppt::{scope_key}",
+            type="primary",
+            width="content",
+            disabled=phase != "ready",
+            help=(
+                "Se habilita cuando finalice la generación automática. "
+                f"Guardará el PPT en: {export_dir_label}"
+            ),
+        )
+
+    if phase == "generating":
+        st.caption(
+            "Estado: generando informe. El botón 'Guardar en disco' se habilitará al finalizar."
+        )
+    elif phase == "ready" and artifact is not None:
+        file_name = str(artifact.get("file_name") or "informe.pptx")
+        slide_count = _int_from_obj(artifact.get("slide_count"), default=0)
+        total_issues = _int_from_obj(artifact.get("total_issues"), default=0)
+        st.caption(
+            f"Informe listo para guardar en disco: {file_name} · "
+            f"{slide_count} slides · {total_issues} issues."
+        )
 
     if run_save:
-        saved_ok = False
+        ready_payload = _ready_artifact(scope_key, request_sig=current_request_sig)
+        if ready_payload is None:
+            _store_status(
+                scope_key=scope_key,
+                kind="error",
+                message=(
+                    "El informe preparado ya no coincide con el scope/filtros actuales. "
+                    "La pantalla iniciará una nueva generación automáticamente."
+                ),
+            )
+        else:
+            try:
+                file_name = str(ready_payload.get("file_name") or "").strip() or "radar-export.pptx"
+                content = _bytes_from_obj(ready_payload.get("content"))
+                export_path = _unique_export_path(export_dir, file_name=file_name)
+                export_path.write_bytes(content)
+                st.session_state[_saved_path_state_key(scope_key)] = str(export_path)
+                _store_status(
+                    scope_key=scope_key,
+                    kind="success",
+                    message=(
+                        "Guardado manual completado. "
+                        "Archivo guardado en el enlace mostrado a continuación."
+                    ),
+                )
+                st.rerun()
+            except Exception as exc:
+                _store_status(
+                    scope_key=scope_key,
+                    kind="error",
+                    message=f"No se pudo completar el guardado manual del informe PPT: {exc}",
+                )
+
+    if str(st.session_state.get(phase_key) or "").strip().lower() == "generating":
         try:
             with st.spinner("Generando el informe PPT del scope activo..."):
                 all_df = (
@@ -260,29 +463,35 @@ def render(settings: Settings) -> None:
                     scoped_source_df_override=scoped_df,
                 )
 
-                export_path = _unique_export_path(export_dir, file_name=result.file_name)
-                export_path.write_bytes(result.content)
-                st.session_state[_saved_path_state_key(scope_key)] = str(export_path)
-                saved_ok = True
+                st.session_state[_artifact_state_key(scope_key)] = {
+                    "request_sig": current_request_sig,
+                    "file_name": str(result.file_name or "radar-export.pptx"),
+                    "content": bytes(result.content or b""),
+                    "slide_count": int(result.slide_count or 0),
+                    "total_issues": int(result.total_issues or 0),
+                    "open_issues": int(result.open_issues or 0),
+                    "closed_issues": int(result.closed_issues or 0),
+                }
+                st.session_state[request_sig_key] = current_request_sig
+                st.session_state[phase_key] = "ready"
 
             _store_status(
                 scope_key=scope_key,
                 kind="success",
                 message=(
-                    f"Informe guardado · {result.slide_count} slides · "
-                    f"{result.total_issues} issues ({result.open_issues} abiertas)."
+                    f"Informe generado · {result.slide_count} slides · "
+                    f"{result.total_issues} issues ({result.open_issues} abiertas). "
+                    "Botón 'Guardar en disco' habilitado."
                 ),
             )
+            st.rerun()
         except Exception as exc:
+            _clear_generated_report_state(scope_key)
             _store_status(
                 scope_key=scope_key,
                 kind="error",
-                message=f"No se pudo generar/guardar el informe PPT: {exc}",
+                message=f"No se pudo generar el informe PPT: {exc}",
             )
-        if saved_ok:
-            st.session_state[save_done_key] = True
-            button_slot.empty()
 
-    status_slot = st.empty()
     with status_slot:
         _render_status(scope_key)
