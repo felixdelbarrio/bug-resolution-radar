@@ -1,6 +1,8 @@
 streamlit>=1.30.0
 watchdog>=4.0.0
 pandas>=2.0.0
+openpyxl>=3.1.0
+XlsxWriter>=3.2.0
 plotly>=5.18.0
 python-pptx>=1.0.2
 kaleido>=1.2.0

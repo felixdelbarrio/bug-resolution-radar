@@ -66,6 +66,8 @@ jobs:
             "--collect-all", "lxml",
             "--collect-all", "PIL",
             "--collect-all", "kaleido",
+            "--collect-all", "openpyxl",
+            "--collect-all", "xlsxwriter",
             "--collect-all", "bug_resolution_radar",
             "run_streamlit.py"
           )

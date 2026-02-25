@@ -26,7 +26,7 @@ from bug_resolution_radar.ui.pages.ingest_page import _helix_item_to_issue
         ("Borrador", "New"),
         ("Cancelada", "Accepted"),
         ("Cancelado", "Accepted"),
-        ("Cerrado", "Deployed"),
+        ("Cerrado", "Closed"),
         ("Corregido", "Ready To Verify"),
         ("En cesta", "New"),
         ("En curso", "En progreso"),
@@ -48,12 +48,12 @@ from bug_resolution_radar.ui.pages.ingest_page import _helix_item_to_issue
         ("Pte. Autorización", "Blocked"),
         ("Rechazado", "Accepted"),
         ("Registrado", "New"),
-        ("Resuelto", "Ready to Deploy"),
+        ("Resuelto", "Resolved"),
         ("Revisión", "Ready To Verify"),
-        ("Terminado", "Deployed"),
+        ("Terminado", "Closed"),
         ("Assigned", "Analysing"),
-        ("Resolved", "Ready to Deploy"),
-        ("Closed", "Deployed"),
+        ("Resolved", "Resolved"),
+        ("Closed", "Closed"),
     ],
 )
 def test_map_helix_status_uses_requested_workflow_mapping(raw_status: str, expected: str) -> None:
@@ -61,7 +61,7 @@ def test_map_helix_status_uses_requested_workflow_mapping(raw_status: str, expec
 
 
 def test_map_helix_status_uses_generic_closed_and_open_fallbacks() -> None:
-    assert map_helix_status("Closed by automation") == "Deployed"
+    assert map_helix_status("Closed by automation") == "Closed"
     assert map_helix_status("Open in queue") == "New"
     assert map_helix_status("Estado no mapeado") == "New"
 
@@ -124,6 +124,8 @@ def test_map_helix_values_to_item_keeps_query_fields_and_raw_status() -> None:
     assert item.matrix_service_n1 == "Matriz N1"
     assert item.source_service_n1 == "Source N1"
     assert item.url == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
+    assert item.raw_fields.get("id") == "INC0001"
+    assert item.raw_fields.get("priority") == "Moderate"
 
 
 def test_map_helix_values_to_item_reads_custom_attributes_container() -> None:
@@ -149,6 +151,27 @@ def test_map_helix_values_to_item_reads_custom_attributes_container() -> None:
     assert item.closed_date == "2026-02-20T00:00:00Z"
     assert item.matrix_service_n1 == "Core"
     assert item.source_service_n1 == "Legacy"
+
+
+def test_map_helix_values_to_item_reads_arsql_flat_fields_case_insensitive() -> None:
+    item = map_helix_values_to_item(
+        values={
+            "id": "INC0003",
+            "status": "Resolved",
+            "BBVA_SourceServiceN1": "ENTERPRISE WEB",
+            "BBVA_MatrixServiceN1": "MATRIX",
+            "BBVA_ClosedDate": 1704153600000,
+        },
+        base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
+        country="México",
+        source_alias="MX SmartIT",
+        source_id="helix:mexico:mx-smartit",
+    )
+
+    assert item is not None
+    assert item.source_service_n1 == "ENTERPRISE WEB"
+    assert item.matrix_service_n1 == "MATRIX"
+    assert item.closed_date == "2024-01-02T00:00:00+00:00"
 
 
 def test_map_helix_values_to_item_uses_configured_dashboard_url() -> None:

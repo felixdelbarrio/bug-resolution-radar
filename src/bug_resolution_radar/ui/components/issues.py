@@ -497,7 +497,7 @@ def render_issue_table(dff: pd.DataFrame) -> None:
         if len(display_df) > MAX_TABLE_NATIVE_ROWS:
             st.caption(
                 f"Mostrando {MAX_TABLE_NATIVE_ROWS}/{len(display_df)} filas en pantalla. "
-                "Usa CSV para el dataset completo."
+                "Usa Excel para el dataset completo."
             )
             display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
         native_cols = list(show_cols)

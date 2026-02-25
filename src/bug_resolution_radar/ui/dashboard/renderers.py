@@ -15,6 +15,7 @@ from bug_resolution_radar.ui.common import (
 )
 from bug_resolution_radar.ui.components.filters import render_filters
 from bug_resolution_radar.ui.components.issues import render_issue_cards, render_issue_table
+from bug_resolution_radar.ui.dashboard.downloads import df_to_excel_bytes
 from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
     ChartSpec,
@@ -140,12 +141,12 @@ def render_issues_section(dff: pd.DataFrame) -> None:
     with top:
         c1, c2 = st.columns([1, 2])
         with c1:
-            csv_bytes = dff_show.to_csv(index=False).encode("utf-8")
+            csv_bytes = df_to_excel_bytes(dff_show, include_index=False, sheet_name="Issues")
             st.download_button(
-                "⬇️ Descargar CSV",
+                "⬇️ Descargar Excel",
                 data=csv_bytes,
-                file_name="issues_filtradas.csv",
-                mime="text/csv",
+                file_name="issues_filtradas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="issues_download_csv",
                 width="stretch",
             )
