@@ -260,7 +260,6 @@ def render(settings: Settings) -> None:
                         "__source_id__": str(src.get("source_id", "")).strip(),
                         "country": str(src.get("country", "")).strip(),
                         "alias": str(src.get("alias", "")).strip(),
-                        "organization": str(src.get("organization", "")).strip(),
                         "service_origin_buug": str(src.get("service_origin_buug", "")).strip(),
                         "service_origin_n1": str(src.get("service_origin_n1", "")).strip(),
                         "service_origin_n2": str(src.get("service_origin_n2", "")).strip(),
@@ -282,7 +281,6 @@ def render(settings: Settings) -> None:
                     "__ingest__",
                     "country",
                     "alias",
-                    "organization",
                     "service_origin_buug",
                     "service_origin_n1",
                     "service_origin_n2",
@@ -291,7 +289,6 @@ def render(settings: Settings) -> None:
                     "__source_id__",
                     "country",
                     "alias",
-                    "organization",
                     "service_origin_buug",
                     "service_origin_n1",
                     "service_origin_n2",
@@ -300,7 +297,6 @@ def render(settings: Settings) -> None:
                     "__ingest__": st.column_config.CheckboxColumn("Ingestar"),
                     "country": st.column_config.TextColumn("country"),
                     "alias": st.column_config.TextColumn("alias"),
-                    "organization": st.column_config.TextColumn("organization"),
                     "service_origin_buug": st.column_config.TextColumn("Servicio Origen BU/UG"),
                     "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1"),
                     "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2"),
@@ -329,7 +325,16 @@ def render(settings: Settings) -> None:
             )
         else:
             helix_cfg_selected = []
-            _render_sources_preview(helix_cfg, ["country", "alias", "organization"])
+            _render_sources_preview(
+                helix_cfg,
+                [
+                    "country",
+                    "alias",
+                    "service_origin_buug",
+                    "service_origin_n1",
+                    "service_origin_n2",
+                ],
+            )
 
         helix_path = _get_helix_path(settings)
         helix_repo = HelixRepo(Path(helix_path))
@@ -351,9 +356,7 @@ def render(settings: Settings) -> None:
                 with st.spinner("Probando fuentes Helix seleccionadas..."):
                     for src in helix_cfg_selected:
                         ok, msg, _ = ingest_helix(
-                            helix_base_url=str(src.get("base_url", "")).strip(),
                             browser=str(src.get("browser", "chrome")).strip(),
-                            organization=str(src.get("organization", "")).strip(),
                             country=str(src.get("country", "")).strip(),
                             source_alias=str(src.get("alias", "")).strip(),
                             source_id=str(src.get("source_id", "")).strip(),
@@ -381,9 +384,7 @@ def render(settings: Settings) -> None:
                 with st.spinner("Ingestando Helix para fuentes seleccionadas..."):
                     for src in helix_cfg_selected:
                         ok, msg, new_helix_doc = ingest_helix(
-                            helix_base_url=str(src.get("base_url", "")).strip(),
                             browser=str(src.get("browser", "chrome")).strip(),
-                            organization=str(src.get("organization", "")).strip(),
                             country=str(src.get("country", "")).strip(),
                             source_alias=str(src.get("alias", "")).strip(),
                             source_id=str(src.get("source_id", "")).strip(),

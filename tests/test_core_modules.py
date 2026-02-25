@@ -173,8 +173,7 @@ def test_multi_country_sources_parsing_and_ids() -> None:
     settings = cfg.Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         JIRA_SOURCES_JSON='[{"country":"Mexico","alias":"Core MX","jql":"status = Open"}]',
-        HELIX_SOURCES_JSON=('[{"country":"España","alias":"SmartIT ES","organization":"ORG-ES"}]'),
-        HELIX_BASE_URL="https://helix.example.com",
+        HELIX_SOURCES_JSON='[{"country":"España","alias":"SmartIT ES"}]',
         HELIX_BROWSER="edge",
         HELIX_SSL_VERIFY="true",
     )

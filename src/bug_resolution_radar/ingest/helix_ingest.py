@@ -222,6 +222,48 @@ def _root_from_url(url: str) -> str:
     return f"{scheme}://{host}"
 
 
+def _smartit_base_from_dashboard_url(url: str) -> str:
+    txt = str(url or "").strip()
+    if not txt:
+        return ""
+    parsed = urlparse(txt)
+    scheme = str(parsed.scheme or "").strip()
+    host = str(parsed.hostname or "").strip()
+    if not scheme or not host:
+        return ""
+
+    path = str(parsed.path or "").strip()
+    base_path = ""
+    if "/app" in path:
+        base_path = path.split("/app", 1)[0].rstrip("/")
+    else:
+        base_path = path.rstrip("/")
+    if not base_path:
+        base_path = "/smartit"
+    candidate = f"{scheme}://{host}{base_path}"
+    try:
+        return validate_service_base_url(candidate, service_name="Helix")
+    except ValueError:
+        return ""
+
+
+def _smartit_base_from_arsql_root(url: str) -> str:
+    root = _root_from_url(url)
+    if not root:
+        return ""
+    parsed = urlparse(root)
+    scheme = str(parsed.scheme or "").strip() or "https"
+    host = str(parsed.hostname or "").strip()
+    if not host:
+        return ""
+    smartit_host = host.replace("-ir1.", "-smartit.", 1) if "-ir1." in host else host
+    candidate = f"{scheme}://{smartit_host}/smartit"
+    try:
+        return validate_service_base_url(candidate, service_name="Helix")
+    except ValueError:
+        return ""
+
+
 def _dedup_non_empty(items: List[str]) -> List[str]:
     seen: set[str] = set()
     out: List[str] = []
@@ -1045,9 +1087,7 @@ def _item_merge_key(item: HelixWorkItem) -> str:
 
 
 def ingest_helix(
-    helix_base_url: str,
     browser: str,
-    organization: str,
     country: str = "",
     source_alias: str = "",
     source_id: str = "",
@@ -1078,20 +1118,16 @@ def ingest_helix(
         source_id_value = build_source_id("helix", country_value or "default", alias_value)
     source_label = f"{country_value} · {alias_value}" if country_value else f"Helix · {alias_value}"
 
-    if not organization:
-        return False, f"{source_label}: configura organization.", None
+    dashboard_url_cfg = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
+    base = _smartit_base_from_dashboard_url(dashboard_url_cfg)
+    dashboard_root = _root_from_url(dashboard_url_cfg)
+    if not base:
+        base = _smartit_base_from_arsql_root(str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip())
 
-    try:
-        base = validate_service_base_url(helix_base_url, service_name="Helix")
-    except ValueError as e:
-        return False, f"{source_label}: {e}", None
-
-    if base.endswith("/app"):
-        base = base[:-4]
-
-    parsed = urlparse(base)
-    base_host = parsed.hostname or ""
-    base_scheme = parsed.scheme or "https"
+    parsed = urlparse(base) if base else urlparse("")
+    dashboard_parsed = urlparse(dashboard_root) if dashboard_root else urlparse("")
+    base_host = str(parsed.hostname or dashboard_parsed.hostname or "").strip()
+    base_scheme = str(parsed.scheme or dashboard_parsed.scheme or "https").strip() or "https"
 
     arsql_uid = str(os.getenv("HELIX_ARSQL_DATASOURCE_UID", "")).strip()
     host = base_host
@@ -1103,8 +1139,11 @@ def ingest_helix(
     arsql_base_candidates: List[str] = []
     # SmartIT ticket console is the right "safe landing" URL for work items.
     # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
-    ticket_console_url = f"{base}/app/#/ticket-console"
-    dashboard_url_cfg = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
+    ticket_console_url = (
+        dashboard_url_cfg.strip()
+        or (f"{base}/app/#/ticket-console" if base else "")
+        or (f"{base_scheme}://{base_host}/smartit/app/#/ticket-console" if base_host else "")
+    )
     login_bootstrap_url = ""
     arsql_dashboard_path_default = "/dashboards/"
     grafana_org_id_cfg = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
@@ -1216,40 +1255,69 @@ def ingest_helix(
         _coerce_float(os.getenv("HELIX_BROWSER_LOGIN_POLL_SECONDS", "2"), 2.0),
     )
 
-    def _bootstrap_cookie_from_browser() -> Optional[str]:
+    def _auth_cookie_hosts() -> List[str]:
+        seeds = [
+            str(host or "").strip(),
+            str(base_host or "").strip(),
+            str(urlparse(login_bootstrap_url).hostname or "").strip(),
+            str(urlparse(ticket_console_url).hostname or "").strip(),
+            str(urlparse(dashboard_url_cfg).hostname or "").strip(),
+        ]
+        out: List[str] = []
+        seen: set[str] = set()
+
+        def _push(h: str) -> None:
+            hh = str(h or "").strip().lower()
+            if not hh or hh in seen:
+                return
+            out.append(hh)
+            seen.add(hh)
+
+        for seed in seeds:
+            _push(seed)
+            if "-ir1." in seed:
+                _push(seed.replace("-ir1.", "-smartit.", 1))
+            if "-smartit." in seed:
+                _push(seed.replace("-smartit.", "-ir1.", 1))
+        return out
+
+    def _read_auth_cookie_from_browser() -> Tuple[Optional[str], str, str]:
+        last_error = ""
+        for cookie_host in _auth_cookie_hosts():
+            try:
+                candidate = get_helix_session_cookie(browser=browser, host=cookie_host)
+            except Exception as e:
+                last_error = str(e)
+                continue
+            candidate = sanitize_cookie_header(candidate)
+            if candidate and _has_auth_cookie(_cookie_names_from_header(candidate)):
+                return candidate, cookie_host, ""
+        return None, "", last_error
+
+    def _bootstrap_cookie_from_browser() -> Tuple[Optional[str], str]:
         try:
-            existing = get_helix_session_cookie(browser=browser, host=host)
+            existing, existing_host, _ = _read_auth_cookie_from_browser()
         except Exception:
-            existing = None
-        existing = sanitize_cookie_header(existing)
-        if existing and _has_auth_cookie(_cookie_names_from_header(existing)):
-            return existing
+            existing, existing_host = None, ""
+        if existing:
+            return existing, existing_host
 
         _open_url_in_configured_browser(login_bootstrap_url, browser)
         deadline = time.monotonic() + float(login_wait_seconds)
         while time.monotonic() < deadline:
-            try:
-                candidate = get_helix_session_cookie(browser=browser, host=host)
-            except Exception:
-                candidate = None
-            candidate = sanitize_cookie_header(candidate)
-            if candidate and _has_auth_cookie(_cookie_names_from_header(candidate)):
-                return candidate
+            candidate, candidate_host, _ = _read_auth_cookie_from_browser()
+            if candidate:
+                return candidate, candidate_host
             time.sleep(login_poll_seconds)
-        return None
+        return None, ""
 
-    try:
-        cookie = get_helix_session_cookie(browser=browser, host=host)
-        cookie_error = ""
-    except Exception as e:
-        cookie = None
-        cookie_error = str(e)
-    cookie = sanitize_cookie_header(cookie)
+    cookie, cookie_source_host, cookie_error = _read_auth_cookie_from_browser()
     cookie_names_from_header = _cookie_names_from_header(cookie or "")
     if not cookie or not _has_auth_cookie(cookie_names_from_header):
-        bootstrapped_cookie = _bootstrap_cookie_from_browser()
+        bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
         if bootstrapped_cookie:
             cookie = bootstrapped_cookie
+            cookie_source_host = bootstrapped_host or cookie_source_host
             cookie_names_from_header = _cookie_names_from_header(cookie)
 
     if not cookie:
@@ -1260,7 +1328,7 @@ def ingest_helix(
             None,
         )
 
-    cookie_names = _cookies_to_jar(session, cookie, host=host)
+    cookie_names = _cookies_to_jar(session, cookie, host=(cookie_source_host or host))
     if not _has_auth_cookie(cookie_names):
         return (
             False,
@@ -1271,18 +1339,12 @@ def ingest_helix(
         )
 
     def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
-        try:
-            fresh_cookie = get_helix_session_cookie(browser=browser, host=host)
-            cookie_refresh_error = ""
-        except Exception as e:
-            fresh_cookie = None
-            cookie_refresh_error = str(e)
-
-        fresh_cookie = sanitize_cookie_header(fresh_cookie)
-        if not fresh_cookie or not _has_auth_cookie(_cookie_names_from_header(fresh_cookie)):
-            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+        fresh_cookie, fresh_cookie_host, cookie_refresh_error = _read_auth_cookie_from_browser()
+        if not fresh_cookie:
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:
                 fresh_cookie = bootstrapped_cookie
+                fresh_cookie_host = bootstrapped_host or fresh_cookie_host
 
         if not fresh_cookie:
             detail = f" Detalle: {cookie_refresh_error}" if cookie_refresh_error else ""
@@ -1297,15 +1359,19 @@ def ingest_helix(
         except Exception:
             pass
 
-        refreshed_cookie_names = _cookies_to_jar(session, fresh_cookie, host=host)
+        refreshed_cookie_names = _cookies_to_jar(session, fresh_cookie, host=(fresh_cookie_host or host))
         if not _has_auth_cookie(refreshed_cookie_names):
-            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()
                 except Exception:
                     pass
-                refreshed_cookie_names = _cookies_to_jar(session, bootstrapped_cookie, host=host)
+                refreshed_cookie_names = _cookies_to_jar(
+                    session,
+                    bootstrapped_cookie,
+                    host=(bootstrapped_host or fresh_cookie_host or host),
+                )
             if not _has_auth_cookie(refreshed_cookie_names):
                 return (
                     False,
@@ -1334,13 +1400,13 @@ def ingest_helix(
             )
 
         if _looks_like_sso_redirect(refresh_preflight):
-            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()
                 except Exception:
                     pass
-                _cookies_to_jar(session, bootstrapped_cookie, host=host)
+                _cookies_to_jar(session, bootstrapped_cookie, host=(bootstrapped_host or host))
                 _apply_xsrf_headers(session)
                 retry_preflight: Optional[requests.Response]
                 try:
@@ -1384,7 +1450,6 @@ def ingest_helix(
                 None,
             )
 
-    org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
     # Enterprise Web official extraction criteria: current natural year by creation date
     # (Submit Date), Production environment, and business types present in the official
@@ -1505,13 +1570,13 @@ def ingest_helix(
             preflight_name = "/dashboards/"
             _sync_arsql_origin_headers()
         if not arsql_uid:
-            bootstrapped_cookie = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()
                 except Exception:
                     pass
-                _cookies_to_jar(session, bootstrapped_cookie, host=host)
+                _cookies_to_jar(session, bootstrapped_cookie, host=(bootstrapped_host or host))
                 _apply_xsrf_headers(session)
                 arsql_uid, discovered_root = _discover_uid_across_candidates()
                 if arsql_uid:
@@ -1887,7 +1952,6 @@ def ingest_helix(
     doc.query = (
         "mode=arsql; "
         f"arsql_root={arsql_base_root}; "
-        f"organization=[{org}]; "
         f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
         f"timeFields=[{arsql_time_fields_q}]; "
         f"sourceServiceN1=[{source_service_n1_q}]; "

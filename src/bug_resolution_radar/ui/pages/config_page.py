@@ -523,7 +523,6 @@ def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[
                 "__source_id__": _as_str(src.get("source_id")),
                 "country": country,
                 "alias": _as_str(src.get("alias")),
-                "organization": _as_str(src.get("organization")),
                 "service_origin_buug": _as_str(src.get("service_origin_buug")),
                 "service_origin_n1": _as_str(src.get("service_origin_n1")),
                 "service_origin_n2": _as_str(src.get("service_origin_n2")),
@@ -580,7 +579,6 @@ def _normalize_helix_rows(
             continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
-        organization = _as_str(row.get("organization"))
         service_origin_buug = _as_str(row.get("service_origin_buug"))
         service_origin_n1 = _as_str(row.get("service_origin_n1"))
         service_origin_n2 = _as_str(row.get("service_origin_n2"))
@@ -589,7 +587,6 @@ def _normalize_helix_rows(
             [
                 country,
                 alias,
-                organization,
                 service_origin_buug,
                 service_origin_n1,
                 service_origin_n2,
@@ -602,9 +599,6 @@ def _normalize_helix_rows(
         if not alias:
             errors.append(f"Helix fila {idx}: alias obligatorio.")
             continue
-        if not organization:
-            errors.append(f"Helix fila {idx}: organization obligatorio.")
-            continue
 
         dedup_key = (country, alias.lower())
         if dedup_key in seen:
@@ -614,7 +608,6 @@ def _normalize_helix_rows(
         payload = {
             "country": country,
             "alias": alias,
-            "organization": organization,
         }
         if service_origin_buug:
             payload["service_origin_buug"] = service_origin_buug
@@ -883,25 +876,27 @@ def render(settings: Settings) -> None:
             st.rerun()
 
     with t_helix:
-        st.markdown("### Helix global")
+        st.markdown("### Helix")
+        st.caption("Configuración común de conexión y autenticación para todas las fuentes Helix.")
 
-        h1, h2, h3 = st.columns(3)
+        h1, h2, h3 = st.columns([1.2, 1.0, 1.0])
         with h1:
-            helix_base_url = st.text_input(
-                "Helix Base URL (global)",
-                value=_as_str(getattr(settings, "HELIX_BASE_URL", "")),
-                key="cfg_helix_base_url_global",
+            helix_default_proxy = st.text_input(
+                "Proxy",
+                value=_as_str(getattr(settings, "HELIX_PROXY", "")),
+                key="cfg_helix_proxy_default",
+                placeholder="http://127.0.0.1:8999",
             )
         with h2:
             helix_default_browser = st.selectbox(
-                "Browser (global)",
+                "Browser",
                 options=["chrome", "edge"],
                 index=0 if _as_str(settings.HELIX_BROWSER) == "chrome" else 1,
                 key="cfg_helix_browser_default",
             )
         with h3:
             helix_default_ssl_verify = st.selectbox(
-                "SSL verify (global)",
+                "SSL verify",
                 options=["true", "false"],
                 index=(
                     0 if _boolish(getattr(settings, "HELIX_SSL_VERIFY", True), default=True) else 1
@@ -909,21 +904,8 @@ def render(settings: Settings) -> None:
                 key="cfg_helix_ssl_default",
             )
 
-        h4, h5 = st.columns(2)
-        with h4:
-            helix_default_proxy = st.text_input(
-                "Proxy (global)",
-                value=_as_str(getattr(settings, "HELIX_PROXY", "")),
-                key="cfg_helix_proxy_default",
-            )
-        with h5:
-            helix_data_path = st.text_input(
-                "Helix Data Path",
-                value=_as_str(getattr(settings, "HELIX_DATA_PATH", "data/helix_dump.json")),
-                key="cfg_helix_data_path",
-            )
         helix_dashboard_url = st.text_input(
-            "Helix Dashboard URL (base apertura ticket)",
+            "Helix Dashboard URL",
             value=_as_str(
                 getattr(
                     settings,
@@ -936,9 +918,7 @@ def render(settings: Settings) -> None:
         st.caption("Modo de ingesta Helix: ARSQL (único modo soportado).")
 
         st.markdown("### Fuentes Helix por país")
-        st.caption(
-            "Campos globales (base_url, browser, proxy, ssl_verify) se configuran arriba una sola vez."
-        )
+        st.caption("Alias y filtros de servicio por fuente. La conexión Helix se define arriba.")
         helix_rows = _rows_from_helix_settings(settings, countries)
         helix_df = pd.DataFrame(
             helix_rows
@@ -948,7 +928,6 @@ def render(settings: Settings) -> None:
                     "__source_id__": "",
                     "country": countries[0],
                     "alias": "",
-                    "organization": "",
                     "service_origin_buug": "BBVA México",
                     "service_origin_n1": "ENTERPRISE WEB",
                     "service_origin_n2": "",
@@ -965,7 +944,6 @@ def render(settings: Settings) -> None:
                 "__delete__",
                 "country",
                 "alias",
-                "organization",
                 "service_origin_buug",
                 "service_origin_n1",
                 "service_origin_n2",
@@ -974,7 +952,6 @@ def render(settings: Settings) -> None:
                 "__delete__": st.column_config.CheckboxColumn("Eliminar"),
                 "country": st.column_config.SelectboxColumn("country", options=countries),
                 "alias": st.column_config.TextColumn("alias"),
-                "organization": st.column_config.TextColumn("organization"),
                 "service_origin_buug": st.column_config.TextColumn("Servicio Origen BU/UG"),
                 "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1 (CSV)"),
                 "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
@@ -1016,20 +993,13 @@ def render(settings: Settings) -> None:
                 for err in helix_errors:
                     st.error(err)
                 return
-            helix_base_url_clean = str(helix_base_url).strip()
-            if helix_clean and not helix_base_url_clean:
-                st.error("Helix: base_url global obligatorio si hay fuentes configuradas.")
-                return
-
             new_settings = _safe_update_settings(
                 settings,
                 {
                     "HELIX_SOURCES_JSON": to_env_json(helix_clean),
-                    "HELIX_BASE_URL": helix_base_url_clean,
                     "HELIX_BROWSER": str(helix_default_browser).strip(),
                     "HELIX_PROXY": str(helix_default_proxy).strip(),
                     "HELIX_SSL_VERIFY": str(helix_default_ssl_verify).strip().lower(),
-                    "HELIX_DATA_PATH": str(helix_data_path).strip(),
                     "HELIX_DASHBOARD_URL": str(helix_dashboard_url).strip(),
                 },
             )

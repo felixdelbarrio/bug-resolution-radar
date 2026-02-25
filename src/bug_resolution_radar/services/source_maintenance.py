@@ -82,7 +82,6 @@ def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tup
         source_payload = {
             "country": str(row.get("country") or "").strip(),
             "alias": str(row.get("alias") or "").strip(),
-            "organization": str(row.get("organization") or "").strip(),
         }
         service_origin_buug = str(row.get("service_origin_buug") or "").strip()
         service_origin_n1 = str(row.get("service_origin_n1") or "").strip()

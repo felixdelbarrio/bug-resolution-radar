@@ -102,9 +102,7 @@ def test_ingest_helix_refreshes_session_and_retries_once(monkeypatch: Any) -> No
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
 
     ok, msg, doc = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=1,
         dry_run=False,
     )
@@ -138,9 +136,7 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
 
     ok, msg, _ = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=75,
         dry_run=False,
         create_date_year=2026,
@@ -223,9 +219,7 @@ def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
 
     ok, msg, doc = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=75,
         dry_run=False,
         create_date_year=2026,
@@ -339,9 +333,7 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
     monkeypatch.setenv("HELIX_ARSQL_SOURCE_SERVICE_N1", "ENTERPRISE WEB")
 
     ok, msg, doc = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=2,
         dry_run=False,
         create_date_year=2026,
@@ -425,9 +417,7 @@ def test_ingest_helix_arsql_pages_when_tenant_ignores_requested_limit(monkeypatc
     monkeypatch.setenv("HELIX_ARSQL_SOURCE_SERVICE_N1", "ENTERPRISE WEB")
 
     ok, msg, doc = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=500,
         dry_run=False,
         create_date_year=2026,
@@ -478,9 +468,7 @@ def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> No
     monkeypatch.delenv("HELIX_ARSQL_DATASOURCE_UID", raising=False)
 
     ok, msg, _ = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=75,
         dry_run=False,
         create_date_year=2026,
@@ -529,11 +517,13 @@ def test_ingest_helix_arsql_infers_ir1_host_and_uses_dashboards_preflight(monkey
     monkeypatch.delenv("HELIX_ARSQL_BASE_URL", raising=False)
     monkeypatch.delenv("HELIX_ARSQL_DATASOURCE_UID", raising=False)
     monkeypatch.delenv("HELIX_ARSQL_DASHBOARD_URL", raising=False)
+    monkeypatch.setenv(
+        "HELIX_DASHBOARD_URL",
+        "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    )
 
     ok, msg, _ = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=75,
         dry_run=False,
         create_date_year=2026,
@@ -577,9 +567,7 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
     monkeypatch.setenv("HELIX_BROWSER_LOGIN_POLL_SECONDS", "0.5")
 
     ok, msg, _ = helix_mod.ingest_helix(
-        helix_base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
         browser="chrome",
-        organization="ENTERPRISE WEB SYSTEMS SERVICE OWNER",
         chunk_size=75,
         dry_run=False,
         create_date_year=2026,

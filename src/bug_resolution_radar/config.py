@@ -240,7 +240,6 @@ class Settings(BaseModel):
     # -------------------------
     HELIX_SOURCES_JSON: str = "[]"
     HELIX_INGEST_DISABLED_SOURCES_JSON: str = "[]"
-    HELIX_BASE_URL: str = ""
     HELIX_BROWSER: str = "chrome"
     HELIX_DATA_PATH: str = "data/helix_dump.json"
     HELIX_DASHBOARD_URL: str = (
@@ -394,23 +393,19 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
 def helix_sources(settings: Settings) -> List[Dict[str, str]]:
     countries = supported_countries(settings)
     rows = _parse_json_list(getattr(settings, "HELIX_SOURCES_JSON", ""))
-    global_base_url = _coerce_str(getattr(settings, "HELIX_BASE_URL", ""))
     global_browser = _coerce_str(settings.HELIX_BROWSER) or "chrome"
     global_proxy = _coerce_str(settings.HELIX_PROXY)
     global_ssl_verify = _coerce_str(settings.HELIX_SSL_VERIFY) or "true"
-    if not global_base_url:
-        return []
 
     out: List[Dict[str, str]] = []
     seen: set[str] = set()
     for row in rows:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
         alias = _coerce_str(row.get("alias"))
-        organization = _coerce_str(row.get("organization"))
         service_origin_buug = _coerce_str(row.get("service_origin_buug"))
         service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
         service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
-        if not country or not alias or not organization:
+        if not country or not alias:
             continue
         sid = build_source_id("helix", country, alias)
         if sid in seen:
@@ -421,8 +416,6 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             "source_id": sid,
             "country": country,
             "alias": alias,
-            "base_url": global_base_url,
-            "organization": organization,
             "browser": global_browser,
             "proxy": global_proxy,
             "ssl_verify": global_ssl_verify,

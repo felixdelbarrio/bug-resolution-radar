@@ -41,10 +41,9 @@ def test_remove_helix_source_from_settings_keeps_global_helix_connection_config(
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         HELIX_SOURCES_JSON=(
-            '[{"country":"México","alias":"MX SmartIT","organization":"ORG1"},'
-            '{"country":"España","alias":"ES SmartIT","organization":"ORG2"}]'
+            '[{"country":"México","alias":"MX SmartIT"},'
+            '{"country":"España","alias":"ES SmartIT"}]'
         ),
-        HELIX_BASE_URL="https://helix.example.com",
     )
 
     updated, removed = remove_helix_source_from_settings(settings, "helix:mexico:mx-smartit")
@@ -56,7 +55,7 @@ def test_remove_helix_source_from_settings_keeps_global_helix_connection_config(
     assert "browser" not in rows[0]
     assert "proxy" not in rows[0]
     assert "ssl_verify" not in rows[0]
-    assert updated.HELIX_BASE_URL == "https://helix.example.com"
+    assert "organization" not in rows[0]
 
 
 def test_purge_source_cache_removes_issues_helix_and_learning(tmp_path: Path) -> None:
