@@ -37,7 +37,7 @@ def test_remove_jira_source_from_settings_clears_legacy_fallback() -> None:
     assert updated.JIRA_JQL == ""
 
 
-def test_remove_helix_source_from_settings_clears_legacy_fallback() -> None:
+def test_remove_helix_source_from_settings_keeps_global_helix_connection_config() -> None:
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         HELIX_SOURCES_JSON=(

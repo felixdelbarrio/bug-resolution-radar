@@ -29,6 +29,10 @@ from bug_resolution_radar.services.source_maintenance import (
 )
 from bug_resolution_radar.ui.cache import clear_signature_cache
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.exports.downloads import (
+    build_download_filename,
+    df_to_excel_bytes,
+)
 
 
 def _boolish(value: Any, default: bool = True) -> bool:
@@ -94,6 +98,70 @@ def _render_purge_stats(stats: Dict[str, int]) -> None:
         f"Issues purgados: {issues_removed}. "
         f"Items Helix purgados: {helix_items_removed}. "
         f"Scopes de aprendizaje purgados: {learning_scopes_removed}."
+    )
+
+
+def _source_rows_export_df(df: pd.DataFrame, *, source_type: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    rows_out: List[Dict[str, Any]] = []
+    for row in df.to_dict(orient="records"):
+        row_copy = dict(row)
+        row_copy.pop("__delete__", None)
+
+        country = _as_str(row_copy.get("country"))
+        alias = _as_str(row_copy.get("alias"))
+        source_id = _as_str(row_copy.get("__source_id__"))
+        if not source_id and country and alias:
+            source_id = build_source_id(source_type, country, alias)
+
+        business_fields = {
+            str(k): _as_str(v)
+            for k, v in row_copy.items()
+            if k != "__source_id__" and not str(k).startswith("__")
+        }
+        if not any(business_fields.values()):
+            continue
+
+        export_row: Dict[str, Any] = {"source_id": source_id}
+        export_row.update(business_fields)
+        rows_out.append(export_row)
+
+    if not rows_out:
+        return pd.DataFrame()
+
+    out_df = pd.DataFrame(rows_out)
+    preferred_cols = ["source_id", "country", "alias"]
+    ordered_cols = [c for c in preferred_cols if c in out_df.columns] + [
+        c for c in out_df.columns if c not in preferred_cols
+    ]
+    return out_df.loc[:, ordered_cols].copy(deep=False)
+
+
+def _render_sources_excel_download(
+    df: pd.DataFrame,
+    *,
+    source_type: str,
+    key: str,
+    filename_prefix: str,
+    sheet_name: str,
+) -> None:
+    export_df = _source_rows_export_df(df, source_type=source_type)
+    disabled = export_df.empty
+    payload = (
+        b""
+        if disabled
+        else df_to_excel_bytes(export_df, include_index=False, sheet_name=sheet_name)
+    )
+    st.download_button(
+        label="⬇️ Descargar Excel",
+        data=payload,
+        file_name=build_download_filename(filename_prefix, suffix="fuentes", ext="xlsx"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=key,
+        disabled=disabled,
+        width="content",
     )
 
 
@@ -738,6 +806,13 @@ def render(settings: Settings) -> None:
                 "jql": st.column_config.TextColumn("jql"),
             },
         )
+        _render_sources_excel_download(
+            jira_editor,
+            source_type="jira",
+            key="cfg_export_jira_sources_xlsx",
+            filename_prefix="fuentes_jira",
+            sheet_name="Fuentes Jira",
+        )
 
         jira_delete_ids, jira_delete_labels = _selected_sources_from_editor(
             jira_editor, source_type="jira"
@@ -904,6 +979,13 @@ def render(settings: Settings) -> None:
                 "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1 (CSV)"),
                 "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
             },
+        )
+        _render_sources_excel_download(
+            helix_editor,
+            source_type="helix",
+            key="cfg_export_helix_sources_xlsx",
+            filename_prefix="fuentes_helix",
+            sheet_name="Fuentes Helix",
         )
 
         helix_delete_ids, helix_delete_labels = _selected_sources_from_editor(
