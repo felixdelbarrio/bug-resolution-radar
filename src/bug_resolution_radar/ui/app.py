@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List
 
 import streamlit as st
@@ -22,6 +23,22 @@ from bug_resolution_radar.ui.dashboard.state import (
 )
 from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_page, report_page
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
+
+
+def _sync_settings_to_process_env(settings: Settings) -> None:
+    """
+    Keep runtime `os.environ` aligned with `.env` values already parsed into Settings.
+
+    Some ingestion modules read configuration via `os.getenv(...)` directly. In the
+    Streamlit app we load `.env` through `load_settings()` (without exporting vars),
+    so this bridge avoids mismatches between what the UI shows and what backend
+    ingestion code reads.
+    """
+    for key, value in settings.model_dump().items():
+        if value is None:
+            os.environ.pop(str(key), None)
+            continue
+        os.environ[str(key)] = str(value)
 
 
 def _set_workspace_mode(mode: str) -> None:
@@ -411,6 +428,7 @@ def main() -> None:
     """Boot application, render hero/shell and dispatch the selected page."""
     ensure_env()
     settings = load_settings()
+    _sync_settings_to_process_env(settings)
     bootstrap_filters_from_env(settings)
     if "workspace_dark_mode" not in st.session_state:
         streamlit_dark_fallback = (
