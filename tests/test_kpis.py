@@ -5,9 +5,9 @@ from typing import Any
 
 import pandas as pd
 
-from bug_resolution_radar import kpis as kpis_module
+from bug_resolution_radar.analytics import kpis as kpis_module
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.kpis import compute_kpis
+from bug_resolution_radar.analytics.kpis import compute_kpis
 
 
 def test_kpis_basic_counts() -> None:

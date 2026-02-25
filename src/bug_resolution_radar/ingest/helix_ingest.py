@@ -23,9 +23,9 @@ from tenacity import (
 )
 
 from ..config import build_source_id
-from ..schema_helix import HelixDocument, HelixWorkItem
-from ..security import sanitize_cookie_header, validate_service_base_url
-from ..utils import now_iso
+from ..common.security import sanitize_cookie_header, validate_service_base_url
+from ..common.utils import now_iso
+from ..models.schema_helix import HelixDocument, HelixWorkItem
 from .helix_mapper import map_helix_values_to_item
 from .helix_session import get_helix_session_cookie
 
@@ -378,10 +378,40 @@ def _build_arsql_sql(
     create_end_ms: int,
     limit: int,
     offset: int,
+    include_all_fields: bool = True,
+    disabled_fields: Optional[set[str]] = None,
     source_service_n1: Optional[List[str]] = None,
     incident_types: Optional[List[str]] = None,
     companies: Optional[List[str]] = None,
 ) -> str:
+    disabled = {str(x or "").strip() for x in (disabled_fields or set()) if str(x or "").strip()}
+
+    def _is_disabled(field_name: str) -> bool:
+        return str(field_name or "").strip() in disabled
+
+    def _field_ref(field_name: str) -> str:
+        return f"`HPD:Help Desk`.`{field_name}`"
+
+    def _first_available_field(candidates: List[str]) -> Optional[str]:
+        for name in candidates:
+            if not _is_disabled(name):
+                return name
+        return None
+
+    def _select_alias(
+        field_name: str,
+        alias: str,
+        *,
+        fallback_sql: str = "''",
+        assignee_case_when_blank: bool = False,
+    ) -> str:
+        if _is_disabled(field_name):
+            return f"{fallback_sql} AS `{alias}`"
+        ref = _field_ref(field_name)
+        if assignee_case_when_blank:
+            return f"CASE WHEN {ref} IS NULL THEN ' ' ELSE {ref} END AS `{alias}`"
+        return f"{ref} AS `{alias}`"
+
     start_sec = int(max(0, create_start_ms) // 1000)
     end_sec = int(max(start_sec, create_end_ms) // 1000)
     start_ms = int(max(0, create_start_ms))
@@ -395,27 +425,52 @@ def _build_arsql_sql(
             f"OR {field_sql} BETWEEN {start_ms} AND {end_ms})"
         )
 
-    where_parts: List[str] = [
-        "`HPD:Help Desk`.`BBVA_MarcaSmartIT` = 'SmartIT'",
-        "`HPD:Help Desk`.`Incident Number` IS NOT NULL",
-        "("
-        f"{_time_window('`HPD:Help Desk`.`Submit Date`')}"
-        f" OR {_time_window('`HPD:Help Desk`.`Last Modified Date`')}"
-        f" OR {_time_window('`HPD:Help Desk`.`BBVA_StartDateTime`')}"
-        f" OR {_time_window('`HPD:Help Desk`.`Closed Date`')}"
-        f" OR {_time_window('`HPD:Help Desk`.`Last Resolved Date`')}"
-        ")",
-    ]
+    where_parts: List[str] = []
+    if not _is_disabled("BBVA_MarcaSmartIT"):
+        where_parts.append(f"{_field_ref('BBVA_MarcaSmartIT')} = 'SmartIT'")
+    where_parts.append(f"{_field_ref('Incident Number')} IS NOT NULL")
 
-    source_filter = _sql_in_filter("`HPD:Help Desk`.`BBVA_SourceServiceN1`", source_service_n1)
+    time_field_candidates = [
+        "Submit Date",
+        "Last Modified Date",
+        "BBVA_StartDateTime",
+        "Closed Date",
+        "Last Resolved Date",
+    ]
+    time_clauses = [
+        _time_window(_field_ref(field_name))
+        for field_name in time_field_candidates
+        if not _is_disabled(field_name)
+    ]
+    if time_clauses:
+        where_parts.append("(" + " OR ".join(time_clauses) + ")")
+
+    source_filter_field = _first_available_field(["BBVA_SourceServiceN1", "BBVA_MatrixServiceN1"])
+    source_filter = (
+        _sql_in_filter(_field_ref(source_filter_field), source_service_n1)
+        if source_filter_field
+        else None
+    )
     if source_filter:
         where_parts.append(source_filter)
 
-    incident_type_filter = _sql_in_filter("`HPD:Help Desk`.`Service Type`", incident_types)
+    incident_type_filter = (
+        None
+        if _is_disabled("Service Type")
+        else _sql_in_filter(_field_ref("Service Type"), incident_types)
+    )
     if incident_type_filter:
         where_parts.append(incident_type_filter)
 
-    company_filter = _sql_in_filter("`HPD:Help Desk`.`Contact Company`", companies)
+    # Official Enterprise Web exports filter by "Servicio Origen - BU/UG", not by recognizer/customer company.
+    company_filter_field = _first_available_field(
+        ["BBVA_SourceServiceBUUG", "BBVA_SourceServiceCompany", "Contact Company"]
+    )
+    company_filter = (
+        _sql_in_filter(_field_ref(company_filter_field), companies)
+        if company_filter_field
+        else None
+    )
     if company_filter:
         where_parts.append(company_filter)
 
@@ -423,28 +478,42 @@ def _build_arsql_sql(
     safe_limit = max(1, int(limit))
     safe_offset = max(0, int(offset))
 
+    extra_select = ", *" if include_all_fields else ""
+    order_by_field = (
+        _first_available_field(
+            [
+                "Submit Date",
+                "Last Modified Date",
+                "Closed Date",
+                "Last Resolved Date",
+                "Incident Number",
+            ]
+        )
+        or "Incident Number"
+    )
+
     return (
         "SELECT "
-        "`HPD:Help Desk`.`Incident Number` AS `id`, "
-        "`HPD:Help Desk`.`Priority` AS `priority`, "
-        "`HPD:Help Desk`.`Description` AS `summary`, "
-        "`HPD:Help Desk`.`Status` AS `status`, "
-        "CASE WHEN `HPD:Help Desk`.`Assignee` IS NULL THEN ' ' "
-        "ELSE `HPD:Help Desk`.`Assignee` END AS `assignee`, "
-        "`HPD:Help Desk`.`Service Type` AS `incidentType`, "
-        "`HPD:Help Desk`.`ServiceCI` AS `service`, "
-        "`HPD:Help Desk`.`HPD_CI` AS `impactedService`, "
-        "`HPD:Help Desk`.`Contact Company` AS `customerName`, "
-        "`HPD:Help Desk`.`BBVA_MatrixServiceN1` AS `bbva_matrixservicen1`, "
-        "`HPD:Help Desk`.`BBVA_SourceServiceN1` AS `bbva_sourceservicen1`, "
-        "`HPD:Help Desk`.`BBVA_StartDateTime` AS `bbva_startdatetime`, "
-        "`HPD:Help Desk`.`Closed Date` AS `bbva_closeddate`, "
-        "`HPD:Help Desk`.`Last Modified Date` AS `lastModifiedDate`, "
-        "`HPD:Help Desk`.`Submit Date` AS `targetDate`, "
-        "`HPD:Help Desk`.`InstanceId` AS `workItemId` "
+        f"{_select_alias('Incident Number', 'id')}, "
+        f"{_select_alias('Priority', 'priority')}, "
+        f"{_select_alias('Description', 'summary')}, "
+        f"{_select_alias('Status', 'status')}, "
+        f"{_select_alias('Assignee', 'assignee', assignee_case_when_blank=True)}, "
+        f"{_select_alias('Service Type', 'incidentType')}, "
+        f"{_select_alias('ServiceCI', 'service')}, "
+        f"{_select_alias('HPD_CI', 'impactedService')}, "
+        f"{_select_alias('Contact Company', 'customerName')}, "
+        f"{_select_alias('BBVA_MatrixServiceN1', 'bbva_matrixservicen1')}, "
+        f"{_select_alias('BBVA_SourceServiceN1', 'bbva_sourceservicen1')}, "
+        f"{_select_alias('BBVA_StartDateTime', 'bbva_startdatetime')}, "
+        f"{_select_alias('Closed Date', 'bbva_closeddate')}, "
+        f"{_select_alias('Last Modified Date', 'lastModifiedDate')}, "
+        f"{_select_alias('Submit Date', 'targetDate')}, "
+        f"{_select_alias('InstanceId', 'workItemId')} "
+        f"{extra_select} "
         "FROM `HPD:Help Desk` "
         f"WHERE {where_sql} "
-        "ORDER BY `HPD:Help Desk`.`Submit Date` DESC "
+        f"ORDER BY {_field_ref(order_by_field)} DESC "
         f"LIMIT {safe_limit} OFFSET {safe_offset}"
     )
 
@@ -734,6 +803,47 @@ def _extract_total(payload: Any) -> Optional[int]:
             if got is not None:
                 return got
     return None
+
+
+def _arsql_missing_field_name_from_payload(payload: Any) -> str:
+    messages: List[Dict[str, Any]] = []
+    if isinstance(payload, list):
+        messages = [x for x in payload if isinstance(x, dict)]
+    elif isinstance(payload, dict):
+        for key in ("messages", "errors", "items"):
+            seq = payload.get(key)
+            if isinstance(seq, list):
+                messages.extend(x for x in seq if isinstance(x, dict))
+        if not messages:
+            messages = [payload]
+
+    for msg in messages:
+        joined = " ".join(
+            str(msg.get(k) or "")
+            for k in ("messageType", "messageText", "messageAppendedText", "messageNumber")
+        ).lower()
+        if "field does not exist" not in joined:
+            continue
+        appended = str(msg.get("messageAppendedText") or "")
+        m = re.search(r"<([^>]+)>", appended)
+        if m:
+            return str(m.group(1) or "").strip()
+        for key in ("field", "fieldName", "column", "name"):
+            cand = str(msg.get(key) or "").strip()
+            if cand:
+                return cand
+    return ""
+
+
+def _arsql_missing_field_name_from_response(resp: requests.Response) -> str:
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    name = _arsql_missing_field_name_from_payload(payload)
+    if name:
+        return name
+    return ""
 
 
 def _cookies_to_jar(session: requests.Session, cookie_header: str, host: str) -> List[str]:
@@ -1303,6 +1413,12 @@ def ingest_helix(
         "ENTERPRISE WEB" if query_mode == "arsql" else "",
     )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
+    arsql_include_all_fields = _parse_bool(
+        os.getenv("HELIX_ARSQL_SELECT_ALL_FIELDS", "true"),
+        default=True,
+    )
+    arsql_wide_fallback_used = False
+    arsql_disabled_fields: set[str] = set()
 
     def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
         size = int(page_chunk_size if page_chunk_size is not None else chunk_size)
@@ -1312,6 +1428,8 @@ def ingest_helix(
                 create_end_ms=create_end_ms,
                 limit=size,
                 offset=int(start_index),
+                include_all_fields=arsql_include_all_fields,
+                disabled_fields=arsql_disabled_fields,
                 source_service_n1=arsql_source_service_n1,
                 incident_types=incident_types_filter,
                 companies=arsql_companies,
@@ -1637,6 +1755,21 @@ def ingest_helix(
             )
 
         if r.status_code != 200:
+            if query_mode == "arsql":
+                missing_field = _arsql_missing_field_name_from_response(r)
+                if missing_field and missing_field not in arsql_disabled_fields:
+                    arsql_disabled_fields.add(missing_field)
+                    continue
+            if (
+                query_mode == "arsql"
+                and arsql_include_all_fields
+                and not arsql_wide_fallback_used
+                and page <= 1
+                and r.status_code in (400, 422)
+            ):
+                arsql_include_all_fields = False
+                arsql_wide_fallback_used = True
+                continue
             if _is_session_expired_response(r):
                 if session_refreshes >= max_session_refreshes:
                     return (
@@ -1732,13 +1865,17 @@ def ingest_helix(
     companies_q = ",".join(str(r.get("name") or "").strip() for r in company_rows if r) or "all"
     if query_mode == "arsql":
         source_service_q = ",".join(arsql_source_service_n1) or "all"
+        select_mode_q = "wide" if arsql_include_all_fields else "narrow"
+        disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
         doc.query = (
             "mode=arsql; "
             f"arsql_root={arsql_base_root}; "
             f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
             f"sourceServiceN1=[{source_service_q}]; "
             f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; "
-            f"page_limit={base_chunk_size}"
+            f"page_limit={base_chunk_size}; "
+            f"select={select_mode_q}; "
+            f"disabled_fields=[{disabled_fields_q}]"
         )
     else:
         doc.query = (

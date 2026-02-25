@@ -7,9 +7,9 @@ from typing import Any, Dict
 
 import pandas as pd
 
-from bug_resolution_radar.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.kpis import compute_kpis
+from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.ui.components.filters import apply_filters
 from bug_resolution_radar.ui.dashboard.state import FilterState, get_filter_state, open_only
 

@@ -10,11 +10,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from bug_resolution_radar.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
+    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -195,7 +196,8 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
 
 def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
-    points = build_age_bucket_points(ctx.open_df)
+    # Este gráfico debe incluir también estados finalistas; usa el scope filtrado completo.
+    points = build_age_bucket_points(ctx.dff)
     if points.empty:
         return None
 
@@ -461,7 +463,6 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         y="count",
         text="count",
         color="priority",
-        barmode="stack",
         title="Issues por Estado",
         category_orders={"status": ordered_statuses, "priority": priority_order},
         color_discrete_map=priority_color_map(),

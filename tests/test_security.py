@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bug_resolution_radar.security import sanitize_cookie_header, validate_service_base_url
+from bug_resolution_radar.common.security import sanitize_cookie_header, validate_service_base_url
 
 
 def test_validate_service_base_url_accepts_https_and_normalizes() -> None:

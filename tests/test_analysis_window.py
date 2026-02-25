@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from bug_resolution_radar.analysis_window import (
+from bug_resolution_radar.analytics.analysis_window import (
     apply_analysis_depth_filter,
     effective_analysis_lookback_months,
     max_available_backlog_days,

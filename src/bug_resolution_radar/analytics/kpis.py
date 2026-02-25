@@ -8,7 +8,7 @@ from typing import Any, Dict
 import pandas as pd
 import plotly.express as px
 
-from .config import Settings
+from bug_resolution_radar.config import Settings
 from .status_semantics import effective_closed_mask
 
 _DT_COLS = ("created", "updated", "resolved")

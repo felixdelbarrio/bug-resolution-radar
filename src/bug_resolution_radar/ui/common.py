@@ -9,8 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-from bug_resolution_radar.schema import IssuesDocument
-from bug_resolution_radar.status_semantics import effective_closed_mask
+from bug_resolution_radar.models.schema import IssuesDocument
+from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 
 # ----------------------------
 # Persistence: IssuesDocument
@@ -61,8 +61,23 @@ def _issues_to_dataframe(doc: IssuesDocument) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     for col in ["created", "updated", "resolved"]:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+            df[col] = _parse_datetime_utc_mixed(df[col])
     return df
+
+
+def _parse_datetime_utc_mixed(series: pd.Series) -> pd.Series:
+    """Parse mixed Jira/Helix datetime strings into UTC timestamps.
+
+    Jira and Helix payloads can coexist in the same column with different string
+    formats (e.g. Jira's "2026-01-01T12:34:56.000+0000" and Helix's ISO8601
+    "2026-01-01T12:34:56+00:00"). On pandas 2.x, mixed formats need
+    ``format='mixed'`` to avoid coercing one side to NaT.
+    """
+    try:
+        return pd.to_datetime(series, utc=True, errors="coerce", format="mixed")
+    except TypeError:
+        # Compatibility fallback for pandas versions without `format="mixed"`.
+        return pd.to_datetime(series, utc=True, errors="coerce")
 
 
 @lru_cache(maxsize=8)

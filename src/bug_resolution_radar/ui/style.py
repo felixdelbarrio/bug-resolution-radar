@@ -10,7 +10,7 @@ from typing import Any
 
 import streamlit as st
 
-from bug_resolution_radar.design_tokens import (
+from bug_resolution_radar.theme.design_tokens import (
     BBVA_DARK,
     BBVA_FONT_HEADLINE,
     BBVA_FONT_SANS,

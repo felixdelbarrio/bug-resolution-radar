@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.insights import SimilarityCluster
+from bug_resolution_radar.analytics.insights import SimilarityCluster
 from bug_resolution_radar.ui.insights.duplicates import (
     _dedupe_heuristic_clusters,
     _prepare_duplicates_payload,

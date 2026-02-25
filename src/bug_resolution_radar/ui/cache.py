@@ -89,3 +89,15 @@ def cached_by_signature(
     while len(bucket) > max_entries:
         bucket.popitem(last=False)
     return value, False
+
+
+def clear_signature_cache() -> int:
+    """Clear session-scoped aggregation cache and return removed entry count."""
+    root = st.session_state.get(_CACHE_ROOT_KEY)
+    removed = 0
+    if isinstance(root, dict):
+        for bucket in root.values():
+            if isinstance(bucket, OrderedDict):
+                removed += len(bucket)
+    st.session_state.pop(_CACHE_ROOT_KEY, None)
+    return int(removed)

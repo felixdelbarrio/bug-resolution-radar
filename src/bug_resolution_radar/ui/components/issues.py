@@ -9,7 +9,7 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.status_semantics import effective_closed_mask
+from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.ui.common import (
     chip_palette_for_color,
     chip_style_from_color,
@@ -497,7 +497,7 @@ def render_issue_table(dff: pd.DataFrame) -> None:
         if len(display_df) > MAX_TABLE_NATIVE_ROWS:
             st.caption(
                 f"Mostrando {MAX_TABLE_NATIVE_ROWS}/{len(display_df)} filas en pantalla. "
-                "Usa CSV para el dataset completo."
+                "Usa Excel para el dataset completo."
             )
             display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
         native_cols = list(show_cols)

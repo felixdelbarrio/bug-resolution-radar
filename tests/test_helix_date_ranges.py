@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from bug_resolution_radar.ingest.helix_ingest import (
+    _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
     _build_filter_criteria,
     _utc_year_create_date_range_ms,
@@ -79,5 +80,57 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
     assert (
         "`HPD:Help Desk`.`Service Type` IN ('User Service Restoration', 'Security Incident')" in sql
     )
-    assert "`HPD:Help Desk`.`Contact Company` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
+    assert ", * FROM `HPD:Help Desk`" in sql
     assert "LIMIT 75 OFFSET 150" in sql
+
+
+def test_build_arsql_sql_can_disable_wide_select() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=10,
+        offset=0,
+        include_all_fields=False,
+    )
+
+    assert ", * FROM `HPD:Help Desk`" not in sql
+
+
+def test_build_arsql_sql_falls_back_company_filter_when_source_buug_field_missing() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=10,
+        offset=0,
+        companies=["BBVA México"],
+        disabled_fields={"BBVA_SourceServiceBUUG"},
+    )
+
+    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" not in sql
+    assert "`HPD:Help Desk`.`BBVA_SourceServiceCompany` IN ('BBVA México')" in sql
+
+
+def test_build_arsql_sql_falls_back_company_filter_to_contact_company_as_last_resort() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=10,
+        offset=0,
+        companies=["BBVA México"],
+        disabled_fields={"BBVA_SourceServiceBUUG", "BBVA_SourceServiceCompany"},
+    )
+
+    assert "`HPD:Help Desk`.`Contact Company` IN ('BBVA México')" in sql
+
+
+def test_arsql_missing_field_name_from_payload_extracts_field_name() -> None:
+    payload = [
+        {
+            "messageType": "ERROR",
+            "messageText": "Field does not exist on current form",
+            "messageAppendedText": "HPD:Help Desk : <BBVA_SourceServiceBUUG>",
+            "messageNumber": 314,
+        }
+    ]
+    assert _arsql_missing_field_name_from_payload(payload) == "BBVA_SourceServiceBUUG"

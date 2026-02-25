@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 
 
 def _normalize_token(value: Any) -> str:
@@ -41,7 +42,7 @@ def _looks_like_smartit_id(value: str) -> bool:
 
 def _detect_smartit_id(values: Dict[str, Any]) -> str:
     """
-    Best-effort detection of the SmartIT internal id used in `/incident/<id>`.
+    Best-effort detection of the SmartIT internal id used in `/incidentPV/<id>`.
 
     ARSQL tenants may return the internal id under different column names, or even
     as an unnamed trailing column (e.g. `col_14`). Prefer IDs starting with `IDG`,
@@ -99,8 +100,8 @@ def _extract_text(value: Any) -> str:
 
 _STATUS_MAP: Dict[str, str] = {
     "assigned": "Analysing",
-    "resolved": "Ready to Deploy",
-    "closed": "Deployed",
+    "resolved": "Resolved",
+    "closed": "Closed",
     "new": "New",
     "open": "New",
     "in progress": "En progreso",
@@ -120,7 +121,7 @@ _STATUS_MAP: Dict[str, str] = {
     "borrador": "New",
     "cancelada": "Accepted",
     "cancelado": "Accepted",
-    "cerrado": "Deployed",
+    "cerrado": "Closed",
     "corregido": "Ready To Verify",
     "en cesta": "New",
     "en curso": "En progreso",
@@ -142,9 +143,9 @@ _STATUS_MAP: Dict[str, str] = {
     "pte autorizacion": "Blocked",
     "rechazado": "Accepted",
     "registrado": "New",
-    "resuelto": "Ready to Deploy",
+    "resuelto": "Resolved",
     "revision": "Ready To Verify",
-    "terminado": "Deployed",
+    "terminado": "Closed",
 }
 
 _CLOSED_TOKENS = (
@@ -171,7 +172,7 @@ def map_helix_status(raw_status: Any) -> str:
         return explicit
 
     if any(t in token for t in _CLOSED_TOKENS):
-        return "Deployed"
+        return "Closed"
     if any(t in token for t in _OPEN_TOKENS):
         return "New"
     return "New"
@@ -251,6 +252,11 @@ def _extract_custom_attr(values: Dict[str, Any], attr_name: str) -> str:
     if not attr_name_norm:
         return ""
 
+    # ARSQL responses may preserve original column casing instead of aliases.
+    for key, val in values.items():
+        if str(key or "").strip().lower() == attr_name_norm and val not in (None, ""):
+            return _extract_text(val)
+
     for key in ("customFields", "customAttributes", "customAttributeValues", "customAttributeMap"):
         container = values.get(key)
         if isinstance(container, dict):
@@ -278,6 +284,48 @@ def _extract_custom_attr(values: Dict[str, Any], attr_name: str) -> str:
                     or ""
                 )
     return ""
+
+
+def _json_safe_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_scalar(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _json_safe_scalar(v) for k, v in value.items()}
+    return _extract_text(value)
+
+
+def _raw_fields_snapshot(values: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for k, v in values.items():
+        key = str(k or "").strip()
+        if not key:
+            continue
+        # Keep snapshot sparse: most ARQL `SELECT *` fields are null/blank and storing
+        # them inflates `helix_dump.json` (disk, memory, serialization time) without
+        # adding value to the official export, which already creates headers even when
+        # row values are missing.
+        if v is None:
+            continue
+        if isinstance(v, str):
+            if not v.strip():
+                continue
+            out[key] = v
+            continue
+        if isinstance(v, (bool, int)):
+            out[key] = v
+            continue
+        if isinstance(v, float):
+            if math.isnan(v) or math.isinf(v):
+                continue
+            out[key] = v
+            continue
+        safe_value = _json_safe_scalar(v)
+        if safe_value in (None, "", [], {}):
+            continue
+        out[key] = safe_value
+    return out
 
 
 def map_helix_values_to_item(
@@ -324,7 +372,7 @@ def map_helix_values_to_item(
 
     base = str(base_url or "").strip().rstrip("/")
     if smartit_id and base:
-        url = f"{base}/app/#/incident/{smartit_id}"
+        url = f"{base}/app/#/incidentPV/{smartit_id}"
     else:
         url = str(ticket_console_url or f"{base}/app/#/ticket-console").strip()
 
@@ -357,4 +405,5 @@ def map_helix_values_to_item(
         country=country,
         source_alias=source_alias,
         source_id=source_id,
+        raw_fields=_raw_fields_snapshot(values),
     )

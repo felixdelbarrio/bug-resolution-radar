@@ -13,12 +13,13 @@ import plotly.express as px
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
+    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -26,7 +27,7 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
-from bug_resolution_radar.ui.dashboard.downloads import render_minimal_export_actions
+from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -675,19 +676,19 @@ def _render_trend_chart(
 
     if chart_id == "age_buckets":
         # Issue-level distribution by age bucket (one point per issue).
-        if open_df.empty or "created" not in open_df.columns:
+        if dff.empty or "created" not in dff.columns:
             st.info("No hay datos suficientes (created) para antigüedad con los filtros actuales.")
             return
 
         age_sig = dataframe_signature(
-            open_df,
+            dff,
             columns=("created", "status", "key", "summary", "priority"),
-            salt="trends.age_buckets.issues.v1",
+            salt="trends.age_buckets.issues.v2",
         )
         points, _ = cached_by_signature(
             "trends.age_buckets.points",
             age_sig,
-            lambda: build_age_bucket_points(open_df),
+            lambda: build_age_bucket_points(dff),
             max_entries=10,
         )
         if not isinstance(points, pd.DataFrame) or points.empty:
@@ -876,7 +877,6 @@ def _render_trend_chart(
             y="count",
             text="count",
             color="priority",
-            barmode="stack",
             category_orders={"status": status_order, "priority": priority_order},
             color_discrete_map=priority_color_map(),
         )

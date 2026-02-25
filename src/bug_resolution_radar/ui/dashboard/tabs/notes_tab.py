@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.notes import NotesStore
+from bug_resolution_radar.services.notes import NotesStore
 
 
 def render_notes_tab(*, dff: pd.DataFrame, notes: NotesStore) -> None:

@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from bug_resolution_radar.config import Settings, helix_sources, jira_sources, to_env_json
+from bug_resolution_radar.models.schema import IssuesDocument
+from bug_resolution_radar.models.schema_helix import HelixDocument
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
 from bug_resolution_radar.ui.insights.learning_store import (
     InsightsLearningStore,
     default_learning_path,
+)
+
+_CACHE_DEFS: tuple[tuple[str, str], ...] = (
+    ("issues", "Cache de issues normalizadas"),
+    ("helix", "Cache Helix (raw/normalizado)"),
+    ("learning", "Cache de aprendizaje (Insights)"),
 )
 
 
@@ -21,6 +29,10 @@ def _sid(value: object) -> str:
 def _helix_data_path(settings: Settings) -> Path:
     raw = str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip()
     return Path(raw or "data/helix.json")
+
+
+def _cache_defs() -> List[tuple[str, str]]:
+    return list(_CACHE_DEFS)
 
 
 def remove_jira_source_from_settings(settings: Settings, source_id: str) -> Tuple[Settings, bool]:
@@ -153,4 +165,91 @@ def source_cache_impact(settings: Settings, source_id: str) -> Dict[str, int]:
         "issues_records": int(issues_records),
         "helix_items": int(helix_items),
         "learning_scopes": int(learning_scopes),
+    }
+
+
+def cache_inventory(settings: Settings) -> List[Dict[str, Any]]:
+    """Return available persisted caches with current record counts and paths."""
+    issues_path = Path(
+        str(getattr(settings, "DATA_PATH", "data/issues.json") or "data/issues.json")
+    )
+    helix_path = _helix_data_path(settings)
+    learning_path = default_learning_path(settings)
+
+    issues_records = len(load_issues_doc(str(issues_path)).issues)
+
+    helix_items = 0
+    helix_doc = HelixRepo(helix_path).load()
+    if helix_doc is not None:
+        helix_items = len(helix_doc.items)
+
+    learning_store = InsightsLearningStore(learning_path)
+    learning_store.load()
+    learning_scopes = learning_store.count_all_scopes()
+
+    counts = {
+        "issues": int(issues_records),
+        "helix": int(helix_items),
+        "learning": int(learning_scopes),
+    }
+    paths = {
+        "issues": issues_path,
+        "helix": helix_path,
+        "learning": learning_path,
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for cache_id, label in _cache_defs():
+        rows.append(
+            {
+                "cache_id": cache_id,
+                "label": label,
+                "records": int(counts.get(cache_id, 0) or 0),
+                "path": str(paths.get(cache_id, "")),
+            }
+        )
+    return rows
+
+
+def reset_cache_store(settings: Settings, cache_id: str) -> Dict[str, Any]:
+    """Reset a persisted cache store to an empty state and report counters."""
+    target = str(cache_id or "").strip().lower()
+    inventory = {row["cache_id"]: row for row in cache_inventory(settings)}
+    if target not in inventory:
+        raise ValueError(f"Unsupported cache id: {cache_id}")
+
+    if target == "issues":
+        path = Path(str(getattr(settings, "DATA_PATH", "data/issues.json") or "data/issues.json"))
+        before_doc = load_issues_doc(str(path))
+        before = len(before_doc.issues)
+        save_issues_doc(str(path), IssuesDocument.empty())
+        after = len(load_issues_doc(str(path)).issues)
+    elif target == "helix":
+        path = _helix_data_path(settings)
+        repo = HelixRepo(path)
+        before_helix_doc = repo.load()
+        before = len(before_helix_doc.items) if before_helix_doc is not None else 0
+        repo.save(HelixDocument.empty())
+        after_helix_doc = repo.load()
+        after = len(after_helix_doc.items) if after_helix_doc is not None else 0
+    elif target == "learning":
+        path = default_learning_path(settings)
+        store = InsightsLearningStore(path)
+        store.load()
+        before = store.count_all_scopes()
+        store.clear_all()
+        store.save()
+        store.load()
+        after = store.count_all_scopes()
+    else:
+        raise ValueError(f"Unsupported cache id: {cache_id}")
+
+    row = inventory[target]
+    return {
+        "cache_id": target,
+        "label": str(row.get("label") or target),
+        "path": str(row.get("path") or ""),
+        "before": int(before),
+        "after": int(after),
+        "reset": int(max(0, before - after)),
     }
