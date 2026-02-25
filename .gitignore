@@ -12,6 +12,7 @@ build_bundle/
 release_bundle/
 bug-resolution-radar-macos.zip
 bug-resolution-radar-*.zip
+bug-resolution-radar.pkg
 
 .mypy_cache/
 .pytest_cache/

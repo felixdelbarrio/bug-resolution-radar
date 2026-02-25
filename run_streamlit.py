@@ -4,10 +4,44 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import runpy
 import sys
 from pathlib import Path
 
 from streamlit.web import cli as stcli
+
+
+def _maybe_run_choreographer_wrapper_passthrough() -> int | None:
+    """
+    Execute choreographer's Chromium pipe wrapper when the frozen app is invoked as a Python executable.
+
+    Kaleido/choreographer launches a helper on POSIX as:
+      [sys.executable, _unix_pipe_chromium_wrapper.py, <chrome>, ...]
+    In a PyInstaller app, ``sys.executable`` points to this bundled app binary, so
+    without this passthrough we accidentally relaunch Streamlit and open extra tabs.
+    """
+    if len(sys.argv) < 2:
+        return None
+
+    wrapper_path = Path(str(sys.argv[1] or ""))
+    if wrapper_path.name != "_unix_pipe_chromium_wrapper.py":
+        return None
+    if not wrapper_path.exists() or not wrapper_path.is_file():
+        return None
+
+    original_argv = list(sys.argv)
+    try:
+        # Emulate regular `python wrapper.py ...` argv semantics.
+        sys.argv = [str(wrapper_path), *original_argv[2:]]
+        runpy.run_path(str(wrapper_path), run_name="__main__")
+        return 0
+    except SystemExit as exc:
+        code = exc.code
+        if isinstance(code, int):
+            return int(code)
+        return 0
+    finally:
+        sys.argv = original_argv
 
 
 def _resolve_app_script() -> Path:
@@ -194,5 +228,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    wrapper_exit = _maybe_run_choreographer_wrapper_passthrough()
+    if wrapper_exit is not None:
+        raise SystemExit(wrapper_exit)
     mp.freeze_support()
     raise SystemExit(main())

@@ -107,6 +107,7 @@ ensure-build-tools:
 
 test-ppt-regression: ensure-build-tools
 	$(PYTEST) -q tests/test_executive_report_ppt.py -k "$(PPT_REGRESSION_TEST_EXPR)"
+	$(PYTEST) -q tests/test_run_streamlit_entrypoint.py
 
 build-local:
 	@case "$(HOST_UNAME)" in \
@@ -121,19 +122,20 @@ build-macos: test-ppt-regression
 		exit 1; \
 	fi
 	rm -rf dist_app build_app build_bundle/bug-resolution-radar-macos bug-resolution-radar-macos.zip
+	ROOT_DIR="$$(pwd)"; \
 	EXTRA_ARGS=(); \
 	if [ -d src/bug_resolution_radar/ui/assets ]; then \
-		EXTRA_ARGS+=(--add-data "src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets"); \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets"); \
 	else \
 		echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."; \
 	fi; \
 	if [ -f .env.example ]; then \
-		EXTRA_ARGS+=(--add-data ".env.example:."); \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.env.example:."); \
 	fi; \
 	if [ -f .streamlit/config.toml ]; then \
-		EXTRA_ARGS+=(--add-data ".streamlit/config.toml:.streamlit"); \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
-	$(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) run_streamlit.py
+	$(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) "$$ROOT_DIR/run_streamlit.py"
 	BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"; \
 	mkdir -p "$$BUNDLE_DIR/dist"; \
 	if [ -d dist_app/bug-resolution-radar.app ]; then \
@@ -164,19 +166,20 @@ build-linux: test-ppt-regression
 		exit 1; \
 	fi
 	rm -rf dist build build_bundle/bug-resolution-radar-linux
+	ROOT_DIR="$$(pwd)"; \
 	EXTRA_ARGS=(); \
 	if [ -d src/bug_resolution_radar/ui/assets ]; then \
-		EXTRA_ARGS+=(--add-data "src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets"); \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets"); \
 	else \
 		echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."; \
 	fi; \
 	if [ -f .env.example ]; then \
-		EXTRA_ARGS+=(--add-data ".env.example:."); \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.env.example:."); \
 	fi; \
 	if [ -f .streamlit/config.toml ]; then \
-		EXTRA_ARGS+=(--add-data ".streamlit/config.toml:.streamlit"); \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
-	$(PYINSTALLER) --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) run_streamlit.py
+	$(PYINSTALLER) --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) "$$ROOT_DIR/run_streamlit.py"
 	BUNDLE_DIR="build_bundle/bug-resolution-radar-linux"; \
 	mkdir -p "$$BUNDLE_DIR/dist"; \
 	cp dist/bug-resolution-radar "$$BUNDLE_DIR/dist/bug-resolution-radar"; \
@@ -203,7 +206,7 @@ run:
 	$(RUN) run app.py
 
 clean-build:
-	rm -rf dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip
+	rm -rf dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip bug-resolution-radar.pkg
 
 clean:
 	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache .coverage htmlcov
