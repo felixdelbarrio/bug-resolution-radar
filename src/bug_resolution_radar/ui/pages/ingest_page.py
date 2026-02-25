@@ -339,6 +339,11 @@ def render(settings: Settings) -> None:
         helix_path = _get_helix_path(settings)
         helix_repo = HelixRepo(Path(helix_path))
         stored_helix_doc = helix_repo.load() or HelixDocument.empty()
+        helix_browser = (
+            str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip() or "chrome"
+        )
+        helix_proxy = str(getattr(settings, "HELIX_PROXY", "") or "").strip()
+        helix_ssl_verify = str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip()
 
         col_h1, col_h2 = st.columns(2)
         with col_h1:
@@ -356,12 +361,12 @@ def render(settings: Settings) -> None:
                 with st.spinner("Probando fuentes Helix seleccionadas..."):
                     for src in helix_cfg_selected:
                         ok, msg, _ = ingest_helix(
-                            browser=str(src.get("browser", "chrome")).strip(),
+                            browser=helix_browser,
                             country=str(src.get("country", "")).strip(),
                             source_alias=str(src.get("alias", "")).strip(),
                             source_id=str(src.get("source_id", "")).strip(),
-                            proxy=str(src.get("proxy", "")).strip(),
-                            ssl_verify=str(src.get("ssl_verify", "true")).strip(),
+                            proxy=helix_proxy,
+                            ssl_verify=helix_ssl_verify,
                             service_origin_buug=src.get("service_origin_buug"),
                             service_origin_n1=src.get("service_origin_n1"),
                             service_origin_n2=src.get("service_origin_n2"),
@@ -384,12 +389,12 @@ def render(settings: Settings) -> None:
                 with st.spinner("Ingestando Helix para fuentes seleccionadas..."):
                     for src in helix_cfg_selected:
                         ok, msg, new_helix_doc = ingest_helix(
-                            browser=str(src.get("browser", "chrome")).strip(),
+                            browser=helix_browser,
                             country=str(src.get("country", "")).strip(),
                             source_alias=str(src.get("alias", "")).strip(),
                             source_id=str(src.get("source_id", "")).strip(),
-                            proxy=str(src.get("proxy", "")).strip(),
-                            ssl_verify=str(src.get("ssl_verify", "true")).strip(),
+                            proxy=helix_proxy,
+                            ssl_verify=helix_ssl_verify,
                             service_origin_buug=src.get("service_origin_buug"),
                             service_origin_n1=src.get("service_origin_n1"),
                             service_origin_n2=src.get("service_origin_n2"),

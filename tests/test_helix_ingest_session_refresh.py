@@ -541,15 +541,15 @@ def test_ingest_helix_arsql_infers_ir1_host_and_uses_dashboards_preflight(monkey
 
 def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -> None:
     opened_urls: list[str] = []
-    cookie_values = [None, None, "JSESSIONID=abc; XSRF-TOKEN=xyz; loginId=test-user"]
 
     def fake_open(url: str, browser: str) -> bool:
         opened_urls.append(f"{browser}:{url}")
         return True
 
     def fake_cookie(browser: str, host: str) -> str:
-        value = cookie_values.pop(0) if cookie_values else "JSESSIONID=abc; XSRF-TOKEN=xyz"
-        return str(value or "")
+        if not opened_urls:
+            return ""
+        return "JSESSIONID=abc; XSRF-TOKEN=xyz; loginId=test-user"
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
         return _FakeResponse(
@@ -577,3 +577,29 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
     assert "ingesta Helix OK" in msg
     assert opened_urls
     assert "/dashboards/" in opened_urls[0]
+
+
+def test_ingest_helix_does_not_open_invalid_dashboards_url_when_host_missing(
+    monkeypatch: Any,
+) -> None:
+    opened_urls: list[str] = []
+
+    def fake_open(url: str, browser: str) -> bool:
+        opened_urls.append(f"{browser}:{url}")
+        return True
+
+    monkeypatch.delenv("HELIX_ARSQL_BASE_URL", raising=False)
+    monkeypatch.delenv("HELIX_DASHBOARD_URL", raising=False)
+    monkeypatch.delenv("HELIX_ARSQL_DASHBOARD_URL", raising=False)
+    monkeypatch.setattr(helix_mod, "_open_url_in_configured_browser", fake_open)
+
+    ok, msg, _ = helix_mod.ingest_helix(
+        browser="chrome",
+        chunk_size=75,
+        dry_run=True,
+        create_date_year=2026,
+    )
+
+    assert ok is False
+    assert "no se pudo resolver host ARSQL" in msg
+    assert opened_urls == []

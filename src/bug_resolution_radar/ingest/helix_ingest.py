@@ -122,6 +122,8 @@ def _iso_from_epoch_ms(ms: int) -> str:
 
 
 def _open_url_in_configured_browser(url: str, browser: str) -> bool:
+    if not _root_from_url(url):
+        return False
     b = str(browser or "").strip().lower()
     browser_names = (
         ["chrome", "google-chrome", "google chrome"]
@@ -1168,7 +1170,8 @@ def ingest_helix(
             inferred_roots.append(dashboard_root)
         if "-smartit." in base_host:
             inferred_roots.append(f"{base_scheme}://{base_host.replace('-smartit.', '-ir1.', 1)}")
-        inferred_roots.append(f"{base_scheme}://{base_host}")
+        if base_host:
+            inferred_roots.append(f"{base_scheme}://{base_host}")
         arsql_base_candidates = _dedup_non_empty(inferred_roots)
         arsql_base_url = arsql_base_candidates[0] if arsql_base_candidates else ""
         if not arsql_base_url:
@@ -1177,6 +1180,8 @@ def ingest_helix(
     arsql_parsed = urlparse(arsql_base_url)
     host = arsql_parsed.hostname or base_host
     scheme = arsql_parsed.scheme or base_scheme
+    if not str(host or "").strip():
+        return False, f"{source_label}: no se pudo resolver host ARSQL.", None
     arsql_base_root = f"{scheme}://{host}"
     if not arsql_base_candidates:
         arsql_base_candidates = [arsql_base_root]
@@ -1194,6 +1199,7 @@ def ingest_helix(
         if dashboard_url_cfg
         else f"{arsql_base_root}{arsql_dashboard_path_default}"
     )
+    login_bootstrap_url = str(login_bootstrap_url or "").strip()
 
     session = requests.Session()
 
@@ -1302,6 +1308,11 @@ def ingest_helix(
         if existing:
             return existing, existing_host
 
+        if not _auth_cookie_hosts():
+            return None, ""
+        if not _root_from_url(login_bootstrap_url):
+            return None, ""
+
         _open_url_in_configured_browser(login_bootstrap_url, browser)
         deadline = time.monotonic() + float(login_wait_seconds)
         while time.monotonic() < deadline:
@@ -1322,9 +1333,19 @@ def ingest_helix(
 
     if not cookie:
         details = f" Detalle: {cookie_error}" if cookie_error else ""
+        hint = ""
+        if not _auth_cookie_hosts():
+            hint = (
+                " Revisa HELIX_DASHBOARD_URL (URL absoluta de SmartIT) " "o HELIX_ARSQL_BASE_URL."
+            )
+        elif not _root_from_url(login_bootstrap_url):
+            hint = (
+                " Revisa HELIX_DASHBOARD_URL/HELIX_ARSQL_DASHBOARD_URL: "
+                "la URL de bootstrap no es válida."
+            )
         return (
             False,
-            f"{source_label}: no se encontró cookie Helix válida en '{browser}'.{details}",
+            f"{source_label}: no se encontró cookie Helix válida en '{browser}'.{details}{hint}",
             None,
         )
 
@@ -1359,7 +1380,9 @@ def ingest_helix(
         except Exception:
             pass
 
-        refreshed_cookie_names = _cookies_to_jar(session, fresh_cookie, host=(fresh_cookie_host or host))
+        refreshed_cookie_names = _cookies_to_jar(
+            session, fresh_cookie, host=(fresh_cookie_host or host)
+        )
         if not _has_auth_cookie(refreshed_cookie_names):
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:

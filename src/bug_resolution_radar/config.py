@@ -393,9 +393,6 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
 def helix_sources(settings: Settings) -> List[Dict[str, str]]:
     countries = supported_countries(settings)
     rows = _parse_json_list(getattr(settings, "HELIX_SOURCES_JSON", ""))
-    global_browser = _coerce_str(settings.HELIX_BROWSER) or "chrome"
-    global_proxy = _coerce_str(settings.HELIX_PROXY)
-    global_ssl_verify = _coerce_str(settings.HELIX_SSL_VERIFY) or "true"
 
     out: List[Dict[str, str]] = []
     seen: set[str] = set()
@@ -416,9 +413,6 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             "source_id": sid,
             "country": country,
             "alias": alias,
-            "browser": global_browser,
-            "proxy": global_proxy,
-            "ssl_verify": global_ssl_verify,
         }
         if service_origin_buug:
             payload["service_origin_buug"] = service_origin_buug
