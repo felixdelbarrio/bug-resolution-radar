@@ -68,3 +68,41 @@ def test_binary_runtime_stability_config_binds_localhost(monkeypatch) -> None:
     assert os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] == "none"
     assert os.environ["STREAMLIT_SERVER_RUN_ON_SAVE"] == "false"
     assert os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] == "false"
+
+
+def test_start_binary_auto_shutdown_monitor_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_ON_LAST_SESSION", "false")
+
+    class _ThreadMustNotRun:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Thread should not be created when auto-shutdown is disabled")
+
+    monkeypatch.setattr(run_streamlit.threading, "Thread", _ThreadMustNotRun)
+    run_streamlit._start_binary_auto_shutdown_monitor()
+
+
+def test_start_binary_auto_shutdown_monitor_starts_daemon_thread(monkeypatch) -> None:
+    monkeypatch.delenv("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_ON_LAST_SESSION", raising=False)
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_GRACE_S", "7")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_POLL_S", "0.5")
+
+    captured: dict[str, object] = {}
+
+    class _FakeThread:
+        def __init__(self, *, target, kwargs, daemon, name):
+            captured["target"] = target
+            captured["kwargs"] = kwargs
+            captured["daemon"] = daemon
+            captured["name"] = name
+
+        def start(self) -> None:
+            captured["started"] = True
+
+    monkeypatch.setattr(run_streamlit.threading, "Thread", _FakeThread)
+    run_streamlit._start_binary_auto_shutdown_monitor()
+
+    assert captured["target"] is run_streamlit._binary_auto_shutdown_monitor_loop
+    assert captured["kwargs"] == {"grace_s": 7.0, "poll_s": 0.5}
+    assert captured["daemon"] is True
+    assert captured["name"] == "brr-auto-shutdown-monitor"
+    assert captured["started"] is True
