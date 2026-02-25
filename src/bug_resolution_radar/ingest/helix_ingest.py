@@ -45,6 +45,13 @@ _ARSQL_ENVIRONMENT_FIELD_CANDIDATES: tuple[str, ...] = (
     "BBVA_Entorno",
     "Entorno",
 )
+_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES: tuple[str, ...] = (
+    "Incidencia",
+    "Consulta",
+    "Evento Monitorización",
+)
+_ARSQL_OFFICIAL_ENVIRONMENTS: tuple[str, ...] = ("Production",)
+_ARSQL_OFFICIAL_TIME_FIELDS: tuple[str, ...] = ("Submit Date",)
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
@@ -1453,26 +1460,23 @@ def ingest_helix(
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    incident_types_default = (
-        "Incidencia,Consulta,Evento Monitorización"
-        if query_mode == "arsql"
-        else "User Service Restoration,Security Incident"
-    )
-    incident_types_filter = _csv_list(
-        os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default
-    )
-    allowed_business_incident_types = _csv_list(
-        os.getenv("HELIX_ALLOWED_BUSINESS_INCIDENT_TYPES"),
-        "Incidencia,Consulta,Evento Monitorización",
-    )
-    arsql_environments_filter = _csv_list(
-        os.getenv("HELIX_FILTER_ENVIRONMENTS"),
-        "Production" if query_mode == "arsql" else "",
-    )
-    arsql_time_fields = _csv_list(
-        os.getenv("HELIX_ARSQL_TIME_FIELDS"),
-        "Submit Date" if query_mode == "arsql" else "",
-    )
+    if query_mode == "arsql":
+        # Enterprise Web official extraction criteria: current natural year by creation date
+        # (Submit Date), Production environment, and business types present in the official
+        # workbook. Keep these fixed to avoid drift between app ingestion/export and the
+        # reference Excel.
+        incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+        allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+        arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
+        arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
+    else:
+        incident_types_filter = _csv_list(
+            os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
+            "User Service Restoration,Security Incident",
+        )
+        allowed_business_incident_types = []
+        arsql_environments_filter = []
+        arsql_time_fields = []
     buug_names = (
         _csv_list(service_origin_buug, "")
         if service_origin_buug is not None

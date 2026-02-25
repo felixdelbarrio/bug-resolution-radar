@@ -6,14 +6,13 @@ RUN=$(VENV)/bin/streamlit
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup install format lint typecheck test run clean
+.PHONY: help setup format lint typecheck test run clean
 
 help:
 	@echo ""
 	@echo "Bug Resolution Radar - comandos"
 	@echo ""
-	@echo "  make setup       Crea venv e instala dependencias + paquete editable"
-	@echo "  make install     Reinstala dependencias + paquete en el venv existente"
+	@echo "  make setup       Prepara/actualiza el entorno completo (venv + deps dev, incluye black)"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
 	@echo "  make format      Formatea el código (black, si está instalado)"
 	@echo "  make lint        Lint (ruff, si está instalado)"
@@ -26,18 +25,12 @@ help:
 	@echo ""
 
 setup:
-	$(PY) -m venv $(VENV)
+	@if [ ! -d $(VENV) ]; then $(PY) -m venv $(VENV); fi
 	$(PIP) install -U pip
-	$(PIP) install -r requirements.txt
-	$(PIP) install -e .
+	$(PIP) install -e ".[dev]"
 	@echo ""
 	@echo "Entorno listo."
 	@echo "Activa con: source .venv/bin/activate"
-
-install:
-	$(PIP) install -U pip
-	$(PIP) install -r requirements.txt
-	$(PIP) install -e .
 
 format:
 	@if [ -f $(VENV)/bin/black ]; then \
