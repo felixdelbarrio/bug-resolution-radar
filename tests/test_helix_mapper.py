@@ -188,7 +188,13 @@ def test_map_helix_incident_type_prefers_business_field_and_keeps_consulta() -> 
     assert map_helix_incident_type("Incident", values) == "Consulta"
     assert is_allowed_helix_business_incident_type("Consulta") is True
     assert is_allowed_helix_business_incident_type("Incidencia") is True
+    assert is_allowed_helix_business_incident_type("Evento Monitorización") is True
     assert is_allowed_helix_business_incident_type("Request") is False
+
+
+def test_map_helix_incident_type_maps_monitoring_event() -> None:
+    values = {"Tipo de Incidencia": "Evento Monitorización"}
+    assert map_helix_incident_type("Incident", values) == "Evento Monitorización"
 
 
 def test_map_helix_values_to_item_uses_configured_dashboard_url() -> None:

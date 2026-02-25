@@ -241,6 +241,11 @@ def map_helix_incident_type(raw_incident_type: Any, values: Optional[Dict[str, A
         token = _normalize_token(txt)
         if not token:
             continue
+        if (
+            "evento" in token and "monitor" in token
+            or token in {"monitoring event", "event monitoring"}
+        ):
+            return "Evento Monitorización"
         if "consulta" in token or token in {"consultation", "query", "question", "inquiry"}:
             return "Consulta"
         if (
@@ -256,7 +261,7 @@ def map_helix_incident_type(raw_incident_type: Any, values: Optional[Dict[str, A
 
 def is_allowed_helix_business_incident_type(value: Any) -> bool:
     token = _normalize_token(value)
-    return token in {"incidencia", "consulta"}
+    return token in {"incidencia", "consulta", "evento monitorizacion"}
 
 
 def _extract_person_name(value: Any) -> str:

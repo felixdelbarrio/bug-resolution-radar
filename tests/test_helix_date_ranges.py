@@ -92,7 +92,7 @@ def test_build_arsql_sql_falls_back_incident_type_filter_to_service_type_with_ma
         create_end_ms=2000,
         limit=25,
         offset=0,
-        incident_types=["Incidencia", "Consulta"],
+        incident_types=["Incidencia", "Consulta", "Evento Monitorización"],
         disabled_fields={
             "BBVA_Tipo_de_Incidencia",
             "BBVA_TipoDeIncidencia",
@@ -103,10 +103,33 @@ def test_build_arsql_sql_falls_back_incident_type_filter_to_service_type_with_ma
         },
     )
 
-    assert (
-        "`HPD:Help Desk`.`Service Type` IN ('Incident', 'Question', 'Consultation', 'Request', 'Service Request')"
-        in sql
+    assert "`HPD:Help Desk`.`Service Type` IN (" in sql
+    for token in (
+        "'Incident'",
+        "'Monitoring Event'",
+        "'Event'",
+        "'Evento Monitorización'",
+        "'Question'",
+        "'Consultation'",
+        "'Request'",
+        "'Service Request'",
+    ):
+        assert token in sql
+
+
+def test_build_arsql_sql_can_filter_submit_date_only_and_environment() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=25,
+        offset=0,
+        environments=["Production"],
+        time_fields=["Submit Date"],
     )
+
+    assert "`HPD:Help Desk`.`Submit Date` BETWEEN" in sql
+    assert "`HPD:Help Desk`.`Last Modified Date` BETWEEN" not in sql
+    assert "`HPD:Help Desk`.`BBVA_Environment` IN ('Production', 'Producción')" in sql
 
 
 def test_build_arsql_sql_can_disable_wide_select() -> None:
