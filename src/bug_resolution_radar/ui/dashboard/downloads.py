@@ -10,10 +10,15 @@ from typing import Any, Iterable, Literal, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
+from openpyxl.utils import get_column_letter
 
 from bug_resolution_radar.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
 
 EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
+EXCEL_DEFAULT_DATA_ROW_HEIGHT = 18.0
+EXCEL_DEFAULT_HEADER_ROW_HEIGHT = 20.0
+EXCEL_ID_COL_MIN_WIDTH = 18.0
+EXCEL_ID_COL_MAX_WIDTH = 26.0
 
 
 # -------------------------
@@ -173,6 +178,51 @@ def _safe_excel_sheet_name(name: str, *, used: set[str]) -> str:
     return candidate
 
 
+def _excel_text_len(value: Any) -> int:
+    if value is None:
+        return 0
+    return len(str(value))
+
+
+def _find_excel_id_column(df: pd.DataFrame) -> Optional[str]:
+    if df is None:
+        return None
+    for name in ("ID de la Incidencia", "key", "id"):
+        if name in df.columns:
+            return name
+    return None
+
+
+def _apply_excel_id_sizing(ws: Any, out_df: pd.DataFrame) -> None:
+    """Size workbook layout using the incident ID column instead of long text columns."""
+    if out_df is None or out_df.empty:
+        return
+
+    id_col_name = _find_excel_id_column(out_df)
+    if not id_col_name:
+        return
+
+    try:
+        id_col_idx = int(out_df.columns.get_loc(id_col_name)) + 1
+    except Exception:
+        return
+
+    col_letter = get_column_letter(id_col_idx)
+    max_chars = _excel_text_len(id_col_name)
+    for row_idx in range(2, ws.max_row + 1):
+        cell_val = ws.cell(row=row_idx, column=id_col_idx).value
+        max_chars = max(max_chars, _excel_text_len(cell_val))
+
+    target_width = min(EXCEL_ID_COL_MAX_WIDTH, max(EXCEL_ID_COL_MIN_WIDTH, float(max_chars + 2)))
+    ws.column_dimensions[col_letter].width = float(target_width)
+
+    ws.row_dimensions[1].height = EXCEL_DEFAULT_HEADER_ROW_HEIGHT
+    for row_idx in range(2, ws.max_row + 1):
+        id_val = ws.cell(row=row_idx, column=id_col_idx).value
+        line_count = max(1, str(id_val or "").count("\n") + 1)
+        ws.row_dimensions[row_idx].height = EXCEL_DEFAULT_DATA_ROW_HEIGHT * float(line_count)
+
+
 def _write_excel_sheet(
     writer: pd.ExcelWriter,
     *,
@@ -198,6 +248,7 @@ def _write_excel_sheet(
                 cell.number_format = EXCEL_DATETIME_NUMFMT
             elif isinstance(cell.value, date):
                 cell.number_format = EXCEL_DATETIME_NUMFMT
+    _apply_excel_id_sizing(ws, out_df)
     if out_df.empty or not link_specs:
         return
 

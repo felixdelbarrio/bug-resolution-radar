@@ -80,3 +80,23 @@ def test_df_to_excel_bytes_accepts_timezone_aware_datetimes() -> None:
     ws = wb["Issues"]
     assert ws["B2"].value is not None
     assert ws["B2"].number_format.lower() == "dd/mm/yyyy hh:mm:ss"
+
+
+def test_df_to_excel_bytes_sizes_by_id_not_by_long_summary() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "INC000104226433",
+                "summary": "Linea muy larga\n" * 20,
+            }
+        ]
+    )
+
+    xlsx = df_to_excel_bytes(df, sheet_name="Issues")
+    wb = load_workbook(BytesIO(xlsx))
+    ws = wb["Issues"]
+
+    # Row height is fixed from ID column (single line), not expanded by summary content.
+    assert float(ws.row_dimensions[2].height or 0.0) == 18.0
+    # ID/key column width is explicitly adjusted and capped.
+    assert 18.0 <= float(ws.column_dimensions["A"].width or 0.0) <= 26.0
