@@ -15,6 +15,7 @@ from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
+    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -450,24 +451,24 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         .reset_index(name="count")
         .sort_values(["status", "count"], ascending=[True, False])
     )
-    priority_order = sorted(
-        grouped["priority"].astype(str).unique().tolist(),
-        key=_priority_sort_key,
+    status_totals = (
+        grouped.groupby("status", dropna=False, observed=False)["count"]
+        .sum()
+        .reset_index(name="count")
     )
 
     fig = px.bar(
-        grouped,
+        status_totals,
         x="status",
         y="count",
         text="count",
-        color="priority",
-        barmode="stack",
+        color="status",
         title="Issues por Estado",
-        category_orders={"status": ordered_statuses, "priority": priority_order},
-        color_discrete_map=priority_color_map(),
+        category_orders={"status": ordered_statuses},
+        color_discrete_map=status_color_map(ordered_statuses),
     )
     fig.update_traces(textposition="inside", textfont=dict(size=12))
-    return apply_plotly_bbva(fig, showlegend=True)
+    return apply_plotly_bbva(fig, showlegend=False)
 
 
 def _insights_open_status_bar(ctx: ChartContext) -> List[str]:

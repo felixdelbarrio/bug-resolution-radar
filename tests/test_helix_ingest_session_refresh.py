@@ -339,7 +339,7 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
     assert "ingesta Helix OK" in msg
     assert doc is not None
     assert len(doc.items) == 3
-    assert doc.items[0].url.endswith("/app/#/incident/IDGE189LA8XVSATJYQ1ATJYQ1AVIXN")
+    assert doc.items[0].url.endswith("/app/#/incidentPV/IDGE189LA8XVSATJYQ1ATJYQ1AVIXN")
     assert offsets == [0, 2, 3]
 
 

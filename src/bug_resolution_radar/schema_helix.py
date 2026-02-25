@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +32,7 @@ class HelixWorkItem(BaseModel):
     country: str = ""
     source_alias: str = ""
     source_id: str = ""
+    raw_fields: Dict[str, Any] = Field(default_factory=dict)
 
 
 class HelixDocument(BaseModel):

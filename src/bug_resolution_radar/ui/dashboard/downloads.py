@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import html
+from io import BytesIO
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Any, Iterable, Literal, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
+from openpyxl.utils import get_column_letter
 
 from bug_resolution_radar.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+
+EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
+EXCEL_DEFAULT_DATA_ROW_HEIGHT = 18.0
+EXCEL_DEFAULT_HEADER_ROW_HEIGHT = 20.0
+EXCEL_ID_COL_MIN_WIDTH = 18.0
+EXCEL_ID_COL_MAX_WIDTH = 26.0
 
 
 # -------------------------
@@ -21,8 +29,9 @@ class CsvDownloadSpec:
     filename_prefix: str = "issues_filtradas"
     include_index: bool = False
     encoding: str = "utf-8"
-    mime: str = "text/csv"
+    mime: str = ""
     date_format: str = "%Y-%m-%d"
+    format: Literal["xlsx", "csv"] = "xlsx"
 
 
 def _safe_filename(s: str) -> str:
@@ -47,6 +56,279 @@ def _build_filename(prefix: str, *, suffix: str = "", ext: str = "csv") -> str:
     return f"{pref}{'_' + suf if suf else ''}_{ts}.{dot_ext}"
 
 
+def build_download_filename(prefix: str, *, suffix: str = "", ext: str = "csv") -> str:
+    """Public wrapper for timestamped export filenames."""
+    return _build_filename(prefix, suffix=suffix, ext=ext)
+
+
+def _csv_hyperlink_formula(url: object, label: object) -> str | None:
+    url_txt = str(url or "").strip()
+    if not url_txt:
+        return None
+    if not (url_txt.startswith("http://") or url_txt.startswith("https://")):
+        return None
+
+    label_txt = str(label or "").strip() or url_txt
+    safe_url = url_txt.replace('"', '""')
+    safe_label = label_txt.replace('"', '""')
+    return f'=HYPERLINK("{safe_url}","{safe_label}")'
+
+
+def _csv_key_as_link_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a CSV-safe copy where `key` becomes a hyperlink formula when `url` exists."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    if "key" not in df.columns or "url" not in df.columns:
+        return df
+
+    out = df.copy()
+    link_values = [
+        _csv_hyperlink_formula(url=row.get("url"), label=row.get("key"))
+        for _, row in out[["key", "url"]].iterrows()
+    ]
+    out["key"] = [
+        link if link is not None else str(orig if orig is not None else "")
+        for link, orig in zip(link_values, out["key"].tolist())
+    ]
+    # Once the link is embedded in `key`, the raw `url` column is redundant in the CSV export.
+    out = out.drop(columns=["url"], errors="ignore")
+    return out
+
+
+def _xlsx_link_specs_from_df(
+    df: pd.DataFrame,
+    *,
+    default_visible_col: str = "key",
+    default_url_col: str = "url",
+) -> list[tuple[str, str]]:
+    if df is None or df.empty:
+        return []
+    if default_visible_col in df.columns and default_url_col in df.columns:
+        return [(default_visible_col, default_url_col)]
+    return []
+
+
+def _prepare_excel_df_for_links(
+    df: pd.DataFrame,
+    *,
+    link_specs: Sequence[tuple[str, str]],
+) -> pd.DataFrame:
+    if df is None:
+        return pd.DataFrame()
+    out = df.copy()
+    url_cols_to_drop: list[str] = []
+    for visible_col, url_col in link_specs:
+        if visible_col in out.columns and url_col in out.columns:
+            url_cols_to_drop.append(url_col)
+    if url_cols_to_drop:
+        out = out.drop(columns=url_cols_to_drop, errors="ignore")
+    return out
+
+
+def _excel_safe_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        if value.tzinfo is not None:
+            return value.tz_convert("UTC").tz_localize(None).to_pydatetime()
+        return value.to_pydatetime()
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    return value
+
+
+def _excel_safe_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    out = df.copy()
+    for col in out.columns:
+        series = out[col]
+        try:
+            if isinstance(series.dtype, pd.DatetimeTZDtype):
+                out[col] = series.dt.tz_convert("UTC").dt.tz_localize(None)
+                continue
+            if pd.api.types.is_object_dtype(series.dtype):
+                out[col] = series.map(_excel_safe_scalar)
+        except Exception:
+            # Export path must be resilient even if a column has mixed/unexpected values.
+            out[col] = (
+                series.map(_excel_safe_scalar)
+                if pd.api.types.is_object_dtype(series.dtype)
+                else series
+            )
+    return out
+
+
+def _safe_excel_sheet_name(name: str, *, used: set[str]) -> str:
+    base = str(name or "Export").strip() or "Export"
+    cleaned = "".join(ch for ch in base if ch not in {":", "\\", "/", "?", "*", "[", "]"})
+    cleaned = cleaned[:31] or "Export"
+    candidate = cleaned
+    n = 2
+    while candidate in used:
+        suffix = f"_{n}"
+        candidate = (cleaned[: max(1, 31 - len(suffix))] + suffix)[:31]
+        n += 1
+    used.add(candidate)
+    return candidate
+
+
+def _excel_text_len(value: Any) -> int:
+    if value is None:
+        return 0
+    return len(str(value))
+
+
+def _find_excel_id_column(df: pd.DataFrame) -> Optional[str]:
+    if df is None:
+        return None
+    for name in ("ID de la Incidencia", "key", "id"):
+        if name in df.columns:
+            return name
+    return None
+
+
+def _apply_excel_id_sizing(ws: Any, out_df: pd.DataFrame) -> None:
+    """Size workbook layout using the incident ID column instead of long text columns."""
+    if out_df is None or out_df.empty:
+        return
+
+    id_col_name = _find_excel_id_column(out_df)
+    if not id_col_name:
+        return
+
+    try:
+        id_col_idx = int(out_df.columns.get_loc(id_col_name)) + 1
+    except Exception:
+        return
+
+    col_letter = get_column_letter(id_col_idx)
+    max_chars = _excel_text_len(id_col_name)
+    for row_idx in range(2, ws.max_row + 1):
+        cell_val = ws.cell(row=row_idx, column=id_col_idx).value
+        max_chars = max(max_chars, _excel_text_len(cell_val))
+
+    target_width = min(EXCEL_ID_COL_MAX_WIDTH, max(EXCEL_ID_COL_MIN_WIDTH, float(max_chars + 2)))
+    ws.column_dimensions[col_letter].width = float(target_width)
+
+    ws.row_dimensions[1].height = EXCEL_DEFAULT_HEADER_ROW_HEIGHT
+    for row_idx in range(2, ws.max_row + 1):
+        id_val = ws.cell(row=row_idx, column=id_col_idx).value
+        line_count = max(1, str(id_val or "").count("\n") + 1)
+        ws.row_dimensions[row_idx].height = EXCEL_DEFAULT_DATA_ROW_HEIGHT * float(line_count)
+
+
+def _write_excel_sheet(
+    writer: pd.ExcelWriter,
+    *,
+    sheet_name: str,
+    df: pd.DataFrame,
+    include_index: bool,
+    hyperlink_columns: Optional[Sequence[tuple[str, str]]] = None,
+) -> None:
+    src_df = pd.DataFrame() if df is None else df
+    link_specs = (
+        list(hyperlink_columns)
+        if hyperlink_columns is not None
+        else _xlsx_link_specs_from_df(src_df)
+    )
+    out_df = _prepare_excel_df_for_links(src_df, link_specs=link_specs)
+    out_df = _excel_safe_df(out_df)
+
+    out_df.to_excel(writer, index=include_index, sheet_name=sheet_name)
+    ws = writer.book[sheet_name]
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, datetime):
+                cell.number_format = EXCEL_DATETIME_NUMFMT
+            elif isinstance(cell.value, date):
+                cell.number_format = EXCEL_DATETIME_NUMFMT
+    _apply_excel_id_sizing(ws, out_df)
+    if out_df.empty or not link_specs:
+        return
+
+    col_positions = {str(col): idx + 1 for idx, col in enumerate(out_df.columns.tolist())}
+    row_offset = 2
+    for visible_col, url_col in link_specs:
+        if visible_col not in src_df.columns or url_col not in src_df.columns:
+            continue
+        target_col = col_positions.get(str(visible_col))
+        if target_col is None:
+            continue
+        labels = src_df[visible_col].tolist()
+        urls = src_df[url_col].tolist()
+        for row_idx, (label, url) in enumerate(zip(labels, urls), start=row_offset):
+            url_txt = str(url or "").strip()
+            if not (url_txt.startswith("http://") or url_txt.startswith("https://")):
+                continue
+            cell = ws.cell(row=row_idx, column=target_col)
+            cell.value = str(label or "").strip() or url_txt
+            cell.hyperlink = url_txt
+            cell.style = "Hyperlink"
+
+
+def dfs_to_excel_bytes(
+    sheets: Sequence[tuple[str, pd.DataFrame]],
+    *,
+    include_index: bool = False,
+    hyperlink_columns_by_sheet: Optional[dict[str, Sequence[tuple[str, str]]]] = None,
+) -> bytes:
+    """Convert multiple DataFrames into a single XLSX workbook."""
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        used_sheet_names: set[str] = set()
+        if not sheets:
+            _write_excel_sheet(
+                writer,
+                sheet_name=_safe_excel_sheet_name("Export", used=used_sheet_names),
+                df=pd.DataFrame(),
+                include_index=include_index,
+                hyperlink_columns=None,
+            )
+        for raw_sheet_name, df in sheets:
+            safe_sheet = _safe_excel_sheet_name(raw_sheet_name, used=used_sheet_names)
+            sheet_links = None
+            if hyperlink_columns_by_sheet:
+                sheet_links = hyperlink_columns_by_sheet.get(raw_sheet_name)
+                if sheet_links is None:
+                    sheet_links = hyperlink_columns_by_sheet.get(safe_sheet)
+            _write_excel_sheet(
+                writer,
+                sheet_name=safe_sheet,
+                df=df,
+                include_index=include_index,
+                hyperlink_columns=sheet_links,
+            )
+    return bio.getvalue()
+
+
+def df_to_excel_bytes(
+    df: pd.DataFrame,
+    *,
+    include_index: bool = False,
+    sheet_name: str = "Issues",
+    hyperlink_columns: Optional[Sequence[tuple[str, str]]] = None,
+) -> bytes:
+    """Convert DataFrame to XLSX bytes.
+
+    Hyperlinks are rendered as real spreadsheet links (not formulas shown as text).
+    By default, when columns `key` and `url` exist, `key` is clickable and `url` is hidden.
+    """
+    src_df = pd.DataFrame() if df is None else df
+    return dfs_to_excel_bytes(
+        [(sheet_name, src_df)],
+        include_index=include_index,
+        hyperlink_columns_by_sheet=(
+            {str(sheet_name): list(hyperlink_columns)} if hyperlink_columns is not None else None
+        ),
+    )
+
+
 def df_to_csv_bytes(
     df: pd.DataFrame, *, include_index: bool = False, encoding: str = "utf-8"
 ) -> bytes:
@@ -56,6 +338,8 @@ def df_to_csv_bytes(
     """
     if df is None:
         df = pd.DataFrame()
+    else:
+        df = _csv_key_as_link_df(df)
     csv: str = df.to_csv(index=include_index)
     return csv.encode(encoding, errors="replace")
 
@@ -63,7 +347,7 @@ def df_to_csv_bytes(
 def download_button_for_df(
     df: pd.DataFrame,
     *,
-    label: str = "⬇️ Descargar CSV",
+    label: str = "⬇️ Descargar Excel",
     key: str = "download_csv",
     spec: Optional[CsvDownloadSpec] = None,
     suffix: str = "",
@@ -83,17 +367,25 @@ def download_button_for_df(
 
     csv_spec = spec or CsvDownloadSpec()
 
-    fname = _build_filename(csv_spec.filename_prefix, suffix=suffix, ext="csv")
+    fmt = str(getattr(csv_spec, "format", "xlsx") or "xlsx").strip().lower()
+    if fmt not in {"xlsx", "csv"}:
+        fmt = "xlsx"
 
-    csv_bytes = df_to_csv_bytes(
-        df, include_index=csv_spec.include_index, encoding=csv_spec.encoding
-    )
+    fname = _build_filename(csv_spec.filename_prefix, suffix=suffix, ext=fmt)
+    if fmt == "csv":
+        payload = df_to_csv_bytes(
+            df, include_index=csv_spec.include_index, encoding=csv_spec.encoding
+        )
+        mime = csv_spec.mime or "text/csv"
+    else:
+        payload = df_to_excel_bytes(df, include_index=csv_spec.include_index, sheet_name="Issues")
+        mime = csv_spec.mime or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     st.download_button(
         label=label,
-        data=csv_bytes,
+        data=payload,
         file_name=fname,
-        mime=csv_spec.mime,
+        mime=mime,
         key=key,
         disabled=disabled,
         width=width,
@@ -353,10 +645,10 @@ def render_minimal_export_actions(
     if has_csv:
         buttons.append(
             {
-                "label": "CSV",
-                "data": df_to_csv_bytes(csv_safe),
-                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="csv"),
-                "mime": "text/csv",
+                "label": "Excel",
+                "data": df_to_excel_bytes(csv_safe, sheet_name="Datos"),
+                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="xlsx"),
+                "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "key": f"{key_prefix}::dl_csv_min",
                 "disabled": False,
                 "help": None,

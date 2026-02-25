@@ -112,7 +112,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         render_overview_tab(settings=settings, kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)
         render_status_priority_matrix(ctx.dff, ctx.fs, key_prefix="mx_overview")
     elif section == "issues":
-        render_issues_tab(dff=ctx.dff)
+        render_issues_tab(dff=ctx.dff, settings=settings)
     elif section == "kanban":
         render_kanban_tab(open_df=ctx.open_df)
     elif section == "trends":

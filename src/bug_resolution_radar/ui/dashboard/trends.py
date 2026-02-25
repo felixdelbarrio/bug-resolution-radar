@@ -19,6 +19,7 @@ from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
+    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -865,20 +866,20 @@ def _render_trend_chart(
             return
         status_order = status_order_raw if isinstance(status_order_raw, list) else []
 
-        priority_order = sorted(
-            grouped["priority"].astype(str).unique().tolist(),
-            key=_priority_sort_key,
+        status_totals = (
+            grouped.groupby("status", dropna=False, observed=False)["count"]
+            .sum()
+            .reset_index(name="count")
         )
 
         fig = px.bar(
-            grouped,
+            status_totals,
             x="status",
             y="count",
             text="count",
-            color="priority",
-            barmode="stack",
-            category_orders={"status": status_order, "priority": priority_order},
-            color_discrete_map=priority_color_map(),
+            color="status",
+            category_orders={"status": status_order},
+            color_discrete_map=status_color_map(status_order),
         )
         fig.update_layout(title_text="", xaxis_title="Estado", yaxis_title="Incidencias")
         fig.update_traces(textposition="inside", textfont=dict(size=10))
@@ -889,7 +890,7 @@ def _render_trend_chart(
             y_totals=[float(st_totals.get(s, 0)) for s in status_order],
             font_size=12,
         )
-        fig = apply_plotly_bbva(fig, showlegend=True)
+        fig = apply_plotly_bbva(fig, showlegend=False)
         render_minimal_export_actions(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
