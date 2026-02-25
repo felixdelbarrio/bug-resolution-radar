@@ -117,42 +117,6 @@ def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int
     return start_ms, end_ms, year_int
 
 
-def _build_filter_criteria(
-    organization: str,
-    create_start_ms: int,
-    create_end_ms: int,
-    *,
-    status_mappings: Optional[List[str]] = None,
-    incident_types: Optional[List[str]] = None,
-    priorities: Optional[List[str]] = None,
-    companies: Optional[List[Dict[str, str]]] = None,
-    risk_level: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    criteria: Dict[str, Any] = {
-        "organizations": [str(organization or "").strip()],
-        "createDateRanges": [{"start": int(create_start_ms), "end": int(create_end_ms)}],
-    }
-    if status_mappings:
-        criteria["statusMappings"] = [str(x).strip() for x in status_mappings if str(x).strip()]
-    if incident_types:
-        criteria["incidentTypes"] = [str(x).strip() for x in incident_types if str(x).strip()]
-    if priorities:
-        criteria["priorities"] = [str(x).strip() for x in priorities if str(x).strip()]
-    if companies:
-        valid_companies: List[Dict[str, str]] = []
-        for row in companies:
-            if not isinstance(row, dict):
-                continue
-            name = str(row.get("name") or "").strip()
-            if name:
-                valid_companies.append({"name": name})
-        if valid_companies:
-            criteria["companies"] = valid_companies
-    if risk_level:
-        criteria["riskLevel"] = [str(x).strip() for x in risk_level if str(x).strip()]
-    return criteria
-
-
 def _iso_from_epoch_ms(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
 
@@ -226,17 +190,6 @@ _ARSQL_SELECT_ALIASES: List[str] = [
     "targetDate",
     "workItemId",
 ]
-
-
-def _resolve_helix_query_mode(value: Any, *, has_arsql_uid: bool) -> str:
-    token = str(value or "").strip().lower()
-    if token in {"person_workitems", "person", "workitems", "v2"}:
-        return "person_workitems"
-    if token in {"arsql", "arsqlquery", "report_arsql", "dashboard_arsql"}:
-        return "arsql"
-    if token == "auto":
-        return "arsql" if has_arsql_uid else "person_workitems"
-    return "arsql" if has_arsql_uid else "person_workitems"
 
 
 def _sql_quote(value: str) -> str:
@@ -735,47 +688,6 @@ def _request(
     return r
 
 
-def _extract_objects(payload: Any) -> List[Dict[str, Any]]:
-    if isinstance(payload, list):
-        out: List[Dict[str, Any]] = []
-        for x in payload:
-            out.extend(_extract_objects(x))
-        return out
-
-    if not isinstance(payload, dict):
-        return []
-
-    v = payload.get("objects")
-    if isinstance(v, list):
-        return [x for x in v if isinstance(x, dict)]
-
-    items = payload.get("items")
-    if isinstance(items, list):
-        out2: List[Dict[str, Any]] = []
-        for it in items:
-            out2.extend(_extract_objects(it))
-        return out2
-
-    for k in ("workItems", "entries", "records", "results"):
-        v2 = payload.get(k)
-        if isinstance(v2, list):
-            out3: List[Dict[str, Any]] = []
-            for it in v2:
-                if isinstance(it, dict) and ("objects" in it or "items" in it):
-                    out3.extend(_extract_objects(it))
-                elif isinstance(it, dict):
-                    out3.append(it)
-            return out3
-
-    for vv in payload.values():
-        if isinstance(vv, (dict, list)):
-            got = _extract_objects(vv)
-            if got:
-                return got
-
-    return []
-
-
 def _column_name(column: Any, idx: int) -> str:
     if isinstance(column, str):
         name = column.strip()
@@ -1182,77 +1094,63 @@ def ingest_helix(
     base_scheme = parsed.scheme or "https"
 
     arsql_uid = str(os.getenv("HELIX_ARSQL_DATASOURCE_UID", "")).strip()
-    query_mode = _resolve_helix_query_mode(
-        os.getenv("HELIX_QUERY_MODE", "arsql"),
-        has_arsql_uid=bool(arsql_uid),
-    )
-
     host = base_host
     scheme = base_scheme
-    endpoint = f"{base}/rest/v2/person/workitems/get"
-    preflight_url = f"{base}/app/"
-    preflight_name = "/app/"
+    endpoint = ""
+    preflight_url = ""
+    preflight_name = "/dashboards/"
     arsql_base_root = ""
     arsql_base_candidates: List[str] = []
     # SmartIT ticket console is the right "safe landing" URL for work items.
     # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
     ticket_console_url = f"{base}/app/#/ticket-console"
     dashboard_url_cfg = str(os.getenv("HELIX_DASHBOARD_URL", "")).strip()
-    login_bootstrap_url = ticket_console_url
+    login_bootstrap_url = ""
     arsql_dashboard_path_default = "/dashboards/"
+    grafana_org_id_cfg = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
+    arsql_dashboard_url_cfg = str(os.getenv("HELIX_ARSQL_DASHBOARD_URL", "")).strip()
+    if not arsql_dashboard_url_cfg:
+        generic_dashboard_url = dashboard_url_cfg
+        if "/dashboards/" in generic_dashboard_url:
+            arsql_dashboard_url_cfg = generic_dashboard_url
+    arsql_base_url_raw = str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip()
+    if arsql_base_url_raw:
+        try:
+            arsql_base_url = validate_service_base_url(arsql_base_url_raw, service_name="Helix ARSQL")
+        except ValueError as e:
+            return False, f"{source_label}: {e}", None
+        arsql_base_candidates = [arsql_base_url]
+    else:
+        inferred_roots: List[str] = []
+        dashboard_root = _root_from_url(arsql_dashboard_url_cfg)
+        if dashboard_root:
+            inferred_roots.append(dashboard_root)
+        if "-smartit." in base_host:
+            inferred_roots.append(f"{base_scheme}://{base_host.replace('-smartit.', '-ir1.', 1)}")
+        inferred_roots.append(f"{base_scheme}://{base_host}")
+        arsql_base_candidates = _dedup_non_empty(inferred_roots)
+        arsql_base_url = arsql_base_candidates[0] if arsql_base_candidates else ""
+        if not arsql_base_url:
+            return False, f"{source_label}: no se pudo resolver host ARSQL.", None
 
-    if query_mode == "arsql":
-        grafana_org_id_cfg = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
-        arsql_dashboard_url_cfg = str(os.getenv("HELIX_ARSQL_DASHBOARD_URL", "")).strip()
-        if not arsql_dashboard_url_cfg:
-            generic_dashboard_url = dashboard_url_cfg
-            if "/dashboards/" in generic_dashboard_url:
-                arsql_dashboard_url_cfg = generic_dashboard_url
-        arsql_base_url_raw = str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip()
-        if arsql_base_url_raw:
-            try:
-                arsql_base_url = validate_service_base_url(
-                    arsql_base_url_raw, service_name="Helix ARSQL"
-                )
-            except ValueError as e:
-                return False, f"{source_label}: {e}", None
-            arsql_base_candidates = [arsql_base_url]
-        else:
-            inferred_roots: List[str] = []
-            dashboard_root = _root_from_url(arsql_dashboard_url_cfg)
-            if dashboard_root:
-                inferred_roots.append(dashboard_root)
-            if "-smartit." in base_host:
-                inferred_roots.append(
-                    f"{base_scheme}://{base_host.replace('-smartit.', '-ir1.', 1)}"
-                )
-            inferred_roots.append(f"{base_scheme}://{base_host}")
-            arsql_base_candidates = _dedup_non_empty(inferred_roots)
-            arsql_base_url = arsql_base_candidates[0] if arsql_base_candidates else ""
-            if not arsql_base_url:
-                return False, f"{source_label}: no se pudo resolver host ARSQL.", None
+    arsql_parsed = urlparse(arsql_base_url)
+    host = arsql_parsed.hostname or base_host
+    scheme = arsql_parsed.scheme or base_scheme
+    arsql_base_root = f"{scheme}://{host}"
+    if not arsql_base_candidates:
+        arsql_base_candidates = [arsql_base_root]
+    endpoint = _build_arsql_endpoint(arsql_base_root, arsql_uid) if arsql_uid else ""
+    preflight_url = f"{arsql_base_root}/dashboards/"
 
-        arsql_parsed = urlparse(arsql_base_url)
-        host = arsql_parsed.hostname or base_host
-        scheme = arsql_parsed.scheme or base_scheme
-        arsql_base_root = f"{scheme}://{host}"
-        if not arsql_base_candidates:
-            arsql_base_candidates = [arsql_base_root]
-        endpoint = _build_arsql_endpoint(arsql_base_root, arsql_uid) if arsql_uid else ""
-        preflight_url = f"{arsql_base_root}/dashboards/"
-        preflight_name = "/dashboards/"
-
-        if host == "itsmhelixbbva-ir1.onbmc.com":
-            org_id = grafana_org_id_cfg or "1175563307"
-            arsql_dashboard_path_default = (
-                "/dashboards/d/c6683c35-c8e4-4192-ac83-b63feab9599d/"
-                f"bbva-incident-report?orgId={org_id}"
-            )
-        login_bootstrap_url = arsql_dashboard_url_cfg or (
-            dashboard_url_cfg
-            if dashboard_url_cfg
-            else f"{arsql_base_root}{arsql_dashboard_path_default}"
+    if host == "itsmhelixbbva-ir1.onbmc.com":
+        org_id = grafana_org_id_cfg or "1175563307"
+        arsql_dashboard_path_default = (
+            "/dashboards/d/c6683c35-c8e4-4192-ac83-b63feab9599d/"
+            f"bbva-incident-report?orgId={org_id}"
         )
+    login_bootstrap_url = arsql_dashboard_url_cfg or (
+        dashboard_url_cfg if dashboard_url_cfg else f"{arsql_base_root}{arsql_dashboard_path_default}"
+    )
 
     session = requests.Session()
 
@@ -1289,24 +1187,21 @@ def ingest_helix(
             "Origin": f"{scheme}://{host}",
             "Referer": preflight_url,
             "X-Requested-With": "XMLHttpRequest",
-            "X-Requested-By": "undefined" if query_mode == "arsql" else "SmartIT",
+            "X-Requested-By": "undefined",
             "Pragma": "no-cache",
             "Cache-Control": "no-cache",
         }
     )
-    if query_mode == "arsql":
-        session.headers["X-AR-Client-Type"] = str(
-            os.getenv("HELIX_ARSQL_CLIENT_TYPE", "4021")
-        ).strip()
-        ds_auth = str(os.getenv("HELIX_ARSQL_DS_AUTH", "IMS-JWT JWT PLACEHOLDER")).strip()
-        if ds_auth:
-            session.headers["X-DS-Authorization"] = ds_auth
-        grafana_org_id = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
-        if grafana_org_id:
-            session.headers["X-Grafana-Org-Id"] = grafana_org_id
-        grafana_device_id = str(os.getenv("HELIX_ARSQL_GRAFANA_DEVICE_ID", "")).strip()
-        if grafana_device_id:
-            session.headers["X-Grafana-Device-Id"] = grafana_device_id
+    session.headers["X-AR-Client-Type"] = str(os.getenv("HELIX_ARSQL_CLIENT_TYPE", "4021")).strip()
+    ds_auth = str(os.getenv("HELIX_ARSQL_DS_AUTH", "IMS-JWT JWT PLACEHOLDER")).strip()
+    if ds_auth:
+        session.headers["X-DS-Authorization"] = ds_auth
+    grafana_org_id = str(os.getenv("HELIX_ARSQL_GRAFANA_ORG_ID", "")).strip()
+    if grafana_org_id:
+        session.headers["X-Grafana-Org-Id"] = grafana_org_id
+    grafana_device_id = str(os.getenv("HELIX_ARSQL_GRAFANA_DEVICE_ID", "")).strip()
+    if grafana_device_id:
+        session.headers["X-Grafana-Device-Id"] = grafana_device_id
 
     login_wait_seconds = max(
         5,
@@ -1487,23 +1382,14 @@ def ingest_helix(
 
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    if query_mode == "arsql":
-        # Enterprise Web official extraction criteria: current natural year by creation date
-        # (Submit Date), Production environment, and business types present in the official
-        # workbook. Keep these fixed to avoid drift between app ingestion/export and the
-        # reference Excel.
-        incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
-        allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
-        arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
-        arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
-    else:
-        incident_types_filter = _csv_list(
-            os.getenv("HELIX_FILTER_INCIDENT_TYPES"),
-            "User Service Restoration,Security Incident",
-        )
-        allowed_business_incident_types = []
-        arsql_environments_filter = []
-        arsql_time_fields = []
+    # Enterprise Web official extraction criteria: current natural year by creation date
+    # (Submit Date), Production environment, and business types present in the official
+    # workbook. Keep these fixed to avoid drift between app ingestion/export and the
+    # reference Excel.
+    incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+    allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+    arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
+    arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
     buug_names = (
         _csv_list(service_origin_buug, "")
         if service_origin_buug is not None
@@ -1511,42 +1397,13 @@ def ingest_helix(
     )
     companies_filter = [{"name": name} for name in buug_names]
 
-    attribute_names = [
-        "slaStatus",
-        "priority",
-        "incidentType",
-        "id",
-        "assignee",
-        "status",
-        "summary",
-        "service",
-    ]
-    custom_attribute_names = [
-        "bbva_closeddate",
-        "bbva_matrixservicen1",
-        "bbva_sourceservicen1",
-        "bbva_startdatetime",
-    ]
-
-    filter_criteria = _build_filter_criteria(
-        org,
-        create_start_ms,
-        create_end_ms,
-        status_mappings=_csv_list(os.getenv("HELIX_FILTER_STATUS_MAPPINGS"), "open,close"),
-        incident_types=incident_types_filter,
-        # Some Helix tenants reject unknown priority literals (ARException 1588).
-        # Keep priorities unfiltered by default; allow opt-in through env override.
-        priorities=_csv_list(os.getenv("HELIX_FILTER_PRIORITIES"), ""),
-        companies=companies_filter,
-    )
-
     arsql_source_service_n1 = _csv_list(
         (
             service_origin_n1
             if service_origin_n1 is not None
             else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1")
         ),
-        "ENTERPRISE WEB" if query_mode == "arsql" else "",
+        "ENTERPRISE WEB",
     )
     arsql_source_service_n2 = _csv_list(
         (
@@ -1566,33 +1423,25 @@ def ingest_helix(
 
     def make_body(start_index: int, page_chunk_size: Optional[int] = None) -> Dict[str, Any]:
         size = int(page_chunk_size if page_chunk_size is not None else chunk_size)
-        if query_mode == "arsql":
-            sql = _build_arsql_sql(
-                create_start_ms=create_start_ms,
-                create_end_ms=create_end_ms,
-                limit=size,
-                offset=int(start_index),
-                include_all_fields=arsql_include_all_fields,
-                disabled_fields=arsql_disabled_fields,
-                source_service_n1=arsql_source_service_n1,
-                source_service_n2=arsql_source_service_n2,
-                incident_types=incident_types_filter,
-                companies=arsql_companies,
-                environments=arsql_environments_filter,
-                time_fields=arsql_time_fields,
-            )
-            return {
-                "date_format": "DD/MM/YYYY",
-                "date_time_format": "DD/MM/YYYY HH:MM:SS",
-                "output_type": "Table",
-                "sql": sql,
-            }
+        sql = _build_arsql_sql(
+            create_start_ms=create_start_ms,
+            create_end_ms=create_end_ms,
+            limit=size,
+            offset=int(start_index),
+            include_all_fields=arsql_include_all_fields,
+            disabled_fields=arsql_disabled_fields,
+            source_service_n1=arsql_source_service_n1,
+            source_service_n2=arsql_source_service_n2,
+            incident_types=incident_types_filter,
+            companies=arsql_companies,
+            environments=arsql_environments_filter,
+            time_fields=arsql_time_fields,
+        )
         return {
-            "filterCriteria": filter_criteria,
-            "attributeNames": attribute_names,
-            "chunkInfo": {"startIndex": int(start_index), "chunkSize": size},
-            "customAttributeNames": custom_attribute_names,
-            "sortInfo": {},
+            "date_format": "DD/MM/YYYY",
+            "date_time_format": "DD/MM/YYYY HH:MM:SS",
+            "output_type": "Table",
+            "sql": sql,
         }
 
     connect_to, read_to = _get_timeouts(
@@ -1641,7 +1490,7 @@ def ingest_helix(
                 return uid, f"{candidate_scheme}://{candidate_host}"
         return "", arsql_base_root
 
-    if query_mode == "arsql" and not arsql_uid:
+    if not arsql_uid:
         arsql_uid, discovered_root = _discover_uid_across_candidates()
         if arsql_uid:
             arsql_base_root = discovered_root or arsql_base_root
@@ -1672,7 +1521,7 @@ def ingest_helix(
         if not arsql_uid:
             return (
                 False,
-                f"{source_label}: HELIX_QUERY_MODE=arsql no pudo autodetectar datasource uid. "
+                f"{source_label}: no se pudo autodetectar HELIX_ARSQL_DATASOURCE_UID. "
                 "Configura HELIX_ARSQL_DATASOURCE_UID o abre antes un dashboard Helix y reintenta.",
                 None,
             )
@@ -1762,7 +1611,7 @@ def ingest_helix(
             max(1, int(chunk_size)),
         ),
     )
-    base_chunk_size = arsql_limit if query_mode == "arsql" else max(1, int(chunk_size))
+    base_chunk_size = arsql_limit
     current_chunk_size = base_chunk_size
     min_chunk_limit = max(
         1,
@@ -1904,14 +1753,12 @@ def ingest_helix(
             )
 
         if r.status_code != 200:
-            if query_mode == "arsql":
-                missing_field = _arsql_missing_field_name_from_response(r)
-                if missing_field and missing_field not in arsql_disabled_fields:
-                    arsql_disabled_fields.add(missing_field)
-                    continue
+            missing_field = _arsql_missing_field_name_from_response(r)
+            if missing_field and missing_field not in arsql_disabled_fields:
+                arsql_disabled_fields.add(missing_field)
+                continue
             if (
-                query_mode == "arsql"
-                and arsql_include_all_fields
+                arsql_include_all_fields
                 and not arsql_wide_fallback_used
                 and page <= 1
                 and r.status_code in (400, 422)
@@ -1948,7 +1795,7 @@ def ingest_helix(
         page += 1
 
         data = r.json()
-        batch = _extract_arsql_rows(data) if query_mode == "arsql" else _extract_objects(data)
+        batch = _extract_arsql_rows(data)
         if not batch:
             break
 
@@ -1956,11 +1803,7 @@ def ingest_helix(
 
         new_in_page = 0
         for it in batch:
-            if query_mode == "arsql":
-                values = cast(Dict[str, Any], it if isinstance(it, dict) else {})
-            else:
-                values_raw = it.get("values")
-                values = cast(Dict[str, Any], values_raw if isinstance(values_raw, dict) else it)
+            values = cast(Dict[str, Any], it if isinstance(it, dict) else {})
             mapped_item = map_helix_values_to_item(
                 values=values,
                 base_url=base,
@@ -1972,13 +1815,12 @@ def ingest_helix(
             if mapped_item is None:
                 continue
             if (
-                query_mode == "arsql"
-                and allowed_business_incident_types
+                allowed_business_incident_types
                 and not is_allowed_helix_business_incident_type(mapped_item.incident_type)
             ):
                 filtered_out_by_business_incident_type += 1
                 continue
-            if query_mode == "arsql" and arsql_environments_filter:
+            if arsql_environments_filter:
                 env_raw = ""
                 raw_fields = mapped_item.raw_fields or {}
                 for env_key in ("BBVA_Environment", "BBVA_Entorno", "Entorno"):
@@ -2020,8 +1862,6 @@ def ingest_helix(
         if total is not None and (start >= total or len(seen_ids) >= total):
             break
         if total is None and batch_size < current_chunk_size:
-            if query_mode != "arsql":
-                break
             # Some tenants enforce a fixed page size (e.g. 25 rows) regardless of requested LIMIT.
             # In that case, keep paging using the effective page size until the API returns empty.
             current_chunk_size = int(batch_size)
@@ -2033,41 +1873,28 @@ def ingest_helix(
     doc.helix_base_url = base
     create_start_iso = _iso_from_epoch_ms(create_start_ms)
     create_end_iso = _iso_from_epoch_ms(create_end_ms)
-    status_mappings_q = (
-        ",".join(cast(List[str], filter_criteria.get("statusMappings", []))) or "all"
+    incident_types_q = ",".join(incident_types_filter) or "all"
+    companies_q = ",".join(str(r.get("name") or "").strip() for r in companies_filter if r) or "all"
+    source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
+    source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
+    arsql_environments_q = ",".join(arsql_environments_filter) or "all"
+    arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
+    select_mode_q = "wide" if arsql_include_all_fields else "narrow"
+    disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
+    doc.query = (
+        "mode=arsql; "
+        f"arsql_root={arsql_base_root}; "
+        f"organization=[{org}]; "
+        f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
+        f"timeFields=[{arsql_time_fields_q}]; "
+        f"sourceServiceN1=[{source_service_n1_q}]; "
+        f"sourceServiceN2=[{source_service_n2_q}]; "
+        f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
+        f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
+        f"page_limit={base_chunk_size}; "
+        f"select={select_mode_q}; "
+        f"disabled_fields=[{disabled_fields_q}]"
     )
-    incident_types_q = ",".join(cast(List[str], filter_criteria.get("incidentTypes", []))) or "all"
-    priorities_q = ",".join(cast(List[str], filter_criteria.get("priorities", []))) or "all"
-    company_rows = cast(List[Dict[str, str]], filter_criteria.get("companies", []))
-    companies_q = ",".join(str(r.get("name") or "").strip() for r in company_rows if r) or "all"
-    if query_mode == "arsql":
-        source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
-        source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
-        arsql_environments_q = ",".join(arsql_environments_filter) or "all"
-        arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
-        select_mode_q = "wide" if arsql_include_all_fields else "narrow"
-        disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
-        doc.query = (
-            "mode=arsql; "
-            f"arsql_root={arsql_base_root}; "
-            f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
-            f"timeFields=[{arsql_time_fields_q}]; "
-            f"sourceServiceN1=[{source_service_n1_q}]; "
-            f"sourceServiceN2=[{source_service_n2_q}]; "
-            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
-            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
-            f"page_limit={base_chunk_size}; "
-            f"select={select_mode_q}; "
-            f"disabled_fields=[{disabled_fields_q}]"
-        )
-    else:
-        doc.query = (
-            f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
-            f" (year={create_year}); statusMappings=[{status_mappings_q}]; "
-            f"incidentTypes=[{incident_types_q}]; priorities=[{priorities_q}]; "
-            f"companies=[{companies_q}]; "
-            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]"
-        )
 
     merged = {_item_merge_key(i): i for i in doc.items}
     for i in items:

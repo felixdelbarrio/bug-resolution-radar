@@ -30,10 +30,9 @@ class _FakeResponse:
 
 
 @pytest.fixture(autouse=True)
-def _default_query_mode_person_workitems(monkeypatch: Any) -> None:
-    monkeypatch.setenv("HELIX_QUERY_MODE", "person_workitems")
-    monkeypatch.delenv("HELIX_ARSQL_DATASOURCE_UID", raising=False)
-    monkeypatch.delenv("HELIX_ARSQL_BASE_URL", raising=False)
+def _default_arsql_setup(monkeypatch: Any) -> None:
+    monkeypatch.setenv("HELIX_ARSQL_DATASOURCE_UID", "ZFPVLzQnz")
+    monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "https://itsmhelixbbva-ir1.onbmc.com")
     monkeypatch.delenv("HELIX_ARSQL_DASHBOARD_URL", raising=False)
 
 
@@ -48,6 +47,7 @@ def test_is_session_expired_response_detects_known_error_marker() -> None:
 
 
 def test_ingest_helix_refreshes_session_and_retries_once(monkeypatch: Any) -> None:
+    columns = list(helix_mod._ARSQL_SELECT_ALIASES)
     responses = [
         _FakeResponse(
             403,
@@ -58,14 +58,26 @@ def test_ingest_helix_refreshes_session_and_retries_once(monkeypatch: Any) -> No
             200,
             payload={
                 "total": 1,
-                "objects": [
-                    {
-                        "values": {
-                            "id": "INC0001",
-                            "summary": "Issue de prueba",
-                            "status": "Open",
-                        }
-                    }
+                "columns": columns,
+                "rows": [
+                    [
+                        "INC0001",
+                        "Low",
+                        "Issue de prueba",
+                        "Open",
+                        "Ana",
+                        "Incidencia",
+                        "Service A",
+                        "Impact A",
+                        "BBVA México",
+                        "ENTERPRISE WEB",
+                        "ENTERPRISE WEB",
+                        1704067200000,
+                        None,
+                        1704067200000,
+                        1704067200000,
+                        "IDGTEST0001",
+                    ]
                 ],
             },
         ),
@@ -110,7 +122,7 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
         captured_bodies.append(kwargs.get("json"))
-        return _FakeResponse(200, payload={"total": 0, "objects": []})
+        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []})
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
@@ -136,66 +148,63 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
     assert "ingesta Helix OK" in msg
     assert captured_bodies
     body = captured_bodies[0]
-    assert body["attributeNames"] == [
-        "slaStatus",
-        "priority",
-        "incidentType",
-        "id",
-        "assignee",
-        "status",
-        "summary",
-        "service",
-    ]
-    assert body["customAttributeNames"] == [
-        "bbva_closeddate",
-        "bbva_matrixservicen1",
-        "bbva_sourceservicen1",
-        "bbva_startdatetime",
-    ]
-    assert body["chunkInfo"] == {"startIndex": 0, "chunkSize": 75}
-    assert body["sortInfo"] == {}
-    assert body["filterCriteria"]["statusMappings"] == ["open", "close"]
-    assert body["filterCriteria"]["incidentTypes"] == [
-        "User Service Restoration",
-        "Security Incident",
-    ]
-    assert body["filterCriteria"]["organizations"] == ["ENTERPRISE WEB SYSTEMS SERVICE OWNER"]
-    assert body["filterCriteria"]["companies"] == [{"name": "BBVA México"}]
-    assert "priorities" not in body["filterCriteria"]
-    assert "riskLevel" not in body["filterCriteria"]
+    assert body["output_type"] == "Table"
+    assert "sql" in body
+    sql = str(body["sql"])
+    assert "FROM `HPD:Help Desk`" in sql
+    assert "LIMIT 75 OFFSET 0" in sql
+    assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
+    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
 
 
 def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
     monkeypatch: Any,
 ) -> None:
-    captured_starts = []
+    captured_offsets = []
+    columns = list(helix_mod._ARSQL_SELECT_ALIASES)
+    def _row(prefix: str, idx: int) -> list[Any]:
+        return [
+            f"{prefix}{idx}",
+            "Low",
+            f"Issue {prefix}{idx}",
+            "Open",
+            "Ana",
+            "Incidencia",
+            "Service A",
+            "Impact A",
+            "BBVA México",
+            "ENTERPRISE WEB",
+            "ENTERPRISE WEB",
+            1704067200000,
+            None,
+            1704067200000,
+            1704067200000,
+            f"IDG{prefix}{idx}",
+        ]
     responses = [
         _FakeResponse(
             200,
             payload={
                 "total": 50,
-                "objects": [
-                    {"values": {"id": f"INC-A-{i}", "summary": "A", "status": "Open"}}
-                    for i in range(25)
-                ],
+                "columns": columns,
+                "rows": [_row("INC-A-", i) for i in range(25)],
             },
         ),
         _FakeResponse(
             200,
             payload={
                 "total": 50,
-                "objects": [
-                    {"values": {"id": f"INC-B-{i}", "summary": "B", "status": "Open"}}
-                    for i in range(25)
-                ],
+                "columns": columns,
+                "rows": [_row("INC-B-", i) for i in range(25)],
             },
         ),
     ]
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
         body = kwargs.get("json") or {}
-        chunk = body.get("chunkInfo") or {}
-        captured_starts.append(int(chunk.get("startIndex") or 0))
+        sql = str(body.get("sql") or "")
+        match = re.search(r"OFFSET\s+(\d+)", sql, flags=re.IGNORECASE)
+        captured_offsets.append(int(match.group(1)) if match else -1)
         return responses.pop(0)
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
@@ -223,7 +232,7 @@ def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
     assert doc is not None
     assert len(doc.items) == 50
     # First page starts at 0; second should advance by effective batch (25), not requested chunk (75).
-    assert captured_starts == [0, 25]
+    assert captured_offsets == [0, 25]
 
 
 def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
@@ -320,7 +329,6 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
         lambda browser, host: "apt.uid=abc; apt.sid=def; RSSO_OIDC_1=ghi",
     )
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
-    monkeypatch.setenv("HELIX_QUERY_MODE", "arsql")
     monkeypatch.setenv("HELIX_ARSQL_DATASOURCE_UID", "ZFPVLzQnz")
     monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "https://itsmhelixbbva-ir1.onbmc.com")
     monkeypatch.setenv("HELIX_ARSQL_LIMIT", "2")
@@ -407,7 +415,6 @@ def test_ingest_helix_arsql_pages_when_tenant_ignores_requested_limit(monkeypatc
         lambda browser, host: "apt.uid=abc; apt.sid=def; RSSO_OIDC_1=ghi",
     )
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
-    monkeypatch.setenv("HELIX_QUERY_MODE", "arsql")
     monkeypatch.setenv("HELIX_ARSQL_DATASOURCE_UID", "ZFPVLzQnz")
     monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "https://itsmhelixbbva-ir1.onbmc.com")
     monkeypatch.setenv("HELIX_ARSQL_LIMIT", "500")
@@ -436,7 +443,7 @@ def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> No
         session: requests.Session, method: str, url: str, timeout: Any, **kwargs: Any
     ) -> _FakeResponse:
         called_urls.append(url)
-        return _FakeResponse(200, payload={"total": 0, "objects": []}, url=url)
+        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}, url=url)
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         if url.endswith("/dashboards/api/datasources"):
@@ -461,7 +468,6 @@ def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> No
         lambda browser, host: "apt.uid=abc; apt.sid=def; RSSO_OIDC_1=ghi",
     )
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
-    monkeypatch.setenv("HELIX_QUERY_MODE", "arsql")
     monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "https://itsmhelixbbva-ir1.onbmc.com")
     monkeypatch.delenv("HELIX_ARSQL_DATASOURCE_UID", raising=False)
 
@@ -491,7 +497,7 @@ def test_ingest_helix_arsql_infers_ir1_host_and_uses_dashboards_preflight(monkey
         session: requests.Session, method: str, url: str, timeout: Any, **kwargs: Any
     ) -> _FakeResponse:
         called_urls.append(url)
-        return _FakeResponse(200, payload={"total": 0, "objects": []}, url=url)
+        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}, url=url)
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         get_urls.append(url)
@@ -512,7 +518,6 @@ def test_ingest_helix_arsql_infers_ir1_host_and_uses_dashboards_preflight(monkey
         lambda browser, host: "apt.uid=abc; apt.sid=def; RSSO_OIDC_1=ghi",
     )
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
-    monkeypatch.setenv("HELIX_QUERY_MODE", "arsql")
     monkeypatch.delenv("HELIX_ARSQL_BASE_URL", raising=False)
     monkeypatch.delenv("HELIX_ARSQL_DATASOURCE_UID", raising=False)
     monkeypatch.delenv("HELIX_ARSQL_DASHBOARD_URL", raising=False)
@@ -549,7 +554,7 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
         return str(value or "")
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
-        return _FakeResponse(200, payload={"total": 0, "objects": []})
+        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []})
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
@@ -558,7 +563,6 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
     monkeypatch.setattr(helix_mod, "_request", fake_request)
     monkeypatch.setattr(helix_mod, "get_helix_session_cookie", fake_cookie)
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
-    monkeypatch.setenv("HELIX_QUERY_MODE", "person_workitems")
     monkeypatch.setenv("HELIX_BROWSER_LOGIN_WAIT_SECONDS", "5")
     monkeypatch.setenv("HELIX_BROWSER_LOGIN_POLL_SECONDS", "0.5")
 
@@ -574,4 +578,4 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
     assert ok is True
     assert "ingesta Helix OK" in msg
     assert opened_urls
-    assert "/app/#/ticket-console" in opened_urls[0]
+    assert "/dashboards/" in opened_urls[0]

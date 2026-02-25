@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.config import Settings, helix_sources, jira_sources
+from bug_resolution_radar.config import (
+    Settings,
+    helix_sources,
+    jira_sources,
+    save_settings,
+    to_env_json,
+)
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
@@ -120,6 +127,33 @@ def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:
         (st.success if ok else st.error)(msg)
 
 
+def _parse_json_str_list(raw: object) -> List[str]:
+    txt = str(raw or "").strip()
+    if not txt:
+        return []
+    try:
+        payload = json.loads(txt)
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    out: List[str] = []
+    for item in payload:
+        sid = str(item or "").strip()
+        if sid and sid not in out:
+            out.append(sid)
+    return out
+
+
+def _persist_helix_ingest_disabled_sources(settings: Settings, disabled_source_ids: List[str]) -> Settings:
+    normalized = [str(x).strip() for x in disabled_source_ids if str(x).strip()]
+    new_settings = settings.model_copy(
+        update={"HELIX_INGEST_DISABLED_SOURCES_JSON": to_env_json(normalized)}
+    )
+    save_settings(new_settings)
+    return new_settings
+
+
 def render(settings: Settings) -> None:
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
     t_jira, t_helix = st.tabs(["Jira", "Helix"])
@@ -199,21 +233,94 @@ def render(settings: Settings) -> None:
     with t_helix:
         helix_cfg = helix_sources(settings)
         st.caption(f"Fuentes Helix configuradas: {len(helix_cfg)}")
-        _render_sources_preview(
-            helix_cfg,
-            [
-                "country",
-                "alias",
-                "base_url",
-                "organization",
-                "service_origin_buug",
-                "service_origin_n1",
-                "service_origin_n2",
-                "browser",
-                "proxy",
-                "ssl_verify",
-            ],
-        )
+        valid_helix_source_ids = [
+            str(src.get("source_id", "")).strip() for src in helix_cfg if str(src.get("source_id", "")).strip()
+        ]
+        disabled_helix_source_ids = [
+            sid
+            for sid in _parse_json_str_list(getattr(settings, "HELIX_INGEST_DISABLED_SOURCES_JSON", ""))
+            if sid in valid_helix_source_ids
+        ]
+        disabled_set = set(disabled_helix_source_ids)
+
+        if helix_cfg:
+            selector_df = pd.DataFrame(
+                [
+                    {
+                        "__ingest__": str(src.get("source_id", "")).strip() not in disabled_set,
+                        "__source_id__": str(src.get("source_id", "")).strip(),
+                        "country": str(src.get("country", "")).strip(),
+                        "alias": str(src.get("alias", "")).strip(),
+                        "organization": str(src.get("organization", "")).strip(),
+                        "service_origin_buug": str(src.get("service_origin_buug", "")).strip(),
+                        "service_origin_n1": str(src.get("service_origin_n1", "")).strip(),
+                        "service_origin_n2": str(src.get("service_origin_n2", "")).strip(),
+                    }
+                    for src in helix_cfg
+                ]
+            )
+            st.markdown("### Fuentes Helix a ingestar")
+            st.caption(
+                "Por defecto todas marcadas. Este selector se guarda automáticamente en el .env."
+            )
+            helix_selector = st.data_editor(
+                selector_df,
+                hide_index=True,
+                num_rows="fixed",
+                width="stretch",
+                key="ingest_helix_sources_selector",
+                column_order=[
+                    "__ingest__",
+                    "country",
+                    "alias",
+                    "organization",
+                    "service_origin_buug",
+                    "service_origin_n1",
+                    "service_origin_n2",
+                ],
+                disabled=[
+                    "__source_id__",
+                    "country",
+                    "alias",
+                    "organization",
+                    "service_origin_buug",
+                    "service_origin_n1",
+                    "service_origin_n2",
+                ],
+                column_config={
+                    "__ingest__": st.column_config.CheckboxColumn("Ingestar"),
+                    "country": st.column_config.TextColumn("country"),
+                    "alias": st.column_config.TextColumn("alias"),
+                    "organization": st.column_config.TextColumn("organization"),
+                    "service_origin_buug": st.column_config.TextColumn("Servicio Origen BU/UG"),
+                    "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1"),
+                    "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2"),
+                },
+            )
+            selected_helix_source_ids = {
+                str(row.get("__source_id__", "")).strip()
+                for row in helix_selector.to_dict(orient="records")
+                if bool(row.get("__ingest__", False)) and str(row.get("__source_id__", "")).strip()
+            }
+            new_disabled_helix_source_ids = [
+                sid for sid in valid_helix_source_ids if sid not in selected_helix_source_ids
+            ]
+            if new_disabled_helix_source_ids != disabled_helix_source_ids:
+                settings = _persist_helix_ingest_disabled_sources(
+                    settings, new_disabled_helix_source_ids
+                )
+                disabled_helix_source_ids = new_disabled_helix_source_ids
+            helix_cfg_selected = [
+                src
+                for src in helix_cfg
+                if str(src.get("source_id", "")).strip() not in set(disabled_helix_source_ids)
+            ]
+            st.caption(
+                f"Seleccionadas para ingesta Helix: {len(helix_cfg_selected)}/{len(helix_cfg)}"
+            )
+        else:
+            helix_cfg_selected = []
+            _render_sources_preview(helix_cfg, ["country", "alias", "organization"])
 
         helix_path = _get_helix_path(settings)
         helix_repo = HelixRepo(Path(helix_path))
@@ -228,10 +335,12 @@ def render(settings: Settings) -> None:
         if test_helix:
             if not helix_cfg:
                 st.error("No hay fuentes Helix configuradas.")
+            elif not helix_cfg_selected:
+                st.warning("No hay fuentes Helix seleccionadas para ingesta.")
             else:
                 messages = []
-                with st.spinner("Probando fuentes Helix..."):
-                    for src in helix_cfg:
+                with st.spinner("Probando fuentes Helix seleccionadas..."):
+                    for src in helix_cfg_selected:
                         ok, msg, _ = ingest_helix(
                             helix_base_url=str(src.get("base_url", "")).strip(),
                             browser=str(src.get("browser", "chrome")).strip(),
@@ -253,13 +362,15 @@ def render(settings: Settings) -> None:
         if run_helix:
             if not helix_cfg:
                 st.error("No hay fuentes Helix configuradas.")
+            elif not helix_cfg_selected:
+                st.warning("No hay fuentes Helix seleccionadas para ingesta.")
             else:
                 messages = []
                 success_count = 0
                 merged_helix = stored_helix_doc
                 issues_doc = load_issues_doc(settings.DATA_PATH)
-                with st.spinner("Ingestando Helix para todas las fuentes configuradas..."):
-                    for src in helix_cfg:
+                with st.spinner("Ingestando Helix para fuentes seleccionadas..."):
+                    for src in helix_cfg_selected:
                         ok, msg, new_helix_doc = ingest_helix(
                             helix_base_url=str(src.get("base_url", "")).strip(),
                             browser=str(src.get("browser", "chrome")).strip(),
@@ -292,7 +403,7 @@ def render(settings: Settings) -> None:
                     save_issues_doc(settings.DATA_PATH, issues_doc)
                     stored_helix_doc = merged_helix
                     st.success(
-                        f"Reingesta Helix finalizada: {success_count}/{len(helix_cfg)} fuentes OK. "
+                        f"Reingesta Helix finalizada: {success_count}/{len(helix_cfg_selected)} fuentes OK. "
                         f"Guardado en {helix_path} y {settings.DATA_PATH}."
                     )
                 else:

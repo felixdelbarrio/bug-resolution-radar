@@ -239,9 +239,8 @@ class Settings(BaseModel):
     # HELIX
     # -------------------------
     HELIX_SOURCES_JSON: str = "[]"
-    # legacy fallback (solo compatibilidad si no hay HELIX_SOURCES_JSON)
+    HELIX_INGEST_DISABLED_SOURCES_JSON: str = "[]"
     HELIX_BASE_URL: str = ""
-    HELIX_ORGANIZATION: str = ""
     HELIX_BROWSER: str = "chrome"
     HELIX_DATA_PATH: str = "data/helix_dump.json"
     HELIX_DASHBOARD_URL: str = (
@@ -261,7 +260,6 @@ class Settings(BaseModel):
     HELIX_MIN_CHUNK_SIZE: int = 10
     HELIX_MAX_PAGES: int = 200
     HELIX_MAX_INGEST_SECONDS: int = 900
-    HELIX_QUERY_MODE: str = "arsql"  # person_workitems|arsql|auto
     HELIX_ARSQL_BASE_URL: str = ""
     HELIX_ARSQL_DATASOURCE_UID: str = ""
     HELIX_ARSQL_SOURCE_SERVICE_N1: str = "ENTERPRISE WEB"
@@ -396,23 +394,23 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
 def helix_sources(settings: Settings) -> List[Dict[str, str]]:
     countries = supported_countries(settings)
     rows = _parse_json_list(getattr(settings, "HELIX_SOURCES_JSON", ""))
+    global_base_url = _coerce_str(getattr(settings, "HELIX_BASE_URL", ""))
+    global_browser = _coerce_str(settings.HELIX_BROWSER) or "chrome"
+    global_proxy = _coerce_str(settings.HELIX_PROXY)
+    global_ssl_verify = _coerce_str(settings.HELIX_SSL_VERIFY) or "true"
+    if not global_base_url:
+        return []
 
     out: List[Dict[str, str]] = []
     seen: set[str] = set()
     for row in rows:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
         alias = _coerce_str(row.get("alias"))
-        base_url = _coerce_str(row.get("base_url"))
         organization = _coerce_str(row.get("organization"))
         service_origin_buug = _coerce_str(row.get("service_origin_buug"))
         service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
         service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
-        browser = _coerce_str(row.get("browser")) or _coerce_str(settings.HELIX_BROWSER) or "chrome"
-        proxy = _coerce_str(row.get("proxy")) or _coerce_str(settings.HELIX_PROXY)
-        ssl_verify = (
-            _coerce_str(row.get("ssl_verify")) or _coerce_str(settings.HELIX_SSL_VERIFY) or "true"
-        )
-        if not country or not alias or not base_url or not organization:
+        if not country or not alias or not organization:
             continue
         sid = build_source_id("helix", country, alias)
         if sid in seen:
@@ -423,11 +421,11 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             "source_id": sid,
             "country": country,
             "alias": alias,
-            "base_url": base_url,
+            "base_url": global_base_url,
             "organization": organization,
-            "browser": browser,
-            "proxy": proxy,
-            "ssl_verify": ssl_verify,
+            "browser": global_browser,
+            "proxy": global_proxy,
+            "ssl_verify": global_ssl_verify,
         }
         if service_origin_buug:
             payload["service_origin_buug"] = service_origin_buug
@@ -437,29 +435,7 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             payload["service_origin_n2"] = service_origin_n2
         out.append(payload)
 
-    if out:
-        return out
-
-    # Compatibilidad con configuración Helix histórica.
-    base_url = _coerce_str(getattr(settings, "HELIX_BASE_URL", ""))
-    organization = _coerce_str(getattr(settings, "HELIX_ORGANIZATION", ""))
-    if base_url and organization:
-        country = countries[0] if countries else DEFAULT_SUPPORTED_COUNTRIES[0]
-        alias = "Helix principal"
-        return [
-            {
-                "source_type": "helix",
-                "source_id": build_source_id("helix", country, alias),
-                "country": country,
-                "alias": alias,
-                "base_url": base_url,
-                "organization": organization,
-                "browser": _coerce_str(settings.HELIX_BROWSER) or "chrome",
-                "proxy": _coerce_str(settings.HELIX_PROXY),
-                "ssl_verify": _coerce_str(settings.HELIX_SSL_VERIFY) or "true",
-            }
-        ]
-    return []
+    return out
 
 
 def all_configured_sources(
