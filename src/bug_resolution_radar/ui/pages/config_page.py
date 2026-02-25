@@ -263,7 +263,7 @@ def _render_source_delete_container(
     with st.container(border=True, key=f"{key_prefix}_delete_shell"):
         st.markdown("#### Zona segura de eliminación")
         st.caption(
-            "La eliminación se ejecuta al pulsar Guardar configuración. "
+            "La eliminación se ejecuta al pulsar Guardar en esta pestaña. "
             "El saneado de cache asociado se aplica siempre."
         )
 
@@ -610,6 +610,24 @@ def _clear_delete_confirmation_widget_state() -> None:
         st.session_state.pop(key, None)
 
 
+def _clear_jira_delete_widget_state() -> None:
+    for key in (
+        "cfg_jira_delete_confirm",
+        "cfg_jira_delete_phrase",
+        "cfg_jira_sources_editor",
+    ):
+        st.session_state.pop(key, None)
+
+
+def _clear_helix_delete_widget_state() -> None:
+    for key in (
+        "cfg_helix_delete_confirm",
+        "cfg_helix_delete_phrase",
+        "cfg_helix_sources_editor",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _clear_cache_reset_widget_state() -> None:
     for key in (
         "cfg_cache_reset_editor",
@@ -621,11 +639,8 @@ def _clear_cache_reset_widget_state() -> None:
 
 def _clear_config_delete_widget_state() -> None:
     _clear_delete_confirmation_widget_state()
-    for key in (
-        "cfg_jira_sources_editor",
-        "cfg_helix_sources_editor",
-    ):
-        st.session_state.pop(key, None)
+    _clear_jira_delete_widget_state()
+    _clear_helix_delete_widget_state()
 
 
 def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
@@ -683,7 +698,6 @@ def render(settings: Settings) -> None:
     countries = supported_countries(settings)
     jira_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
     helix_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
-    cache_reset_cfg: Dict[str, Any] = {"cache_ids": [], "armed": False, "valid": True}
     analysis_max_months = 1
     analysis_selected_months = 1
     _inject_delete_zone_css()
@@ -693,7 +707,7 @@ def render(settings: Settings) -> None:
 
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
     with st.container(key="cfg_tabs_shell"):
-        t_prefs, t_jira, t_helix = st.tabs(["Preferencias", "Jira", "Helix"])
+        t_prefs, t_jira, t_helix, t_caches = st.tabs(["Preferencias", "Jira", "Helix", "Caches"])
 
     with t_jira:
         st.markdown("### Jira global")
@@ -753,6 +767,63 @@ def render(settings: Settings) -> None:
             selected_label_by_id=jira_delete_labels,
             key_prefix="cfg_jira",
         )
+
+        jira_save_help = None
+        if not bool(jira_delete_cfg.get("valid", True)):
+            jira_save_help = (
+                "Completa la confirmación de eliminación (checkbox + texto ELIMINAR) "
+                "o limpia esos campos para continuar."
+            )
+        if st.button(
+            "💾 Guardar configuración",
+            key="cfg_save_jira_btn",
+            disabled=not bool(jira_delete_cfg.get("valid", True)),
+            help=jira_save_help,
+        ):
+            jira_clean, jira_errors = _normalize_jira_rows(jira_editor, countries)
+            if jira_errors:
+                for err in jira_errors:
+                    st.error(err)
+                return
+
+            new_settings = _safe_update_settings(
+                settings,
+                {
+                    "JIRA_BASE_URL": str(jira_base).strip(),
+                    "JIRA_BROWSER": str(jira_browser).strip(),
+                    "JIRA_SOURCES_JSON": to_env_json(jira_clean),
+                },
+            )
+            save_settings(new_settings)
+
+            any_deletion = False
+            if bool(jira_delete_cfg.get("armed", False)):
+                jira_delete_sids = [
+                    str(x).strip() for x in jira_delete_cfg.get("source_ids", []) if str(x).strip()
+                ]
+                if jira_delete_sids:
+                    any_deletion = True
+                    jira_purge_total = {
+                        "issues_removed": 0,
+                        "helix_items_removed": 0,
+                        "learning_scopes_removed": 0,
+                    }
+                    for delete_sid in jira_delete_sids:
+                        purge_stats = purge_source_cache(new_settings, delete_sid)
+                        jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
+                    st.success(f"Fuentes Jira eliminadas: {len(jira_delete_sids)}. Cache saneado.")
+                    _render_purge_stats(jira_purge_total)
+
+            if any_deletion:
+                _clear_jira_delete_widget_state()
+                st.session_state["__cfg_flash_success"] = (
+                    "Configuración Jira y eliminación aplicadas."
+                )
+            else:
+                for key in ("cfg_jira_delete_confirm", "cfg_jira_delete_phrase"):
+                    st.session_state.pop(key, None)
+                st.session_state["__cfg_flash_success"] = "Configuración Jira guardada."
+            st.rerun()
 
     with t_helix:
         st.markdown("### Helix defaults")
@@ -884,6 +955,69 @@ def render(settings: Settings) -> None:
             key_prefix="cfg_helix",
         )
 
+        helix_save_help = None
+        if not bool(helix_delete_cfg.get("valid", True)):
+            helix_save_help = (
+                "Completa la confirmación de eliminación (checkbox + texto ELIMINAR) "
+                "o limpia esos campos para continuar."
+            )
+        if st.button(
+            "💾 Guardar configuración",
+            key="cfg_save_helix_btn",
+            disabled=not bool(helix_delete_cfg.get("valid", True)),
+            help=helix_save_help,
+        ):
+            helix_clean, helix_errors = _normalize_helix_rows(helix_editor, countries)
+            if helix_errors:
+                for err in helix_errors:
+                    st.error(err)
+                return
+
+            new_settings = _safe_update_settings(
+                settings,
+                {
+                    "HELIX_SOURCES_JSON": to_env_json(helix_clean),
+                    "HELIX_BROWSER": str(helix_default_browser).strip(),
+                    "HELIX_PROXY": str(helix_default_proxy).strip(),
+                    "HELIX_SSL_VERIFY": str(helix_default_ssl_verify).strip().lower(),
+                    "HELIX_QUERY_MODE": str(helix_query_mode).strip().lower(),
+                    "HELIX_DATA_PATH": str(helix_data_path).strip(),
+                    "HELIX_DASHBOARD_URL": str(helix_dashboard_url).strip(),
+                },
+            )
+            save_settings(new_settings)
+
+            any_deletion = False
+            if bool(helix_delete_cfg.get("armed", False)):
+                helix_delete_sids = [
+                    str(x).strip() for x in helix_delete_cfg.get("source_ids", []) if str(x).strip()
+                ]
+                if helix_delete_sids:
+                    any_deletion = True
+                    helix_purge_total = {
+                        "issues_removed": 0,
+                        "helix_items_removed": 0,
+                        "learning_scopes_removed": 0,
+                    }
+                    for delete_sid in helix_delete_sids:
+                        purge_stats = purge_source_cache(new_settings, delete_sid)
+                        helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
+                    st.success(
+                        f"Fuentes Helix eliminadas: {len(helix_delete_sids)}. Cache saneado."
+                    )
+                    _render_purge_stats(helix_purge_total)
+
+            if any_deletion:
+                _clear_helix_delete_widget_state()
+                st.session_state["__cfg_flash_success"] = (
+                    "Configuración Helix y eliminación aplicadas."
+                )
+            else:
+                for key in ("cfg_helix_delete_confirm", "cfg_helix_delete_phrase"):
+                    st.session_state.pop(key, None)
+                st.session_state["__cfg_flash_success"] = "Configuración Helix guardada."
+            st.rerun()
+
     with t_prefs:
         with st.container(key="cfg_prefs_shell"):
             st.markdown("### Favoritos (Tendencias)")
@@ -911,17 +1045,37 @@ def render(settings: Settings) -> None:
                 st.markdown("#### Profundidad del análisis")
                 analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
                 month_options = _analysis_month_steps(analysis_max_months)
-                analysis_selected_months = st.select_slider(
-                    "Meses analizados en backlog",
-                    options=month_options,
-                    value=_nearest_option(analysis_selected_months, options=month_options),
-                    key="cfg_analysis_depth_months",
-                    format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
-                    help=(
-                        "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
-                        "Si lo dejas al máximo, se usa toda la profundidad disponible."
-                    ),
-                )
+                if len(month_options) <= 1:
+                    only_month = int(month_options[0]) if month_options else 1
+                    analysis_selected_months = only_month
+                    st.session_state["cfg_analysis_depth_months"] = only_month
+                    st.selectbox(
+                        "Meses analizados en backlog",
+                        options=[only_month],
+                        index=0,
+                        key="cfg_analysis_depth_months_single",
+                        disabled=True,
+                        format_func=lambda m: (
+                            f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses"
+                        ),
+                        help=(
+                            "Se habilita automáticamente cuando exista histórico suficiente "
+                            "en la caché de incidencias."
+                        ),
+                    )
+                else:
+                    st.session_state.pop("cfg_analysis_depth_months_single", None)
+                    analysis_selected_months = st.select_slider(
+                        "Meses analizados en backlog",
+                        options=month_options,
+                        value=_nearest_option(analysis_selected_months, options=month_options),
+                        key="cfg_analysis_depth_months",
+                        format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
+                        help=(
+                            "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
+                            "Si lo dejas al máximo, se usa toda la profundidad disponible."
+                        ),
+                    )
                 if int(analysis_selected_months) >= int(analysis_max_months):
                     st.caption("Estado: profundidad máxima disponible (modo automático).")
                 else:
@@ -993,184 +1147,106 @@ def render(settings: Settings) -> None:
                         key="cfg_trend_fav_3",
                     )
 
-            with st.container(key="cfg_prefs_card_cache_reset"):
-                st.markdown("#### Mantenimiento de caché")
-                cache_rows = _rows_from_cache_inventory(settings)
-                cache_df = pd.DataFrame(
-                    cache_rows
-                    or [
-                        {
-                            "__reset__": False,
-                            "__cache_id__": "",
-                            "cache": "Sin caches configurados",
-                            "registros": 0,
-                            "ruta": "",
-                        }
-                    ]
+            if st.button("💾 Guardar configuración", key="cfg_save_prefs_btn"):
+                summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
+                analysis_lookback_months_to_store = (
+                    0
+                    if int(analysis_selected_months) >= int(analysis_max_months)
+                    else int(analysis_selected_months)
                 )
-                cache_editor = st.data_editor(
-                    cache_df,
-                    hide_index=True,
-                    num_rows="fixed",
-                    width="stretch",
-                    key="cfg_cache_reset_editor",
-                    column_order=["__reset__", "cache", "registros", "ruta"],
-                    column_config={
-                        "__reset__": st.column_config.CheckboxColumn("Resetear"),
-                        "cache": st.column_config.TextColumn("Cache"),
-                        "registros": st.column_config.NumberColumn("Registros", format="%d"),
-                        "ruta": st.column_config.TextColumn("Ruta"),
+                new_settings = _safe_update_settings(
+                    settings,
+                    {
+                        "THEME": str(theme_mode).strip().lower(),
+                        "DASHBOARD_SUMMARY_CHARTS": summary_csv,
+                        "TREND_SELECTED_CHARTS": summary_csv,
+                        "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
+                        "ANALYSIS_LOOKBACK_MONTHS": analysis_lookback_months_to_store,
+                        "ANALYSIS_LOOKBACK_DAYS": 0,
                     },
-                    disabled=["cache", "registros", "ruta"],
                 )
-                cache_reset_ids, cache_reset_labels = _selected_caches_from_editor(cache_editor)
-                cache_reset_cfg = _render_cache_reset_container(
-                    selected_cache_ids=cache_reset_ids,
-                    selected_label_by_id=cache_reset_labels,
-                    key_prefix="cfg_cache",
+                save_settings(new_settings)
+                target_dark_mode = str(theme_mode).strip().lower() == "dark"
+                theme_mode_changed = (
+                    bool(st.session_state.get("workspace_dark_mode", False)) != target_dark_mode
                 )
-                cache_reset_disabled = not bool(cache_reset_cfg.get("armed", False))
-                if st.button(
-                    "♻️ Resetear caches seleccionados",
-                    key="cfg_cache_reset_btn",
-                    disabled=cache_reset_disabled,
-                    help=(
-                        "Selecciona caches, marca confirmación y escribe RESETEAR."
-                        if cache_reset_disabled
-                        else None
-                    ),
-                ):
-                    selected_cache_ids = [
-                        str(x).strip()
-                        for x in cache_reset_cfg.get("cache_ids", [])
-                        if str(x).strip()
-                    ]
-                    results: List[Dict[str, Any]] = []
-                    for cache_id in selected_cache_ids:
-                        results.append(reset_cache_store(settings, cache_id))
-                    try:
-                        st.cache_data.clear()
-                    except Exception:
-                        pass
-                    clear_signature_cache()
-                    _clear_cache_reset_widget_state()
-                    st.session_state["__cfg_cache_reset_results"] = results
-                    total_reset = sum(int(row.get("reset", 0) or 0) for row in results)
+                if theme_mode_changed:
+                    st.session_state["workspace_dark_mode"] = target_dark_mode
                     st.session_state["__cfg_flash_success"] = (
-                        f"Reset de cache completado ({len(results)} seleccionado(s), {total_reset} registros vaciados)."
+                        "Preferencias guardadas. Modo visual actualizado."
                     )
-                    st.rerun()
+                else:
+                    st.session_state["__cfg_flash_success"] = "Preferencias guardadas."
+                st.rerun()
 
-    cache_reset_results = st.session_state.pop("__cfg_cache_reset_results", None)
-    if isinstance(cache_reset_results, list) and cache_reset_results:
-        _render_cache_reset_results(cache_reset_results)
+    with t_caches:
+        st.markdown("### Caches")
+        st.caption("Resetea caches persistentes de la aplicación sin afectar la configuración.")
 
-    delete_forms_valid = bool(
-        jira_delete_cfg.get("valid", True) and helix_delete_cfg.get("valid", True)
-    )
-    save_btn_help = None
-    if not delete_forms_valid:
-        save_btn_help = (
-            "Completa la confirmación de eliminación (checkbox + texto ELIMINAR) "
-            "o limpia esos campos para continuar."
-        )
-
-    if st.button(
-        "💾 Guardar configuración",
-        key="cfg_save_btn",
-        disabled=not delete_forms_valid,
-        help=save_btn_help,
-    ):
-        jira_clean, jira_errors = _normalize_jira_rows(jira_editor, countries)
-        helix_clean, helix_errors = _normalize_helix_rows(helix_editor, countries)
-        all_errors = jira_errors + helix_errors
-        if all_errors:
-            for err in all_errors:
-                st.error(err)
-            return
-
-        summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
-        analysis_lookback_months_to_store = (
-            0
-            if int(analysis_selected_months) >= int(analysis_max_months)
-            else int(analysis_selected_months)
-        )
-        update = dict(
-            THEME=str(theme_mode).strip().lower(),
-            SUPPORTED_COUNTRIES=",".join(countries),
-            JIRA_BASE_URL=jira_base.strip(),
-            JIRA_BROWSER=jira_browser,
-            JIRA_SOURCES_JSON=to_env_json(jira_clean),
-            HELIX_SOURCES_JSON=to_env_json(helix_clean),
-            HELIX_BROWSER=helix_default_browser,
-            HELIX_PROXY=str(helix_default_proxy).strip(),
-            HELIX_SSL_VERIFY=str(helix_default_ssl_verify).strip().lower(),
-            HELIX_QUERY_MODE=str(helix_query_mode).strip().lower(),
-            HELIX_DATA_PATH=str(helix_data_path).strip(),
-            HELIX_DASHBOARD_URL=str(helix_dashboard_url).strip(),
-            DASHBOARD_SUMMARY_CHARTS=summary_csv,
-            TREND_SELECTED_CHARTS=summary_csv,
-            REPORT_PPT_DOWNLOAD_DIR=str(report_ppt_download_dir).strip(),
-            ANALYSIS_LOOKBACK_MONTHS=analysis_lookback_months_to_store,
-            ANALYSIS_LOOKBACK_DAYS=0,
-        )
-
-        new_settings = _safe_update_settings(settings, update)
-        save_settings(new_settings)
-        target_dark_mode = str(theme_mode).strip().lower() == "dark"
-        theme_mode_changed = (
-            bool(st.session_state.get("workspace_dark_mode", False)) != target_dark_mode
-        )
-        if theme_mode_changed:
-            st.session_state["workspace_dark_mode"] = target_dark_mode
-
-        any_deletion = False
-
-        if bool(jira_delete_cfg.get("armed", False)):
-            jira_delete_sids = [
-                str(x).strip() for x in jira_delete_cfg.get("source_ids", []) if str(x).strip()
-            ]
-            if jira_delete_sids:
-                any_deletion = True
-                jira_purge_total = {
-                    "issues_removed": 0,
-                    "helix_items_removed": 0,
-                    "learning_scopes_removed": 0,
+        cache_rows = _rows_from_cache_inventory(settings)
+        cache_df = pd.DataFrame(
+            cache_rows
+            or [
+                {
+                    "__reset__": False,
+                    "__cache_id__": "",
+                    "cache": "Sin caches configurados",
+                    "registros": 0,
+                    "ruta": "",
                 }
-                for delete_sid in jira_delete_sids:
-                    purge_stats = purge_source_cache(new_settings, delete_sid)
-                    jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
-                st.success(f"Fuentes Jira eliminadas: {len(jira_delete_sids)}. Cache saneado.")
-                _render_purge_stats(jira_purge_total)
-
-        if bool(helix_delete_cfg.get("armed", False)):
-            helix_delete_sids = [
-                str(x).strip() for x in helix_delete_cfg.get("source_ids", []) if str(x).strip()
             ]
-            if helix_delete_sids:
-                any_deletion = True
-                helix_purge_total = {
-                    "issues_removed": 0,
-                    "helix_items_removed": 0,
-                    "learning_scopes_removed": 0,
-                }
-                for delete_sid in helix_delete_sids:
-                    purge_stats = purge_source_cache(new_settings, delete_sid)
-                    helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
-                st.success(f"Fuentes Helix eliminadas: {len(helix_delete_sids)}. Cache saneado.")
-                _render_purge_stats(helix_purge_total)
-
-        if any_deletion:
-            _clear_config_delete_widget_state()
-            st.session_state["__cfg_flash_success"] = "Configuración y eliminación aplicadas."
-            st.rerun()
-        elif theme_mode_changed:
-            _clear_delete_confirmation_widget_state()
+        )
+        cache_editor = st.data_editor(
+            cache_df,
+            hide_index=True,
+            num_rows="fixed",
+            width="stretch",
+            key="cfg_cache_reset_editor",
+            column_order=["__reset__", "cache", "registros", "ruta"],
+            column_config={
+                "__reset__": st.column_config.CheckboxColumn("Resetear"),
+                "cache": st.column_config.TextColumn("Cache"),
+                "registros": st.column_config.NumberColumn("Registros", format="%d"),
+                "ruta": st.column_config.TextColumn("Ruta"),
+            },
+            disabled=["cache", "registros", "ruta"],
+        )
+        cache_reset_ids, cache_reset_labels = _selected_caches_from_editor(cache_editor)
+        cache_reset_cfg = _render_cache_reset_container(
+            selected_cache_ids=cache_reset_ids,
+            selected_label_by_id=cache_reset_labels,
+            key_prefix="cfg_cache",
+        )
+        cache_reset_disabled = not bool(cache_reset_cfg.get("armed", False))
+        if st.button(
+            "♻️ Resetear caches seleccionados",
+            key="cfg_cache_reset_btn",
+            disabled=cache_reset_disabled,
+            help=(
+                "Selecciona caches, marca confirmación y escribe RESETEAR."
+                if cache_reset_disabled
+                else None
+            ),
+        ):
+            selected_cache_ids = [
+                str(x).strip() for x in cache_reset_cfg.get("cache_ids", []) if str(x).strip()
+            ]
+            results: List[Dict[str, Any]] = []
+            for cache_id in selected_cache_ids:
+                results.append(reset_cache_store(settings, cache_id))
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            clear_signature_cache()
+            _clear_cache_reset_widget_state()
+            st.session_state["__cfg_cache_reset_results"] = results
+            total_reset = sum(int(row.get("reset", 0) or 0) for row in results)
             st.session_state["__cfg_flash_success"] = (
-                "Configuración guardada. Modo visual actualizado."
+                f"Reset de cache completado ({len(results)} seleccionado(s), {total_reset} registros vaciados)."
             )
             st.rerun()
-        else:
-            _clear_delete_confirmation_widget_state()
-            st.session_state["__cfg_flash_success"] = "Configuración guardada."
-            st.rerun()
+
+        cache_reset_results = st.session_state.pop("__cfg_cache_reset_results", None)
+        if isinstance(cache_reset_results, list) and cache_reset_results:
+            _render_cache_reset_results(cache_reset_results)
