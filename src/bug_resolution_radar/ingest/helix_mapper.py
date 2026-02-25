@@ -242,7 +242,8 @@ def map_helix_incident_type(raw_incident_type: Any, values: Optional[Dict[str, A
         if not token:
             continue
         if (
-            "evento" in token and "monitor" in token
+            "evento" in token
+            and "monitor" in token
             or token in {"monitoring event", "event monitoring"}
         ):
             return "Evento Monitorización"
