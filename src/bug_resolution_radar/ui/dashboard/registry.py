@@ -196,7 +196,8 @@ def _insights_timeseries(ctx: ChartContext) -> List[str]:
 
 
 def _render_age_buckets(ctx: ChartContext) -> Optional[go.Figure]:
-    points = build_age_bucket_points(ctx.open_df)
+    # Este gráfico debe incluir también estados finalistas; usa el scope filtrado completo.
+    points = build_age_bucket_points(ctx.dff)
     if points.empty:
         return None
 
@@ -451,24 +452,23 @@ def _render_open_status_bar(ctx: ChartContext) -> Optional[go.Figure]:
         .reset_index(name="count")
         .sort_values(["status", "count"], ascending=[True, False])
     )
-    status_totals = (
-        grouped.groupby("status", dropna=False, observed=False)["count"]
-        .sum()
-        .reset_index(name="count")
+    priority_order = sorted(
+        grouped["priority"].astype(str).unique().tolist(),
+        key=_priority_sort_key,
     )
 
     fig = px.bar(
-        status_totals,
+        grouped,
         x="status",
         y="count",
         text="count",
-        color="status",
+        color="priority",
         title="Issues por Estado",
-        category_orders={"status": ordered_statuses},
-        color_discrete_map=status_color_map(ordered_statuses),
+        category_orders={"status": ordered_statuses, "priority": priority_order},
+        color_discrete_map=priority_color_map(),
     )
     fig.update_traces(textposition="inside", textfont=dict(size=12))
-    return apply_plotly_bbva(fig, showlegend=False)
+    return apply_plotly_bbva(fig, showlegend=True)
 
 
 def _insights_open_status_bar(ctx: ChartContext) -> List[str]:

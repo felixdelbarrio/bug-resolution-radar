@@ -55,12 +55,12 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     return (priority_rank(p), pl)
 
 
-def build_age_bucket_points(open_df: pd.DataFrame) -> pd.DataFrame:
+def build_age_bucket_points(issues_df: pd.DataFrame) -> pd.DataFrame:
     """Prepare issue-level rows with age bucket and age days."""
-    if open_df is None or open_df.empty or "created" not in open_df.columns:
+    if issues_df is None or issues_df.empty or "created" not in issues_df.columns:
         return pd.DataFrame()
 
-    df = open_df.copy(deep=False)
+    df = issues_df.copy(deep=False)
     created_dt = _to_dt_naive(df["created"])
     df = df.assign(__created_dt=created_dt)
     df = df[df["__created_dt"].notna()].copy(deep=False)

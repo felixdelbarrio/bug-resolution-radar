@@ -171,6 +171,18 @@ class InsightsLearningStore:
                 count += 1
         return count
 
+    def count_all_scopes(self) -> int:
+        """Count all persisted scope records."""
+        scopes = _as_dict(self._raw.get("scopes"))
+        return len(scopes)
+
+    def clear_all(self) -> int:
+        """Remove all persisted scopes and return the number of deleted records."""
+        scopes = _as_dict(self._raw.get("scopes"))
+        removed = len(scopes)
+        self._raw = {"version": 1, "scopes": {}}
+        return removed
+
 
 def ensure_learning_session_loaded(*, settings: Settings) -> None:
     """Hydrate in-memory learning state for current country/source scope."""

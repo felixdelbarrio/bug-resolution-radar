@@ -8,7 +8,9 @@ from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.services.source_maintenance import (
+    cache_inventory,
     purge_source_cache,
+    reset_cache_store,
     remove_helix_source_from_settings,
     remove_jira_source_from_settings,
     source_cache_impact,
@@ -227,3 +229,73 @@ def test_source_cache_impact_preview_counts_records(tmp_path: Path) -> None:
     assert impact["issues_records"] == 2
     assert impact["helix_items"] == 0
     assert impact["learning_scopes"] == 1
+
+
+def test_cache_inventory_and_reset_store(tmp_path: Path) -> None:
+    issues_path = tmp_path / "issues.json"
+    helix_path = tmp_path / "helix_dump.json"
+    learning_path = tmp_path / "insights_learning.json"
+
+    save_issues_doc(
+        str(issues_path),
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="J-1",
+                    summary="Issue",
+                    status="Open",
+                    type="Bug",
+                    priority="Low",
+                    source_id="jira:mexico:core-mx",
+                )
+            ]
+        ),
+    )
+    HelixRepo(helix_path).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="H-1",
+                    summary="Helix issue",
+                    source_id="helix:mexico:mx-smartit",
+                )
+            ]
+        )
+    )
+    learning_store = InsightsLearningStore(learning_path)
+    learning_store.load()
+    learning_store.set_scope(
+        "México::jira:mexico:core-mx",
+        state={"seen": {"x": 1}},
+        interactions=2,
+        country="México",
+        source_id="jira:mexico:core-mx",
+    )
+    learning_store.save()
+
+    settings = Settings(
+        DATA_PATH=str(issues_path),
+        HELIX_DATA_PATH=str(helix_path),
+        INSIGHTS_LEARNING_PATH=str(learning_path),
+    )
+
+    inv = {str(row["cache_id"]): row for row in cache_inventory(settings)}
+    assert inv["issues"]["records"] == 1
+    assert inv["helix"]["records"] == 1
+    assert inv["learning"]["records"] == 1
+
+    issue_reset = reset_cache_store(settings, "issues")
+    helix_reset = reset_cache_store(settings, "helix")
+    learning_reset = reset_cache_store(settings, "learning")
+
+    assert issue_reset["before"] == 1
+    assert issue_reset["after"] == 0
+    assert helix_reset["before"] == 1
+    assert helix_reset["after"] == 0
+    assert learning_reset["before"] == 1
+    assert learning_reset["after"] == 0
+
+    inv_after = {str(row["cache_id"]): row for row in cache_inventory(settings)}
+    assert inv_after["issues"]["records"] == 0
+    assert inv_after["helix"]["records"] == 0
+    assert inv_after["learning"]["records"] == 0

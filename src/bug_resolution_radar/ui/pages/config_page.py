@@ -23,8 +23,11 @@ from bug_resolution_radar.config import (
     to_env_json,
 )
 from bug_resolution_radar.services.source_maintenance import (
+    cache_inventory,
     purge_source_cache,
+    reset_cache_store,
 )
+from bug_resolution_radar.ui.cache import clear_signature_cache
 from bug_resolution_radar.ui.common import load_issues_df
 
 
@@ -109,12 +112,17 @@ def _is_delete_phrase_valid(value: Any) -> bool:
     return str(value or "").strip().upper() == "ELIMINAR"
 
 
+def _is_reset_phrase_valid(value: Any) -> bool:
+    return str(value or "").strip().upper() == "RESETEAR"
+
+
 def _inject_delete_zone_css() -> None:
     st.markdown(
         """
         <style>
           [class*="st-key-cfg_jira_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
-          [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
+          [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, #95BAFF 14%) !important;
             background:
               radial-gradient(1200px 280px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 55%),
@@ -312,6 +320,111 @@ def _render_source_delete_container(
         return {"source_ids": selected_source_ids, "armed": armed, "valid": valid}
 
 
+def _rows_from_cache_inventory(settings: Settings) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for row in cache_inventory(settings):
+        rows.append(
+            {
+                "__reset__": False,
+                "__cache_id__": _as_str(row.get("cache_id")),
+                "cache": _as_str(row.get("label")),
+                "registros": int(row.get("records", 0) or 0),
+                "ruta": _as_str(row.get("path")),
+            }
+        )
+    return rows
+
+
+def _selected_caches_from_editor(df: pd.DataFrame) -> Tuple[List[str], Dict[str, str]]:
+    selected_ids: List[str] = []
+    label_by_id: Dict[str, str] = {}
+
+    for row in df.to_dict(orient="records"):
+        if not _boolish(row.get("__reset__"), default=False):
+            continue
+        cache_id = _as_str(row.get("__cache_id__"))
+        label = _as_str(row.get("cache")) or cache_id
+        if not cache_id:
+            continue
+        if cache_id not in selected_ids:
+            selected_ids.append(cache_id)
+            label_by_id[cache_id] = label
+    return selected_ids, label_by_id
+
+
+def _render_cache_reset_container(
+    *,
+    selected_cache_ids: List[str],
+    selected_label_by_id: Dict[str, str],
+    key_prefix: str,
+) -> Dict[str, Any]:
+    st.markdown("### ♻️ Resetear caché")
+
+    with st.container(border=True, key=f"{key_prefix}_cache_reset_shell"):
+        st.markdown("#### Zona segura de reseteo")
+        st.caption(
+            "La operación es inmediata y vacía el contenido del cache seleccionado "
+            "(deja 0 registros). No requiere Guardar configuración."
+        )
+
+        has_selection = bool(selected_cache_ids)
+        if has_selection:
+            plural = "s" if len(selected_cache_ids) != 1 else ""
+            st.markdown(
+                f'<div class="cfg-delete-counter"><strong>{len(selected_cache_ids)}</strong> '
+                f"cache{plural} seleccionado{plural}.</div>",
+                unsafe_allow_html=True,
+            )
+            _render_selected_source_chips(selected_cache_ids, selected_label_by_id)
+        else:
+            st.markdown(
+                '<div class="cfg-delete-ghost">Marca en la tabla los caches que quieras resetear. '
+                "Aquí aparecerán como chips.</div>",
+                unsafe_allow_html=True,
+            )
+
+        confirm = st.checkbox(
+            "Confirmo que quiero resetear los caches seleccionados.",
+            key=f"{key_prefix}_cache_reset_confirm",
+        )
+        phrase = st.text_input(
+            "Escribe RESETEAR para confirmar",
+            value="",
+            key=f"{key_prefix}_cache_reset_phrase",
+            help="Confirmación reforzada para evitar resets accidentales.",
+        )
+        phrase_ok = _is_reset_phrase_valid(phrase)
+        has_partial_input = bool(has_selection or confirm or str(phrase).strip())
+        armed = bool(has_selection and confirm and phrase_ok)
+        valid = bool((not has_partial_input) or armed)
+
+        if has_partial_input and not has_selection:
+            st.warning("Selecciona al menos un cache para resetear.")
+        elif has_partial_input and not armed:
+            st.warning(
+                "Para aplicar el reseteo debes seleccionar caches, "
+                "marcar confirmación y escribir RESETEAR."
+            )
+        elif armed:
+            st.success(
+                f"Reseteo preparado ({len(selected_cache_ids)}). "
+                "Pulsa el botón para vaciar los registros."
+            )
+
+        return {"cache_ids": selected_cache_ids, "armed": armed, "valid": valid}
+
+
+def _render_cache_reset_results(results: List[Dict[str, Any]]) -> None:
+    if not results:
+        return
+    for row in results:
+        label = str(row.get("label") or row.get("cache_id") or "cache")
+        before = int(row.get("before", 0) or 0)
+        after = int(row.get("after", 0) or 0)
+        reset = int(row.get("reset", 0) or 0)
+        st.info(f"{label}: {before} -> {after} registros (reseteados {reset}).")
+
+
 def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for src in jira_sources(settings):
@@ -497,6 +610,15 @@ def _clear_delete_confirmation_widget_state() -> None:
         st.session_state.pop(key, None)
 
 
+def _clear_cache_reset_widget_state() -> None:
+    for key in (
+        "cfg_cache_reset_editor",
+        "cfg_cache_cache_reset_confirm",
+        "cfg_cache_cache_reset_phrase",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _clear_config_delete_widget_state() -> None:
     _clear_delete_confirmation_widget_state()
     for key in (
@@ -561,6 +683,7 @@ def render(settings: Settings) -> None:
     countries = supported_countries(settings)
     jira_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
     helix_delete_cfg: Dict[str, Any] = {"source_ids": [], "armed": False, "valid": True}
+    cache_reset_cfg: Dict[str, Any] = {"cache_ids": [], "armed": False, "valid": True}
     analysis_max_months = 1
     analysis_selected_months = 1
     _inject_delete_zone_css()
@@ -869,6 +992,78 @@ def render(settings: Settings) -> None:
                         format_func=lambda x: id_to_label.get(x, x),
                         key="cfg_trend_fav_3",
                     )
+
+            with st.container(key="cfg_prefs_card_cache_reset"):
+                st.markdown("#### Mantenimiento de caché")
+                cache_rows = _rows_from_cache_inventory(settings)
+                cache_df = pd.DataFrame(
+                    cache_rows
+                    or [
+                        {
+                            "__reset__": False,
+                            "__cache_id__": "",
+                            "cache": "Sin caches configurados",
+                            "registros": 0,
+                            "ruta": "",
+                        }
+                    ]
+                )
+                cache_editor = st.data_editor(
+                    cache_df,
+                    hide_index=True,
+                    num_rows="fixed",
+                    width="stretch",
+                    key="cfg_cache_reset_editor",
+                    column_order=["__reset__", "cache", "registros", "ruta"],
+                    column_config={
+                        "__reset__": st.column_config.CheckboxColumn("Resetear"),
+                        "cache": st.column_config.TextColumn("Cache"),
+                        "registros": st.column_config.NumberColumn("Registros", format="%d"),
+                        "ruta": st.column_config.TextColumn("Ruta"),
+                    },
+                    disabled=["cache", "registros", "ruta"],
+                )
+                cache_reset_ids, cache_reset_labels = _selected_caches_from_editor(cache_editor)
+                cache_reset_cfg = _render_cache_reset_container(
+                    selected_cache_ids=cache_reset_ids,
+                    selected_label_by_id=cache_reset_labels,
+                    key_prefix="cfg_cache",
+                )
+                cache_reset_disabled = not bool(cache_reset_cfg.get("armed", False))
+                if st.button(
+                    "♻️ Resetear caches seleccionados",
+                    key="cfg_cache_reset_btn",
+                    disabled=cache_reset_disabled,
+                    help=(
+                        "Selecciona caches, marca confirmación y escribe RESETEAR."
+                        if cache_reset_disabled
+                        else None
+                    ),
+                ):
+                    selected_cache_ids = [
+                        str(x).strip()
+                        for x in cache_reset_cfg.get("cache_ids", [])
+                        if str(x).strip()
+                    ]
+                    results: List[Dict[str, Any]] = []
+                    for cache_id in selected_cache_ids:
+                        results.append(reset_cache_store(settings, cache_id))
+                    try:
+                        st.cache_data.clear()
+                    except Exception:
+                        pass
+                    clear_signature_cache()
+                    _clear_cache_reset_widget_state()
+                    st.session_state["__cfg_cache_reset_results"] = results
+                    total_reset = sum(int(row.get("reset", 0) or 0) for row in results)
+                    st.session_state["__cfg_flash_success"] = (
+                        f"Reset de cache completado ({len(results)} seleccionado(s), {total_reset} registros vaciados)."
+                    )
+                    st.rerun()
+
+    cache_reset_results = st.session_state.pop("__cfg_cache_reset_results", None)
+    if isinstance(cache_reset_results, list) and cache_reset_results:
+        _render_cache_reset_results(cache_reset_results)
 
     delete_forms_valid = bool(
         jira_delete_cfg.get("valid", True) and helix_delete_cfg.get("valid", True)
