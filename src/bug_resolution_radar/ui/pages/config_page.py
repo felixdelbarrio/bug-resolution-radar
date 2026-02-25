@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -742,6 +743,21 @@ def render(settings: Settings) -> None:
                 f"Estado: últimos {int(analysis_selected_months)} "
                 f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
             )
+        st.markdown("#### Descargas del informe PPT")
+        report_ppt_download_dir_default = (
+            str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+            or str((Path.home() / "Downloads").expanduser())
+        )
+        report_ppt_download_dir = st.text_input(
+            "Ruta por defecto de descarga (Informe PPT)",
+            value=report_ppt_download_dir_default,
+            key="cfg_report_ppt_download_dir",
+            help=(
+                "Ruta local donde el botón 'Descargar informe' guardará el PPT. "
+                "Si no existe, se intentará crear automáticamente."
+            ),
+        )
+        st.caption("Se aplica al flujo manual de descarga del Informe PPT.")
         st.caption("Define los 3 gráficos favoritos.")
 
         catalog = _trend_chart_catalog()
@@ -831,6 +847,7 @@ def render(settings: Settings) -> None:
             HELIX_DASHBOARD_URL=str(helix_dashboard_url).strip(),
             DASHBOARD_SUMMARY_CHARTS=summary_csv,
             TREND_SELECTED_CHARTS=summary_csv,
+            REPORT_PPT_DOWNLOAD_DIR=str(report_ppt_download_dir).strip(),
             ANALYSIS_LOOKBACK_MONTHS=analysis_lookback_months_to_store,
             ANALYSIS_LOOKBACK_DAYS=0,
         )

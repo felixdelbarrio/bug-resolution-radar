@@ -29,8 +29,16 @@ def _set_workspace_mode(mode: str) -> None:
     mode_txt = str(mode or "").strip().lower()
     previous_mode = str(st.session_state.get("workspace_mode") or "").strip().lower()
     if mode_txt == "report" and previous_mode != "report":
+        report_state_prefixes = (
+            "workspace_report_save_done::",  # legacy
+            "workspace_report_saved_path::",
+            "workspace_report_phase::",
+            "workspace_report_request_sig::",
+            "workspace_report_artifact::",
+        )
         for key in list(st.session_state.keys()):
-            if str(key or "").startswith("workspace_report_save_done::"):
+            key_txt = str(key or "")
+            if key_txt == "workspace_report_status" or key_txt.startswith(report_state_prefixes):
                 st.session_state.pop(key, None)
     st.session_state["workspace_mode"] = mode_txt
 
