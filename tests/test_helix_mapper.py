@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from bug_resolution_radar.ingest.helix_mapper import (
+    is_allowed_helix_business_incident_type,
+    map_helix_incident_type,
     map_helix_priority,
     map_helix_status,
     map_helix_values_to_item,
@@ -115,7 +117,7 @@ def test_map_helix_values_to_item_keeps_query_fields_and_raw_status() -> None:
     assert item.status == "Analysing"
     assert item.status_raw == "Assigned"
     assert item.priority == "Medium"
-    assert item.incident_type == "Security Incident"
+    assert item.incident_type == "Incidencia"
     assert item.service == "Payments"
     assert item.impacted_service == "SENDA GLOBAL (FRONTALES GLOBALES EMPRESAS)"
     assert item.assignee == "Ana"
@@ -176,6 +178,17 @@ def test_map_helix_values_to_item_reads_arsql_flat_fields_case_insensitive() -> 
     assert item.source_service_n1 == "ENTERPRISE WEB"
     assert item.matrix_service_n1 == "MATRIX"
     assert item.closed_date == "2024-01-02T00:00:00+00:00"
+
+
+def test_map_helix_incident_type_prefers_business_field_and_keeps_consulta() -> None:
+    values = {
+        "incidentType": "Incident",
+        "BBVA_Tipo_de_Incidencia": "Consulta",
+    }
+    assert map_helix_incident_type("Incident", values) == "Consulta"
+    assert is_allowed_helix_business_incident_type("Consulta") is True
+    assert is_allowed_helix_business_incident_type("Incidencia") is True
+    assert is_allowed_helix_business_incident_type("Request") is False
 
 
 def test_map_helix_values_to_item_uses_configured_dashboard_url() -> None:

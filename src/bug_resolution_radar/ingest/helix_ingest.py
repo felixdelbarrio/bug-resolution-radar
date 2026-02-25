@@ -26,8 +26,20 @@ from ..config import build_source_id
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
 from ..models.schema_helix import HelixDocument, HelixWorkItem
-from .helix_mapper import map_helix_values_to_item
+from .helix_mapper import (
+    is_allowed_helix_business_incident_type,
+    map_helix_values_to_item,
+)
 from .helix_session import get_helix_session_cookie
+
+_ARSQL_BUSINESS_INCIDENT_TYPE_FIELD_CANDIDATES: tuple[str, ...] = (
+    "BBVA_Tipo_de_Incidencia",
+    "BBVA_TipoDeIncidencia",
+    "BBVA_TipoIncidencia",
+    "BBVA_TypeOfIncident",
+    "BBVA_IncidentType",
+    "Tipo_de_Incidencia",
+)
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
@@ -398,6 +410,31 @@ def _build_arsql_sql(
                 return name
         return None
 
+    def _incident_type_filter_values(
+        field_name: Optional[str], values: Optional[List[str]]
+    ) -> List[str]:
+        raw_vals = [str(x).strip() for x in (values or []) if str(x).strip()]
+        if not raw_vals:
+            return []
+        if str(field_name or "").strip() != "Service Type":
+            return raw_vals
+        out: List[str] = []
+        seen: set[str] = set()
+        for txt in raw_vals:
+            token = re.sub(r"\s+", " ", txt.strip().lower())
+            mapped: List[str]
+            if token in {"incidencia", "incident", "incidence"}:
+                mapped = ["Incident"]
+            elif token in {"consulta", "consultation", "query", "question", "inquiry"}:
+                mapped = ["Question", "Consultation", "Request", "Service Request"]
+            else:
+                mapped = [txt]
+            for candidate in mapped:
+                if candidate not in seen:
+                    seen.add(candidate)
+                    out.append(candidate)
+        return out
+
     def _select_alias(
         field_name: str,
         alias: str,
@@ -454,10 +491,14 @@ def _build_arsql_sql(
     if source_filter:
         where_parts.append(source_filter)
 
+    incident_type_field = _first_available_field(
+        list(_ARSQL_BUSINESS_INCIDENT_TYPE_FIELD_CANDIDATES) + ["Service Type"]
+    )
+    incident_type_filter_values = _incident_type_filter_values(incident_type_field, incident_types)
     incident_type_filter = (
-        None
-        if _is_disabled("Service Type")
-        else _sql_in_filter(_field_ref("Service Type"), incident_types)
+        _sql_in_filter(_field_ref(incident_type_field), incident_type_filter_values)
+        if incident_type_field
+        else None
     )
     if incident_type_filter:
         where_parts.append(incident_type_filter)
@@ -491,6 +532,11 @@ def _build_arsql_sql(
         )
         or "Incident Number"
     )
+    incident_type_select_sql = (
+        _select_alias(incident_type_field, "incidentType")
+        if incident_type_field
+        else "'' AS `incidentType`"
+    )
 
     return (
         "SELECT "
@@ -499,7 +545,7 @@ def _build_arsql_sql(
         f"{_select_alias('Description', 'summary')}, "
         f"{_select_alias('Status', 'status')}, "
         f"{_select_alias('Assignee', 'assignee', assignee_case_when_blank=True)}, "
-        f"{_select_alias('Service Type', 'incidentType')}, "
+        f"{incident_type_select_sql}, "
         f"{_select_alias('ServiceCI', 'service')}, "
         f"{_select_alias('HPD_CI', 'impactedService')}, "
         f"{_select_alias('Contact Company', 'customerName')}, "
@@ -1363,10 +1409,16 @@ def ingest_helix(
     org = (organization or "").strip()
     create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
     incident_types_default = (
-        "" if query_mode == "arsql" else "User Service Restoration,Security Incident"
+        "Incidencia,Consulta"
+        if query_mode == "arsql"
+        else "User Service Restoration,Security Incident"
     )
     incident_types_filter = _csv_list(
         os.getenv("HELIX_FILTER_INCIDENT_TYPES"), incident_types_default
+    )
+    allowed_business_incident_types = _csv_list(
+        os.getenv("HELIX_ALLOWED_BUSINESS_INCIDENT_TYPES"),
+        "Incidencia,Consulta",
     )
     buug_names = (
         _csv_list(service_origin_buug, "")
@@ -1657,6 +1709,7 @@ def ingest_helix(
         900.0,
     )
     page = 0
+    filtered_out_by_business_incident_type = 0
     max_session_refreshes = max(
         0,
         _coerce_int(os.getenv("HELIX_MAX_SESSION_REFRESHES", "1"), 1),
@@ -1822,6 +1875,11 @@ def ingest_helix(
             )
             if mapped_item is None:
                 continue
+            if allowed_business_incident_types and not is_allowed_helix_business_incident_type(
+                mapped_item.incident_type
+            ):
+                filtered_out_by_business_incident_type += 1
+                continue
             wid = str(mapped_item.id or "").strip()
             if wid in seen_ids:
                 continue
@@ -1873,6 +1931,7 @@ def ingest_helix(
             f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
             f"sourceServiceN1=[{source_service_q}]; "
             f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; "
+            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
             f"page_limit={base_chunk_size}; "
             f"select={select_mode_q}; "
             f"disabled_fields=[{disabled_fields_q}]"
@@ -1882,7 +1941,8 @@ def ingest_helix(
             f"organizations in [{org}] and createDate in [{create_start_iso} .. {create_end_iso}]"
             f" (year={create_year}); statusMappings=[{status_mappings_q}]; "
             f"incidentTypes=[{incident_types_q}]; priorities=[{priorities_q}]; "
-            f"companies=[{companies_q}]"
+            f"companies=[{companies_q}]; "
+            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]"
         )
 
     merged = {_item_merge_key(i): i for i in doc.items}
@@ -1892,6 +1952,9 @@ def ingest_helix(
 
     return (
         True,
-        f"{source_label}: ingesta Helix OK ({len(items)} items, merge total {len(doc.items)}).",
+        (
+            f"{source_label}: ingesta Helix OK ({len(items)} items, merge total {len(doc.items)}). "
+            f"Filtrados por tipo (negocio): {filtered_out_by_business_incident_type}."
+        ),
         doc,
     )

@@ -78,11 +78,35 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
     assert "`HPD:Help Desk`.`Incident Number` IS NOT NULL" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
     assert (
-        "`HPD:Help Desk`.`Service Type` IN ('User Service Restoration', 'Security Incident')" in sql
+        "`HPD:Help Desk`.`BBVA_Tipo_de_Incidencia` IN ('User Service Restoration', 'Security Incident')"
+        in sql
     )
     assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
     assert ", * FROM `HPD:Help Desk`" in sql
     assert "LIMIT 75 OFFSET 150" in sql
+
+
+def test_build_arsql_sql_falls_back_incident_type_filter_to_service_type_with_mapped_values() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=25,
+        offset=0,
+        incident_types=["Incidencia", "Consulta"],
+        disabled_fields={
+            "BBVA_Tipo_de_Incidencia",
+            "BBVA_TipoDeIncidencia",
+            "BBVA_TipoIncidencia",
+            "BBVA_TypeOfIncident",
+            "BBVA_IncidentType",
+            "Tipo_de_Incidencia",
+        },
+    )
+
+    assert (
+        "`HPD:Help Desk`.`Service Type` IN ('Incident', 'Question', 'Consultation', 'Request', 'Service Request')"
+        in sql
+    )
 
 
 def test_build_arsql_sql_can_disable_wide_select() -> None:
