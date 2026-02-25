@@ -122,7 +122,9 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
         captured_bodies.append(kwargs.get("json"))
-        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []})
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}
+        )
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
@@ -162,6 +164,7 @@ def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
 ) -> None:
     captured_offsets = []
     columns = list(helix_mod._ARSQL_SELECT_ALIASES)
+
     def _row(prefix: str, idx: int) -> list[Any]:
         return [
             f"{prefix}{idx}",
@@ -181,6 +184,7 @@ def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
             1704067200000,
             f"IDG{prefix}{idx}",
         ]
+
     responses = [
         _FakeResponse(
             200,
@@ -443,7 +447,9 @@ def test_ingest_helix_arsql_autodiscovers_datasource_uid(monkeypatch: Any) -> No
         session: requests.Session, method: str, url: str, timeout: Any, **kwargs: Any
     ) -> _FakeResponse:
         called_urls.append(url)
-        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}, url=url)
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}, url=url
+        )
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         if url.endswith("/dashboards/api/datasources"):
@@ -497,7 +503,9 @@ def test_ingest_helix_arsql_infers_ir1_host_and_uses_dashboards_preflight(monkey
         session: requests.Session, method: str, url: str, timeout: Any, **kwargs: Any
     ) -> _FakeResponse:
         called_urls.append(url)
-        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}, url=url)
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}, url=url
+        )
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         get_urls.append(url)
@@ -554,7 +562,9 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
         return str(value or "")
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
-        return _FakeResponse(200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []})
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}
+        )
 
     def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
         return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)

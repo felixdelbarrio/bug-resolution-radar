@@ -1116,7 +1116,9 @@ def ingest_helix(
     arsql_base_url_raw = str(os.getenv("HELIX_ARSQL_BASE_URL", "")).strip()
     if arsql_base_url_raw:
         try:
-            arsql_base_url = validate_service_base_url(arsql_base_url_raw, service_name="Helix ARSQL")
+            arsql_base_url = validate_service_base_url(
+                arsql_base_url_raw, service_name="Helix ARSQL"
+            )
         except ValueError as e:
             return False, f"{source_label}: {e}", None
         arsql_base_candidates = [arsql_base_url]
@@ -1149,7 +1151,9 @@ def ingest_helix(
             f"bbva-incident-report?orgId={org_id}"
         )
     login_bootstrap_url = arsql_dashboard_url_cfg or (
-        dashboard_url_cfg if dashboard_url_cfg else f"{arsql_base_root}{arsql_dashboard_path_default}"
+        dashboard_url_cfg
+        if dashboard_url_cfg
+        else f"{arsql_base_root}{arsql_dashboard_path_default}"
     )
 
     session = requests.Session()
@@ -1814,9 +1818,8 @@ def ingest_helix(
             )
             if mapped_item is None:
                 continue
-            if (
-                allowed_business_incident_types
-                and not is_allowed_helix_business_incident_type(mapped_item.incident_type)
+            if allowed_business_incident_types and not is_allowed_helix_business_incident_type(
+                mapped_item.incident_type
             ):
                 filtered_out_by_business_incident_type += 1
                 continue

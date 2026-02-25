@@ -14,7 +14,6 @@ from bug_resolution_radar.config import (
     helix_sources,
     jira_sources,
     save_settings,
-    to_env_json,
 )
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
@@ -145,10 +144,16 @@ def _parse_json_str_list(raw: object) -> List[str]:
     return out
 
 
-def _persist_helix_ingest_disabled_sources(settings: Settings, disabled_source_ids: List[str]) -> Settings:
+def _persist_helix_ingest_disabled_sources(
+    settings: Settings, disabled_source_ids: List[str]
+) -> Settings:
     normalized = [str(x).strip() for x in disabled_source_ids if str(x).strip()]
     new_settings = settings.model_copy(
-        update={"HELIX_INGEST_DISABLED_SOURCES_JSON": to_env_json(normalized)}
+        update={
+            "HELIX_INGEST_DISABLED_SOURCES_JSON": json.dumps(
+                normalized, ensure_ascii=False, separators=(",", ":")
+            )
+        }
     )
     save_settings(new_settings)
     return new_settings
@@ -234,11 +239,15 @@ def render(settings: Settings) -> None:
         helix_cfg = helix_sources(settings)
         st.caption(f"Fuentes Helix configuradas: {len(helix_cfg)}")
         valid_helix_source_ids = [
-            str(src.get("source_id", "")).strip() for src in helix_cfg if str(src.get("source_id", "")).strip()
+            str(src.get("source_id", "")).strip()
+            for src in helix_cfg
+            if str(src.get("source_id", "")).strip()
         ]
         disabled_helix_source_ids = [
             sid
-            for sid in _parse_json_str_list(getattr(settings, "HELIX_INGEST_DISABLED_SOURCES_JSON", ""))
+            for sid in _parse_json_str_list(
+                getattr(settings, "HELIX_INGEST_DISABLED_SOURCES_JSON", "")
+            )
             if sid in valid_helix_source_ids
         ]
         disabled_set = set(disabled_helix_source_ids)
