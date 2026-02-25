@@ -979,6 +979,7 @@ def _call_in_subprocess_with_timeout(
 
     safe_timeout_s = max(1.0, float(hard_timeout_s))
     start_method = _kaleido_worker_mp_start_method()
+    ctx: Any
     try:
         ctx = mp.get_context(start_method)
     except ValueError:
