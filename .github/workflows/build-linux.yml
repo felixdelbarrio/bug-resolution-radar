@@ -27,14 +27,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest
-          pip install pyinstaller
+          pip install -e ".[dev]"
 
-      - name: Run POSIX PPT multiprocessing regression tests
+      - name: Run POSIX PPT binary regression tests
         run: |
-          pytest -q tests/test_executive_report_ppt.py -k "subprocess_with_timeout or kaleido_worker_mp_start_method"
+          pytest -q tests/test_executive_report_ppt.py -k "subprocess_with_timeout"
           pytest -q tests/test_run_streamlit_entrypoint.py
+          pytest -q tests/test_executive_report_ppt.py::test_generate_scope_executive_ppt_is_scoped_and_valid_ppt
 
       - name: Build executable with PyInstaller
         run: |

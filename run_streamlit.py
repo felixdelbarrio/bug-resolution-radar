@@ -181,7 +181,7 @@ def _ensure_streamlit_config(runtime_home: Path) -> None:
 
 def _configure_streamlit_runtime_stability_for_binary() -> None:
     """
-    Reduce unexpected server restarts in packaged builds.
+    Reduce unexpected server restarts and network exposure in packaged builds.
 
     Long-running operations (e.g. PPT generation with Plotly/Kaleido) may create
     temp files. Streamlit's file watcher can interpret those changes as source
@@ -191,6 +191,7 @@ def _configure_streamlit_runtime_stability_for_binary() -> None:
     os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
     os.environ.setdefault("STREAMLIT_SERVER_RUN_ON_SAVE", "false")
     os.environ.setdefault("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", "false")
+    os.environ.setdefault("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")
 
 
 def _runtime_home_for_binary() -> Path:

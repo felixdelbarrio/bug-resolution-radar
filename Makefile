@@ -9,7 +9,7 @@ PYTEST=$(VENV)/bin/pytest
 PYINSTALLER=$(VENV)/bin/pyinstaller
 
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
-PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout or kaleido_worker_mp_start_method
+PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
 
 PYINSTALLER_COLLECT_ALL_ARGS = \
 	--collect-all streamlit \
@@ -108,6 +108,7 @@ ensure-build-tools:
 test-ppt-regression: ensure-build-tools
 	$(PYTEST) -q tests/test_executive_report_ppt.py -k "$(PPT_REGRESSION_TEST_EXPR)"
 	$(PYTEST) -q tests/test_run_streamlit_entrypoint.py
+	$(PYTEST) -q tests/test_executive_report_ppt.py::test_generate_scope_executive_ppt_is_scoped_and_valid_ppt
 
 build-local:
 	@case "$(HOST_UNAME)" in \

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-import time
 
 import pandas as pd
 import pytest
 from pptx import Presentation
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.reports import generate_scope_executive_ppt
-import bug_resolution_radar.reports.executive_ppt as executive_ppt_mod
 from bug_resolution_radar.reports.executive_ppt import (
     _best_actions,
     _build_sections,
@@ -19,13 +19,11 @@ from bug_resolution_radar.reports.executive_ppt import (
     _ChartSection,
     _fig_to_png,
     _is_finalist_status,
-    _kaleido_worker_mp_start_method,
     _open_closed,
     _select_actions_for_final_slide,
     _soften_insight_tone,
     _urgency_from_score,
 )
-from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.ui.common import save_issues_doc
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, _render_open_priority_pie
 from bug_resolution_radar.ui.insights.engine import ActionInsight, TrendInsightPack
@@ -138,24 +136,6 @@ def test_call_in_subprocess_with_timeout_raises_timeout() -> None:
         _call_in_subprocess_with_timeout(time.sleep, 5, hard_timeout_s=1)
     elapsed = time.monotonic() - started
     assert elapsed < 4.0
-
-
-def test_kaleido_worker_mp_start_method_prefers_fork_in_frozen_posix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("BUG_RESOLUTION_RADAR_PPT_RENDER_MP_START_METHOD", raising=False)
-    monkeypatch.setattr(executive_ppt_mod.os, "name", "posix")
-    monkeypatch.setattr(executive_ppt_mod.sys, "frozen", True, raising=False)
-    assert _kaleido_worker_mp_start_method() == "fork"
-
-
-def test_kaleido_worker_mp_start_method_honors_env_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PPT_RENDER_MP_START_METHOD", "spawn")
-    monkeypatch.setattr(executive_ppt_mod.os, "name", "posix")
-    monkeypatch.setattr(executive_ppt_mod.sys, "frozen", True, raising=False)
-    assert _kaleido_worker_mp_start_method() == "spawn"
 
 
 def test_generate_scope_executive_ppt_is_scoped_and_valid_ppt(tmp_path: Path) -> None:

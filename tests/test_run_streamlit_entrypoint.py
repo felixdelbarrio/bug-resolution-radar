@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 
@@ -53,3 +54,17 @@ def test_choreographer_wrapper_passthrough_executes_wrapper_script(
     assert captured["run_name"] == "__main__"
     assert captured["argv_seen"] == [str(wrapper), *original_argv[2:]]
     assert run_streamlit.sys.argv == original_argv
+
+
+def test_binary_runtime_stability_config_binds_localhost(monkeypatch) -> None:
+    monkeypatch.delenv("STREAMLIT_SERVER_ADDRESS", raising=False)
+    monkeypatch.delenv("STREAMLIT_SERVER_FILE_WATCHER_TYPE", raising=False)
+    monkeypatch.delenv("STREAMLIT_SERVER_RUN_ON_SAVE", raising=False)
+    monkeypatch.delenv("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", raising=False)
+
+    run_streamlit._configure_streamlit_runtime_stability_for_binary()
+
+    assert os.environ["STREAMLIT_SERVER_ADDRESS"] == "127.0.0.1"
+    assert os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] == "none"
+    assert os.environ["STREAMLIT_SERVER_RUN_ON_SAVE"] == "false"
+    assert os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] == "false"
