@@ -216,6 +216,34 @@ def _ready_artifact(scope_key: str, *, request_sig: str) -> dict[str, object] | 
     return payload
 
 
+def _int_from_obj(value: object, *, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _bytes_from_obj(value: object) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    return b""
+
+
 def _store_status(*, scope_key: str, kind: str, message: str) -> None:
     st.session_state[_REPORT_STATUS_KEY] = {
         "scope_key": str(scope_key or "").strip(),
@@ -313,7 +341,11 @@ def render(settings: Settings) -> None:
         phase = "idle"
         st.session_state[phase_key] = phase
 
-    if phase in {"generating", "ready"} and stored_request_sig and stored_request_sig != current_request_sig:
+    if (
+        phase in {"generating", "ready"}
+        and stored_request_sig
+        and stored_request_sig != current_request_sig
+    ):
         _clear_generated_report_state(scope_key)
         phase = "idle"
         stored_request_sig = ""
@@ -355,11 +387,13 @@ def render(settings: Settings) -> None:
         )
 
     if phase == "generating":
-        st.caption("Estado: generando informe. El botón 'Guardar en disco' se habilitará al finalizar.")
+        st.caption(
+            "Estado: generando informe. El botón 'Guardar en disco' se habilitará al finalizar."
+        )
     elif phase == "ready" and artifact is not None:
         file_name = str(artifact.get("file_name") or "informe.pptx")
-        slide_count = int(artifact.get("slide_count") or 0)
-        total_issues = int(artifact.get("total_issues") or 0)
+        slide_count = _int_from_obj(artifact.get("slide_count"), default=0)
+        total_issues = _int_from_obj(artifact.get("total_issues"), default=0)
         st.caption(
             f"Informe listo para guardar en disco: {file_name} · "
             f"{slide_count} slides · {total_issues} issues."
@@ -379,8 +413,7 @@ def render(settings: Settings) -> None:
         else:
             try:
                 file_name = str(ready_payload.get("file_name") or "").strip() or "radar-export.pptx"
-                content_obj = ready_payload.get("content") or b""
-                content = bytes(content_obj)
+                content = _bytes_from_obj(ready_payload.get("content"))
                 export_path = _unique_export_path(export_dir, file_name=file_name)
                 export_path.write_bytes(content)
                 st.session_state[_saved_path_state_key(scope_key)] = str(export_path)

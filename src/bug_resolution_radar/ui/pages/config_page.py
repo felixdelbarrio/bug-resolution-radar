@@ -744,10 +744,9 @@ def render(settings: Settings) -> None:
                 f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
             )
         st.markdown("#### Descargas del informe PPT")
-        report_ppt_download_dir_default = (
-            str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
-            or str((Path.home() / "Downloads").expanduser())
-        )
+        report_ppt_download_dir_default = str(
+            getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
+        ).strip() or str((Path.home() / "Downloads").expanduser())
         report_ppt_download_dir = st.text_input(
             "Ruta por defecto de descarga (Informe PPT)",
             value=report_ppt_download_dir_default,
