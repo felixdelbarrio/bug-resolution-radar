@@ -6,6 +6,8 @@ import multiprocessing as mp
 import os
 import runpy
 import sys
+import threading
+import time
 from pathlib import Path
 
 from streamlit.web import cli as stcli
@@ -117,6 +119,27 @@ def _load_dotenv_if_present(dotenv_path: Path) -> None:
         return
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
 def _macos_has_app(app_name: str) -> bool:
     for base in (Path("/Applications"), Path.home() / "Applications"):
         try:
@@ -194,6 +217,80 @@ def _configure_streamlit_runtime_stability_for_binary() -> None:
     os.environ.setdefault("STREAMLIT_SERVER_ADDRESS", "127.0.0.1")
 
 
+def _binary_active_session_count(runtime_obj: object) -> int:
+    """Best-effort count of active Streamlit sessions across versions."""
+    try:
+        session_mgr = getattr(runtime_obj, "_session_mgr", None)
+        if session_mgr is not None and hasattr(session_mgr, "num_active_sessions"):
+            return int(session_mgr.num_active_sessions())
+    except Exception:
+        pass
+    return 0
+
+
+def _binary_auto_shutdown_monitor_loop(*, grace_s: float, poll_s: float) -> None:
+    """
+    Stop the Streamlit runtime after the last browser session disconnects.
+
+    We arm shutdown only after at least one active session has been observed, so
+    the binary can stay open while the user takes time to open the first tab.
+    """
+    seen_active_session = False
+    no_session_since: float | None = None
+
+    while True:
+        try:
+            from streamlit import runtime as st_runtime
+            from streamlit.runtime.runtime import RuntimeState
+
+            if not st_runtime.exists():
+                time.sleep(poll_s)
+                continue
+
+            runtime = st_runtime.get_instance()
+            state = getattr(runtime, "state", None)
+            if state in (RuntimeState.STOPPING, RuntimeState.STOPPED):
+                return
+
+            active_count = _binary_active_session_count(runtime)
+            if active_count > 0:
+                seen_active_session = True
+                no_session_since = None
+            elif seen_active_session:
+                if no_session_since is None:
+                    no_session_since = time.monotonic()
+                elif (time.monotonic() - no_session_since) >= grace_s:
+                    runtime.stop()
+                    return
+        except Exception:
+            # Keep this monitor fail-safe: never block app startup or usage.
+            pass
+
+        time.sleep(poll_s)
+
+
+def _start_binary_auto_shutdown_monitor() -> None:
+    """
+    Start a background monitor that stops the server when the last tab closes.
+
+    Defaults are conservative and only apply to packaged binaries.
+    """
+    enabled = _bool_env("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_ON_LAST_SESSION", True)
+    if not enabled:
+        return
+
+    grace_s = max(3.0, _float_env("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_GRACE_S", 20.0))
+    poll_s = max(0.2, _float_env("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_POLL_S", 1.0))
+
+    thread = threading.Thread(
+        target=_binary_auto_shutdown_monitor_loop,
+        kwargs={"grace_s": grace_s, "poll_s": poll_s},
+        daemon=True,
+        name="brr-auto-shutdown-monitor",
+    )
+    thread.start()
+
+
 def _runtime_home_for_binary() -> Path:
     # Use an OS-appropriate, user-writable directory so the app can persist
     # config/data even when macOS applies App Translocation (read-only mount).
@@ -216,6 +313,7 @@ def main() -> int:
         _load_dotenv_if_present(runtime_home / ".env")
         _configure_streamlit_ui_browser_env()
         _configure_streamlit_runtime_stability_for_binary()
+        _start_binary_auto_shutdown_monitor()
     script = _resolve_app_script()
     sys.argv = [
         "streamlit",
