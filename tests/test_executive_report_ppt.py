@@ -21,7 +21,7 @@ from bug_resolution_radar.reports.executive_ppt import (
     _soften_insight_tone,
     _urgency_from_score,
 )
-from bug_resolution_radar.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.ui.common import save_issues_doc
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, _render_open_priority_pie
 from bug_resolution_radar.ui.insights.engine import ActionInsight, TrendInsightPack

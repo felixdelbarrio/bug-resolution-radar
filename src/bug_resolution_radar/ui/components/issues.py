@@ -9,7 +9,7 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.status_semantics import effective_closed_mask
+from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.ui.common import (
     chip_palette_for_color,
     chip_style_from_color,

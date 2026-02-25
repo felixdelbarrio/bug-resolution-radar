@@ -5,9 +5,9 @@ from pathlib import Path
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
-from bug_resolution_radar.schema import IssuesDocument, NormalizedIssue
-from bug_resolution_radar.schema_helix import HelixDocument, HelixWorkItem
-from bug_resolution_radar.source_maintenance import (
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.services.source_maintenance import (
     purge_source_cache,
     remove_helix_source_from_settings,
     remove_jira_source_from_settings,

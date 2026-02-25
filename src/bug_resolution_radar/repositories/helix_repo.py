@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from bug_resolution_radar.schema_helix import HelixDocument
+from bug_resolution_radar.models.schema_helix import HelixDocument
 
 
 class HelixRepo:

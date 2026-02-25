@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.notes import NotesStore
+from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context

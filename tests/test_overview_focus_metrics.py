@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.ui.dashboard.overview import _exit_funnel_counts_from_filtered
+from bug_resolution_radar.ui.dashboard.tabs.overview_tab import _exit_funnel_counts_from_filtered
 
 
 def test_exit_funnel_counts_from_filtered_scope() -> None:

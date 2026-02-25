@@ -7,7 +7,7 @@ from bug_resolution_radar.ui.dashboard.registry import (
     _render_age_buckets,
     _render_open_priority_pie,
 )
-from bug_resolution_radar.ui.dashboard.trends import (
+from bug_resolution_radar.ui.dashboard.tabs.trends_tab import (
     _effective_trends_open_scope,
     _exclude_terminal_status_rows,
     _open_status_payload,

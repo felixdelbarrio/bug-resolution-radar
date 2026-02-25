@@ -13,7 +13,7 @@ import plotly.express as px
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,

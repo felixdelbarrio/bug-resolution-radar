@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from bug_resolution_radar.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,

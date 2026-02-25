@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.insights import SimilarityCluster, find_similar_issue_clusters
+from bug_resolution_radar.analytics.insights import SimilarityCluster, find_similar_issue_clusters
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions

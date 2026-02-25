@@ -14,9 +14,9 @@ import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..config import Settings, build_source_id, supported_countries
-from ..schema import IssuesDocument, NormalizedIssue
-from ..security import sanitize_cookie_header, validate_service_base_url
-from ..utils import now_iso
+from ..common.security import sanitize_cookie_header, validate_service_base_url
+from ..common.utils import now_iso
+from ..models.schema import IssuesDocument, NormalizedIssue
 from .jira_session import get_jira_session_cookie
 
 

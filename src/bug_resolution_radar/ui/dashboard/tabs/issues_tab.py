@@ -10,7 +10,7 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.ui.components.issues import (
     prepare_issue_cards_df,
     render_issue_cards,

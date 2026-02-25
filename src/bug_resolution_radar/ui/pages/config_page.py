@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.analysis_window import (
+from bug_resolution_radar.analytics.analysis_window import (
     effective_analysis_lookback_months,
     max_available_backlog_months,
 )
@@ -22,7 +22,7 @@ from bug_resolution_radar.config import (
     supported_countries,
     to_env_json,
 )
-from bug_resolution_radar.source_maintenance import (
+from bug_resolution_radar.services.source_maintenance import (
     purge_source_cache,
 )
 from bug_resolution_radar.ui.common import load_issues_df

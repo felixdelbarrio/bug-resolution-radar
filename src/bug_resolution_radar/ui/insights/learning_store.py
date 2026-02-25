@@ -9,7 +9,7 @@ from typing import Any, Dict, Tuple
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.utils import now_iso
+from bug_resolution_radar.common.utils import now_iso
 
 LEARNING_STATE_KEY = "__insights_learning_state"
 LEARNING_INTERACTIONS_KEY = "__insights_interactions"

@@ -23,9 +23,9 @@ from tenacity import (
 )
 
 from ..config import build_source_id
-from ..schema_helix import HelixDocument, HelixWorkItem
-from ..security import sanitize_cookie_header, validate_service_base_url
-from ..utils import now_iso
+from ..common.security import sanitize_cookie_header, validate_service_base_url
+from ..common.utils import now_iso
+from ..models.schema_helix import HelixDocument, HelixWorkItem
 from .helix_mapper import map_helix_values_to_item
 from .helix_session import get_helix_session_cookie
 

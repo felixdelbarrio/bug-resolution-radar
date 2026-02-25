@@ -8,7 +8,7 @@ import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 
 
 def _normalize_token(value: Any) -> str:

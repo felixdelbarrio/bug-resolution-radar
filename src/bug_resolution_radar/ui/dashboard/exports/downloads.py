@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 from openpyxl.utils import get_column_letter
 
-from bug_resolution_radar.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+from bug_resolution_radar.theme.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
 
 EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
 EXCEL_DEFAULT_DATA_ROW_HEIGHT = 18.0

@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 
 HELIX_OFFICIAL_EXCEL_COLUMNS: list[str] = [
     "Mes",

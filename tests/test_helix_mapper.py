@@ -7,7 +7,7 @@ from bug_resolution_radar.ingest.helix_mapper import (
     map_helix_status,
     map_helix_values_to_item,
 )
-from bug_resolution_radar.schema_helix import HelixWorkItem
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.ui.pages.ingest_page import _helix_item_to_issue
 
 
