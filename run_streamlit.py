@@ -144,6 +144,20 @@ def _ensure_streamlit_config(runtime_home: Path) -> None:
         return
 
 
+def _configure_streamlit_runtime_stability_for_binary() -> None:
+    """
+    Reduce unexpected server restarts in packaged builds.
+
+    Long-running operations (e.g. PPT generation with Plotly/Kaleido) may create
+    temp files. Streamlit's file watcher can interpret those changes as source
+    changes in frozen apps and restart the report, which looks like "spinner
+    eterno" and may reopen browser tabs.
+    """
+    os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
+    os.environ.setdefault("STREAMLIT_SERVER_RUN_ON_SAVE", "false")
+    os.environ.setdefault("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", "false")
+
+
 def _runtime_home_for_binary() -> Path:
     # Use an OS-appropriate, user-writable directory so the app can persist
     # config/data even when macOS applies App Translocation (read-only mount).
@@ -165,12 +179,15 @@ def main() -> int:
         os.chdir(runtime_home)
         _load_dotenv_if_present(runtime_home / ".env")
         _configure_streamlit_ui_browser_env()
+        _configure_streamlit_runtime_stability_for_binary()
     script = _resolve_app_script()
     sys.argv = [
         "streamlit",
         "run",
         str(script),
         "--global.developmentMode=false",
+        "--server.fileWatcherType=none",
+        "--server.runOnSave=false",
     ]
     return int(stcli.main())
 
