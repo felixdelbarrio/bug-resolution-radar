@@ -29,6 +29,10 @@ from bug_resolution_radar.services.source_maintenance import (
 )
 from bug_resolution_radar.ui.cache import clear_signature_cache
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.exports.downloads import (
+    build_download_filename,
+    df_to_excel_bytes,
+)
 
 
 def _boolish(value: Any, default: bool = True) -> bool:
@@ -94,6 +98,70 @@ def _render_purge_stats(stats: Dict[str, int]) -> None:
         f"Issues purgados: {issues_removed}. "
         f"Items Helix purgados: {helix_items_removed}. "
         f"Scopes de aprendizaje purgados: {learning_scopes_removed}."
+    )
+
+
+def _source_rows_export_df(df: pd.DataFrame, *, source_type: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    rows_out: List[Dict[str, Any]] = []
+    for row in df.to_dict(orient="records"):
+        row_copy = dict(row)
+        row_copy.pop("__delete__", None)
+
+        country = _as_str(row_copy.get("country"))
+        alias = _as_str(row_copy.get("alias"))
+        source_id = _as_str(row_copy.get("__source_id__"))
+        if not source_id and country and alias:
+            source_id = build_source_id(source_type, country, alias)
+
+        business_fields = {
+            str(k): _as_str(v)
+            for k, v in row_copy.items()
+            if k != "__source_id__" and not str(k).startswith("__")
+        }
+        if not any(business_fields.values()):
+            continue
+
+        export_row: Dict[str, Any] = {"source_id": source_id}
+        export_row.update(business_fields)
+        rows_out.append(export_row)
+
+    if not rows_out:
+        return pd.DataFrame()
+
+    out_df = pd.DataFrame(rows_out)
+    preferred_cols = ["source_id", "country", "alias"]
+    ordered_cols = [c for c in preferred_cols if c in out_df.columns] + [
+        c for c in out_df.columns if c not in preferred_cols
+    ]
+    return out_df.loc[:, ordered_cols].copy(deep=False)
+
+
+def _render_sources_excel_download(
+    df: pd.DataFrame,
+    *,
+    source_type: str,
+    key: str,
+    filename_prefix: str,
+    sheet_name: str,
+) -> None:
+    export_df = _source_rows_export_df(df, source_type=source_type)
+    disabled = export_df.empty
+    payload = (
+        b""
+        if disabled
+        else df_to_excel_bytes(export_df, include_index=False, sheet_name=sheet_name)
+    )
+    st.download_button(
+        label="⬇️ Descargar Excel",
+        data=payload,
+        file_name=build_download_filename(filename_prefix, suffix="fuentes", ext="xlsx"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=key,
+        disabled=disabled,
+        width="content",
     )
 
 
@@ -455,14 +523,9 @@ def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[
                 "__source_id__": _as_str(src.get("source_id")),
                 "country": country,
                 "alias": _as_str(src.get("alias")),
-                "base_url": _as_str(src.get("base_url")),
-                "organization": _as_str(src.get("organization")),
                 "service_origin_buug": _as_str(src.get("service_origin_buug")),
                 "service_origin_n1": _as_str(src.get("service_origin_n1")),
                 "service_origin_n2": _as_str(src.get("service_origin_n2")),
-                "browser": _as_str(src.get("browser")) or "chrome",
-                "proxy": _as_str(src.get("proxy")),
-                "ssl_verify": _as_str(src.get("ssl_verify")) or "true",
             }
         )
     return rows
@@ -516,22 +579,14 @@ def _normalize_helix_rows(
             continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
-        base_url = _as_str(row.get("base_url"))
-        organization = _as_str(row.get("organization"))
         service_origin_buug = _as_str(row.get("service_origin_buug"))
         service_origin_n1 = _as_str(row.get("service_origin_n1"))
         service_origin_n2 = _as_str(row.get("service_origin_n2"))
-        browser = _as_str(row.get("browser")) or "chrome"
-        proxy = _as_str(row.get("proxy"))
-        ssl_verify = _as_str(row.get("ssl_verify")) or "true"
 
         if not any(
             [
                 country,
                 alias,
-                base_url,
-                organization,
-                proxy,
                 service_origin_buug,
                 service_origin_n1,
                 service_origin_n2,
@@ -544,18 +599,6 @@ def _normalize_helix_rows(
         if not alias:
             errors.append(f"Helix fila {idx}: alias obligatorio.")
             continue
-        if not base_url:
-            errors.append(f"Helix fila {idx}: base_url obligatorio.")
-            continue
-        if not organization:
-            errors.append(f"Helix fila {idx}: organization obligatorio.")
-            continue
-        if browser not in {"chrome", "edge"}:
-            errors.append(f"Helix fila {idx}: browser debe ser chrome o edge.")
-            continue
-        if ssl_verify not in {"true", "false"}:
-            errors.append(f"Helix fila {idx}: ssl_verify debe ser true o false.")
-            continue
 
         dedup_key = (country, alias.lower())
         if dedup_key in seen:
@@ -565,11 +608,6 @@ def _normalize_helix_rows(
         payload = {
             "country": country,
             "alias": alias,
-            "base_url": base_url,
-            "organization": organization,
-            "browser": browser,
-            "proxy": proxy,
-            "ssl_verify": ssl_verify,
         }
         if service_origin_buug:
             payload["service_origin_buug"] = service_origin_buug
@@ -761,6 +799,13 @@ def render(settings: Settings) -> None:
                 "jql": st.column_config.TextColumn("jql"),
             },
         )
+        _render_sources_excel_download(
+            jira_editor,
+            source_type="jira",
+            key="cfg_export_jira_sources_xlsx",
+            filename_prefix="fuentes_jira",
+            sheet_name="Fuentes Jira",
+        )
 
         jira_delete_ids, jira_delete_labels = _selected_sources_from_editor(
             jira_editor, source_type="jira"
@@ -831,56 +876,36 @@ def render(settings: Settings) -> None:
             st.rerun()
 
     with t_helix:
-        st.markdown("### Helix defaults")
-        query_mode_current = _as_str(getattr(settings, "HELIX_QUERY_MODE", "arsql")).lower()
-        if query_mode_current not in {"arsql", "person_workitems"}:
-            query_mode_current = "arsql"
-        helix_query_mode_labels = {
-            "arsql": "ARSQL (dashboards/report/arsqlquery)",
-            "person_workitems": "Helix API (/rest/v2/person/workitems/get)",
-        }
+        st.markdown("### Helix")
+        st.caption("Configuración común de conexión y autenticación para todas las fuentes Helix.")
 
-        h1, h2, h3 = st.columns(3)
+        h1, h2, h3 = st.columns([1.2, 1.0, 1.0])
         with h1:
+            helix_default_proxy = st.text_input(
+                "Proxy",
+                value=_as_str(getattr(settings, "HELIX_PROXY", "")),
+                key="cfg_helix_proxy_default",
+                placeholder="http://127.0.0.1:8999",
+            )
+        with h2:
             helix_default_browser = st.selectbox(
-                "Browser default",
+                "Browser",
                 options=["chrome", "edge"],
                 index=0 if _as_str(settings.HELIX_BROWSER) == "chrome" else 1,
                 key="cfg_helix_browser_default",
             )
-        with h2:
+        with h3:
             helix_default_ssl_verify = st.selectbox(
-                "SSL verify default",
+                "SSL verify",
                 options=["true", "false"],
                 index=(
                     0 if _boolish(getattr(settings, "HELIX_SSL_VERIFY", True), default=True) else 1
                 ),
                 key="cfg_helix_ssl_default",
             )
-        with h3:
-            helix_query_mode = st.selectbox(
-                "Modo de ingesta",
-                options=["arsql", "person_workitems"],
-                index=0 if query_mode_current == "arsql" else 1,
-                format_func=lambda x: helix_query_mode_labels.get(x, x),
-                key="cfg_helix_query_mode",
-            )
 
-        h4, h5 = st.columns(2)
-        with h4:
-            helix_default_proxy = st.text_input(
-                "Proxy default",
-                value=_as_str(getattr(settings, "HELIX_PROXY", "")),
-                key="cfg_helix_proxy_default",
-            )
-        with h5:
-            helix_data_path = st.text_input(
-                "Helix Data Path",
-                value=_as_str(getattr(settings, "HELIX_DATA_PATH", "data/helix_dump.json")),
-                key="cfg_helix_data_path",
-            )
         helix_dashboard_url = st.text_input(
-            "Helix Dashboard URL (base apertura ticket)",
+            "Helix Dashboard URL",
             value=_as_str(
                 getattr(
                     settings,
@@ -890,12 +915,10 @@ def render(settings: Settings) -> None:
             ),
             key="cfg_helix_dashboard_url",
         )
-        if helix_query_mode == "arsql":
-            st.caption("Modo activo: ARSQL (por defecto).")
-        else:
-            st.caption("Modo activo: endpoint Helix clásico person/workitems/get.")
+        st.caption("Modo de ingesta Helix: ARSQL (único modo soportado).")
 
         st.markdown("### Fuentes Helix por país")
+        st.caption("Alias y filtros de servicio por fuente. La conexión Helix se define arriba.")
         helix_rows = _rows_from_helix_settings(settings, countries)
         helix_df = pd.DataFrame(
             helix_rows
@@ -905,14 +928,9 @@ def render(settings: Settings) -> None:
                     "__source_id__": "",
                     "country": countries[0],
                     "alias": "",
-                    "base_url": "",
-                    "organization": "",
                     "service_origin_buug": "BBVA México",
                     "service_origin_n1": "ENTERPRISE WEB",
                     "service_origin_n2": "",
-                    "browser": helix_default_browser,
-                    "proxy": helix_default_proxy,
-                    "ssl_verify": helix_default_ssl_verify,
                 }
             ]
         )
@@ -926,30 +944,25 @@ def render(settings: Settings) -> None:
                 "__delete__",
                 "country",
                 "alias",
-                "base_url",
-                "organization",
                 "service_origin_buug",
                 "service_origin_n1",
                 "service_origin_n2",
-                "browser",
-                "proxy",
-                "ssl_verify",
             ],
             column_config={
                 "__delete__": st.column_config.CheckboxColumn("Eliminar"),
                 "country": st.column_config.SelectboxColumn("country", options=countries),
                 "alias": st.column_config.TextColumn("alias"),
-                "base_url": st.column_config.TextColumn("base_url"),
-                "organization": st.column_config.TextColumn("organization"),
                 "service_origin_buug": st.column_config.TextColumn("Servicio Origen BU/UG"),
                 "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1 (CSV)"),
                 "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
-                "browser": st.column_config.SelectboxColumn("browser", options=["chrome", "edge"]),
-                "proxy": st.column_config.TextColumn("proxy"),
-                "ssl_verify": st.column_config.SelectboxColumn(
-                    "ssl_verify", options=["true", "false"]
-                ),
             },
+        )
+        _render_sources_excel_download(
+            helix_editor,
+            source_type="helix",
+            key="cfg_export_helix_sources_xlsx",
+            filename_prefix="fuentes_helix",
+            sheet_name="Fuentes Helix",
         )
 
         helix_delete_ids, helix_delete_labels = _selected_sources_from_editor(
@@ -980,7 +993,6 @@ def render(settings: Settings) -> None:
                 for err in helix_errors:
                     st.error(err)
                 return
-
             new_settings = _safe_update_settings(
                 settings,
                 {
@@ -988,8 +1000,6 @@ def render(settings: Settings) -> None:
                     "HELIX_BROWSER": str(helix_default_browser).strip(),
                     "HELIX_PROXY": str(helix_default_proxy).strip(),
                     "HELIX_SSL_VERIFY": str(helix_default_ssl_verify).strip().lower(),
-                    "HELIX_QUERY_MODE": str(helix_query_mode).strip().lower(),
-                    "HELIX_DATA_PATH": str(helix_data_path).strip(),
                     "HELIX_DASHBOARD_URL": str(helix_dashboard_url).strip(),
                 },
             )

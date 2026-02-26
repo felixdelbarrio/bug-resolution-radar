@@ -202,6 +202,52 @@ def _ensure_streamlit_config(runtime_home: Path) -> None:
         return
 
 
+def _streamlit_credentials_file_path() -> Path:
+    return Path.home() / ".streamlit" / "credentials.toml"
+
+
+def _ensure_streamlit_credentials(email: str) -> None:
+    """
+    Pre-seed Streamlit activation credentials to avoid first-run CLI prompts.
+
+    Streamlit stores this file in the user's HOME (`~/.streamlit/credentials.toml`),
+    not in the app runtime directory.
+    """
+    normalized_email = str(email or "").strip()
+    if not normalized_email:
+        return
+
+    target = _streamlit_credentials_file_path()
+    try:
+        if target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        escaped_email = normalized_email.replace("\\", "\\\\").replace('"', '\\"')
+        target.write_text(
+            f'[general]\nemail = "{escaped_email}"\n',
+            encoding="utf-8",
+        )
+    except Exception:
+        return
+
+
+def _configure_streamlit_first_run_noninteractive_defaults() -> None:
+    """
+    Prevent Streamlit's first-run email prompt in packaged builds.
+
+    We intentionally avoid forcing `server.headless=true` so the binary can keep
+    auto-opening the browser for non-technical users.
+    """
+    os.environ.setdefault("STREAMLIT_SERVER_SHOW_EMAIL_PROMPT", "false")
+    os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
+
+    default_email = str(
+        os.environ.get("BUG_RESOLUTION_RADAR_STREAMLIT_DEFAULT_EMAIL")
+        or "bug-resolution-radar@gmail.com"
+    ).strip()
+    _ensure_streamlit_credentials(default_email)
+
+
 def _configure_streamlit_runtime_stability_for_binary() -> None:
     """
     Reduce unexpected server restarts and network exposure in packaged builds.
@@ -309,6 +355,7 @@ def main() -> int:
         os.environ.setdefault("BUG_RESOLUTION_RADAR_HOME", str(runtime_home))
         runtime_home.mkdir(parents=True, exist_ok=True)
         _ensure_streamlit_config(runtime_home)
+        _configure_streamlit_first_run_noninteractive_defaults()
         os.chdir(runtime_home)
         _load_dotenv_if_present(runtime_home / ".env")
         _configure_streamlit_ui_browser_env()

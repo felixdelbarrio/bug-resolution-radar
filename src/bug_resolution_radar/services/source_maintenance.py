@@ -66,7 +66,7 @@ def remove_jira_source_from_settings(settings: Settings, source_id: str) -> Tupl
 
 
 def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tuple[Settings, bool]:
-    """Remove a Helix source from settings and disable legacy Helix fallback."""
+    """Remove a Helix source from HELIX_SOURCES_JSON settings."""
     target = _sid(source_id)
     if not target:
         return settings, False
@@ -82,11 +82,6 @@ def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tup
         source_payload = {
             "country": str(row.get("country") or "").strip(),
             "alias": str(row.get("alias") or "").strip(),
-            "base_url": str(row.get("base_url") or "").strip(),
-            "organization": str(row.get("organization") or "").strip(),
-            "browser": str(row.get("browser") or "").strip() or "chrome",
-            "proxy": str(row.get("proxy") or "").strip(),
-            "ssl_verify": str(row.get("ssl_verify") or "").strip() or "true",
         }
         service_origin_buug = str(row.get("service_origin_buug") or "").strip()
         service_origin_n1 = str(row.get("service_origin_n1") or "").strip()
@@ -101,9 +96,6 @@ def remove_helix_source_from_settings(settings: Settings, source_id: str) -> Tup
     updated = settings.model_copy(
         update={
             "HELIX_SOURCES_JSON": to_env_json(payload),
-            # Avoid resurrecting deleted sources via legacy fallback.
-            "HELIX_BASE_URL": "",
-            "HELIX_ORGANIZATION": "",
         }
     )
     return updated, True

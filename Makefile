@@ -29,6 +29,27 @@ PYINSTALLER_COLLECT_ALL_ARGS = \
 	--collect-all browser_cookie3 \
 	--collect-all bug_resolution_radar
 
+# Finder/Quick Look can recreate .DS_Store while packaging folders are being removed.
+# Retry a few times to make clean targets less flaky on macOS.
+define rm_rf_retry
+for path in $(1); do \
+	if [ ! -e "$$path" ]; then \
+		continue; \
+	fi; \
+	for attempt in 1 2 3; do \
+		find "$$path" -name .DS_Store -delete 2>/dev/null || true; \
+		if rm -rf "$$path"; then \
+			break; \
+		fi; \
+		sleep 1; \
+	done; \
+	if [ -e "$$path" ]; then \
+		echo "No se pudo eliminar $$path (Finder/Quick Look puede estar recreando .DS_Store)." >&2; \
+		exit 1; \
+	fi; \
+done
+endef
+
 .DEFAULT_GOAL := help
 
 .PHONY: help setup format lint typecheck test run clean clean-build \
@@ -122,7 +143,7 @@ build-macos: test-ppt-regression
 		echo "El target build-macos requiere ejecutarse en macOS."; \
 		exit 1; \
 	fi
-	rm -rf dist_app build_app build_bundle/bug-resolution-radar-macos bug-resolution-radar-macos.zip
+	@$(call rm_rf_retry,dist_app build_app build_bundle/bug-resolution-radar-macos bug-resolution-radar-macos.zip)
 	ROOT_DIR="$$(pwd)"; \
 	EXTRA_ARGS=(); \
 	if [ -d src/bug_resolution_radar/ui/assets ]; then \
@@ -166,7 +187,7 @@ build-linux: test-ppt-regression
 		echo "El target build-linux requiere ejecutarse en Linux."; \
 		exit 1; \
 	fi
-	rm -rf dist build build_bundle/bug-resolution-radar-linux
+	@$(call rm_rf_retry,dist build build_bundle/bug-resolution-radar-linux)
 	ROOT_DIR="$$(pwd)"; \
 	EXTRA_ARGS=(); \
 	if [ -d src/bug_resolution_radar/ui/assets ]; then \
@@ -207,7 +228,7 @@ run:
 	$(RUN) run app.py
 
 clean-build:
-	rm -rf dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip bug-resolution-radar.pkg
+	@$(call rm_rf_retry,dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip bug-resolution-radar.pkg)
 
 clean:
 	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache .coverage htmlcov

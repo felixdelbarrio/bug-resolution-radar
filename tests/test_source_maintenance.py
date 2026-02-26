@@ -37,17 +37,13 @@ def test_remove_jira_source_from_settings_clears_legacy_fallback() -> None:
     assert updated.JIRA_JQL == ""
 
 
-def test_remove_helix_source_from_settings_clears_legacy_fallback() -> None:
+def test_remove_helix_source_from_settings_keeps_global_helix_connection_config() -> None:
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         HELIX_SOURCES_JSON=(
-            '[{"country":"México","alias":"MX SmartIT","base_url":"https://h1","organization":"ORG1",'
-            '"browser":"chrome","proxy":"","ssl_verify":"true"},'
-            '{"country":"España","alias":"ES SmartIT","base_url":"https://h2","organization":"ORG2",'
-            '"browser":"edge","proxy":"","ssl_verify":"false"}]'
+            '[{"country":"México","alias":"MX SmartIT"},'
+            '{"country":"España","alias":"ES SmartIT"}]'
         ),
-        HELIX_BASE_URL="https://legacy-helix.example.com",
-        HELIX_ORGANIZATION="LEGACY",
     )
 
     updated, removed = remove_helix_source_from_settings(settings, "helix:mexico:mx-smartit")
@@ -55,8 +51,11 @@ def test_remove_helix_source_from_settings_clears_legacy_fallback() -> None:
     rows = json.loads(updated.HELIX_SOURCES_JSON)
     assert len(rows) == 1
     assert rows[0]["alias"] == "ES SmartIT"
-    assert updated.HELIX_BASE_URL == ""
-    assert updated.HELIX_ORGANIZATION == ""
+    assert "base_url" not in rows[0]
+    assert "browser" not in rows[0]
+    assert "proxy" not in rows[0]
+    assert "ssl_verify" not in rows[0]
+    assert "organization" not in rows[0]
 
 
 def test_purge_source_cache_removes_issues_helix_and_learning(tmp_path: Path) -> None:

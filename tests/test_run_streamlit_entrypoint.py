@@ -70,6 +70,72 @@ def test_binary_runtime_stability_config_binds_localhost(monkeypatch) -> None:
     assert os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] == "false"
 
 
+def test_ensure_streamlit_credentials_creates_default_file(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    credentials_path = tmp_path / ".streamlit" / "credentials.toml"
+    monkeypatch.setattr(
+        run_streamlit,
+        "_streamlit_credentials_file_path",
+        lambda: credentials_path,
+    )
+
+    run_streamlit._ensure_streamlit_credentials("bug-resolution-radar@gmail.com")
+
+    assert credentials_path.exists()
+    assert (
+        credentials_path.read_text(encoding="utf-8")
+        == '[general]\nemail = "bug-resolution-radar@gmail.com"\n'
+    )
+
+
+def test_ensure_streamlit_credentials_does_not_overwrite_existing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    credentials_path = tmp_path / ".streamlit" / "credentials.toml"
+    credentials_path.parent.mkdir(parents=True, exist_ok=True)
+    credentials_path.write_text(
+        '[general]\nemail = "existing@example.com"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        run_streamlit,
+        "_streamlit_credentials_file_path",
+        lambda: credentials_path,
+    )
+
+    run_streamlit._ensure_streamlit_credentials("bug-resolution-radar@gmail.com")
+
+    assert (
+        credentials_path.read_text(encoding="utf-8")
+        == '[general]\nemail = "existing@example.com"\n'
+    )
+
+
+def test_configure_streamlit_first_run_noninteractive_defaults(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("STREAMLIT_SERVER_SHOW_EMAIL_PROMPT", raising=False)
+    monkeypatch.delenv("STREAMLIT_BROWSER_GATHER_USAGE_STATS", raising=False)
+    monkeypatch.delenv("BUG_RESOLUTION_RADAR_STREAMLIT_DEFAULT_EMAIL", raising=False)
+
+    credentials_path = tmp_path / ".streamlit" / "credentials.toml"
+    monkeypatch.setattr(
+        run_streamlit,
+        "_streamlit_credentials_file_path",
+        lambda: credentials_path,
+    )
+
+    run_streamlit._configure_streamlit_first_run_noninteractive_defaults()
+
+    assert os.environ["STREAMLIT_SERVER_SHOW_EMAIL_PROMPT"] == "false"
+    assert os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] == "false"
+    assert credentials_path.exists()
+
+
 def test_start_binary_auto_shutdown_monitor_can_be_disabled(monkeypatch) -> None:
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_AUTO_SHUTDOWN_ON_LAST_SESSION", "false")
 
