@@ -6,3 +6,9 @@ backgroundColor = "#F4F6F9"            # Page background (very light neutral)
 secondaryBackgroundColor = "#FFFFFF"   # Surfaces/cards
 textColor = "#11192D"                  # BBVA Grey 900
 font = "sans serif"
+
+[server]
+showEmailPrompt = false
+
+[browser]
+gatherUsageStats = false
