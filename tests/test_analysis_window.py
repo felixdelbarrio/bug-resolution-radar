@@ -41,7 +41,7 @@ def test_max_available_backlog_months_is_ceiled() -> None:
     assert max_available_backlog_months(df, now=now) == 3
 
 
-def test_apply_analysis_depth_filter_filters_old_rows_and_keeps_unknown_created() -> None:
+def test_apply_analysis_depth_filter_filters_old_rows_and_excludes_unknown_created() -> None:
     now = datetime(2026, 2, 20, tzinfo=timezone.utc)
     df = pd.DataFrame(
         [
@@ -54,7 +54,7 @@ def test_apply_analysis_depth_filter_filters_old_rows_and_keeps_unknown_created(
 
     out = apply_analysis_depth_filter(df, settings=settings, now=now)
 
-    assert set(out["key"].tolist()) == {"A", "C"}
+    assert set(out["key"].tolist()) == {"A"}
 
 
 def test_effective_analysis_lookback_months_uses_legacy_days_if_months_not_set() -> None:
