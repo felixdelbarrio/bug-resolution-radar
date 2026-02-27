@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bug_resolution_radar.ingest.helix_ingest import (
     _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
+    _resolve_create_date_range_ms,
     _utc_year_create_date_range_ms,
 )
 
@@ -28,6 +29,36 @@ def test_utc_year_create_date_range_ms_defaults_to_current_year() -> None:
     _, _, year = _utc_year_create_date_range_ms()
 
     assert year == datetime.now(timezone.utc).year
+
+
+def test_resolve_create_date_range_ms_defaults_to_natural_year_plus_7_days() -> None:
+    now = datetime(2026, 2, 27, 10, 30, 0, tzinfo=timezone.utc)
+
+    start_ms, end_ms, rule = _resolve_create_date_range_ms(now=now)
+
+    expected_start = int(datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected_end = int((now + timedelta(days=7)).timestamp() * 1000)
+
+    assert start_ms == expected_start
+    assert end_ms == expected_end
+    assert "natural_year=2026" in rule
+
+
+def test_resolve_create_date_range_ms_uses_analysis_lookback_plus_one_month() -> None:
+    now = datetime(2026, 2, 27, 10, 30, 0, tzinfo=timezone.utc)
+
+    start_ms, end_ms, rule = _resolve_create_date_range_ms(
+        analysis_lookback_months=12,
+        now=now,
+    )
+
+    expected_start = int(datetime(2025, 1, 27, 10, 30, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected_end = int((now + timedelta(days=7)).timestamp() * 1000)
+
+    assert start_ms == expected_start
+    assert end_ms == expected_end
+    assert "analysis_lookback_months=12" in rule
+    assert "effective=13m" in rule
 
 
 def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
