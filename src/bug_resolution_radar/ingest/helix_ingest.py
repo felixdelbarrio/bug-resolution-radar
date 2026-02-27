@@ -290,23 +290,48 @@ def _optimize_create_start_from_cache(
     if not in_window:
         return start_ms, "cache_window=empty"
 
-    non_final_ms = [
-        anchor_ms
-        for item, anchor_ms in in_window
-        if not _is_helix_finalist_status(item.status or item.status_raw)
-    ]
-    if non_final_ms:
-        optimized_start = max(start_ms, min(non_final_ms))
-        return (
-            optimized_start,
-            f"cache_non_final={len(non_final_ms)}/{len(in_window)}",
-        )
-
     tail_days = max(1, _coerce_int(all_final_tail_days, 7))
     tail_ms = int(tail_days * 24 * 60 * 60 * 1000)
     latest_ms = max(anchor_ms for _, anchor_ms in in_window)
     optimized_start = max(start_ms, latest_ms - tail_ms)
+    non_final_count = sum(
+        1 for item, _ in in_window if not _is_helix_finalist_status(item.status or item.status_raw)
+    )
+    if non_final_count > 0:
+        return (
+            optimized_start,
+            f"cache_non_final={non_final_count}/{len(in_window)}; tail_days={tail_days}",
+        )
     return optimized_start, f"cache_all_final={len(in_window)}; tail_days={tail_days}"
+
+
+def _cache_pending_refresh_ids(
+    cached_items: List[HelixWorkItem],
+    *,
+    base_start_ms: int,
+    base_end_ms: int,
+    max_ids: Any = 200,
+) -> List[str]:
+    start_ms = int(max(0, base_start_ms))
+    end_ms = int(max(start_ms, base_end_ms))
+    max_ids_int = max(1, _coerce_int(max_ids, 200))
+    out: List[str] = []
+    seen: set[str] = set()
+
+    for item in cached_items:
+        anchor_ms = _item_anchor_epoch_ms(item)
+        if anchor_ms is None or anchor_ms < start_ms or anchor_ms > end_ms:
+            continue
+        if _is_helix_finalist_status(item.status or item.status_raw):
+            continue
+        incident_id = str(item.id or "").strip()
+        if not incident_id or incident_id in seen:
+            continue
+        seen.add(incident_id)
+        out.append(incident_id)
+        if len(out) >= max_ids_int:
+            break
+    return out
 
 
 def _iso_from_epoch_ms(ms: int) -> str:
@@ -576,6 +601,7 @@ def _build_arsql_sql(
     source_service_n1: Optional[List[str]] = None,
     source_service_n2: Optional[List[str]] = None,
     incident_types: Optional[List[str]] = None,
+    incident_ids: Optional[List[str]] = None,
     companies: Optional[List[str]] = None,
     environments: Optional[List[str]] = None,
     time_fields: Optional[List[str]] = None,
@@ -691,8 +717,13 @@ def _build_arsql_sql(
         for field_name in time_field_candidates
         if not _is_disabled(field_name)
     ]
-    if time_clauses:
+    incident_ids_filter = _sql_in_filter(_field_ref("Incident Number"), incident_ids)
+    if time_clauses and incident_ids_filter:
+        where_parts.append("(" + " OR ".join(time_clauses + [incident_ids_filter]) + ")")
+    elif time_clauses:
         where_parts.append("(" + " OR ".join(time_clauses) + ")")
+    elif incident_ids_filter:
+        where_parts.append(incident_ids_filter)
 
     source_filter_field = _first_available_field(["BBVA_SourceServiceN1", "BBVA_MatrixServiceN1"])
     source_filter = (
@@ -1690,8 +1721,18 @@ def ingest_helix(
         base_start_ms=create_start_ms,
         base_end_ms=create_end_ms,
     )
+    pending_ids_max = _coerce_int(os.getenv("HELIX_ARSQL_PENDING_IDS_MAX", "200"), 200)
+    arsql_pending_incident_ids = _cache_pending_refresh_ids(
+        source_cached_items,
+        base_start_ms=create_start_ms,
+        base_end_ms=create_end_ms,
+        max_ids=pending_ids_max,
+    )
     create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
-    create_window_rule = f"{create_window_rule}; {cache_window_rule}"
+    create_window_rule = (
+        f"{create_window_rule}; {cache_window_rule}; "
+        f"pending_ids={len(arsql_pending_incident_ids)}"
+    )
     # Keep official extraction filters for business type/environment/time fields.
     # Only the temporal window changes according to configured analysis depth.
     incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
@@ -1741,6 +1782,7 @@ def ingest_helix(
             source_service_n1=arsql_source_service_n1,
             source_service_n2=arsql_source_service_n2,
             incident_types=incident_types_filter,
+            incident_ids=arsql_pending_incident_ids,
             companies=arsql_companies,
             environments=arsql_environments_filter,
             time_fields=arsql_time_fields,
@@ -2207,9 +2249,6 @@ def ingest_helix(
             new_in_page += 1
             items.append(mapped_item)
 
-        if new_in_page == 0:
-            break
-
         batch_size = len(batch)
         if batch_size <= 0:
             break
@@ -2225,11 +2264,14 @@ def ingest_helix(
             current_chunk_size = int(batch_size)
 
     doc = _build_result_doc(items)
+    source_total_after_merge = len(
+        {_item_merge_key(i) for i in source_cached_items} | {_item_merge_key(i) for i in items}
+    )
 
     return (
         True,
         (
-            f"{source_label}: ingesta Helix OK ({len(items)} items, merge total {len(doc.items)}). "
+            f"{source_label}: ingesta Helix OK ({len(items)} items, cache fuente tras merge {source_total_after_merge}). "
             f"Filtrados por tipo (negocio): {filtered_out_by_business_incident_type}. "
             f"Filtrados por entorno: {filtered_out_by_environment}."
         ),
