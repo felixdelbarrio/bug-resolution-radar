@@ -63,9 +63,7 @@ def open_url_in_configured_browser(url: str, browser: str) -> bool:
 
     if platform == "linux":
         bins = (
-            ["google-chrome", "chrome", "chromium"]
-            if use_chrome
-            else ["microsoft-edge", "msedge"]
+            ["google-chrome", "chrome", "chromium"] if use_chrome else ["microsoft-edge", "msedge"]
         )
         for bin_name in bins:
             try:
@@ -115,7 +113,7 @@ def is_target_page_open_in_configured_browser(url: str, browser: str) -> Optiona
         "        if tabUrl is missing value then",
         "        else if tabUrl starts with targetUrl then",
         '          return "1"',
-        "        else if targetRoot is not \"\" and tabUrl starts with targetRoot then",
+        '        else if targetRoot is not "" and tabUrl starts with targetRoot then',
         '          return "1"',
         "        end if",
         "      end repeat",
