@@ -56,6 +56,16 @@ _ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES: tuple[str, ...] = (
 )
 _ARSQL_OFFICIAL_ENVIRONMENTS: tuple[str, ...] = ("Production",)
 _ARSQL_OFFICIAL_TIME_FIELDS: tuple[str, ...] = ("Submit Date",)
+_HELIX_FINALIST_STATUS_TOKENS: tuple[str, ...] = (
+    "accepted",
+    "ready to deploy",
+    "deployed",
+    "closed",
+    "resolved",
+    "done",
+    "cancelled",
+    "canceled",
+)
 _INSECURE_TLS_WARNING_SUPPRESSED = False
 
 
@@ -175,6 +185,128 @@ def _resolve_create_date_range_ms(
     start_ms = int(start_dt.timestamp() * 1000)
     end_ms = int(max(start_dt.timestamp(), end_dt.timestamp()) * 1000)
     return start_ms, end_ms, f"natural_year={natural_year}; end=now+{future_days_int}d"
+
+
+def _iso_to_epoch_ms(value: Any) -> Optional[int]:
+    txt = str(value or "").strip()
+    if not txt:
+        return None
+    try:
+        dt = datetime.fromisoformat(txt.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+def _is_helix_finalist_status(value: Any) -> bool:
+    token = re.sub(
+        r"\s+", " ", str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    )
+    if not token:
+        return False
+    return any(part in token for part in _HELIX_FINALIST_STATUS_TOKENS)
+
+
+def _source_item_matches(
+    item: HelixWorkItem,
+    *,
+    source_id: str,
+    country: str,
+    alias: str,
+) -> bool:
+    item_sid = str(item.source_id or "").strip().lower()
+    source_sid = str(source_id or "").strip().lower()
+    if source_sid:
+        return item_sid == source_sid
+    item_country = str(item.country or "").strip().lower()
+    item_alias = str(item.source_alias or "").strip().lower()
+    return (
+        item_country == str(country or "").strip().lower()
+        and item_alias == str(alias or "").strip().lower()
+    )
+
+
+def _item_anchor_epoch_ms(item: HelixWorkItem) -> Optional[int]:
+    # TargetDate (Submit Date) is the official window field; keep a few fallbacks for legacy rows.
+    for value in (
+        item.target_date,
+        item.start_datetime,
+        item.last_modified,
+        item.closed_date,
+    ):
+        parsed = _iso_to_epoch_ms(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _cached_items_for_source(
+    doc: Optional[HelixDocument],
+    *,
+    source_id: str,
+    country: str,
+    alias: str,
+) -> List[HelixWorkItem]:
+    if doc is None or not isinstance(doc, HelixDocument):
+        return []
+    return [
+        item
+        for item in (doc.items or [])
+        if isinstance(item, HelixWorkItem)
+        and _source_item_matches(
+            item,
+            source_id=source_id,
+            country=country,
+            alias=alias,
+        )
+    ]
+
+
+def _optimize_create_start_from_cache(
+    cached_items: List[HelixWorkItem],
+    *,
+    base_start_ms: int,
+    base_end_ms: int,
+    all_final_tail_days: Any = 7,
+) -> Tuple[int, str]:
+    start_ms = int(max(0, base_start_ms))
+    end_ms = int(max(start_ms, base_end_ms))
+    if not cached_items:
+        return start_ms, "cache=empty"
+
+    in_window: List[Tuple[HelixWorkItem, int]] = []
+    for item in cached_items:
+        anchor_ms = _item_anchor_epoch_ms(item)
+        if anchor_ms is None:
+            continue
+        if anchor_ms < start_ms or anchor_ms > end_ms:
+            continue
+        in_window.append((item, anchor_ms))
+
+    if not in_window:
+        return start_ms, "cache_window=empty"
+
+    non_final_ms = [
+        anchor_ms
+        for item, anchor_ms in in_window
+        if not _is_helix_finalist_status(item.status or item.status_raw)
+    ]
+    if non_final_ms:
+        optimized_start = max(start_ms, min(non_final_ms))
+        return (
+            optimized_start,
+            f"cache_non_final={len(non_final_ms)}/{len(in_window)}",
+        )
+
+    tail_days = max(1, _coerce_int(all_final_tail_days, 7))
+    tail_ms = int(tail_days * 24 * 60 * 60 * 1000)
+    latest_ms = max(anchor_ms for _, anchor_ms in in_window)
+    optimized_start = max(start_ms, latest_ms - tail_ms)
+    return optimized_start, f"cache_all_final={len(in_window)}; tail_days={tail_days}"
 
 
 def _iso_from_epoch_ms(ms: int) -> str:
@@ -1140,6 +1272,7 @@ def ingest_helix(
     max_ingest_seconds: Any = None,
     dry_run: bool = False,
     existing_doc: Optional[HelixDocument] = None,
+    cache_doc: Optional[HelixDocument] = None,
 ) -> Tuple[bool, str, Optional[HelixDocument]]:
     country_value = str(country or "").strip()
     alias_value = str(source_alias or "").strip() or "Helix principal"
@@ -1527,10 +1660,38 @@ def ingest_helix(
             )
 
     analysis_lookback_months = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 0)
-    create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
-        create_date_year=create_date_year,
-        analysis_lookback_months=analysis_lookback_months,
+    cache_reference_doc = cache_doc if cache_doc is not None else existing_doc
+    source_cached_items = _cached_items_for_source(
+        cache_reference_doc,
+        source_id=source_id_value,
+        country=country_value,
+        alias=alias_value,
     )
+    if source_cached_items:
+        rolling_lookback_months = (
+            int(analysis_lookback_months) if analysis_lookback_months > 0 else 12
+        )
+        create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
+            analysis_lookback_months=rolling_lookback_months,
+        )
+        create_window_rule = (
+            f"{create_window_rule}; first_ingest=false; "
+            f"cache_items_source={len(source_cached_items)}"
+        )
+    else:
+        create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
+            create_date_year=create_date_year,
+            analysis_lookback_months=0,
+        )
+        create_window_rule = f"{create_window_rule}; first_ingest=true"
+
+    optimized_start_ms, cache_window_rule = _optimize_create_start_from_cache(
+        source_cached_items,
+        base_start_ms=create_start_ms,
+        base_end_ms=create_end_ms,
+    )
+    create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
+    create_window_rule = f"{create_window_rule}; {cache_window_rule}"
     # Keep official extraction filters for business type/environment/time fields.
     # Only the temporal window changes according to configured analysis depth.
     incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)

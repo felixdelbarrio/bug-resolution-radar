@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Literal, Tuple, cast
 
 import pandas as pd
 import streamlit as st
@@ -147,7 +147,9 @@ def _render_progress_status(
                 (st.success if ok else st.error)(msg)
         return True
 
-    ui_state = "complete" if state in {"success", "partial"} else "error"
+    ui_state: Literal["complete", "error"] = (
+        "complete" if state in {"success", "partial"} else "error"
+    )
     headline = str(snapshot.get("summary") or f"{title}: ingesta finalizada.")
     with st.status(headline, state=ui_state, expanded=False):
         st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
@@ -274,6 +276,7 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                         service_origin_n2=src.get("service_origin_n2"),
                         dry_run=False,
                         existing_doc=HelixDocument.empty(),
+                        cache_doc=merged_helix,
                     )
                 except Exception as e:
                     ok = False
