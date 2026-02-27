@@ -6,7 +6,8 @@ import os
 import re
 import time
 import warnings
-from datetime import datetime, timezone
+import calendar
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
@@ -116,6 +117,62 @@ def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int
     start_ms = int(start_dt.timestamp() * 1000)
     end_ms = int(end_dt.timestamp() * 1000) - 1
     return start_ms, end_ms, year_int
+
+
+def _shift_months_utc(base_dt: datetime, months: int) -> datetime:
+    dt = (
+        base_dt.astimezone(timezone.utc)
+        if base_dt.tzinfo is not None
+        else base_dt.replace(tzinfo=timezone.utc)
+    )
+    total_months = (dt.year * 12) + (dt.month - 1) + int(months)
+    target_year = total_months // 12
+    target_month = (total_months % 12) + 1
+    target_day = min(dt.day, calendar.monthrange(target_year, target_month)[1])
+    return dt.replace(year=target_year, month=target_month, day=target_day)
+
+
+def _resolve_create_date_range_ms(
+    *,
+    create_date_year: Optional[Any] = None,
+    analysis_lookback_months: Optional[Any] = None,
+    now: Optional[datetime] = None,
+    future_days: Any = 7,
+) -> Tuple[int, int, str]:
+    if isinstance(now, datetime):
+        now_utc = now.astimezone(timezone.utc) if now.tzinfo is not None else now.replace(
+            tzinfo=timezone.utc
+        )
+    else:
+        now_utc = datetime.now(timezone.utc)
+    future_days_int = max(0, _coerce_int(future_days, 7))
+    lookback_months = _coerce_int(analysis_lookback_months, 0)
+
+    # If analysis depth is configured, ARQL uses a rolling window with one extra month.
+    if lookback_months > 0:
+        effective_months = int(lookback_months) + 1
+        start_dt = _shift_months_utc(now_utc, -effective_months)
+        end_dt = now_utc + timedelta(days=future_days_int)
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(max(start_dt.timestamp(), end_dt.timestamp()) * 1000)
+        rule = (
+            f"analysis_lookback_months={lookback_months} "
+            f"(effective={effective_months}m; end=now+{future_days_int}d)"
+        )
+        return start_ms, end_ms, rule
+
+    # Legacy explicit year override (kept for compatibility with direct callers/tests).
+    if create_date_year is not None:
+        start_ms, end_ms, year_int = _utc_year_create_date_range_ms(create_date_year)
+        return start_ms, end_ms, f"year={year_int}"
+
+    # Default when no analysis depth is configured: current natural year to now + 7 days.
+    natural_year = now_utc.year
+    start_dt = datetime(natural_year, 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc)
+    end_dt = now_utc + timedelta(days=future_days_int)
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(max(start_dt.timestamp(), end_dt.timestamp()) * 1000)
+    return start_ms, end_ms, f"natural_year={natural_year}; end=now+{future_days_int}d"
 
 
 def _iso_from_epoch_ms(ms: int) -> str:
@@ -1467,11 +1524,13 @@ def ingest_helix(
                 None,
             )
 
-    create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    # Enterprise Web official extraction criteria: current natural year by creation date
-    # (Submit Date), Production environment, and business types present in the official
-    # workbook. Keep these fixed to avoid drift between app ingestion/export and the
-    # reference Excel.
+    analysis_lookback_months = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 0)
+    create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
+        create_date_year=create_date_year,
+        analysis_lookback_months=analysis_lookback_months,
+    )
+    # Keep official extraction filters for business type/environment/time fields.
+    # Only the temporal window changes according to configured analysis depth.
     incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
     allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
     arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
@@ -1969,7 +2028,7 @@ def ingest_helix(
     doc.query = (
         "mode=arsql; "
         f"arsql_root={arsql_base_root}; "
-        f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
+        f"createDate in [{create_start_iso} .. {create_end_iso}] ({create_window_rule}); "
         f"timeFields=[{arsql_time_fields_q}]; "
         f"sourceServiceN1=[{source_service_n1_q}]; "
         f"sourceServiceN2=[{source_service_n2_q}]; "
