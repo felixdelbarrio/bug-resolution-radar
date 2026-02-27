@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import time
-import webbrowser
-from platform import system as platform_system
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -17,6 +14,10 @@ from ..config import Settings, build_source_id, supported_countries
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
 from ..models.schema import IssuesDocument, NormalizedIssue
+from .browser_runtime import (
+    is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
+    open_url_in_configured_browser as _open_url_in_browser,
+)
 from .jira_session import get_jira_session_cookie
 
 
@@ -29,54 +30,20 @@ def _request(session: requests.Session, method: str, url: str, **kwargs: Any) ->
 
 
 def _open_url_in_configured_browser(url: str, browser: str) -> bool:
-    b = str(browser or "").strip().lower()
-    browser_names = (
-        ["chrome", "google-chrome", "google chrome"]
-        if b == "chrome"
-        else ["edge", "msedge", "microsoft-edge", "microsoft edge"]
-    )
-    for name in browser_names:
-        try:
-            ctl = webbrowser.get(name)
-            if ctl.open(url, new=2, autoraise=True):
-                return True
-        except Exception:
-            continue
+    return _open_url_in_browser(url=url, browser=browser)
 
-    platform = platform_system().lower()
-    if platform == "darwin":
-        app_name = "Google Chrome" if b == "chrome" else "Microsoft Edge"
-        try:
-            subprocess.Popen(
-                ["open", "-a", app_name, url],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
-        except Exception:
-            pass
 
-    if platform == "linux":
-        bins = (
-            ["google-chrome", "chrome", "chromium"]
-            if b == "chrome"
-            else ["microsoft-edge", "msedge"]
-        )
-        for bin_name in bins:
-            try:
-                subprocess.Popen(
-                    [bin_name, url],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                return True
-            except Exception:
-                continue
+def _is_target_page_open_in_configured_browser(url: str, browser: str) -> Optional[bool]:
+    return _is_target_page_open_in_browser(url=url, browser=browser)
 
-    try:
-        return bool(webbrowser.open(url, new=2, autoraise=True))
-    except Exception:
-        return False
+
+def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bool:
+    is_open = _is_target_page_open_in_configured_browser(url, browser)
+    if is_open is True:
+        return True
+    if is_open is False:
+        return _open_url_in_configured_browser(url, browser)
+    return False
 
 
 def _cookie_names_from_header(cookie_header: str) -> List[str]:
@@ -116,7 +83,13 @@ def _bootstrap_jira_cookie_from_browser(
     login_url: str,
     wait_seconds: int,
     poll_seconds: float,
+    page_already_ensured: bool = False,
 ) -> Optional[str]:
+    if not page_already_ensured:
+        page_already_ensured = _ensure_target_page_open_in_configured_browser(login_url, browser)
+    if not page_already_ensured:
+        _open_url_in_configured_browser(login_url, browser)
+
     try:
         existing = get_jira_session_cookie(browser=browser, host=host)
     except Exception:
@@ -125,7 +98,6 @@ def _bootstrap_jira_cookie_from_browser(
     if existing and _has_jira_auth_cookie(_cookie_names_from_header(existing)):
         return existing
 
-    _open_url_in_configured_browser(login_url, browser)
     deadline = time.monotonic() + float(wait_seconds)
     while time.monotonic() < deadline:
         try:
@@ -195,6 +167,16 @@ def ingest_jira(
     if not base.endswith("/jira"):
         base_candidates.append(base + "/jira")
 
+    jira_web_base = base if base.endswith("/jira") else f"{base}/jira"
+    login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or (
+        f"{jira_web_base}/secure/Dashboard.jspa"
+    )
+    wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
+    poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
+    pre_cookie_page_ready = _ensure_target_page_open_in_configured_browser(
+        login_url, settings.JIRA_BROWSER
+    )
+
     try:
         host = urlparse(base).hostname or ""
         cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
@@ -205,18 +187,13 @@ def ingest_jira(
     cookie = sanitize_cookie_header(cookie)
     cookie_names = _cookie_names_from_header(cookie or "")
     if not cookie or not _has_jira_auth_cookie(cookie_names):
-        jira_web_base = base if base.endswith("/jira") else f"{base}/jira"
-        login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or (
-            f"{jira_web_base}/secure/Dashboard.jspa"
-        )
-        wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
-        poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
         bootstrapped_cookie = _bootstrap_jira_cookie_from_browser(
             browser=settings.JIRA_BROWSER,
             host=host,
             login_url=login_url,
             wait_seconds=wait_seconds,
             poll_seconds=poll_seconds,
+            page_already_ensured=pre_cookie_page_ready,
         )
         if bootstrapped_cookie:
             cookie = bootstrapped_cookie

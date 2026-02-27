@@ -99,13 +99,17 @@ def apply_analysis_depth_filter(
     if df is None or df.empty or "created" not in df.columns:
         return pd.DataFrame() if df is None else df.copy(deep=False)
 
+    created = pd.to_datetime(df["created"], utc=True, errors="coerce")
+    has_created = created.notna()
+    if not has_created.any():
+        return df.loc[has_created].copy(deep=False)
+
     lookback_months = effective_analysis_lookback_months(settings, df=df, now=now)
     available_months = max_available_backlog_months(df, now=now)
     if lookback_months >= available_months:
-        return df.copy(deep=False)
+        return df.loc[has_created].copy(deep=False)
 
-    created = pd.to_datetime(df["created"], utc=True, errors="coerce")
     current = _utc_timestamp(now)
     cutoff = current - pd.DateOffset(months=int(lookback_months))
-    mask = created.isna() | (created >= cutoff)
+    mask = has_created & (created >= cutoff)
     return df.loc[mask].copy(deep=False)

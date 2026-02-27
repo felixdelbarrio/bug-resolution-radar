@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import time
-import webbrowser
 import warnings
 from datetime import datetime, timezone
-from platform import system as platform_system
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
@@ -28,6 +25,10 @@ from ..config import build_source_id
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
 from ..models.schema_helix import HelixDocument, HelixWorkItem
+from .browser_runtime import (
+    is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
+    open_url_in_configured_browser as _open_url_in_browser,
+)
 from .helix_mapper import (
     is_allowed_helix_business_incident_type,
     map_helix_values_to_item,
@@ -124,54 +125,22 @@ def _iso_from_epoch_ms(ms: int) -> str:
 def _open_url_in_configured_browser(url: str, browser: str) -> bool:
     if not _root_from_url(url):
         return False
-    b = str(browser or "").strip().lower()
-    browser_names = (
-        ["chrome", "google-chrome", "google chrome"]
-        if b == "chrome"
-        else ["edge", "msedge", "microsoft-edge", "microsoft edge"]
-    )
-    for name in browser_names:
-        try:
-            ctl = webbrowser.get(name)
-            if ctl.open(url, new=2, autoraise=True):
-                return True
-        except Exception:
-            continue
+    return _open_url_in_browser(url=url, browser=browser)
 
-    platform = platform_system().lower()
-    if platform == "darwin":
-        app_name = "Google Chrome" if b == "chrome" else "Microsoft Edge"
-        try:
-            subprocess.Popen(
-                ["open", "-a", app_name, url],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
-        except Exception:
-            pass
 
-    if platform == "linux":
-        bins = (
-            ["google-chrome", "chrome", "chromium"]
-            if b == "chrome"
-            else ["microsoft-edge", "msedge"]
-        )
-        for bin_name in bins:
-            try:
-                subprocess.Popen(
-                    [bin_name, url],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                return True
-            except Exception:
-                continue
-
-    try:
-        return bool(webbrowser.open(url, new=2, autoraise=True))
-    except Exception:
+def _is_target_page_open_in_configured_browser(url: str, browser: str) -> Optional[bool]:
+    if not _root_from_url(url):
         return False
+    return _is_target_page_open_in_browser(url=url, browser=browser)
+
+
+def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bool:
+    is_open = _is_target_page_open_in_configured_browser(url, browser)
+    if is_open is True:
+        return True
+    if is_open is False:
+        return _open_url_in_configured_browser(url, browser)
+    return False
 
 
 _ARSQL_SELECT_ALIASES: List[str] = [
@@ -1287,9 +1256,26 @@ def ingest_helix(
                 _push(seed.replace("-smartit.", "-ir1.", 1))
         return out
 
+    auth_cookie_hosts = _auth_cookie_hosts()
+    can_bootstrap_page = bool(auth_cookie_hosts) and bool(_root_from_url(login_bootstrap_url))
+    bootstrap_page_checked = False
+    bootstrap_page_ready = False
+
+    def _ensure_login_bootstrap_page_open(*, force_recheck: bool = False) -> bool:
+        nonlocal bootstrap_page_checked, bootstrap_page_ready
+        if not can_bootstrap_page:
+            return False
+        if bootstrap_page_checked and not force_recheck:
+            return bootstrap_page_ready
+        bootstrap_page_ready = _ensure_target_page_open_in_configured_browser(
+            login_bootstrap_url, browser
+        )
+        bootstrap_page_checked = True
+        return bootstrap_page_ready
+
     def _read_auth_cookie_from_browser() -> Tuple[Optional[str], str, str]:
         last_error = ""
-        for cookie_host in _auth_cookie_hosts():
+        for cookie_host in auth_cookie_hosts:
             try:
                 candidate = get_helix_session_cookie(browser=browser, host=cookie_host)
             except Exception as e:
@@ -1301,6 +1287,9 @@ def ingest_helix(
         return None, "", last_error
 
     def _bootstrap_cookie_from_browser() -> Tuple[Optional[str], str]:
+        nonlocal bootstrap_page_ready
+        page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
+
         try:
             existing, existing_host, _ = _read_auth_cookie_from_browser()
         except Exception:
@@ -1308,12 +1297,15 @@ def ingest_helix(
         if existing:
             return existing, existing_host
 
-        if not _auth_cookie_hosts():
+        if not auth_cookie_hosts:
             return None, ""
-        if not _root_from_url(login_bootstrap_url):
+        if not can_bootstrap_page:
             return None, ""
+        if not page_ready:
+            page_ready = _open_url_in_configured_browser(login_bootstrap_url, browser)
+            if page_ready:
+                bootstrap_page_ready = True
 
-        _open_url_in_configured_browser(login_bootstrap_url, browser)
         deadline = time.monotonic() + float(login_wait_seconds)
         while time.monotonic() < deadline:
             candidate, candidate_host, _ = _read_auth_cookie_from_browser()
@@ -1322,6 +1314,7 @@ def ingest_helix(
             time.sleep(login_poll_seconds)
         return None, ""
 
+    _ensure_login_bootstrap_page_open(force_recheck=True)
     cookie, cookie_source_host, cookie_error = _read_auth_cookie_from_browser()
     cookie_names_from_header = _cookie_names_from_header(cookie or "")
     if not cookie or not _has_auth_cookie(cookie_names_from_header):
@@ -1334,11 +1327,11 @@ def ingest_helix(
     if not cookie:
         details = f" Detalle: {cookie_error}" if cookie_error else ""
         hint = ""
-        if not _auth_cookie_hosts():
+        if not auth_cookie_hosts:
             hint = (
                 " Revisa HELIX_DASHBOARD_URL (URL absoluta de SmartIT) " "o HELIX_ARSQL_BASE_URL."
             )
-        elif not _root_from_url(login_bootstrap_url):
+        elif not can_bootstrap_page:
             hint = (
                 " Revisa HELIX_DASHBOARD_URL/HELIX_ARSQL_DASHBOARD_URL: "
                 "la URL de bootstrap no es válida."
@@ -1360,6 +1353,7 @@ def ingest_helix(
         )
 
     def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
+        _ensure_login_bootstrap_page_open(force_recheck=True)
         fresh_cookie, fresh_cookie_host, cookie_refresh_error = _read_auth_cookie_from_browser()
         if not fresh_cookie:
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
