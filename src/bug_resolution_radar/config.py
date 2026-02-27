@@ -228,6 +228,7 @@ class Settings(BaseModel):
     JIRA_BASE_URL: str = ""
     SUPPORTED_COUNTRIES: str = DEFAULT_SUPPORTED_COUNTRIES_CSV
     JIRA_SOURCES_JSON: str = "[]"
+    JIRA_INGEST_DISABLED_SOURCES_JSON: str = "[]"
     # legacy fallback (solo compatibilidad si no hay JIRA_SOURCES_JSON)
     JIRA_JQL: str = ""
     JIRA_BROWSER: str = "chrome"
