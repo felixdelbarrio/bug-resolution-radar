@@ -1,10 +1,13 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bug_resolution_radar.ingest.helix_ingest import (
     _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
+    _optimize_create_start_from_cache,
+    _resolve_create_date_range_ms,
     _utc_year_create_date_range_ms,
 )
+from bug_resolution_radar.models.schema_helix import HelixWorkItem
 
 
 def test_utc_year_create_date_range_ms_uses_full_year_boundaries() -> None:
@@ -28,6 +31,104 @@ def test_utc_year_create_date_range_ms_defaults_to_current_year() -> None:
     _, _, year = _utc_year_create_date_range_ms()
 
     assert year == datetime.now(timezone.utc).year
+
+
+def test_resolve_create_date_range_ms_defaults_to_natural_year_plus_7_days() -> None:
+    now = datetime(2026, 2, 27, 10, 30, 0, tzinfo=timezone.utc)
+
+    start_ms, end_ms, rule = _resolve_create_date_range_ms(now=now)
+
+    expected_start = int(datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected_end = int((now + timedelta(days=7)).timestamp() * 1000)
+
+    assert start_ms == expected_start
+    assert end_ms == expected_end
+    assert "natural_year=2026" in rule
+
+
+def test_resolve_create_date_range_ms_uses_analysis_lookback_plus_one_month() -> None:
+    now = datetime(2026, 2, 27, 10, 30, 0, tzinfo=timezone.utc)
+
+    start_ms, end_ms, rule = _resolve_create_date_range_ms(
+        analysis_lookback_months=12,
+        now=now,
+    )
+
+    expected_start = int(datetime(2025, 1, 27, 10, 30, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected_end = int((now + timedelta(days=7)).timestamp() * 1000)
+
+    assert start_ms == expected_start
+    assert end_ms == expected_end
+    assert "analysis_lookback_months=12" in rule
+    assert "effective=13m" in rule
+
+
+def test_optimize_create_start_from_cache_uses_oldest_non_final_in_window() -> None:
+    base_start = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    base_end = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
+    cached_items = [
+        HelixWorkItem(
+            id="INC-1",
+            status="Closed",
+            source_id="helix:mexico:web",
+            target_date="2025-02-01T00:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-2",
+            status="Open",
+            source_id="helix:mexico:web",
+            target_date="2025-10-15T08:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-3",
+            status="Resolved",
+            source_id="helix:mexico:web",
+            target_date="2026-01-20T00:00:00+00:00",
+        ),
+    ]
+
+    optimized_start, rule = _optimize_create_start_from_cache(
+        cached_items,
+        base_start_ms=base_start,
+        base_end_ms=base_end,
+    )
+
+    expected_start = int(datetime(2025, 10, 15, 8, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    assert optimized_start == expected_start
+    assert "cache_non_final=1/3" in rule
+
+
+def test_optimize_create_start_from_cache_all_final_uses_recent_tail_from_last_item() -> None:
+    base_start = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    base_end = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
+    cached_items = [
+        HelixWorkItem(
+            id="INC-10",
+            status="Closed",
+            source_id="helix:mexico:web",
+            target_date="2025-06-01T00:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-11",
+            status="Resolved",
+            source_id="helix:mexico:web",
+            target_date="2025-12-10T12:00:00+00:00",
+        ),
+    ]
+
+    optimized_start, rule = _optimize_create_start_from_cache(
+        cached_items,
+        base_start_ms=base_start,
+        base_end_ms=base_end,
+        all_final_tail_days=7,
+    )
+
+    expected_start = int(
+        (datetime(2025, 12, 10, 12, 0, 0, tzinfo=timezone.utc) - timedelta(days=7)).timestamp()
+        * 1000
+    )
+    assert optimized_start == expected_start
+    assert "cache_all_final=2" in rule
 
 
 def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:

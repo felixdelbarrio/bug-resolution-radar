@@ -6,7 +6,8 @@ import os
 import re
 import time
 import warnings
-from datetime import datetime, timezone
+import calendar
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
 
@@ -55,6 +56,16 @@ _ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES: tuple[str, ...] = (
 )
 _ARSQL_OFFICIAL_ENVIRONMENTS: tuple[str, ...] = ("Production",)
 _ARSQL_OFFICIAL_TIME_FIELDS: tuple[str, ...] = ("Submit Date",)
+_HELIX_FINALIST_STATUS_TOKENS: tuple[str, ...] = (
+    "accepted",
+    "ready to deploy",
+    "deployed",
+    "closed",
+    "resolved",
+    "done",
+    "cancelled",
+    "canceled",
+)
 _INSECURE_TLS_WARNING_SUPPRESSED = False
 
 
@@ -116,6 +127,186 @@ def _utc_year_create_date_range_ms(year: Optional[Any] = None) -> Tuple[int, int
     start_ms = int(start_dt.timestamp() * 1000)
     end_ms = int(end_dt.timestamp() * 1000) - 1
     return start_ms, end_ms, year_int
+
+
+def _shift_months_utc(base_dt: datetime, months: int) -> datetime:
+    dt = (
+        base_dt.astimezone(timezone.utc)
+        if base_dt.tzinfo is not None
+        else base_dt.replace(tzinfo=timezone.utc)
+    )
+    total_months = (dt.year * 12) + (dt.month - 1) + int(months)
+    target_year = total_months // 12
+    target_month = (total_months % 12) + 1
+    target_day = min(dt.day, calendar.monthrange(target_year, target_month)[1])
+    return dt.replace(year=target_year, month=target_month, day=target_day)
+
+
+def _resolve_create_date_range_ms(
+    *,
+    create_date_year: Optional[Any] = None,
+    analysis_lookback_months: Optional[Any] = None,
+    now: Optional[datetime] = None,
+    future_days: Any = 7,
+) -> Tuple[int, int, str]:
+    if isinstance(now, datetime):
+        now_utc = (
+            now.astimezone(timezone.utc)
+            if now.tzinfo is not None
+            else now.replace(tzinfo=timezone.utc)
+        )
+    else:
+        now_utc = datetime.now(timezone.utc)
+    future_days_int = max(0, _coerce_int(future_days, 7))
+    lookback_months = _coerce_int(analysis_lookback_months, 0)
+
+    # If analysis depth is configured, ARQL uses a rolling window with one extra month.
+    if lookback_months > 0:
+        effective_months = int(lookback_months) + 1
+        start_dt = _shift_months_utc(now_utc, -effective_months)
+        end_dt = now_utc + timedelta(days=future_days_int)
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(max(start_dt.timestamp(), end_dt.timestamp()) * 1000)
+        rule = (
+            f"analysis_lookback_months={lookback_months} "
+            f"(effective={effective_months}m; end=now+{future_days_int}d)"
+        )
+        return start_ms, end_ms, rule
+
+    # Legacy explicit year override (kept for compatibility with direct callers/tests).
+    if create_date_year is not None:
+        start_ms, end_ms, year_int = _utc_year_create_date_range_ms(create_date_year)
+        return start_ms, end_ms, f"year={year_int}"
+
+    # Default when no analysis depth is configured: current natural year to now + 7 days.
+    natural_year = now_utc.year
+    start_dt = datetime(natural_year, 1, 1, 0, 0, 0, 0, tzinfo=timezone.utc)
+    end_dt = now_utc + timedelta(days=future_days_int)
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(max(start_dt.timestamp(), end_dt.timestamp()) * 1000)
+    return start_ms, end_ms, f"natural_year={natural_year}; end=now+{future_days_int}d"
+
+
+def _iso_to_epoch_ms(value: Any) -> Optional[int]:
+    txt = str(value or "").strip()
+    if not txt:
+        return None
+    try:
+        dt = datetime.fromisoformat(txt.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+def _is_helix_finalist_status(value: Any) -> bool:
+    token = re.sub(
+        r"\s+", " ", str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    )
+    if not token:
+        return False
+    return any(part in token for part in _HELIX_FINALIST_STATUS_TOKENS)
+
+
+def _source_item_matches(
+    item: HelixWorkItem,
+    *,
+    source_id: str,
+    country: str,
+    alias: str,
+) -> bool:
+    item_sid = str(item.source_id or "").strip().lower()
+    source_sid = str(source_id or "").strip().lower()
+    if source_sid:
+        return item_sid == source_sid
+    item_country = str(item.country or "").strip().lower()
+    item_alias = str(item.source_alias or "").strip().lower()
+    return (
+        item_country == str(country or "").strip().lower()
+        and item_alias == str(alias or "").strip().lower()
+    )
+
+
+def _item_anchor_epoch_ms(item: HelixWorkItem) -> Optional[int]:
+    # TargetDate (Submit Date) is the official window field; keep a few fallbacks for legacy rows.
+    for value in (
+        item.target_date,
+        item.start_datetime,
+        item.last_modified,
+        item.closed_date,
+    ):
+        parsed = _iso_to_epoch_ms(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _cached_items_for_source(
+    doc: Optional[HelixDocument],
+    *,
+    source_id: str,
+    country: str,
+    alias: str,
+) -> List[HelixWorkItem]:
+    if doc is None or not isinstance(doc, HelixDocument):
+        return []
+    return [
+        item
+        for item in (doc.items or [])
+        if isinstance(item, HelixWorkItem)
+        and _source_item_matches(
+            item,
+            source_id=source_id,
+            country=country,
+            alias=alias,
+        )
+    ]
+
+
+def _optimize_create_start_from_cache(
+    cached_items: List[HelixWorkItem],
+    *,
+    base_start_ms: int,
+    base_end_ms: int,
+    all_final_tail_days: Any = 7,
+) -> Tuple[int, str]:
+    start_ms = int(max(0, base_start_ms))
+    end_ms = int(max(start_ms, base_end_ms))
+    if not cached_items:
+        return start_ms, "cache=empty"
+
+    in_window: List[Tuple[HelixWorkItem, int]] = []
+    for item in cached_items:
+        anchor_ms = _item_anchor_epoch_ms(item)
+        if anchor_ms is None:
+            continue
+        if anchor_ms < start_ms or anchor_ms > end_ms:
+            continue
+        in_window.append((item, anchor_ms))
+
+    if not in_window:
+        return start_ms, "cache_window=empty"
+
+    non_final_ms = [
+        anchor_ms
+        for item, anchor_ms in in_window
+        if not _is_helix_finalist_status(item.status or item.status_raw)
+    ]
+    if non_final_ms:
+        optimized_start = max(start_ms, min(non_final_ms))
+        return (
+            optimized_start,
+            f"cache_non_final={len(non_final_ms)}/{len(in_window)}",
+        )
+
+    tail_days = max(1, _coerce_int(all_final_tail_days, 7))
+    tail_ms = int(tail_days * 24 * 60 * 60 * 1000)
+    latest_ms = max(anchor_ms for _, anchor_ms in in_window)
+    optimized_start = max(start_ms, latest_ms - tail_ms)
+    return optimized_start, f"cache_all_final={len(in_window)}; tail_days={tail_days}"
 
 
 def _iso_from_epoch_ms(ms: int) -> str:
@@ -1081,6 +1272,7 @@ def ingest_helix(
     max_ingest_seconds: Any = None,
     dry_run: bool = False,
     existing_doc: Optional[HelixDocument] = None,
+    cache_doc: Optional[HelixDocument] = None,
 ) -> Tuple[bool, str, Optional[HelixDocument]]:
     country_value = str(country or "").strip()
     alias_value = str(source_alias or "").strip() or "Helix principal"
@@ -1467,11 +1659,41 @@ def ingest_helix(
                 None,
             )
 
-    create_start_ms, create_end_ms, create_year = _utc_year_create_date_range_ms(create_date_year)
-    # Enterprise Web official extraction criteria: current natural year by creation date
-    # (Submit Date), Production environment, and business types present in the official
-    # workbook. Keep these fixed to avoid drift between app ingestion/export and the
-    # reference Excel.
+    analysis_lookback_months = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 0)
+    cache_reference_doc = cache_doc if cache_doc is not None else existing_doc
+    source_cached_items = _cached_items_for_source(
+        cache_reference_doc,
+        source_id=source_id_value,
+        country=country_value,
+        alias=alias_value,
+    )
+    if source_cached_items:
+        rolling_lookback_months = (
+            int(analysis_lookback_months) if analysis_lookback_months > 0 else 12
+        )
+        create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
+            analysis_lookback_months=rolling_lookback_months,
+        )
+        create_window_rule = (
+            f"{create_window_rule}; first_ingest=false; "
+            f"cache_items_source={len(source_cached_items)}"
+        )
+    else:
+        create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
+            create_date_year=create_date_year,
+            analysis_lookback_months=0,
+        )
+        create_window_rule = f"{create_window_rule}; first_ingest=true"
+
+    optimized_start_ms, cache_window_rule = _optimize_create_start_from_cache(
+        source_cached_items,
+        base_start_ms=create_start_ms,
+        base_end_ms=create_end_ms,
+    )
+    create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
+    create_window_rule = f"{create_window_rule}; {cache_window_rule}"
+    # Keep official extraction filters for business type/environment/time fields.
+    # Only the temporal window changes according to configured analysis depth.
     incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
     allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
     arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
@@ -1747,6 +1969,57 @@ def ingest_helix(
     )
     session_refreshes = 0
 
+    def _build_result_doc(
+        collected_items: List[HelixWorkItem],
+        *,
+        outcome_note: str = "",
+    ) -> HelixDocument:
+        doc = existing_doc or HelixDocument.empty()
+        doc.schema_version = "1.0"
+        doc.ingested_at = now_iso()
+        # Persist SmartIT base URL so UI links always land in the incident console.
+        doc.helix_base_url = base
+        create_start_iso = _iso_from_epoch_ms(create_start_ms)
+        create_end_iso = _iso_from_epoch_ms(create_end_ms)
+        incident_types_q = ",".join(incident_types_filter) or "all"
+        companies_q = (
+            ",".join(str(r.get("name") or "").strip() for r in companies_filter if r) or "all"
+        )
+        source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
+        source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
+        arsql_environments_q = ",".join(arsql_environments_filter) or "all"
+        arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
+        select_mode_q = "wide" if arsql_include_all_fields else "narrow"
+        disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
+        outcome_note_q = str(outcome_note or "").strip()
+        if outcome_note_q:
+            outcome_note_q = f"; outcome={outcome_note_q}"
+        doc.query = (
+            "mode=arsql; "
+            f"arsql_root={arsql_base_root}; "
+            f"createDate in [{create_start_iso} .. {create_end_iso}] ({create_window_rule}); "
+            f"timeFields=[{arsql_time_fields_q}]; "
+            f"sourceServiceN1=[{source_service_n1_q}]; "
+            f"sourceServiceN2=[{source_service_n2_q}]; "
+            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
+            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
+            f"page_limit={base_chunk_size}; "
+            f"select={select_mode_q}; "
+            f"disabled_fields=[{disabled_fields_q}]"
+            f"{outcome_note_q}"
+        )
+
+        merged = {_item_merge_key(i): i for i in doc.items}
+        for item in collected_items:
+            merged[_item_merge_key(item)] = item
+        doc.items = list(merged.values())
+        return doc
+
+    def _partial_doc(outcome_note: str) -> Optional[HelixDocument]:
+        if not items:
+            return None
+        return _build_result_doc(items, outcome_note=outcome_note)
+
     while True:
         elapsed = time.monotonic() - started_at
         if elapsed > max_elapsed_seconds:
@@ -1757,7 +2030,7 @@ def ingest_helix(
                 f"Páginas={page}, items_nuevos={len(items)} | "
                 f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("timeout:max_elapsed"),
             )
 
         if page >= max_pages_limit:
@@ -1767,7 +2040,7 @@ def ingest_helix(
                 f"max_pages={max_pages_limit} | páginas={page} | items_nuevos={len(items)} | "
                 f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("limit:max_pages"),
             )
 
         try:
@@ -1795,7 +2068,7 @@ def ingest_helix(
                     f"{source_label}: Helix responde con rate limit tras reintentos agotados. "
                     f"Causa: {cause} | endpoint={endpoint} | "
                     f"chunk={current_chunk_size} | timeout(connect/read)={connect_to}/{current_read_to}",
-                    None,
+                    _partial_doc("error:rate_limit"),
                 )
             return (
                 False,
@@ -1804,7 +2077,7 @@ def ingest_helix(
                 f"timeout(connect/read)={connect_to}/{current_read_to} | "
                 f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to} | "
                 f"endpoint={endpoint}",
-                None,
+                _partial_doc("timeout:retry_exhausted"),
             )
         except requests.exceptions.Timeout as e:
             if current_chunk_size > min_chunk_limit:
@@ -1821,21 +2094,21 @@ def ingest_helix(
                 f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
                 f"timeout(connect/read)={connect_to}/{current_read_to} | "
                 f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to}",
-                None,
+                _partial_doc("timeout:request"),
             )
         except SSLError as e:
             return (
                 False,
                 f"{source_label}: error SSL en Helix: {e} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("error:ssl"),
             )
         except requests.exceptions.RequestException as e:
             return (
                 False,
                 f"{source_label}: error de red en Helix: "
                 f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("error:network"),
             )
 
         if r.status_code != 200:
@@ -1860,14 +2133,14 @@ def ingest_helix(
                         f"y se agotaron los refrescos de sesión. "
                         f"Detalle: {_short_text(r.text)} | proxy={helix_proxy or '(sin proxy)'} | "
                         f"verify={verify_desc}",
-                        None,
+                        _partial_doc("error:session_expired"),
                     )
                 refreshed_ok, refreshed_msg = _refresh_auth_session("session_expired")
                 if not refreshed_ok:
                     return (
                         False,
                         f"{refreshed_msg} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                        None,
+                        _partial_doc("error:session_refresh"),
                     )
                 session_refreshes += 1
                 continue
@@ -1875,7 +2148,7 @@ def ingest_helix(
                 False,
                 f"{source_label}: error Helix ({r.status_code}): {r.text[:800]} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc(f"error:http_{r.status_code}"),
             )
 
         page += 1
@@ -1951,39 +2224,7 @@ def ingest_helix(
             # In that case, keep paging using the effective page size until the API returns empty.
             current_chunk_size = int(batch_size)
 
-    doc = existing_doc or HelixDocument.empty()
-    doc.schema_version = "1.0"
-    doc.ingested_at = now_iso()
-    # Persist SmartIT base URL so UI links always land in the incident console.
-    doc.helix_base_url = base
-    create_start_iso = _iso_from_epoch_ms(create_start_ms)
-    create_end_iso = _iso_from_epoch_ms(create_end_ms)
-    incident_types_q = ",".join(incident_types_filter) or "all"
-    companies_q = ",".join(str(r.get("name") or "").strip() for r in companies_filter if r) or "all"
-    source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
-    source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
-    arsql_environments_q = ",".join(arsql_environments_filter) or "all"
-    arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
-    select_mode_q = "wide" if arsql_include_all_fields else "narrow"
-    disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
-    doc.query = (
-        "mode=arsql; "
-        f"arsql_root={arsql_base_root}; "
-        f"createDate in [{create_start_iso} .. {create_end_iso}] (year={create_year}); "
-        f"timeFields=[{arsql_time_fields_q}]; "
-        f"sourceServiceN1=[{source_service_n1_q}]; "
-        f"sourceServiceN2=[{source_service_n2_q}]; "
-        f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
-        f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
-        f"page_limit={base_chunk_size}; "
-        f"select={select_mode_q}; "
-        f"disabled_fields=[{disabled_fields_q}]"
-    )
-
-    merged = {_item_merge_key(i): i for i in doc.items}
-    for i in items:
-        merged[_item_merge_key(i)] = i
-    doc.items = list(merged.values())
+    doc = _build_result_doc(items)
 
     return (
         True,
