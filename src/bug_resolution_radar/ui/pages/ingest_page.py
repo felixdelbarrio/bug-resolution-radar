@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 import pandas as pd
 import streamlit as st
@@ -22,6 +25,325 @@ from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
 from bug_resolution_radar.common.utils import now_iso
+
+
+@dataclass
+class _IngestProgress:
+    connector: str
+    state: str = "idle"  # idle | running | success | partial | error
+    started_at: str = ""
+    finished_at: str = ""
+    total_sources: int = 0
+    completed_sources: int = 0
+    success_count: int = 0
+    messages: List[Tuple[bool, str]] = field(default_factory=list)
+    summary: str = ""
+
+
+_INGEST_PROGRESS_LOCK = threading.Lock()
+_INGEST_PROGRESS_BY_CONNECTOR: Dict[str, _IngestProgress] = {}
+
+
+def _progress_entry(connector: str) -> _IngestProgress:
+    entry = _INGEST_PROGRESS_BY_CONNECTOR.get(connector)
+    if entry is not None:
+        return entry
+    fresh = _IngestProgress(connector=str(connector or "").strip().lower())
+    _INGEST_PROGRESS_BY_CONNECTOR[fresh.connector] = fresh
+    return fresh
+
+
+def _progress_start(connector: str, *, total_sources: int) -> bool:
+    key = str(connector or "").strip().lower()
+    with _INGEST_PROGRESS_LOCK:
+        entry = _progress_entry(key)
+        if entry.state == "running":
+            return False
+        entry.state = "running"
+        entry.started_at = now_iso()
+        entry.finished_at = ""
+        entry.total_sources = max(0, int(total_sources))
+        entry.completed_sources = 0
+        entry.success_count = 0
+        entry.messages = []
+        entry.summary = ""
+        return True
+
+
+def _progress_append_message(
+    connector: str,
+    *,
+    ok: bool,
+    msg: str,
+    count_source: bool = True,
+) -> None:
+    key = str(connector or "").strip().lower()
+    with _INGEST_PROGRESS_LOCK:
+        entry = _progress_entry(key)
+        entry.messages.append((bool(ok), str(msg or "").strip()))
+        if count_source:
+            entry.completed_sources = max(0, int(entry.completed_sources) + 1)
+        if ok:
+            entry.success_count = max(0, int(entry.success_count) + 1)
+
+
+def _progress_finish(connector: str, *, state: str, summary: str) -> None:
+    key = str(connector or "").strip().lower()
+    with _INGEST_PROGRESS_LOCK:
+        entry = _progress_entry(key)
+        entry.state = str(state or "error").strip().lower()
+        entry.finished_at = now_iso()
+        entry.summary = str(summary or "").strip()
+        if entry.total_sources > 0:
+            entry.completed_sources = min(max(0, entry.completed_sources), int(entry.total_sources))
+
+
+def _progress_snapshot(connector: str) -> Dict[str, Any]:
+    key = str(connector or "").strip().lower()
+    with _INGEST_PROGRESS_LOCK:
+        entry = _progress_entry(key)
+        return {
+            "connector": entry.connector,
+            "state": entry.state,
+            "started_at": entry.started_at,
+            "finished_at": entry.finished_at,
+            "total_sources": int(entry.total_sources),
+            "completed_sources": int(entry.completed_sources),
+            "success_count": int(entry.success_count),
+            "messages": list(entry.messages),
+            "summary": entry.summary,
+        }
+
+
+def _source_label(source: Dict[str, str], *, fallback: str) -> str:
+    country = str(source.get("country", "")).strip()
+    alias = str(source.get("alias", "")).strip()
+    if country and alias:
+        return f"{country} · {alias}"
+    if alias:
+        return f"{fallback} · {alias}"
+    return fallback
+
+
+def _render_progress_status(
+    *,
+    connector: str,
+    title: str,
+) -> bool:
+    snapshot = _progress_snapshot(connector)
+    state = str(snapshot.get("state") or "idle").strip().lower()
+    if state == "idle":
+        return False
+
+    total = int(snapshot.get("total_sources") or 0)
+    completed = int(snapshot.get("completed_sources") or 0)
+    success_count = int(snapshot.get("success_count") or 0)
+    messages = cast(List[Tuple[bool, str]], snapshot.get("messages") or [])
+
+    if state == "running":
+        with st.status(f"{title}: ingesta en curso", state="running", expanded=True):
+            st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
+            for ok, msg in messages:
+                (st.success if ok else st.error)(msg)
+        return True
+
+    ui_state = "complete" if state in {"success", "partial"} else "error"
+    headline = str(snapshot.get("summary") or f"{title}: ingesta finalizada.")
+    with st.status(headline, state=ui_state, expanded=False):
+        st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
+        finished_at = str(snapshot.get("finished_at") or "").strip()
+        if finished_at:
+            st.caption(f"Finalizada: {finished_at}")
+        for ok, msg in messages:
+            (st.success if ok else st.error)(msg)
+    return False
+
+
+def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> bool:
+    sources = [dict(src) for src in selected_sources]
+    if not _progress_start("jira", total_sources=len(sources)):
+        return False
+    settings_snapshot = settings.model_copy(deep=True)
+
+    def _worker() -> None:
+        try:
+            issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
+            work_doc = issues_doc
+            for src in sources:
+                try:
+                    ok, msg, new_doc = ingest_jira(
+                        settings=settings_snapshot,
+                        dry_run=False,
+                        existing_doc=work_doc,
+                        source=src,
+                    )
+                except Exception as e:
+                    ok = False
+                    msg = (
+                        f"{_source_label(src, fallback='Jira')}: error inesperado en ingesta Jira "
+                        f"({type(e).__name__}): {e}"
+                    )
+                    new_doc = None
+                if ok and new_doc is not None:
+                    work_doc = new_doc
+                _progress_append_message("jira", ok=ok, msg=msg, count_source=True)
+
+            snap = _progress_snapshot("jira")
+            success_count = int(snap.get("success_count") or 0)
+            total_sources = max(1, len(sources))
+            if success_count <= 0:
+                _progress_finish(
+                    "jira",
+                    state="error",
+                    summary="No se pudo ingestar ninguna fuente Jira.",
+                )
+                return
+
+            try:
+                save_issues_doc(settings_snapshot.DATA_PATH, work_doc)
+            except Exception as e:
+                _progress_append_message(
+                    "jira",
+                    ok=False,
+                    msg=("Error guardando resultados Jira: " f"{type(e).__name__}: {e}"),
+                    count_source=False,
+                )
+                _progress_finish(
+                    "jira",
+                    state="error" if success_count == 0 else "partial",
+                    summary="Reingesta Jira finalizada con error al guardar resultados.",
+                )
+                return
+
+            _progress_finish(
+                "jira",
+                state="success" if success_count == total_sources else "partial",
+                summary=(
+                    f"Reingesta Jira finalizada: {success_count}/{total_sources} fuentes OK. "
+                    f"Guardado en {settings_snapshot.DATA_PATH}."
+                ),
+            )
+        except Exception as e:
+            _progress_append_message(
+                "jira",
+                ok=False,
+                msg=f"Error inesperado de orquestación Jira ({type(e).__name__}): {e}",
+                count_source=False,
+            )
+            _progress_finish(
+                "jira",
+                state="error",
+                summary="La ingesta Jira terminó con error.",
+            )
+
+    threading.Thread(target=_worker, name="jira-ingest-worker", daemon=True).start()
+    return True
+
+
+def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> bool:
+    sources = [dict(src) for src in selected_sources]
+    if not _progress_start("helix", total_sources=len(sources)):
+        return False
+    settings_snapshot = settings.model_copy(deep=True)
+
+    def _worker() -> None:
+        try:
+            helix_path = _get_helix_path(settings_snapshot)
+            helix_repo = HelixRepo(Path(helix_path))
+            stored_helix_doc = helix_repo.load() or HelixDocument.empty()
+            merged_helix = stored_helix_doc
+            issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
+            helix_browser = (
+                str(getattr(settings_snapshot, "HELIX_BROWSER", "chrome") or "chrome").strip()
+                or "chrome"
+            )
+            helix_proxy = str(getattr(settings_snapshot, "HELIX_PROXY", "") or "").strip()
+            helix_ssl_verify = str(getattr(settings_snapshot, "HELIX_SSL_VERIFY", "") or "").strip()
+
+            for src in sources:
+                try:
+                    ok, msg, new_helix_doc = ingest_helix(
+                        browser=helix_browser,
+                        country=str(src.get("country", "")).strip(),
+                        source_alias=str(src.get("alias", "")).strip(),
+                        source_id=str(src.get("source_id", "")).strip(),
+                        proxy=helix_proxy,
+                        ssl_verify=helix_ssl_verify,
+                        service_origin_buug=src.get("service_origin_buug"),
+                        service_origin_n1=src.get("service_origin_n1"),
+                        service_origin_n2=src.get("service_origin_n2"),
+                        dry_run=False,
+                        existing_doc=HelixDocument.empty(),
+                    )
+                except Exception as e:
+                    ok = False
+                    msg = (
+                        f"{_source_label(src, fallback='Helix')}: error inesperado en ingesta Helix "
+                        f"({type(e).__name__}): {e}"
+                    )
+                    new_helix_doc = None
+
+                if ok and new_helix_doc is not None:
+                    merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
+                    merged_helix.ingested_at = new_helix_doc.ingested_at
+                    merged_helix.helix_base_url = new_helix_doc.helix_base_url
+                    merged_helix.query = "multi-source"
+                    mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
+                    issues_doc = _merge_issues(issues_doc, mapped)
+                _progress_append_message("helix", ok=ok, msg=msg, count_source=True)
+
+            snap = _progress_snapshot("helix")
+            success_count = int(snap.get("success_count") or 0)
+            total_sources = max(1, len(sources))
+            if success_count <= 0:
+                _progress_finish(
+                    "helix",
+                    state="error",
+                    summary="No se pudo ingestar ninguna fuente Helix.",
+                )
+                return
+
+            try:
+                issues_doc.ingested_at = now_iso()
+                helix_repo.save(merged_helix)
+                save_issues_doc(settings_snapshot.DATA_PATH, issues_doc)
+            except Exception as e:
+                _progress_append_message(
+                    "helix",
+                    ok=False,
+                    msg=("Error guardando resultados Helix: " f"{type(e).__name__}: {e}"),
+                    count_source=False,
+                )
+                _progress_finish(
+                    "helix",
+                    state="error" if success_count == 0 else "partial",
+                    summary="Reingesta Helix finalizada con error al guardar resultados.",
+                )
+                return
+
+            _progress_finish(
+                "helix",
+                state="success" if success_count == total_sources else "partial",
+                summary=(
+                    f"Reingesta Helix finalizada: {success_count}/{total_sources} fuentes OK. "
+                    f"Guardado en {helix_path} y {settings_snapshot.DATA_PATH}."
+                ),
+            )
+        except Exception as e:
+            _progress_append_message(
+                "helix",
+                ok=False,
+                msg=f"Error inesperado de orquestación Helix ({type(e).__name__}): {e}",
+                count_source=False,
+            )
+            _progress_finish(
+                "helix",
+                state="error",
+                summary="La ingesta Helix terminó con error.",
+            )
+
+    threading.Thread(target=_worker, name="helix-ingest-worker", daemon=True).start()
+    return True
 
 
 def _get_helix_path(settings: Settings) -> str:
@@ -144,6 +466,21 @@ def _parse_json_str_list(raw: object) -> List[str]:
     return out
 
 
+def _persist_jira_ingest_disabled_sources(
+    settings: Settings, disabled_source_ids: List[str]
+) -> Settings:
+    normalized = [str(x).strip() for x in disabled_source_ids if str(x).strip()]
+    new_settings = settings.model_copy(
+        update={
+            "JIRA_INGEST_DISABLED_SOURCES_JSON": json.dumps(
+                normalized, ensure_ascii=False, separators=(",", ":")
+            )
+        }
+    )
+    save_settings(new_settings)
+    return new_settings
+
+
 def _persist_helix_ingest_disabled_sources(
     settings: Settings, disabled_source_ids: List[str]
 ) -> Settings:
@@ -161,28 +498,107 @@ def _persist_helix_ingest_disabled_sources(
 
 def render(settings: Settings) -> None:
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
+    running_any = False
     t_jira, t_helix = st.tabs(["Jira", "Helix"])
 
     with t_jira:
         jira_cfg = jira_sources(settings)
         st.caption(f"Fuentes Jira configuradas: {len(jira_cfg)}")
-        _render_sources_preview(jira_cfg, ["country", "alias", "jql"])
+        valid_jira_source_ids = [
+            str(src.get("source_id", "")).strip()
+            for src in jira_cfg
+            if str(src.get("source_id", "")).strip()
+        ]
+        disabled_jira_source_ids = [
+            sid
+            for sid in _parse_json_str_list(
+                getattr(settings, "JIRA_INGEST_DISABLED_SOURCES_JSON", "")
+            )
+            if sid in valid_jira_source_ids
+        ]
+        disabled_jira_set = set(disabled_jira_source_ids)
+
+        if jira_cfg:
+            jira_selector_df = pd.DataFrame(
+                [
+                    {
+                        "__ingest__": str(src.get("source_id", "")).strip()
+                        not in disabled_jira_set,
+                        "__source_id__": str(src.get("source_id", "")).strip(),
+                        "country": str(src.get("country", "")).strip(),
+                        "alias": str(src.get("alias", "")).strip(),
+                        "jql": str(src.get("jql", "")).strip(),
+                    }
+                    for src in jira_cfg
+                ]
+            )
+            st.markdown("### Fuentes Jira a ingestar")
+            st.caption(
+                "Por defecto todas marcadas. Este selector se guarda automáticamente en el .env."
+            )
+            jira_selector = st.data_editor(
+                jira_selector_df,
+                hide_index=True,
+                num_rows="fixed",
+                width="stretch",
+                key="ingest_jira_sources_selector",
+                column_order=["__ingest__", "country", "alias", "jql"],
+                disabled=["__source_id__", "country", "alias", "jql"],
+                column_config={
+                    "__ingest__": st.column_config.CheckboxColumn("Ingestar"),
+                    "country": st.column_config.TextColumn("country"),
+                    "alias": st.column_config.TextColumn("alias"),
+                    "jql": st.column_config.TextColumn("jql"),
+                },
+            )
+            selected_jira_source_ids = {
+                str(row.get("__source_id__", "")).strip()
+                for row in jira_selector.to_dict(orient="records")
+                if bool(row.get("__ingest__", False)) and str(row.get("__source_id__", "")).strip()
+            }
+            new_disabled_jira_source_ids = [
+                sid for sid in valid_jira_source_ids if sid not in selected_jira_source_ids
+            ]
+            if new_disabled_jira_source_ids != disabled_jira_source_ids:
+                settings = _persist_jira_ingest_disabled_sources(
+                    settings, new_disabled_jira_source_ids
+                )
+                disabled_jira_source_ids = new_disabled_jira_source_ids
+            jira_cfg_selected = [
+                src
+                for src in jira_cfg
+                if str(src.get("source_id", "")).strip() not in set(disabled_jira_source_ids)
+            ]
+            st.caption(f"Seleccionadas para ingesta Jira: {len(jira_cfg_selected)}/{len(jira_cfg)}")
+        else:
+            jira_cfg_selected = []
+            _render_sources_preview(jira_cfg, ["country", "alias", "jql"])
+
+        jira_running = (
+            str(_progress_snapshot("jira").get("state") or "").strip().lower() == "running"
+        )
 
         col_a, col_b = st.columns(2)
         with col_a:
-            test_jira = st.button("🔎 Test Jira", key="btn_test_jira_all")
+            test_jira = st.button("🔎 Test Jira", key="btn_test_jira_all", disabled=jira_running)
         with col_b:
-            run_jira = st.button("⬇️ Reingestar Jira", key="btn_run_jira_all")
+            run_jira = st.button(
+                "⬇️ Reingestar Jira",
+                key="btn_run_jira_all",
+                disabled=jira_running,
+            )
 
         issues_doc = load_issues_doc(settings.DATA_PATH)
 
         if test_jira:
             if not jira_cfg:
                 st.error("No hay fuentes Jira configuradas.")
+            elif not jira_cfg_selected:
+                st.warning("No hay fuentes Jira seleccionadas para ingesta.")
             else:
                 messages: List[Tuple[bool, str]] = []
-                with st.spinner("Probando fuentes Jira..."):
-                    for src in jira_cfg:
+                with st.spinner("Probando fuentes Jira seleccionadas..."):
+                    for src in jira_cfg_selected:
                         ok, msg, _ = ingest_jira(settings=settings, dry_run=True, source=src)
                         messages.append((ok, msg))
                 _render_batch_messages(messages)
@@ -190,33 +606,15 @@ def render(settings: Settings) -> None:
         if run_jira:
             if not jira_cfg:
                 st.error("No hay fuentes Jira configuradas.")
+            elif not jira_cfg_selected:
+                st.warning("No hay fuentes Jira seleccionadas para ingesta.")
             else:
-                messages = []
-                work_doc = issues_doc
-                success_count = 0
-                with st.spinner("Ingestando Jira para todas las fuentes configuradas..."):
-                    for src in jira_cfg:
-                        ok, msg, new_doc = ingest_jira(
-                            settings=settings,
-                            dry_run=False,
-                            existing_doc=work_doc,
-                            source=src,
-                        )
-                        messages.append((ok, msg))
-                        if ok and new_doc is not None:
-                            work_doc = new_doc
-                            success_count += 1
+                if _start_jira_ingest_job(settings, selected_sources=jira_cfg_selected):
+                    st.rerun()
+                st.warning("Ya hay una ingesta Jira en curso.")
 
-                _render_batch_messages(messages)
-                if success_count > 0:
-                    save_issues_doc(settings.DATA_PATH, work_doc)
-                    issues_doc = work_doc
-                    st.success(
-                        f"Reingesta Jira finalizada: {success_count}/{len(jira_cfg)} fuentes OK. "
-                        f"Guardado en {settings.DATA_PATH}."
-                    )
-                else:
-                    st.error("No se pudo ingestar ninguna fuente Jira.")
+        jira_running = _render_progress_status(connector="jira", title="Jira")
+        running_any = running_any or jira_running
 
         jira_source_ids = {
             str(i.source_id or "").strip()
@@ -339,6 +737,9 @@ def render(settings: Settings) -> None:
         helix_path = _get_helix_path(settings)
         helix_repo = HelixRepo(Path(helix_path))
         stored_helix_doc = helix_repo.load() or HelixDocument.empty()
+        helix_running = (
+            str(_progress_snapshot("helix").get("state") or "").strip().lower() == "running"
+        )
         helix_browser = (
             str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip() or "chrome"
         )
@@ -347,9 +748,17 @@ def render(settings: Settings) -> None:
 
         col_h1, col_h2 = st.columns(2)
         with col_h1:
-            test_helix = st.button("🔎 Test Helix", key="btn_test_helix_all")
+            test_helix = st.button(
+                "🔎 Test Helix",
+                key="btn_test_helix_all",
+                disabled=helix_running,
+            )
         with col_h2:
-            run_helix = st.button("⬇️ Reingestar Helix", key="btn_run_helix_all")
+            run_helix = st.button(
+                "⬇️ Reingestar Helix",
+                key="btn_run_helix_all",
+                disabled=helix_running,
+            )
 
         if test_helix:
             if not helix_cfg:
@@ -382,47 +791,12 @@ def render(settings: Settings) -> None:
             elif not helix_cfg_selected:
                 st.warning("No hay fuentes Helix seleccionadas para ingesta.")
             else:
-                messages = []
-                success_count = 0
-                merged_helix = stored_helix_doc
-                issues_doc = load_issues_doc(settings.DATA_PATH)
-                with st.spinner("Ingestando Helix para fuentes seleccionadas..."):
-                    for src in helix_cfg_selected:
-                        ok, msg, new_helix_doc = ingest_helix(
-                            browser=helix_browser,
-                            country=str(src.get("country", "")).strip(),
-                            source_alias=str(src.get("alias", "")).strip(),
-                            source_id=str(src.get("source_id", "")).strip(),
-                            proxy=helix_proxy,
-                            ssl_verify=helix_ssl_verify,
-                            service_origin_buug=src.get("service_origin_buug"),
-                            service_origin_n1=src.get("service_origin_n1"),
-                            service_origin_n2=src.get("service_origin_n2"),
-                            dry_run=False,
-                            existing_doc=HelixDocument.empty(),
-                        )
-                        messages.append((ok, msg))
-                        if ok and new_helix_doc is not None:
-                            success_count += 1
-                            merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
-                            merged_helix.ingested_at = new_helix_doc.ingested_at
-                            merged_helix.helix_base_url = new_helix_doc.helix_base_url
-                            merged_helix.query = "multi-source"
-                            mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
-                            issues_doc = _merge_issues(issues_doc, mapped)
+                if _start_helix_ingest_job(settings, selected_sources=helix_cfg_selected):
+                    st.rerun()
+                st.warning("Ya hay una ingesta Helix en curso.")
 
-                _render_batch_messages(messages)
-                if success_count > 0:
-                    issues_doc.ingested_at = now_iso()
-                    helix_repo.save(merged_helix)
-                    save_issues_doc(settings.DATA_PATH, issues_doc)
-                    stored_helix_doc = merged_helix
-                    st.success(
-                        f"Reingesta Helix finalizada: {success_count}/{len(helix_cfg_selected)} fuentes OK. "
-                        f"Guardado en {helix_path} y {settings.DATA_PATH}."
-                    )
-                else:
-                    st.error("No se pudo ingestar ninguna fuente Helix.")
+        helix_running = _render_progress_status(connector="helix", title="Helix")
+        running_any = running_any or helix_running
 
         helix_source_ids = {str(i.source_id or "").strip() for i in stored_helix_doc.items}
         st.markdown("### Última ingesta (Helix)")
@@ -437,3 +811,8 @@ def render(settings: Settings) -> None:
                 "data_path": helix_path,
             }
         )
+
+    if running_any:
+        # Keep ingest page state live while background jobs progress.
+        time.sleep(1.0)
+        st.rerun()
