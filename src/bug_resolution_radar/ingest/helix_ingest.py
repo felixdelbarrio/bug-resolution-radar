@@ -140,8 +140,10 @@ def _resolve_create_date_range_ms(
     future_days: Any = 7,
 ) -> Tuple[int, int, str]:
     if isinstance(now, datetime):
-        now_utc = now.astimezone(timezone.utc) if now.tzinfo is not None else now.replace(
-            tzinfo=timezone.utc
+        now_utc = (
+            now.astimezone(timezone.utc)
+            if now.tzinfo is not None
+            else now.replace(tzinfo=timezone.utc)
         )
     else:
         now_utc = datetime.now(timezone.utc)
