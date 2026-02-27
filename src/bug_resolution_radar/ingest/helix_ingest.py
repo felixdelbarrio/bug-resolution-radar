@@ -1969,6 +1969,57 @@ def ingest_helix(
     )
     session_refreshes = 0
 
+    def _build_result_doc(
+        collected_items: List[HelixWorkItem],
+        *,
+        outcome_note: str = "",
+    ) -> HelixDocument:
+        doc = existing_doc or HelixDocument.empty()
+        doc.schema_version = "1.0"
+        doc.ingested_at = now_iso()
+        # Persist SmartIT base URL so UI links always land in the incident console.
+        doc.helix_base_url = base
+        create_start_iso = _iso_from_epoch_ms(create_start_ms)
+        create_end_iso = _iso_from_epoch_ms(create_end_ms)
+        incident_types_q = ",".join(incident_types_filter) or "all"
+        companies_q = (
+            ",".join(str(r.get("name") or "").strip() for r in companies_filter if r) or "all"
+        )
+        source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
+        source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
+        arsql_environments_q = ",".join(arsql_environments_filter) or "all"
+        arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
+        select_mode_q = "wide" if arsql_include_all_fields else "narrow"
+        disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
+        outcome_note_q = str(outcome_note or "").strip()
+        if outcome_note_q:
+            outcome_note_q = f"; outcome={outcome_note_q}"
+        doc.query = (
+            "mode=arsql; "
+            f"arsql_root={arsql_base_root}; "
+            f"createDate in [{create_start_iso} .. {create_end_iso}] ({create_window_rule}); "
+            f"timeFields=[{arsql_time_fields_q}]; "
+            f"sourceServiceN1=[{source_service_n1_q}]; "
+            f"sourceServiceN2=[{source_service_n2_q}]; "
+            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
+            f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
+            f"page_limit={base_chunk_size}; "
+            f"select={select_mode_q}; "
+            f"disabled_fields=[{disabled_fields_q}]"
+            f"{outcome_note_q}"
+        )
+
+        merged = {_item_merge_key(i): i for i in doc.items}
+        for item in collected_items:
+            merged[_item_merge_key(item)] = item
+        doc.items = list(merged.values())
+        return doc
+
+    def _partial_doc(outcome_note: str) -> Optional[HelixDocument]:
+        if not items:
+            return None
+        return _build_result_doc(items, outcome_note=outcome_note)
+
     while True:
         elapsed = time.monotonic() - started_at
         if elapsed > max_elapsed_seconds:
@@ -1979,7 +2030,7 @@ def ingest_helix(
                 f"Páginas={page}, items_nuevos={len(items)} | "
                 f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("timeout:max_elapsed"),
             )
 
         if page >= max_pages_limit:
@@ -1989,7 +2040,7 @@ def ingest_helix(
                 f"max_pages={max_pages_limit} | páginas={page} | items_nuevos={len(items)} | "
                 f"chunk_actual={current_chunk_size} | read_timeout_actual={current_read_to:.1f}s | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("limit:max_pages"),
             )
 
         try:
@@ -2017,7 +2068,7 @@ def ingest_helix(
                     f"{source_label}: Helix responde con rate limit tras reintentos agotados. "
                     f"Causa: {cause} | endpoint={endpoint} | "
                     f"chunk={current_chunk_size} | timeout(connect/read)={connect_to}/{current_read_to}",
-                    None,
+                    _partial_doc("error:rate_limit"),
                 )
             return (
                 False,
@@ -2026,7 +2077,7 @@ def ingest_helix(
                 f"timeout(connect/read)={connect_to}/{current_read_to} | "
                 f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to} | "
                 f"endpoint={endpoint}",
-                None,
+                _partial_doc("timeout:retry_exhausted"),
             )
         except requests.exceptions.Timeout as e:
             if current_chunk_size > min_chunk_limit:
@@ -2043,21 +2094,21 @@ def ingest_helix(
                 f"Detalle: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc} | "
                 f"timeout(connect/read)={connect_to}/{current_read_to} | "
                 f"chunk={current_chunk_size} | min_chunk={min_chunk_limit} | max_read_timeout={max_read_to}",
-                None,
+                _partial_doc("timeout:request"),
             )
         except SSLError as e:
             return (
                 False,
                 f"{source_label}: error SSL en Helix: {e} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("error:ssl"),
             )
         except requests.exceptions.RequestException as e:
             return (
                 False,
                 f"{source_label}: error de red en Helix: "
                 f"{type(e).__name__}: {e} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc("error:network"),
             )
 
         if r.status_code != 200:
@@ -2082,14 +2133,14 @@ def ingest_helix(
                         f"y se agotaron los refrescos de sesión. "
                         f"Detalle: {_short_text(r.text)} | proxy={helix_proxy or '(sin proxy)'} | "
                         f"verify={verify_desc}",
-                        None,
+                        _partial_doc("error:session_expired"),
                     )
                 refreshed_ok, refreshed_msg = _refresh_auth_session("session_expired")
                 if not refreshed_ok:
                     return (
                         False,
                         f"{refreshed_msg} | proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                        None,
+                        _partial_doc("error:session_refresh"),
                     )
                 session_refreshes += 1
                 continue
@@ -2097,7 +2148,7 @@ def ingest_helix(
                 False,
                 f"{source_label}: error Helix ({r.status_code}): {r.text[:800]} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
-                None,
+                _partial_doc(f"error:http_{r.status_code}"),
             )
 
         page += 1
@@ -2173,39 +2224,7 @@ def ingest_helix(
             # In that case, keep paging using the effective page size until the API returns empty.
             current_chunk_size = int(batch_size)
 
-    doc = existing_doc or HelixDocument.empty()
-    doc.schema_version = "1.0"
-    doc.ingested_at = now_iso()
-    # Persist SmartIT base URL so UI links always land in the incident console.
-    doc.helix_base_url = base
-    create_start_iso = _iso_from_epoch_ms(create_start_ms)
-    create_end_iso = _iso_from_epoch_ms(create_end_ms)
-    incident_types_q = ",".join(incident_types_filter) or "all"
-    companies_q = ",".join(str(r.get("name") or "").strip() for r in companies_filter if r) or "all"
-    source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
-    source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
-    arsql_environments_q = ",".join(arsql_environments_filter) or "all"
-    arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
-    select_mode_q = "wide" if arsql_include_all_fields else "narrow"
-    disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
-    doc.query = (
-        "mode=arsql; "
-        f"arsql_root={arsql_base_root}; "
-        f"createDate in [{create_start_iso} .. {create_end_iso}] ({create_window_rule}); "
-        f"timeFields=[{arsql_time_fields_q}]; "
-        f"sourceServiceN1=[{source_service_n1_q}]; "
-        f"sourceServiceN2=[{source_service_n2_q}]; "
-        f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
-        f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
-        f"page_limit={base_chunk_size}; "
-        f"select={select_mode_q}; "
-        f"disabled_fields=[{disabled_fields_q}]"
-    )
-
-    merged = {_item_merge_key(i): i for i in doc.items}
-    for i in items:
-        merged[_item_merge_key(i)] = i
-    doc.items = list(merged.values())
+    doc = _build_result_doc(items)
 
     return (
         True,

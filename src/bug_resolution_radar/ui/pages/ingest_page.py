@@ -42,6 +42,7 @@ class _IngestProgress:
 
 _INGEST_PROGRESS_LOCK = threading.Lock()
 _INGEST_PROGRESS_BY_CONNECTOR: Dict[str, _IngestProgress] = {}
+_HELIX_AUTO_RESUME_MAX_ATTEMPTS = 3
 
 
 def _progress_entry(connector: str) -> _IngestProgress:
@@ -123,6 +124,19 @@ def _source_label(source: Dict[str, str], *, fallback: str) -> str:
     if alias:
         return f"{fallback} · {alias}"
     return fallback
+
+
+def _is_retryable_helix_failure(message: str) -> bool:
+    txt = str(message or "").strip().lower()
+    if not txt:
+        return False
+    retryable_tokens = (
+        "timeout",
+        "tiempo máximo",
+        "reintentos agotados",
+        "demasiadas páginas",
+    )
+    return any(token in txt for token in retryable_tokens)
 
 
 def _render_progress_status(
@@ -255,6 +269,7 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
             stored_helix_doc = helix_repo.load() or HelixDocument.empty()
             merged_helix = stored_helix_doc
             issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
+            has_partial_updates = False
             helix_browser = (
                 str(getattr(settings_snapshot, "HELIX_BROWSER", "chrome") or "chrome").strip()
                 or "chrome"
@@ -263,42 +278,100 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
             helix_ssl_verify = str(getattr(settings_snapshot, "HELIX_SSL_VERIFY", "") or "").strip()
 
             for src in sources:
-                try:
-                    ok, msg, new_helix_doc = ingest_helix(
-                        browser=helix_browser,
-                        country=str(src.get("country", "")).strip(),
-                        source_alias=str(src.get("alias", "")).strip(),
-                        source_id=str(src.get("source_id", "")).strip(),
-                        proxy=helix_proxy,
-                        ssl_verify=helix_ssl_verify,
-                        service_origin_buug=src.get("service_origin_buug"),
-                        service_origin_n1=src.get("service_origin_n1"),
-                        service_origin_n2=src.get("service_origin_n2"),
-                        dry_run=False,
-                        existing_doc=HelixDocument.empty(),
-                        cache_doc=merged_helix,
-                    )
-                except Exception as e:
-                    ok = False
-                    msg = (
-                        f"{_source_label(src, fallback='Helix')}: error inesperado en ingesta Helix "
-                        f"({type(e).__name__}): {e}"
-                    )
-                    new_helix_doc = None
+                source_label = _source_label(src, fallback="Helix")
+                attempt = 0
+                final_ok = False
+                final_msg = f"{source_label}: no se pudo completar la ingesta."
 
-                if ok and new_helix_doc is not None:
-                    merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
-                    merged_helix.ingested_at = new_helix_doc.ingested_at
-                    merged_helix.helix_base_url = new_helix_doc.helix_base_url
-                    merged_helix.query = "multi-source"
-                    mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
-                    issues_doc = _merge_issues(issues_doc, mapped)
-                _progress_append_message("helix", ok=ok, msg=msg, count_source=True)
+                while attempt < _HELIX_AUTO_RESUME_MAX_ATTEMPTS:
+                    attempt += 1
+                    try:
+                        ok, msg, new_helix_doc = ingest_helix(
+                            browser=helix_browser,
+                            country=str(src.get("country", "")).strip(),
+                            source_alias=str(src.get("alias", "")).strip(),
+                            source_id=str(src.get("source_id", "")).strip(),
+                            proxy=helix_proxy,
+                            ssl_verify=helix_ssl_verify,
+                            service_origin_buug=src.get("service_origin_buug"),
+                            service_origin_n1=src.get("service_origin_n1"),
+                            service_origin_n2=src.get("service_origin_n2"),
+                            dry_run=False,
+                            existing_doc=HelixDocument.empty(),
+                            cache_doc=merged_helix,
+                        )
+                    except Exception as e:
+                        ok = False
+                        msg = (
+                            f"{source_label}: error inesperado en ingesta Helix "
+                            f"({type(e).__name__}): {e}"
+                        )
+                        new_helix_doc = None
+
+                    if new_helix_doc is not None and new_helix_doc.items:
+                        has_partial_updates = True
+                        merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
+                        merged_helix.ingested_at = new_helix_doc.ingested_at
+                        merged_helix.helix_base_url = new_helix_doc.helix_base_url
+                        merged_helix.query = "multi-source"
+                        mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
+                        issues_doc = _merge_issues(issues_doc, mapped)
+
+                    if ok:
+                        final_ok = True
+                        final_msg = msg
+                        if attempt > 1:
+                            final_msg = (
+                                f"{final_msg} Reintento automático OK "
+                                f"({attempt}/{_HELIX_AUTO_RESUME_MAX_ATTEMPTS})."
+                            )
+                        break
+
+                    final_msg = msg
+                    retryable_failure = _is_retryable_helix_failure(msg)
+                    if retryable_failure and attempt < _HELIX_AUTO_RESUME_MAX_ATTEMPTS:
+                        _progress_append_message(
+                            "helix",
+                            ok=False,
+                            msg=(
+                                f"{msg} Reintentando automáticamente desde cache local "
+                                f"({attempt + 1}/{_HELIX_AUTO_RESUME_MAX_ATTEMPTS})."
+                            ),
+                            count_source=False,
+                        )
+                        continue
+                    break
+
+                _progress_append_message("helix", ok=final_ok, msg=final_msg, count_source=True)
 
             snap = _progress_snapshot("helix")
             success_count = int(snap.get("success_count") or 0)
             total_sources = max(1, len(sources))
             if success_count <= 0:
+                if has_partial_updates:
+                    try:
+                        issues_doc.ingested_at = now_iso()
+                        helix_repo.save(merged_helix)
+                        save_issues_doc(settings_snapshot.DATA_PATH, issues_doc)
+                        _progress_append_message(
+                            "helix",
+                            ok=False,
+                            msg=(
+                                "Se guardó avance parcial de Helix en cache local para "
+                                "continuar automáticamente en la siguiente ingesta."
+                            ),
+                            count_source=False,
+                        )
+                    except Exception as e:
+                        _progress_append_message(
+                            "helix",
+                            ok=False,
+                            msg=(
+                                "No se pudo guardar avance parcial de Helix: "
+                                f"{type(e).__name__}: {e}"
+                            ),
+                            count_source=False,
+                        )
                 _progress_finish(
                     "helix",
                     state="error",

@@ -233,6 +233,73 @@ def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(
     assert captured_offsets == [0, 25]
 
 
+def test_ingest_helix_returns_partial_doc_when_timeout_happens_after_first_page(
+    monkeypatch: Any,
+) -> None:
+    columns = list(helix_mod._ARSQL_SELECT_ALIASES)
+    calls = {"request": 0}
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        calls["request"] += 1
+        if calls["request"] == 1:
+            return _FakeResponse(
+                200,
+                payload={
+                    "total": 2,
+                    "columns": columns,
+                    "rows": [
+                        [
+                            "INC9001",
+                            "Low",
+                            "Issue timeout partial",
+                            "Open",
+                            "Ana",
+                            "Incidencia",
+                            "Service A",
+                            "Impact A",
+                            "BBVA México",
+                            "ENTERPRISE WEB",
+                            "ENTERPRISE WEB",
+                            1704067200000,
+                            None,
+                            1704067200000,
+                            1704067200000,
+                            "IDGTESTPARTIAL001",
+                        ]
+                    ],
+                },
+            )
+        raise requests.exceptions.Timeout("simulated timeout")
+
+    def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
+        return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
+
+    monkeypatch.setattr(helix_mod, "_request", fake_request)
+    monkeypatch.setattr(
+        helix_mod,
+        "get_helix_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; XSRF-TOKEN=xyz; loginId=test-user",
+    )
+    monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
+    monkeypatch.setenv("HELIX_ARSQL_LIMIT", "1")
+
+    ok, msg, doc = helix_mod.ingest_helix(
+        browser="chrome",
+        chunk_size=1,
+        dry_run=False,
+        create_date_year=2026,
+        read_timeout=5,
+        max_read_timeout=5,
+        min_chunk_size=1,
+    )
+
+    assert ok is False
+    assert "timeout en Helix" in msg
+    assert doc is not None
+    assert len(doc.items) == 1
+    assert "outcome=timeout:request" in doc.query
+
+
 def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
     offsets: list[int] = []
     columns = list(helix_mod._ARSQL_SELECT_ALIASES)
