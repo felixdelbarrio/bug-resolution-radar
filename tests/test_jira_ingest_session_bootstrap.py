@@ -38,6 +38,11 @@ def test_jira_does_not_open_browser_when_cookie_already_exists(monkeypatch: Any)
         return _FakeResponse(200, payload={"displayName": "Tester"})
 
     monkeypatch.setattr(jira_mod, "_open_url_in_configured_browser", fake_open)
+    monkeypatch.setattr(
+        jira_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: True,
+    )
     monkeypatch.setattr(jira_mod, "_request", fake_request)
     monkeypatch.setattr(
         jira_mod,
@@ -74,6 +79,11 @@ def test_jira_opens_browser_only_when_cookie_missing(monkeypatch: Any) -> None:
         return str(value or "")
 
     monkeypatch.setattr(jira_mod, "_open_url_in_configured_browser", fake_open)
+    monkeypatch.setattr(
+        jira_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: False,
+    )
     monkeypatch.setattr(jira_mod, "_request", fake_request)
     monkeypatch.setattr(jira_mod, "get_jira_session_cookie", fake_cookie)
     monkeypatch.setenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "5")
@@ -92,3 +102,43 @@ def test_jira_opens_browser_only_when_cookie_missing(monkeypatch: Any) -> None:
     assert "OK Jira autenticado" in msg
     assert opened
     assert "/secure/Dashboard.jspa" in opened[0]
+
+
+def test_jira_does_not_open_browser_when_target_page_is_already_open(monkeypatch: Any) -> None:
+    opened: list[str] = []
+    cookie_values = [None, None, "JSESSIONID=abc; atlassian.xsrf.token=xyz"]
+
+    def fake_open(url: str, browser: str) -> bool:
+        opened.append(f"{browser}:{url}")
+        return True
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        return _FakeResponse(200, payload={"displayName": "Tester"})
+
+    def fake_cookie(browser: str, host: str) -> str:
+        value = cookie_values.pop(0) if cookie_values else "JSESSIONID=abc"
+        return str(value or "")
+
+    monkeypatch.setattr(jira_mod, "_open_url_in_configured_browser", fake_open)
+    monkeypatch.setattr(
+        jira_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: True,
+    )
+    monkeypatch.setattr(jira_mod, "_request", fake_request)
+    monkeypatch.setattr(jira_mod, "get_jira_session_cookie", fake_cookie)
+    monkeypatch.setenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "5")
+    monkeypatch.setenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "0.5")
+    monkeypatch.delenv("JIRA_BROWSER_LOGIN_URL", raising=False)
+
+    ok, msg, _ = jira_mod.ingest_jira(
+        settings=Settings(
+            JIRA_BASE_URL="https://jira.globaldevtools.bbva.com", JIRA_BROWSER="chrome"
+        ),
+        dry_run=True,
+        source=_source(),
+    )
+
+    assert ok is True
+    assert "OK Jira autenticado" in msg
+    assert opened == []
