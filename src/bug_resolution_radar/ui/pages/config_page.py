@@ -1069,9 +1069,7 @@ def render(settings: Settings) -> None:
                     "Configuración Helix y eliminación aplicadas."
                 )
             else:
-                _queue_widget_state_clear(
-                    ["cfg_helix_delete_confirm", "cfg_helix_delete_phrase"]
-                )
+                _queue_widget_state_clear(["cfg_helix_delete_confirm", "cfg_helix_delete_phrase"])
                 st.session_state["__cfg_flash_success"] = "Configuración Helix guardada."
             st.session_state["__cfg_active_tab"] = "Helix"
             st.rerun()

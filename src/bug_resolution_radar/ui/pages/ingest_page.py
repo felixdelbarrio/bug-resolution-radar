@@ -754,7 +754,9 @@ def render(settings: Settings) -> None:
 
         st.markdown("### Última ingesta (Jira)")
         if jira_running:
-            st.caption("Nueva ingesta Jira en curso: se limpiaron los resultados de la ingesta previa.")
+            st.caption(
+                "Nueva ingesta Jira en curso: se limpiaron los resultados de la ingesta previa."
+            )
         st.json(_jira_last_ingest_payload(issues_doc, reset_display=jira_running))
 
     with t_helix:
