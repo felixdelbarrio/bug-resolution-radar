@@ -271,21 +271,6 @@ def _slug(value: str) -> str:
     return txt or "scope"
 
 
-def _to_dt_naive(series: pd.Series | None) -> pd.Series:
-    if series is None:
-        return pd.Series([], dtype="datetime64[ns]")
-    out = pd.to_datetime(series, errors="coerce")
-    try:
-        if hasattr(out.dt, "tz") and out.dt.tz is not None:
-            out = out.dt.tz_localize(None)
-    except Exception:
-        try:
-            out = out.dt.tz_localize(None)
-        except Exception:
-            pass
-    return out
-
-
 def _is_finalist_status(value: object) -> bool:
     return is_finalist_status(value)
 
@@ -2020,97 +2005,6 @@ def _section_ribbon_items(section: _ChartSection) -> List[Tuple[str, str, str]]:
         )
     items.append(("Prioridad de acción", urgency_label, urgency_tone))
     return items[:4]
-
-
-def _add_index_row(
-    tf: Any,
-    *,
-    code: str,
-    title: str,
-    detail: str,
-    code_color: str,
-) -> None:
-    p_code = tf.add_paragraph()
-    p_code.space_before = Pt(7)
-    p_code.space_after = Pt(0)
-    r_code = p_code.add_run()
-    r_code.text = code
-    r_code.font.name = FONT_HEAD
-    r_code.font.bold = True
-    r_code.font.size = Pt(16)
-    r_code.font.color.rgb = _rgb(code_color)
-
-    p_title = tf.add_paragraph()
-    p_title.space_before = Pt(0)
-    p_title.space_after = Pt(0)
-    r_title = p_title.add_run()
-    r_title.text = title
-    r_title.font.name = FONT_HEAD
-    r_title.font.bold = True
-    r_title.font.size = Pt(14)
-    r_title.font.color.rgb = _rgb(PALETTE["ink"])
-
-    p_detail = tf.add_paragraph()
-    p_detail.space_before = Pt(0)
-    p_detail.space_after = Pt(2)
-    r_detail = p_detail.add_run()
-    r_detail.text = detail
-    r_detail.font.name = FONT_BODY_BOOK
-    r_detail.font.size = Pt(10.5)
-    r_detail.font.color.rgb = _rgb(PALETTE["muted"])
-
-
-def _add_index_slide(prs: Any, context: _ScopeContext) -> None:
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, PALETTE["bg"])
-    _add_header(
-        slide,
-        title="Índice",
-        subtitle="Historia del análisis y decisiones sugeridas",
-    )
-    rows: List[Tuple[str, str, str, str]] = [
-        ("01", "Apertura", "Alcance y reglas de lectura del análisis", PALETTE["blue"]),
-        ("02", "Panorama", "Tamaño del problema, foco y prioridades", PALETTE["teal"]),
-    ]
-    idx = 3
-    for theme, themed_sections in _group_sections_by_theme(context.sections):
-        detail = " · ".join([_clip_text(sec.title, max_len=45) for sec in themed_sections])
-        rows.append((f"{idx:02d}", theme, detail, PALETTE["navy"]))
-        idx += 1
-    rows.append(
-        (
-            f"{idx:02d}",
-            "Cierre y acciones",
-            "Plan de trabajo priorizado por impacto",
-            PALETTE["blue"],
-        )
-    )
-
-    body = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-        Inches(0.70),
-        Inches(1.30),
-        Inches(12.00),
-        Inches(5.65),
-    )
-    body.fill.solid()
-    body.fill.fore_color.rgb = _rgb(PALETTE["panel"])
-    body.line.color.rgb = _rgb(PALETTE["line"])
-
-    tf = body.text_frame
-    tf.clear()
-    tf.word_wrap = True
-    tf.paragraphs[0].clear()
-    for row in rows:
-        _add_index_row(
-            tf,
-            code=row[0],
-            title=row[1],
-            detail=row[2],
-            code_color=row[3],
-        )
-
-    _add_footer(slide, context=context)
 
 
 def _dominant_value(series: pd.Series, empty: str) -> str:

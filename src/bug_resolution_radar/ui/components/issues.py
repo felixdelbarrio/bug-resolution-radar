@@ -24,16 +24,6 @@ MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
 
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = (hex_color or "").strip().lstrip("#")
-    if len(h) != 6:
-        return f"rgba(127,146,178,{alpha:.3f})"
-    r = int(h[0:2], 16)
-    g = int(h[2:4], 16)
-    b = int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha:.3f})"
-
-
 def _safe_cell_text(value: object) -> str:
     null_tokens = {"nan", "none", "nat", "undefined", "null", ""}
 

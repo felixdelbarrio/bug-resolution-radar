@@ -761,32 +761,6 @@ def _matrix_toggle_priority_filter(prio: str) -> None:
     st.session_state[FILTER_PRIORITY_KEY] = [] if priorities == [prio] else [prio]
 
 
-def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
-    color = (hex_color or "#8EA2C4").strip()
-    deployed_color = status_color("Deployed").strip().upper()
-    if color.strip().upper() == deployed_color:
-        border = _hex_with_alpha(color, 180 if selected else 150)
-        bg = (
-            "color-mix(in srgb, var(--bbva-goal-green-bg) 86%, var(--bbva-goal-green) 14%)"
-            if selected
-            else "var(--bbva-goal-green-bg)"
-        )
-        fw = "800" if selected else "700"
-        return (
-            f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
-            f"border-radius:11px; border:1px solid {border}; background:{bg}; "
-            f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
-        )
-    border = _hex_with_alpha(color, 150 if selected else 110)
-    bg = _hex_with_alpha(color, 48 if selected else 24)
-    fw = "800" if selected else "700"
-    return (
-        f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
-        f"border-radius:11px; border:1px solid {border}; background:{bg}; "
-        f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
-    )
-
-
 def _matrix_priority_label(priority: str) -> str:
     p = str(priority or "").strip()
     if p.lower() == "supone un impedimento":

@@ -87,10 +87,6 @@ def _panel(title: str, subtitle: str | None = None) -> st.delta_generator.DeltaG
     return c
 
 
-def _open_only(df: pd.DataFrame) -> pd.DataFrame:
-    return df[df["resolved"].isna()].copy() if "resolved" in df.columns else df.copy()
-
-
 # ---------------------------------------------------------------------
 # Overview
 # ---------------------------------------------------------------------

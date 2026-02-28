@@ -649,17 +649,6 @@ def _selected_sources_from_editor(
     return selected_ids, label_by_id
 
 
-def _clear_delete_confirmation_widget_state() -> None:
-    _queue_widget_state_clear(
-        [
-            "cfg_jira_delete_confirm",
-            "cfg_jira_delete_phrase",
-            "cfg_helix_delete_confirm",
-            "cfg_helix_delete_phrase",
-        ]
-    )
-
-
 def _clear_jira_delete_widget_state() -> None:
     _queue_widget_state_clear(
         [
@@ -710,12 +699,6 @@ def _apply_queued_widget_state_clear() -> None:
         k = str(key or "").strip()
         if k:
             st.session_state.pop(k, None)
-
-
-def _clear_config_delete_widget_state() -> None:
-    _clear_delete_confirmation_widget_state()
-    _clear_jira_delete_widget_state()
-    _clear_helix_delete_widget_state()
 
 
 def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:

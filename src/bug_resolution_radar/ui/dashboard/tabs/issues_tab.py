@@ -123,21 +123,6 @@ def _load_helix_items_by_merge_key_cached(
     return out
 
 
-def _helix_items_by_merge_key(settings: Settings | None) -> dict[str, HelixWorkItem]:
-    if settings is None:
-        return {}
-    helix_path = (
-        str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip() or "data/helix_dump.json"
-    )
-    p = Path(helix_path)
-    if not p.exists():
-        return {}
-    try:
-        return _load_helix_items_by_merge_key_cached(str(p.resolve()), p.stat().st_mtime_ns)
-    except Exception:
-        return {}
-
-
 def _helix_data_path_and_mtime(settings: Settings | None) -> tuple[str, int]:
     if settings is None:
         return "", -1
