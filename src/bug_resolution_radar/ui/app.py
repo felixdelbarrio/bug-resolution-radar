@@ -424,6 +424,17 @@ def _render_workspace_scope(settings: Settings) -> None:
             )
 
 
+def _page_favicon() -> str:
+    icon_path = (
+        Path(__file__).resolve().parent
+        / "assets"
+        / "icons"
+        / "bbva"
+        / "spherica-behavioural-economics.svg"
+    )
+    return str(icon_path) if icon_path.exists() else "📡"
+
+
 def main() -> None:
     """Boot application, render hero/shell and dispatch the selected page."""
     ensure_env()
@@ -442,7 +453,7 @@ def main() -> None:
     if hero_title.lower() in {"", "bug resolution radar"}:
         hero_title = "Cuadro de mando de incidencias"
 
-    st.set_page_config(page_title=hero_title, layout="wide")
+    st.set_page_config(page_title=hero_title, page_icon=_page_favicon(), layout="wide")
 
     theme_changed = _sync_streamlit_theme_from_workspace()
     theme_rerun_key = "__theme_config_sync_rerun"

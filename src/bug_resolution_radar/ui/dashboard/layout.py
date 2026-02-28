@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
+
+
+def _page_favicon() -> str:
+    icon_path = (
+        Path(__file__).resolve().parents[1]
+        / "assets"
+        / "icons"
+        / "bbva"
+        / "spherica-behavioural-economics.svg"
+    )
+    return str(icon_path) if icon_path.exists() else "📡"
 
 
 def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> None:
@@ -13,7 +26,7 @@ def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> 
     try:
         st.set_page_config(
             page_title=title,
-            page_icon="📡",
+            page_icon=_page_favicon(),
             layout="wide",
             initial_sidebar_state="expanded",
         )
