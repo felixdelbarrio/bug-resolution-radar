@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import webbrowser
 from platform import system as platform_system
@@ -29,27 +30,51 @@ def _escape_applescript_text(value: str) -> str:
     return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _browser_app_control_enabled(platform: str) -> bool:
+    """
+    Whether to use browser-app control primitives (AppleScript/open -a).
+
+    On macOS this is disabled by default to avoid automation-style permission
+    prompts when a simple URL open is enough.
+    """
+    default = platform != "darwin"
+    return _bool_env("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", default)
+
+
 def open_url_in_configured_browser(url: str, browser: str) -> bool:
     """Open URL in the configured browser with platform-specific fallbacks."""
     if not _root_from_url(url):
         return False
 
     use_chrome = _is_chrome_browser(browser)
+    platform = platform_system().lower()
+    allow_app_control = _browser_app_control_enabled(platform)
     browser_names = (
         ["chrome", "google-chrome", "google chrome"]
         if use_chrome
         else ["edge", "msedge", "microsoft-edge", "microsoft edge"]
     )
-    for name in browser_names:
-        try:
-            ctl = webbrowser.get(name)
-            if ctl.open(url, new=2, autoraise=True):
-                return True
-        except Exception:
-            continue
+    if allow_app_control:
+        for name in browser_names:
+            try:
+                ctl = webbrowser.get(name)
+                if ctl.open(url, new=2, autoraise=True):
+                    return True
+            except Exception:
+                continue
 
-    platform = platform_system().lower()
-    if platform == "darwin":
+    if platform == "darwin" and allow_app_control:
         app_name = "Google Chrome" if use_chrome else "Microsoft Edge"
         try:
             subprocess.Popen(
@@ -94,7 +119,10 @@ def is_target_page_open_in_configured_browser(url: str, browser: str) -> Optiona
     if not root:
         return False
 
-    if platform_system().lower() != "darwin":
+    platform = platform_system().lower()
+    if platform != "darwin":
+        return None
+    if not _browser_app_control_enabled(platform):
         return None
 
     app_name = "Google Chrome" if _is_chrome_browser(browser) else "Microsoft Edge"
