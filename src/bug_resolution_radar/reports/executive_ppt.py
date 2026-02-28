@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import multiprocessing as mp
@@ -9,8 +11,11 @@ import os
 import queue
 import re
 import tempfile
+import threading
 import time
-from dataclasses import dataclass
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
@@ -55,6 +60,10 @@ from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
 _T = TypeVar("_T")
+_PPT_PNG_CACHE_VERSION = "v1"
+_PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES = 24
+_PPT_PNG_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
+_PPT_PNG_CACHE_LOCK = threading.Lock()
 
 SLIDE_WIDTH = int(Inches(13.333))
 SLIDE_HEIGHT = int(Inches(7.5))
@@ -228,6 +237,7 @@ class _ChartSection:
     subtitle: str
     figure: Optional[go.Figure]
     insight_pack: TrendInsightPack
+    image_png: Optional[bytes] = None
 
 
 @dataclass(frozen=True)
@@ -834,6 +844,52 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     )
 
 
+def _prerender_section_images(sections: Sequence[_ChartSection]) -> List[_ChartSection]:
+    if not sections:
+        return []
+    if not _bool_env("BUG_RESOLUTION_RADAR_PPT_PRERENDER_CHARTS", True):
+        return list(sections)
+
+    workers = max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_RENDER_WORKERS",
+            _default_ppt_render_workers(),
+        ),
+    )
+    total = len(sections)
+    if workers <= 1 or total <= 1:
+        out: List[_ChartSection] = []
+        for sec in sections:
+            if sec.figure is None:
+                out.append(sec)
+                continue
+            out.append(replace(sec, image_png=_fig_to_png(sec.figure)))
+        return out
+
+    max_workers = min(workers, total)
+    out = list(sections)
+    futures: Dict[Any, int] = {}
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-render") as pool:
+        for idx, sec in enumerate(sections):
+            if sec.figure is None:
+                continue
+            futures[pool.submit(_fig_to_png, sec.figure)] = idx
+        for fut in as_completed(futures):
+            idx = int(futures[fut])
+            try:
+                payload = fut.result()
+            except Exception as exc:
+                LOGGER.warning(
+                    "PPT chart prerender failed: %s (%s)",
+                    sections[idx].chart_id,
+                    exc,
+                )
+                payload = None
+            out[idx] = replace(out[idx], image_png=payload)
+    return out
+
+
 def _build_context(
     settings: Settings,
     *,
@@ -875,7 +931,7 @@ def _build_context(
             "No hay incidencias para el país/origen y filtros seleccionados. Ajusta scope o filtros."
         )
 
-    sections = _build_sections(settings, dff=dff, open_df=open_df)
+    sections = _prerender_section_images(_build_sections(settings, dff=dff, open_df=open_df))
     return _ScopeContext(
         country=str(country or "").strip(),
         source_id=str(source_id or "").strip(),
@@ -908,6 +964,77 @@ def _bool_env(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _ppt_png_cache_max_entries() -> int:
+    return max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_IMAGE_CACHE_MAX_ENTRIES",
+            _PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+    )
+
+
+def _ppt_png_cache_key(
+    fig_dict: dict[str, object],
+    *,
+    scale: float,
+    export_width: int,
+    export_height: int,
+) -> str:
+    raw = json.dumps(
+        fig_dict,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8", errors="replace")
+    h = hashlib.blake2b(digest_size=20)
+    h.update(raw)
+    h.update(
+        (
+            f"|{_PPT_PNG_CACHE_VERSION}|{float(scale):.3f}|"
+            f"{int(export_width)}|{int(export_height)}"
+        ).encode("utf-8")
+    )
+    return h.hexdigest()
+
+
+def _ppt_png_cache_get(cache_key: str) -> Optional[bytes]:
+    with _PPT_PNG_CACHE_LOCK:
+        item = _PPT_PNG_CACHE.get(cache_key)
+        if item is None:
+            return None
+        _PPT_PNG_CACHE.move_to_end(cache_key)
+        return item
+
+
+def _ppt_png_cache_put(cache_key: str, payload: bytes) -> None:
+    if not payload:
+        return
+    max_entries = _ppt_png_cache_max_entries()
+    with _PPT_PNG_CACHE_LOCK:
+        _PPT_PNG_CACHE[cache_key] = payload
+        _PPT_PNG_CACHE.move_to_end(cache_key)
+        while len(_PPT_PNG_CACHE) > max_entries:
+            _PPT_PNG_CACHE.popitem(last=False)
+
+
+def _clear_ppt_png_cache() -> None:
+    with _PPT_PNG_CACHE_LOCK:
+        _PPT_PNG_CACHE.clear()
+
+
+def _default_ppt_render_workers() -> int:
+    if _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False):
+        return 1
+    cpu_count = int(os.cpu_count() or 2)
+    if cpu_count >= 8:
+        return 3
+    if cpu_count >= 4:
+        return 2
+    return 1
 
 
 def _kaleido_tmp_dir() -> str:
@@ -1055,6 +1182,16 @@ def _kaleido_png_bytes(
         timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20)
     )
     fig_dict = _validate_plotly_fig_to_dict(fig_obj)
+    cache_key = _ppt_png_cache_key(
+        fig_dict,
+        scale=scale,
+        export_width=export_width,
+        export_height=export_height,
+    )
+    cached = _ppt_png_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     tmp_dir = _kaleido_tmp_dir()
 
     use_isolated_process = _bool_env(
@@ -1066,7 +1203,7 @@ def _kaleido_png_bytes(
         False,
     )
     if not use_isolated_process:
-        return _kaleido_calc_fig_sync_png(
+        rendered = _kaleido_calc_fig_sync_png(
             fig_dict,
             scale=scale,
             export_width=export_width,
@@ -1074,17 +1211,20 @@ def _kaleido_png_bytes(
             timeout_s=timeout_s,
             tmp_dir=tmp_dir,
         )
+    else:
+        rendered = _call_in_subprocess_with_timeout(
+            _kaleido_calc_fig_sync_png,
+            fig_dict,
+            scale=scale,
+            export_width=export_width,
+            export_height=export_height,
+            timeout_s=timeout_s,
+            tmp_dir=tmp_dir,
+            hard_timeout_s=float(hard_timeout_s),
+        )
 
-    return _call_in_subprocess_with_timeout(
-        _kaleido_calc_fig_sync_png,
-        fig_dict,
-        scale=scale,
-        export_width=export_width,
-        export_height=export_height,
-        timeout_s=timeout_s,
-        tmp_dir=tmp_dir,
-        hard_timeout_s=float(hard_timeout_s),
-    )
+    _ppt_png_cache_put(cache_key, rendered)
+    return rendered
 
 
 def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
@@ -2116,15 +2256,17 @@ def _add_chart_insight_slide(
     chart_frame.fill.fore_color.rgb = _rgb(PALETTE["panel"])
     chart_frame.line.color.rgb = _rgb(PALETTE["line"])
 
-    chart_render_started = time.monotonic()
-    LOGGER.info("PPT chart render started: %s", section.chart_id)
-    image = _fig_to_png(section.figure)
-    LOGGER.info(
-        "PPT chart render finished: %s (ok=%s, %.2fs)",
-        section.chart_id,
-        image is not None,
-        max(0.0, time.monotonic() - chart_render_started),
-    )
+    image = section.image_png
+    if image is None and section.figure is not None:
+        chart_render_started = time.monotonic()
+        LOGGER.info("PPT chart render started: %s", section.chart_id)
+        image = _fig_to_png(section.figure)
+        LOGGER.info(
+            "PPT chart render finished: %s (ok=%s, %.2fs)",
+            section.chart_id,
+            image is not None,
+            max(0.0, time.monotonic() - chart_render_started),
+        )
     if image is None:
         tf = chart_frame.text_frame
         tf.clear()

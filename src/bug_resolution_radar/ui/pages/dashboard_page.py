@@ -10,11 +10,17 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.services.notes import NotesStore
+from bug_resolution_radar.ui.cache import cached_by_signature
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
 from bug_resolution_radar.ui.dashboard.next_best_banner import render_next_best_banner
+from bug_resolution_radar.ui.dashboard.state import (
+    FILTER_ASSIGNEE_KEY,
+    FILTER_PRIORITY_KEY,
+    FILTER_STATUS_KEY,
+)
 from bug_resolution_radar.ui.dashboard.tabs.issues_tab import render_issues_tab
 from bug_resolution_radar.ui.dashboard.tabs.kanban_tab import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.tabs.notes_tab import render_notes_tab
@@ -66,6 +72,54 @@ def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[mask].copy(deep=False)
 
 
+def _cache_filter_values(key: str) -> tuple[str, ...]:
+    vals = [str(v).strip() for v in list(st.session_state.get(key) or []) if str(v).strip()]
+    return tuple(sorted(set(vals)))
+
+
+def _dashboard_data_cache_signature(
+    *,
+    settings: Settings,
+    section: str,
+    scoped_df: pd.DataFrame,
+    include_kpis: bool,
+    include_timeseries_chart: bool,
+) -> str:
+    data_path = Path(str(getattr(settings, "DATA_PATH", "") or "")).resolve()
+    if data_path.exists():
+        stat = data_path.stat()
+        data_rev = f"{stat.st_mtime_ns}:{stat.st_size}"
+    else:
+        data_rev = "missing"
+
+    selected_country = str(st.session_state.get("workspace_country") or "").strip()
+    selected_source = str(st.session_state.get("workspace_source_id") or "").strip()
+    filters_sig = (
+        _cache_filter_values(FILTER_STATUS_KEY),
+        _cache_filter_values(FILTER_PRIORITY_KEY),
+        _cache_filter_values(FILTER_ASSIGNEE_KEY),
+    )
+
+    # Scoped dataframe is derived from source/country, but include a tiny shape signature
+    # to stay safe when data is injected from tests or non-file sources.
+    scoped_sig = f"{len(scoped_df)}:{len(scoped_df.columns)}"
+    return "|".join(
+        [
+            str(data_path),
+            data_rev,
+            selected_country,
+            selected_source,
+            str(section),
+            "kpis=1" if include_kpis else "kpis=0",
+            "ts=1" if include_timeseries_chart else "ts=0",
+            f"lookback_m={getattr(settings, 'ANALYSIS_LOOKBACK_MONTHS', 0)}",
+            f"lookback_d={getattr(settings, 'ANALYSIS_LOOKBACK_DAYS', 0)}",
+            scoped_sig,
+            str(filters_sig),
+        ]
+    )
+
+
 def render(settings: Settings, *, active_section: str = "overview") -> str:
     """Render selected dashboard section and return normalized section id."""
     section = normalize_dashboard_section(active_section)
@@ -90,11 +144,25 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         notes = NotesStore(Path(settings.NOTES_PATH))
         notes.load()
 
-    ctx = build_dashboard_data_context(
-        df_all=scoped_df,
+    include_kpis = section in {"overview", "trends", "insights"}
+    include_timeseries_chart = section in {"overview", "trends"}
+    cache_signature = _dashboard_data_cache_signature(
         settings=settings,
-        include_kpis=section in {"overview", "trends", "insights"},
-        include_timeseries_chart=section in {"overview", "trends"},
+        section=section,
+        scoped_df=scoped_df,
+        include_kpis=include_kpis,
+        include_timeseries_chart=include_timeseries_chart,
+    )
+    ctx, _ = cached_by_signature(
+        "dashboard:data_context",
+        cache_signature,
+        lambda: build_dashboard_data_context(
+            df_all=scoped_df,
+            settings=settings,
+            include_kpis=include_kpis,
+            include_timeseries_chart=include_timeseries_chart,
+        ),
+        max_entries=18,
     )
     if ctx.df_all.empty:
         st.warning(
