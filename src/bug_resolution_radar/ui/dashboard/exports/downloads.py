@@ -383,7 +383,7 @@ def df_to_csv_bytes(
 def download_button_for_df(
     df: pd.DataFrame,
     *,
-    label: str = "⬇️ Descargar Excel",
+    label: str = "Descargar Excel",
     key: str = "download_csv",
     spec: Optional[CsvDownloadSpec] = None,
     suffix: str = "",

@@ -155,7 +155,7 @@ def _render_sources_excel_download(
         else df_to_excel_bytes(export_df, include_index=False, sheet_name=sheet_name)
     )
     st.download_button(
-        label="⬇️ Descargar Excel",
+        label="Descargar Excel",
         data=payload,
         file_name=build_download_filename(filename_prefix, suffix="fuentes", ext="xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -326,7 +326,10 @@ def _render_source_delete_container(
     selected_label_by_id: Dict[str, str],
     key_prefix: str,
 ) -> Dict[str, Any]:
-    st.markdown(section_title)
+    st.markdown(
+        f'<div class="bbva-icon-no-draw-title">{escape(section_title)}</div>',
+        unsafe_allow_html=True,
+    )
 
     with st.container(border=True, key=f"{key_prefix}_delete_shell"):
         st.markdown("#### Zona segura de eliminación")
@@ -426,7 +429,10 @@ def _render_cache_reset_container(
     selected_label_by_id: Dict[str, str],
     key_prefix: str,
 ) -> Dict[str, Any]:
-    st.markdown("### ♻️ Resetear caché")
+    st.markdown(
+        '<div class="bbva-icon-recycle-title">Resetear caché</div>',
+        unsafe_allow_html=True,
+    )
 
     with st.container(border=True, key=f"{key_prefix}_cache_reset_shell"):
         st.markdown("#### Zona segura de reseteo")
@@ -644,40 +650,66 @@ def _selected_sources_from_editor(
 
 
 def _clear_delete_confirmation_widget_state() -> None:
-    for key in (
-        "cfg_jira_delete_confirm",
-        "cfg_jira_delete_phrase",
-        "cfg_helix_delete_confirm",
-        "cfg_helix_delete_phrase",
-    ):
-        st.session_state.pop(key, None)
+    _queue_widget_state_clear(
+        [
+            "cfg_jira_delete_confirm",
+            "cfg_jira_delete_phrase",
+            "cfg_helix_delete_confirm",
+            "cfg_helix_delete_phrase",
+        ]
+    )
 
 
 def _clear_jira_delete_widget_state() -> None:
-    for key in (
-        "cfg_jira_delete_confirm",
-        "cfg_jira_delete_phrase",
-        "cfg_jira_sources_editor",
-    ):
-        st.session_state.pop(key, None)
+    _queue_widget_state_clear(
+        [
+            "cfg_jira_delete_confirm",
+            "cfg_jira_delete_phrase",
+            "cfg_jira_sources_editor",
+        ]
+    )
 
 
 def _clear_helix_delete_widget_state() -> None:
-    for key in (
-        "cfg_helix_delete_confirm",
-        "cfg_helix_delete_phrase",
-        "cfg_helix_sources_editor",
-    ):
-        st.session_state.pop(key, None)
+    _queue_widget_state_clear(
+        [
+            "cfg_helix_delete_confirm",
+            "cfg_helix_delete_phrase",
+            "cfg_helix_sources_editor",
+        ]
+    )
 
 
 def _clear_cache_reset_widget_state() -> None:
-    for key in (
-        "cfg_cache_reset_editor",
-        "cfg_cache_cache_reset_confirm",
-        "cfg_cache_cache_reset_phrase",
-    ):
-        st.session_state.pop(key, None)
+    _queue_widget_state_clear(
+        [
+            "cfg_cache_reset_editor",
+            "cfg_cache_cache_reset_confirm",
+            "cfg_cache_cache_reset_phrase",
+        ]
+    )
+
+
+def _queue_widget_state_clear(keys: List[str]) -> None:
+    pending = st.session_state.get("__cfg_pending_widget_clears", [])
+    if not isinstance(pending, list):
+        pending = []
+    merged = [str(k).strip() for k in pending if str(k).strip()]
+    for key in keys:
+        k = str(key or "").strip()
+        if k and k not in merged:
+            merged.append(k)
+    st.session_state["__cfg_pending_widget_clears"] = merged
+
+
+def _apply_queued_widget_state_clear() -> None:
+    pending = st.session_state.pop("__cfg_pending_widget_clears", [])
+    if not isinstance(pending, list):
+        return
+    for key in pending:
+        k = str(key or "").strip()
+        if k:
+            st.session_state.pop(k, None)
 
 
 def _clear_config_delete_widget_state() -> None:
@@ -734,6 +766,7 @@ def _nearest_option(value: int, *, options: List[int]) -> int:
 
 
 def render(settings: Settings) -> None:
+    _apply_queued_widget_state_clear()
     flash_success = str(st.session_state.pop("__cfg_flash_success", "") or "").strip()
     if flash_success:
         st.success(flash_success)
@@ -749,8 +782,13 @@ def render(settings: Settings) -> None:
     st.subheader("Configuración")
 
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
+    tab_labels = ["Preferencias", "Jira", "Helix", "Caches"]
+    active_tab = str(st.session_state.get("__cfg_active_tab", "Preferencias") or "").strip()
+    if active_tab not in tab_labels:
+        active_tab = "Preferencias"
+    st.session_state["__cfg_active_tab"] = active_tab
     with st.container(key="cfg_tabs_shell"):
-        t_prefs, t_jira, t_helix, t_caches = st.tabs(["Preferencias", "Jira", "Helix", "Caches"])
+        t_prefs, t_jira, t_helix, t_caches = st.tabs(tab_labels, default=active_tab)
 
     with t_jira:
         st.markdown("### Jira global")
@@ -788,7 +826,7 @@ def render(settings: Settings) -> None:
         jira_editor = st.data_editor(
             jira_df,
             hide_index=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             width="stretch",
             key="cfg_jira_sources_editor",
             column_order=["__delete__", "country", "alias", "jql"],
@@ -811,7 +849,7 @@ def render(settings: Settings) -> None:
             jira_editor, source_type="jira"
         )
         jira_delete_cfg = _render_source_delete_container(
-            section_title="### 🧹 Eliminar fuente Jira",
+            section_title="Eliminar fuente Jira",
             source_label="Jira",
             selected_source_ids=jira_delete_ids,
             selected_label_by_id=jira_delete_labels,
@@ -825,7 +863,7 @@ def render(settings: Settings) -> None:
                 "o limpia esos campos para continuar."
             )
         if st.button(
-            "💾 Guardar configuración",
+            "Guardar configuración",
             key="cfg_save_jira_btn",
             disabled=not bool(jira_delete_cfg.get("valid", True)),
             help=jira_save_help,
@@ -870,9 +908,9 @@ def render(settings: Settings) -> None:
                     "Configuración Jira y eliminación aplicadas."
                 )
             else:
-                for key in ("cfg_jira_delete_confirm", "cfg_jira_delete_phrase"):
-                    st.session_state.pop(key, None)
+                _queue_widget_state_clear(["cfg_jira_delete_confirm", "cfg_jira_delete_phrase"])
                 st.session_state["__cfg_flash_success"] = "Configuración Jira guardada."
+            st.session_state["__cfg_active_tab"] = "Jira"
             st.rerun()
 
     with t_helix:
@@ -937,7 +975,7 @@ def render(settings: Settings) -> None:
         helix_editor = st.data_editor(
             helix_df,
             hide_index=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             width="stretch",
             key="cfg_helix_sources_editor",
             column_order=[
@@ -969,7 +1007,7 @@ def render(settings: Settings) -> None:
             helix_editor, source_type="helix"
         )
         helix_delete_cfg = _render_source_delete_container(
-            section_title="### 🧹 Eliminar fuente Helix",
+            section_title="Eliminar fuente Helix",
             source_label="Helix",
             selected_source_ids=helix_delete_ids,
             selected_label_by_id=helix_delete_labels,
@@ -983,7 +1021,7 @@ def render(settings: Settings) -> None:
                 "o limpia esos campos para continuar."
             )
         if st.button(
-            "💾 Guardar configuración",
+            "Guardar configuración",
             key="cfg_save_helix_btn",
             disabled=not bool(helix_delete_cfg.get("valid", True)),
             help=helix_save_help,
@@ -1031,9 +1069,11 @@ def render(settings: Settings) -> None:
                     "Configuración Helix y eliminación aplicadas."
                 )
             else:
-                for key in ("cfg_helix_delete_confirm", "cfg_helix_delete_phrase"):
-                    st.session_state.pop(key, None)
+                _queue_widget_state_clear(
+                    ["cfg_helix_delete_confirm", "cfg_helix_delete_phrase"]
+                )
                 st.session_state["__cfg_flash_success"] = "Configuración Helix guardada."
+            st.session_state["__cfg_active_tab"] = "Helix"
             st.rerun()
 
     with t_prefs:
@@ -1165,7 +1205,7 @@ def render(settings: Settings) -> None:
                         key="cfg_trend_fav_3",
                     )
 
-            if st.button("💾 Guardar configuración", key="cfg_save_prefs_btn"):
+            if st.button("Guardar configuración", key="cfg_save_prefs_btn"):
                 summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
                 analysis_lookback_months_to_store = (
                     0
@@ -1195,6 +1235,7 @@ def render(settings: Settings) -> None:
                     )
                 else:
                     st.session_state["__cfg_flash_success"] = "Preferencias guardadas."
+                st.session_state["__cfg_active_tab"] = "Preferencias"
                 st.rerun()
 
     with t_caches:
@@ -1237,7 +1278,7 @@ def render(settings: Settings) -> None:
         )
         cache_reset_disabled = not bool(cache_reset_cfg.get("armed", False))
         if st.button(
-            "♻️ Resetear caches seleccionados",
+            "Resetear caches seleccionados",
             key="cfg_cache_reset_btn",
             disabled=cache_reset_disabled,
             help=(
@@ -1263,6 +1304,7 @@ def render(settings: Settings) -> None:
             st.session_state["__cfg_flash_success"] = (
                 f"Reset de cache completado ({len(results)} seleccionado(s), {total_reset} registros vaciados)."
             )
+            st.session_state["__cfg_active_tab"] = "Caches"
             st.rerun()
 
         cache_reset_results = st.session_state.pop("__cfg_cache_reset_results", None)

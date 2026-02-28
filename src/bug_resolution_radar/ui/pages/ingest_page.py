@@ -524,6 +524,65 @@ def _render_batch_messages(messages: List[Tuple[bool, str]]) -> None:
         (st.success if ok else st.error)(msg)
 
 
+def _jira_last_ingest_payload(
+    issues_doc: IssuesDocument,
+    *,
+    reset_display: bool,
+) -> Dict[str, Any]:
+    if reset_display:
+        return {
+            "schema_version": issues_doc.schema_version,
+            "ingested_at": "",
+            "jira_base_url": "",
+            "query": "",
+            "jira_source_count": 0,
+            "issues_count": 0,
+        }
+
+    jira_source_ids = {
+        str(i.source_id or "").strip()
+        for i in issues_doc.issues
+        if str(i.source_type or "").strip().lower() == "jira"
+    }
+    return {
+        "schema_version": issues_doc.schema_version,
+        "ingested_at": issues_doc.ingested_at,
+        "jira_base_url": issues_doc.jira_base_url,
+        "query": issues_doc.query,
+        "jira_source_count": len([s for s in jira_source_ids if s]),
+        "issues_count": len(issues_doc.issues),
+    }
+
+
+def _helix_last_ingest_payload(
+    stored_helix_doc: HelixDocument,
+    *,
+    helix_path: str,
+    reset_display: bool,
+) -> Dict[str, Any]:
+    if reset_display:
+        return {
+            "schema_version": stored_helix_doc.schema_version,
+            "ingested_at": "",
+            "helix_base_url": "",
+            "query": "",
+            "helix_source_count": 0,
+            "items_count": 0,
+            "data_path": helix_path,
+        }
+
+    helix_source_ids = {str(i.source_id or "").strip() for i in stored_helix_doc.items}
+    return {
+        "schema_version": stored_helix_doc.schema_version,
+        "ingested_at": stored_helix_doc.ingested_at,
+        "helix_base_url": stored_helix_doc.helix_base_url,
+        "query": stored_helix_doc.query,
+        "helix_source_count": len([s for s in helix_source_ids if s]),
+        "items_count": len(stored_helix_doc.items),
+        "data_path": helix_path,
+    }
+
+
 def _parse_json_str_list(raw: object) -> List[str]:
     txt = str(raw or "").strip()
     if not txt:
@@ -656,10 +715,10 @@ def render(settings: Settings) -> None:
 
         col_a, col_b = st.columns(2)
         with col_a:
-            test_jira = st.button("🔎 Test Jira", key="btn_test_jira_all", disabled=jira_running)
+            test_jira = st.button("Test Jira", key="btn_test_jira_all", disabled=jira_running)
         with col_b:
             run_jira = st.button(
-                "⬇️ Reingestar Jira",
+                "Reingestar Jira",
                 key="btn_run_jira_all",
                 disabled=jira_running,
             )
@@ -687,27 +746,16 @@ def render(settings: Settings) -> None:
             else:
                 if _start_jira_ingest_job(settings, selected_sources=jira_cfg_selected):
                     st.rerun()
-                st.warning("Ya hay una ingesta Jira en curso.")
+                else:
+                    st.warning("Ya hay una ingesta Jira en curso.")
 
         jira_running = _render_progress_status(connector="jira", title="Jira")
         running_any = running_any or jira_running
 
-        jira_source_ids = {
-            str(i.source_id or "").strip()
-            for i in issues_doc.issues
-            if str(i.source_type or "").strip().lower() == "jira"
-        }
         st.markdown("### Última ingesta (Jira)")
-        st.json(
-            {
-                "schema_version": issues_doc.schema_version,
-                "ingested_at": issues_doc.ingested_at,
-                "jira_base_url": issues_doc.jira_base_url,
-                "query": issues_doc.query,
-                "jira_source_count": len([s for s in jira_source_ids if s]),
-                "issues_count": len(issues_doc.issues),
-            }
-        )
+        if jira_running:
+            st.caption("Nueva ingesta Jira en curso: se limpiaron los resultados de la ingesta previa.")
+        st.json(_jira_last_ingest_payload(issues_doc, reset_display=jira_running))
 
     with t_helix:
         helix_cfg = helix_sources(settings)
@@ -825,13 +873,13 @@ def render(settings: Settings) -> None:
         col_h1, col_h2 = st.columns(2)
         with col_h1:
             test_helix = st.button(
-                "🔎 Test Helix",
+                "Test Helix",
                 key="btn_test_helix_all",
                 disabled=helix_running,
             )
         with col_h2:
             run_helix = st.button(
-                "⬇️ Reingestar Helix",
+                "Reingestar Helix",
                 key="btn_run_helix_all",
                 disabled=helix_running,
             )
@@ -869,23 +917,23 @@ def render(settings: Settings) -> None:
             else:
                 if _start_helix_ingest_job(settings, selected_sources=helix_cfg_selected):
                     st.rerun()
-                st.warning("Ya hay una ingesta Helix en curso.")
+                else:
+                    st.warning("Ya hay una ingesta Helix en curso.")
 
         helix_running = _render_progress_status(connector="helix", title="Helix")
         running_any = running_any or helix_running
 
-        helix_source_ids = {str(i.source_id or "").strip() for i in stored_helix_doc.items}
         st.markdown("### Última ingesta (Helix)")
+        if helix_running:
+            st.caption(
+                "Nueva ingesta Helix en curso: se limpiaron los resultados de la ingesta previa."
+            )
         st.json(
-            {
-                "schema_version": stored_helix_doc.schema_version,
-                "ingested_at": stored_helix_doc.ingested_at,
-                "helix_base_url": stored_helix_doc.helix_base_url,
-                "query": stored_helix_doc.query,
-                "helix_source_count": len([s for s in helix_source_ids if s]),
-                "items_count": len(stored_helix_doc.items),
-                "data_path": helix_path,
-            }
+            _helix_last_ingest_payload(
+                stored_helix_doc,
+                helix_path=helix_path,
+                reset_display=helix_running,
+            )
         )
 
     if running_any:

@@ -143,7 +143,7 @@ def render_issues_section(dff: pd.DataFrame) -> None:
         with c1:
             csv_bytes = df_to_excel_bytes(dff_show, include_index=False, sheet_name="Issues")
             st.download_button(
-                "⬇️ Descargar Excel",
+                "Descargar Excel",
                 data=csv_bytes,
                 file_name="issues_filtradas.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

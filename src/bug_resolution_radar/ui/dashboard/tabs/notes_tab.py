@@ -29,7 +29,7 @@ def render_notes_tab(*, dff: pd.DataFrame, notes: NotesStore) -> None:
 
     c1, _ = st.columns([1, 3])
     with c1:
-        if st.button("💾 Guardar nota", key="notes_save_btn", width="stretch"):
+        if st.button("Guardar nota", key="notes_save_btn", width="stretch"):
             notes.set(issue_key, new_note)
             notes.save()
             st.success("Nota guardada localmente.")
