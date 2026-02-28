@@ -13,25 +13,32 @@ HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
 APPLE_CODESIGN_IDENTITY ?=
 APPLE_NOTARY_PROFILE ?=
+PYINSTALLER_RETRIES ?= 2
 
-PYINSTALLER_COLLECT_ALL_ARGS = \
-	--collect-all streamlit \
-	--collect-all webview \
-	--collect-all watchdog \
-	--collect-all plotly \
-	--collect-all pptx \
-	--collect-all lxml \
-	--collect-all PIL \
-	--collect-all kaleido \
-	--collect-all choreographer \
-	--collect-all logistro \
-	--collect-all simplejson \
-	--collect-all orjson \
-	--collect-all openpyxl \
-	--collect-all xlsxwriter \
-	--collect-all numpy \
-	--collect-all browser_cookie3 \
-	--collect-all bug_resolution_radar
+PYINSTALLER_BUNDLE_ARGS = \
+	--collect-all bug_resolution_radar \
+	--collect-data streamlit \
+	--collect-data webview \
+	--collect-data plotly \
+	--collect-data kaleido \
+	--collect-data choreographer \
+	--collect-data browser_cookie3 \
+	--collect-submodules streamlit.runtime.scriptrunner \
+	--collect-submodules streamlit.runtime.scriptrunner_utils \
+	--copy-metadata streamlit \
+	--copy-metadata pywebview \
+	--copy-metadata plotly \
+	--copy-metadata kaleido
+
+PYINSTALLER_NON_WINDOWS_EXCLUDE_ARGS = \
+	--exclude-module pandas.io.clipboard \
+	--exclude-module dateutil.tz.win \
+	--exclude-module webview.platforms.android \
+	--exclude-module webview.platforms.cef \
+	--exclude-module webview.platforms.edgechromium \
+	--exclude-module webview.platforms.mshtml \
+	--exclude-module webview.platforms.winforms \
+	--exclude-module click._winconsole
 
 # Finder/Quick Look can recreate .DS_Store while packaging folders are being removed.
 # Retry a few times to make clean targets less flaky on macOS.
@@ -238,7 +245,18 @@ build-macos: sync-build-env test-ppt-regression
 	if [ -f .streamlit/config.toml ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
-	$(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) "$$ROOT_DIR/run_streamlit.py"
+	for attempt in $$(seq 1 $(PYINSTALLER_RETRIES)); do \
+		if $(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_BUNDLE_ARGS) $(PYINSTALLER_NON_WINDOWS_EXCLUDE_ARGS) "$$ROOT_DIR/run_streamlit.py"; then \
+			break; \
+		fi; \
+		if [ "$$attempt" -ge "$(PYINSTALLER_RETRIES)" ]; then \
+			echo "PyInstaller falló tras $$attempt intentos." >&2; \
+			exit 1; \
+		fi; \
+		echo "PyInstaller falló (intento $$attempt). Reintentando build limpio..." >&2; \
+		rm -rf dist_app build_app; \
+		sleep 1; \
+	done
 	APP_INFO_PLIST="dist_app/bug-resolution-radar.app/Contents/Info.plist"; \
 	if [ -f "$$APP_INFO_PLIST" ]; then \
 		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$$APP_INFO_PLIST" 2>/dev/null || true; \
@@ -309,7 +327,7 @@ build-linux: sync-build-env test-ppt-regression
 	if [ -f .streamlit/config.toml ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
-	$(PYINSTALLER) --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) "$$ROOT_DIR/run_streamlit.py"
+	$(PYINSTALLER) --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_BUNDLE_ARGS) $(PYINSTALLER_NON_WINDOWS_EXCLUDE_ARGS) "$$ROOT_DIR/run_streamlit.py"
 	BUNDLE_DIR="build_bundle/bug-resolution-radar-linux"; \
 	mkdir -p "$$BUNDLE_DIR/dist"; \
 	cp dist/bug-resolution-radar "$$BUNDLE_DIR/dist/bug-resolution-radar"; \
