@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from html import escape
-from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -16,6 +15,7 @@ from bug_resolution_radar.analytics.analysis_window import (
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
+    config_home,
     helix_sources,
     jira_sources,
     save_settings,
@@ -762,8 +762,8 @@ def _corporate_profile_score(
     score = 0
     if not corporate_mode:
         score += 1
-    if desktop_webview:
-        score += 2
+    if not desktop_webview:
+        score += 1
     if browser_app_control:
         score += 3
     if not prefer_selected_binary:
@@ -1117,10 +1117,13 @@ def render(settings: Settings) -> None:
                     "Usar contenedor desktop embebido (pywebview)",
                     value=_boolish(
                         getattr(settings, "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", ""),
-                        default=False,
+                        default=True,
                     ),
                     key="cfg_desktop_webview",
-                    help="Si está activo puede elevar prompts de permisos en macOS corporativo.",
+                    help=(
+                        "Recomendado: evita abrir la app principal en el navegador por defecto y "
+                        "mantiene el shell en la ventana de la aplicación."
+                    ),
                 )
                 browser_app_control = st.checkbox(
                     "Permitir control explícito de app navegador (Apple events/open -a)",
@@ -1247,13 +1250,17 @@ def render(settings: Settings) -> None:
                 st.markdown("**Carpeta de guardado**")
                 report_ppt_download_dir_default = str(
                     getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
-                ).strip() or str((Path.home() / "Downloads").expanduser())
+                ).strip() or str((config_home() / "exports").expanduser())
                 report_ppt_download_dir = st.text_input(
                     "Carpeta de guardado del informe PPT",
                     value=report_ppt_download_dir_default,
                     key="cfg_report_ppt_download_dir",
                     label_visibility="collapsed",
-                    placeholder=str((Path.home() / "Downloads").expanduser()),
+                    placeholder=str((config_home() / "exports").expanduser()),
+                )
+                st.caption(
+                    "Sugerencia: usa una carpeta de la app (Application Support/config) para evitar "
+                    "prompts de permisos en macOS corporativo."
                 )
 
             with st.container(key="cfg_prefs_card_favs"):

@@ -49,16 +49,18 @@ Documentación completa:
 Perfil recomendado para equipos corporativos restringidos:
 
 - `BUG_RESOLUTION_RADAR_CORPORATE_MODE=true`
-- `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=false`
+- `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true`
+- `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW_FALLBACK_BROWSER=true`
 - `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL=false`
 - `BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY=true`
 - `BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS=3`
+- `BUG_RESOLUTION_RADAR_ALLOW_PROTECTED_EXPORT_DIRS=false`
 
 Opcional (si Chrome/Edge están fuera de rutas estándar):
 - `BUG_RESOLUTION_RADAR_CHROME_BINARY=/ruta/a/chrome`
 - `BUG_RESOLUTION_RADAR_EDGE_BINARY=/ruta/a/msedge`
 
-Con esta configuración se minimizan prompts de permisos en macOS corporativo y se mantiene apertura automática de URLs de login en el navegador seleccionado.
+Con esta configuración la app se abre en contenedor embebido (no en navegador por defecto), se minimizan prompts de permisos en macOS corporativo y se mantiene apertura automática de URLs de login en el navegador seleccionado.
 
 ## Configuration
 

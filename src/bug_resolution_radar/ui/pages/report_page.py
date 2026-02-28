@@ -32,18 +32,62 @@ _REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
 _REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
 
 
-def _default_report_export_dir(settings: Settings) -> Path:
-    """Pick a user-friendly, writable export directory for manual PPT downloads."""
+def _bool_env(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _is_macos_protected_user_folder(path: Path) -> bool:
+    if sys.platform != "darwin":
+        return False
+    home = Path.home().expanduser().resolve()
+    protected_roots = [home / "Desktop", home / "Documents", home / "Downloads"]
+    candidate = path.expanduser().resolve()
+    for root in protected_roots:
+        root_resolved = root.expanduser().resolve()
+        if candidate == root_resolved or root_resolved in candidate.parents:
+            return True
+    return False
+
+
+def _allow_protected_export_dirs() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_ALLOW_PROTECTED_EXPORT_DIRS", False)
+
+
+def _configured_export_path(settings: Settings) -> Path | None:
     configured = str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+    if not configured:
+        return None
+    return Path(configured).expanduser()
+
+
+def _default_report_export_dir(settings: Settings) -> Path:
+    """
+    Pick a writable export directory with minimum-privilege defaults.
+
+    On macOS we avoid protected user folders (Downloads/Desktop/Documents) by
+    default because they may trigger consent prompts on managed endpoints.
+    """
+    configured = _configured_export_path(settings)
+    skip_protected = sys.platform == "darwin" and not _allow_protected_export_dirs()
     candidates: list[Path] = []
-    if configured:
+    if configured is not None and not (
+        skip_protected and _is_macos_protected_user_folder(configured)
+    ):
         candidates.append(Path(configured).expanduser())
     candidates.extend(
         [
-            Path.home() / "Downloads",
             config_home() / "exports",
         ]
     )
+    if not skip_protected:
+        candidates.append(Path.home() / "Downloads")
 
     seen: set[str] = set()
     for candidate in candidates:
@@ -325,6 +369,17 @@ def render(settings: Settings) -> None:
 
     export_dir = _default_report_export_dir(settings)
     export_dir_label = str(export_dir)
+    configured_export_path = _configured_export_path(settings)
+    if (
+        configured_export_path is not None
+        and sys.platform == "darwin"
+        and not _allow_protected_export_dirs()
+        and _is_macos_protected_user_folder(configured_export_path)
+    ):
+        st.caption(
+            "Ruta de exportación protegida detectada en macOS. "
+            f"Para evitar prompts de permisos, el guardado se redirige a: {export_dir_label}"
+        )
 
     current_request_sig = _report_request_signature(
         settings,
