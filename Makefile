@@ -13,7 +13,7 @@ HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
 APPLE_CODESIGN_IDENTITY ?=
 APPLE_NOTARY_PROFILE ?=
-PYINSTALLER_RETRIES ?= 2
+PYINSTALLER_RETRIES ?= 4
 
 PYINSTALLER_BUNDLE_ARGS = \
 	--collect-all bug_resolution_radar \
@@ -264,18 +264,30 @@ build-macos: sync-build-env test-ppt-regression
 	if [ -f .streamlit/config.toml ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
+	BUILD_OK=0; \
 	for attempt in $$(seq 1 $(PYINSTALLER_RETRIES)); do \
-		if $(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_BUNDLE_ARGS) $(PYINSTALLER_NON_WINDOWS_EXCLUDE_ARGS) "$$ROOT_DIR/run_streamlit.py"; then \
+		ATTEMPT_WORK="build_app_attempt_$$attempt"; \
+		ATTEMPT_DIST="dist_app_attempt_$$attempt"; \
+		rm -rf "$$ATTEMPT_WORK" "$$ATTEMPT_DIST" bug-resolution-radar.pkg; \
+		if $(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath "$$ATTEMPT_DIST" --workpath "$$ATTEMPT_WORK" --specpath "$$ATTEMPT_WORK" --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_BUNDLE_ARGS) $(PYINSTALLER_NON_WINDOWS_EXCLUDE_ARGS) "$$ROOT_DIR/run_streamlit.py"; then \
+			rm -rf dist_app build_app; \
+			mv "$$ATTEMPT_DIST" dist_app; \
+			mv "$$ATTEMPT_WORK" build_app; \
+			BUILD_OK=1; \
 			break; \
 		fi; \
+		rm -rf "$$ATTEMPT_WORK" "$$ATTEMPT_DIST" bug-resolution-radar.pkg; \
 		if [ "$$attempt" -ge "$(PYINSTALLER_RETRIES)" ]; then \
 			echo "PyInstaller falló tras $$attempt intentos." >&2; \
 			exit 1; \
 		fi; \
 		echo "PyInstaller falló (intento $$attempt). Reintentando build limpio..." >&2; \
-		rm -rf dist_app build_app; \
 		sleep 1; \
-	done
+	done; \
+	if [ "$$BUILD_OK" -ne 1 ]; then \
+		echo "PyInstaller no completó el build." >&2; \
+		exit 1; \
+	fi
 	APP_INFO_PLIST="dist_app/bug-resolution-radar.app/Contents/Info.plist"; \
 	if [ -f "$$APP_INFO_PLIST" ]; then \
 		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$$APP_INFO_PLIST" 2>/dev/null || true; \
