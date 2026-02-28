@@ -1550,22 +1550,30 @@ def ingest_helix(
                 return candidate, cookie_host, ""
         return None, "", last_error
 
-    def _bootstrap_cookie_from_browser() -> Tuple[Optional[str], str]:
+    def _bootstrap_cookie_from_browser(
+        *,
+        force_interactive: bool = False,
+    ) -> Tuple[Optional[str], str]:
         nonlocal bootstrap_page_ready
         page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
 
-        try:
-            existing, existing_host, _ = _read_auth_cookie_from_browser()
-        except Exception:
-            existing, existing_host = None, ""
-        if existing:
-            return existing, existing_host
+        if not force_interactive:
+            try:
+                existing, existing_host, _ = _read_auth_cookie_from_browser()
+            except Exception:
+                existing, existing_host = None, ""
+            if existing:
+                return existing, existing_host
 
         if not auth_cookie_hosts:
             return None, ""
         if not can_bootstrap_page:
             return None, ""
-        if not page_ready:
+        if force_interactive:
+            page_ready = _open_urls_in_configured_browser(_cookie_bootstrap_urls(), browser) > 0
+            if page_ready:
+                bootstrap_page_ready = True
+        elif not page_ready:
             page_ready = _open_urls_in_configured_browser(_cookie_bootstrap_urls(), browser) > 0
             if page_ready:
                 bootstrap_page_ready = True
@@ -1640,7 +1648,9 @@ def ingest_helix(
             session, fresh_cookie, host=(fresh_cookie_host or host)
         )
         if not _has_auth_cookie(refreshed_cookie_names):
-            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
+                force_interactive=True
+            )
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()
@@ -1679,7 +1689,9 @@ def ingest_helix(
             )
 
         if _looks_like_sso_redirect(refresh_preflight):
-            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
+                force_interactive=True
+            )
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()

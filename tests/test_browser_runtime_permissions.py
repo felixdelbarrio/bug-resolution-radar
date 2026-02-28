@@ -141,6 +141,30 @@ def test_open_url_honors_explicit_browser_binary_env_override(
     assert captured["cmd"][-1] == "https://example.com/path"
 
 
+def test_open_url_uses_macos_open_a_fallback_when_binary_not_resolved(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
+    monkeypatch.setattr(browser_runtime, "platform_system", lambda: "Darwin")
+    monkeypatch.setattr(browser_runtime, "_resolve_base_command", lambda cmd: None)
+
+    captured: dict[str, Any] = {}
+
+    class _FakeProcess:
+        pass
+
+    def _fake_popen(cmd: list[str], *, stdout: Any, stderr: Any) -> _FakeProcess:
+        captured["cmd"] = cmd
+        return _FakeProcess()
+
+    monkeypatch.setattr(browser_runtime.subprocess, "Popen", _fake_popen)
+
+    ok = browser_runtime.open_url_in_configured_browser("https://example.com/path", "chrome")
+    assert ok is True
+    assert captured["cmd"] == ["open", "-a", "Google Chrome", "https://example.com/path"]
+
+
 def test_open_urls_dedups_invalid_and_honors_limit(
     monkeypatch: Any,
 ) -> None:

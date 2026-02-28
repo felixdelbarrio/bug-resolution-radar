@@ -169,6 +169,20 @@ def _launch_url_with_selected_browser_binary(
     return False
 
 
+def _launch_url_with_macos_selected_app(url: str, *, use_chrome: bool) -> bool:
+    """Best-effort macOS fallback that still honors selected browser."""
+    app_name = "Google Chrome" if use_chrome else "Microsoft Edge"
+    try:
+        subprocess.Popen(
+            ["open", "-a", app_name, url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def open_url_in_configured_browser(url: str, browser: str) -> bool:
     """Open URL in the configured browser with platform-specific fallbacks."""
     if not _root_from_url(url):
@@ -185,6 +199,9 @@ def open_url_in_configured_browser(url: str, browser: str) -> bool:
         use_chrome=use_chrome,
     ):
         return True
+    if platform == "darwin" and prefer_browser_binary:
+        if _launch_url_with_macos_selected_app(url, use_chrome=use_chrome):
+            return True
 
     browser_names = (
         ["chrome", "google-chrome", "google chrome"]
