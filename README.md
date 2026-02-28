@@ -67,6 +67,9 @@ Las distribuciones binarias usan modo escritorio embebido en Windows/Linux.
 En macOS, por defecto se abre en navegador del sistema para minimizar prompts
 de permisos del sistema; se puede reactivar el contenedor embebido con
 `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true`.
+Para bootstrap de login, la app intenta abrir automáticamente Chrome/Edge
+seleccionado por ejecutable directo (sin AppleScript), reduciendo prompts en
+equipos corporativos bloqueados.
 
 Para empaquetado local robusto, usa:
 
@@ -81,6 +84,33 @@ Esto valida explícitamente las dependencias de runtime desktop (`streamlit`,
 Si una build de escritorio falla al arrancar, revisa:
 
 - macOS: `~/Library/Application Support/bug-resolution-radar/logs/desktop-launcher.log`
+
+## Despliegue corporativo recomendado
+
+Para máxima compatibilidad en equipos restringidos:
+
+- `BUG_RESOLUTION_RADAR_CORPORATE_MODE=true`
+- `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=false`
+- `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL=false`
+- `BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY=true`
+
+Con esta combinación se evita automatización AppleScript y se mantiene la
+apertura automática de URLs de login en el navegador seleccionado.
+
+## Firma y notarización (opcional, preparado)
+
+Sin coste puedes construir igual que hoy. Si más adelante contratas Apple
+Developer, el `Makefile` ya acepta firma/notarización opcionales:
+
+- `APPLE_CODESIGN_IDENTITY="Developer ID Application: ..."`
+- `APPLE_NOTARY_PROFILE="nombre-perfil-notarytool"`
+
+Comandos útiles:
+
+```bash
+make build-macos
+make verify-macos-app
+```
 
 ## Instalación manual
 
@@ -99,8 +129,9 @@ El proyecto usa `.env` (puedes partir de `.env.example`).
 Variables más relevantes:
 
 - App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`.
-- Desktop/permisos (macOS): `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW`,
-  `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL`.
+- Desktop/permisos (macOS): `BUG_RESOLUTION_RADAR_CORPORATE_MODE`,
+  `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW`, `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL`,
+  `BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY`.
 - Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_BROWSER`.
 - Helix: `HELIX_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
 - Helix avanzado: `HELIX_QUERY_MODE` (`person_workitems|arsql|auto`), `HELIX_ARSQL_BASE_URL`,

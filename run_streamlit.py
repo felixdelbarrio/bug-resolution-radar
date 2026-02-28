@@ -150,6 +150,10 @@ def _bool_env(name: str, default: bool) -> bool:
     return bool(default)
 
 
+def _corporate_mode_enabled() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False)
+
+
 def _float_env(name: str, default: float) -> float:
     raw = str(os.environ.get(name) or "").strip()
     if not raw:
@@ -431,6 +435,8 @@ def _desktop_webview_enabled_for_frozen_binary() -> bool:
     On macOS we default to external-browser mode to reduce OS permission prompts
     from embedded WebKit (camera/mic/accessibility/automation checks).
     """
+    if _corporate_mode_enabled():
+        return False
     default = sys.platform != "darwin"
     return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", default)
 
@@ -545,6 +551,12 @@ def _prepare_frozen_runtime() -> None:
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
     _load_dotenv_if_present(runtime_home / ".env")
+    if _corporate_mode_enabled():
+        # Conservative defaults for locked-down corporate endpoints.
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "false")
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
+        _launcher_log("Corporate mode activo: mínimos permisos y browser bootstrap sin AppleScript.")
     _ensure_localhost_no_proxy_env()
     _configure_streamlit_runtime_stability_for_binary()
 

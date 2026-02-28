@@ -212,6 +212,13 @@ def test_desktop_webview_can_be_force_enabled_on_macos(monkeypatch) -> None:
     assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
 
 
+def test_desktop_webview_is_disabled_when_corporate_mode_is_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_CORPORATE_MODE", "true")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+    monkeypatch.setattr(run_streamlit.sys, "platform", "linux", raising=False)
+    assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is False
+
+
 def test_start_internal_streamlit_subprocess_passes_internal_env(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

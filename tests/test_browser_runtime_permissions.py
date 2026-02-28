@@ -27,6 +27,7 @@ def test_open_url_falls_back_to_default_browser_when_app_control_disabled_on_mac
     monkeypatch: Any,
 ) -> None:
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "false")
     monkeypatch.setattr(browser_runtime, "platform_system", lambda: "Darwin")
 
     captured: dict[str, Any] = {}
@@ -41,7 +42,7 @@ def test_open_url_falls_back_to_default_browser_when_app_control_disabled_on_mac
         raise AssertionError("webbrowser.get should not be used when app control is disabled")
 
     def _must_not_popen(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("open -a should not be used when app control is disabled")
+        raise AssertionError("subprocess launch should not run with binary preference disabled")
 
     monkeypatch.setattr(browser_runtime.webbrowser, "open", _fake_open)
     monkeypatch.setattr(browser_runtime.webbrowser, "get", _must_not_get)
@@ -58,6 +59,7 @@ def test_open_url_prefers_configured_browser_when_app_control_enabled(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "true")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "false")
     monkeypatch.setattr(browser_runtime, "platform_system", lambda: "Darwin")
 
     captured: dict[str, Any] = {}
@@ -81,3 +83,51 @@ def test_open_url_prefers_configured_browser_when_app_control_enabled(
     assert captured["url"] == "https://example.com/path"
     assert captured["new"] == 2
     assert captured["autoraise"] is True
+
+
+def test_open_url_uses_selected_browser_binary_on_macos_without_app_control(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
+    monkeypatch.setattr(browser_runtime, "platform_system", lambda: "Darwin")
+
+    captured: dict[str, Any] = {}
+
+    class _FakeProcess:
+        pass
+
+    def _fake_popen(cmd: list[str], *, stdout: Any, stderr: Any) -> _FakeProcess:
+        captured["cmd"] = cmd
+        return _FakeProcess()
+
+    def _must_not_get(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("webbrowser.get should not be used in minimum-permission mode")
+
+    monkeypatch.setattr(browser_runtime.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(browser_runtime.webbrowser, "get", _must_not_get)
+
+    ok = browser_runtime.open_url_in_configured_browser("https://example.com/path", "chrome")
+    assert ok is True
+    cmd = captured["cmd"]
+    assert cmd[-1] == "https://example.com/path"
+    assert cmd[0] == "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+
+def test_corporate_mode_forces_no_browser_app_control_even_if_env_enables_it(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_CORPORATE_MODE", "true")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "true")
+    monkeypatch.setattr(browser_runtime, "platform_system", lambda: "Darwin")
+
+    def _must_not_run(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("osascript should not run in corporate mode")
+
+    monkeypatch.setattr(browser_runtime.subprocess, "run", _must_not_run)
+
+    out = browser_runtime.is_target_page_open_in_configured_browser(
+        "https://example.com/path",
+        "chrome",
+    )
+    assert out is None

@@ -10,6 +10,8 @@ PYINSTALLER=$(VENV)/bin/pyinstaller
 
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
+APPLE_CODESIGN_IDENTITY ?=
+APPLE_NOTARY_PROFILE ?=
 
 PYINSTALLER_COLLECT_ALL_ARGS = \
 	--collect-all streamlit \
@@ -55,7 +57,7 @@ endef
 
 .PHONY: help setup format lint typecheck test run clean clean-build \
 	ensure-build-tools ensure-desktop-runtime-deps sync-build-env \
-	test-ppt-regression build-local build-macos build-linux
+	test-ppt-regression build-local build-macos build-linux verify-macos-app
 
 help:
 	@echo ""
@@ -71,12 +73,15 @@ help:
 	@echo "  make sync-build-env Sincroniza deps de build/runtime desktop antes de empaquetar"
 	@echo "  make build-local Auto-detecta OS (macOS/Linux) y construye binario local"
 	@echo "  make build-macos Construye .app + zip local (igual a .github/workflows/build-macos.yml)"
+	@echo "  make verify-macos-app Verifica firma/assessment del .app generado"
 	@echo "  make build-linux Construye binario Linux + bundle local (igual a .github/workflows/build-linux.yml)"
 	@echo "  make clean-build Borra artefactos de build de binarios"
 	@echo "  make clean       Borra venv y cachés"
 	@echo ""
 	@echo "Variables útiles:"
 	@echo "  PY=python3       (puedes cambiarlo al invocar: make setup PY=python3.11)"
+	@echo "  APPLE_CODESIGN_IDENTITY='Developer ID Application: ...' (opcional)"
+	@echo "  APPLE_NOTARY_PROFILE='perfil-notarytool' (opcional; requiere Apple Developer)"
 	@echo ""
 
 setup:
@@ -174,6 +179,27 @@ build-macos: sync-build-env test-ppt-regression
 		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$$APP_INFO_PLIST" 2>/dev/null || true; \
 		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" "$$APP_INFO_PLIST"; \
 		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent true" "$$APP_INFO_PLIST"; \
+	fi; \
+	APP_PATH="dist_app/bug-resolution-radar.app"; \
+	if [ -n "$(APPLE_CODESIGN_IDENTITY)" ]; then \
+		echo "Firmando app con identity: $(APPLE_CODESIGN_IDENTITY)"; \
+		codesign --force --deep --options runtime --timestamp --sign "$(APPLE_CODESIGN_IDENTITY)" "$$APP_PATH"; \
+	else \
+		echo "Re-firmando app con firma ad-hoc (sin Apple Developer)."; \
+		codesign --force --deep --sign - "$$APP_PATH"; \
+	fi; \
+	if [ -n "$(APPLE_NOTARY_PROFILE)" ]; then \
+		if [ -z "$(APPLE_CODESIGN_IDENTITY)" ]; then \
+			echo "APPLE_NOTARY_PROFILE requiere APPLE_CODESIGN_IDENTITY." >&2; \
+			exit 1; \
+		fi; \
+		NOTARY_ZIP="dist_app/bug-resolution-radar-notary.zip"; \
+		rm -f "$$NOTARY_ZIP"; \
+		ditto -c -k --sequesterRsrc --keepParent "$$APP_PATH" "$$NOTARY_ZIP"; \
+		xcrun notarytool submit "$$NOTARY_ZIP" --keychain-profile "$(APPLE_NOTARY_PROFILE)" --wait; \
+		xcrun stapler staple "$$APP_PATH"; \
+	else \
+		echo "Notarización macOS opcional omitida (APPLE_NOTARY_PROFILE vacío)."; \
 	fi
 	BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"; \
 	mkdir -p "$$BUNDLE_DIR/dist"; \
@@ -240,6 +266,25 @@ build-linux: sync-build-env test-ppt-regression
 	@echo "Build Linux completado:"
 	@echo "  - dist/bug-resolution-radar"
 	@echo "  - build_bundle/bug-resolution-radar-linux"
+
+verify-macos-app:
+	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
+		echo "verify-macos-app requiere ejecutarse en macOS."; \
+		exit 1; \
+	fi
+	@APP_PATH="dist_app/bug-resolution-radar.app"; \
+	if [ ! -d "$$APP_PATH" ]; then \
+		echo "No existe $$APP_PATH. Ejecuta primero: make build-macos"; \
+		exit 1; \
+	fi; \
+	echo "== codesign entitlements =="; \
+	codesign -d --entitlements :- "$$APP_PATH" 2>&1 || true; \
+	echo "== codesign verify =="; \
+	codesign --verify --deep --strict --verbose=2 "$$APP_PATH"; \
+	echo "== spctl assess =="; \
+	if ! spctl --assess --type execute --verbose=4 "$$APP_PATH"; then \
+		echo "Aviso: spctl no aprobó el app (esperable si no está notarizada)."; \
+	fi
 
 run:
 	$(RUN) run app.py

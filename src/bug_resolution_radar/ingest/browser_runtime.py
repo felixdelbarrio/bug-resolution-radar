@@ -6,7 +6,7 @@ import os
 import subprocess
 import webbrowser
 from platform import system as platform_system
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 
@@ -41,6 +41,10 @@ def _bool_env(name: str, default: bool) -> bool:
     return bool(default)
 
 
+def _corporate_mode_enabled() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False)
+
+
 def _browser_app_control_enabled(platform: str) -> bool:
     """
     Whether to use browser-app control primitives (AppleScript/open -a).
@@ -48,8 +52,66 @@ def _browser_app_control_enabled(platform: str) -> bool:
     On macOS this is disabled by default to avoid automation-style permission
     prompts when a simple URL open is enough.
     """
+    if _corporate_mode_enabled():
+        return False
     default = platform != "darwin"
     return _bool_env("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", default)
+
+
+def _prefer_selected_browser_binary(platform: str) -> bool:
+    """
+    Prefer launching browser executables directly instead of app automation.
+
+    This keeps automatic login bootstrap tabs working while avoiding AppleScript
+    flows on restricted corporate macOS environments.
+    """
+    if _corporate_mode_enabled():
+        return True
+    default = platform in {"darwin", "linux"}
+    return _bool_env("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", default)
+
+
+def _browser_binary_candidates(platform: str, *, use_chrome: bool) -> List[List[str]]:
+    if platform == "darwin":
+        if use_chrome:
+            return [
+                ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+                ["/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"],
+                ["google-chrome"],
+                ["chrome"],
+            ]
+        return [
+            ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+            ["microsoft-edge"],
+            ["msedge"],
+        ]
+    if platform == "linux":
+        if use_chrome:
+            return [["google-chrome"], ["chrome"], ["chromium"]]
+        return [["microsoft-edge"], ["msedge"]]
+    if platform == "windows":
+        return [["chrome"]] if use_chrome else [["msedge"]]
+    return []
+
+
+def _launch_url_with_selected_browser_binary(
+    url: str,
+    *,
+    platform: str,
+    use_chrome: bool,
+) -> bool:
+    for base_cmd in _browser_binary_candidates(platform, use_chrome=use_chrome):
+        cmd = [*base_cmd, url]
+        try:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def open_url_in_configured_browser(url: str, browser: str) -> bool:
@@ -60,6 +122,15 @@ def open_url_in_configured_browser(url: str, browser: str) -> bool:
     use_chrome = _is_chrome_browser(browser)
     platform = platform_system().lower()
     allow_app_control = _browser_app_control_enabled(platform)
+    prefer_browser_binary = _prefer_selected_browser_binary(platform)
+
+    if prefer_browser_binary and _launch_url_with_selected_browser_binary(
+        url,
+        platform=platform,
+        use_chrome=use_chrome,
+    ):
+        return True
+
     browser_names = (
         ["chrome", "google-chrome", "google chrome"]
         if use_chrome
@@ -85,21 +156,6 @@ def open_url_in_configured_browser(url: str, browser: str) -> bool:
             return True
         except Exception:
             pass
-
-    if platform == "linux":
-        bins = (
-            ["google-chrome", "chrome", "chromium"] if use_chrome else ["microsoft-edge", "msedge"]
-        )
-        for bin_name in bins:
-            try:
-                subprocess.Popen(
-                    [bin_name, url],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                return True
-            except Exception:
-                continue
 
     try:
         return bool(webbrowser.open(url, new=2, autoraise=True))
