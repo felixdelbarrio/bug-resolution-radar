@@ -215,7 +215,16 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         ),
     )
     icon_ingest = _svg_data_uri(
-        file_name="exploration.svg",
+        file_name="spherica-database.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<ellipse cx="12" cy="6" rx="7" ry="3" fill="#000"/>'
+            '<path d="M5 6v10c0 1.7 3.1 3 7 3s7-1.3 7-3V6" fill="none" stroke="#000" stroke-width="2"/>'
+            "</svg>"
+        ),
+    )
+    icon_search = _svg_data_uri(
+        file_name="spherica-search.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
             '<circle cx="11" cy="11" r="7" fill="none" stroke="#000" stroke-width="2"/>'
@@ -232,11 +241,59 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         ),
     )
     icon_config = _svg_data_uri(
-        file_name="settings.svg",
+        file_name="spherica-simulator.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
             '<circle cx="12" cy="12" r="3" fill="#000"/>'
             '<path d="M12 2l2 2 3-1 1 3 3 1-1 3 2 2-2 2 1 3-3 1-1 3-3-1-2 2-2-2-3 1-1-3-3-1 1-3-2-2 2-2-1-3 3-1 1-3 3 1z" fill="#000"/>'
+            "</svg>"
+        ),
+    )
+    icon_save = _svg_data_uri(
+        file_name="spherica-database.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<ellipse cx="12" cy="6" rx="7" ry="3" fill="#000"/>'
+            '<path d="M5 6v10c0 1.7 3.1 3 7 3s7-1.3 7-3V6" fill="none" stroke="#000" stroke-width="2"/>'
+            "</svg>"
+        ),
+    )
+    icon_no_draw = _svg_data_uri(
+        file_name="spherica-no-draw.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<circle cx="12" cy="12" r="8" fill="none" stroke="#000" stroke-width="2"/>'
+            '<path d="M8 8l8 8" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            "</svg>"
+        ),
+    )
+    icon_reingest = _svg_data_uri(
+        file_name="spherica-save-for-later.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<path d="M12 4v10" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M8 10l4 4 4-4" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M5 19h14" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            "</svg>"
+        ),
+    )
+    icon_recycle = _svg_data_uri(
+        file_name="spherica-recycle.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<path d="M8 6h6l-2-2" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M16 10l2 3-2 3" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M6 14l-2-3 2-3" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            "</svg>"
+        ),
+    )
+    icon_xml = _svg_data_uri(
+        file_name="spherica-xml.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<path d="M7 8l-3 4 3 4" stroke="#000" stroke-width="2" fill="none" stroke-linecap="round"/>'
+            '<path d="M17 8l3 4-3 4" stroke="#000" stroke-width="2" fill="none" stroke-linecap="round"/>'
+            '<path d="M13 6l-2 12" stroke="#000" stroke-width="2" fill="none" stroke-linecap="round"/>'
             "</svg>"
         ),
     )
@@ -858,6 +915,202 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_btn_slot_config button,
           .st-key-workspace_btn_config button { --bbva-btn-icon: url("__ICON_CONFIG__"); }
 
+          /* Save buttons: consistent database icon (replaces legacy diskette emoji). */
+          .st-key-cfg_save_jira_btn button,
+          .st-key-cfg_save_helix_btn button,
+          .st-key-cfg_save_prefs_btn button,
+          .st-key-notes_save_btn button {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.4rem !important;
+          }
+          .st-key-cfg_save_jira_btn button::before,
+          .st-key-cfg_save_helix_btn button::before,
+          .st-key-cfg_save_prefs_btn button::before,
+          .st-key-notes_save_btn button::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 0.98rem !important;
+            height: 0.98rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_SAVE__") !important;
+            mask-image: url("__ICON_SAVE__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 0.98rem !important;
+          }
+
+          /* Reingest buttons: save-for-later icon (replaces legacy download emoji). */
+          .st-key-btn_run_jira_all button,
+          .st-key-btn_run_helix_all button {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.4rem !important;
+          }
+          .st-key-btn_run_jira_all button::before,
+          .st-key-btn_run_helix_all button::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 0.98rem !important;
+            height: 0.98rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_REINGEST__") !important;
+            mask-image: url("__ICON_REINGEST__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 0.98rem !important;
+          }
+
+          /* Ingest test buttons: search icon (replaces legacy magnifier emoji). */
+          .st-key-btn_test_jira_all button,
+          .st-key-btn_test_helix_all button {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.4rem !important;
+          }
+          .st-key-btn_test_jira_all button::before,
+          .st-key-btn_test_helix_all button::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 0.98rem !important;
+            height: 0.98rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_SEARCH__") !important;
+            mask-image: url("__ICON_SEARCH__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 0.98rem !important;
+          }
+
+          /* Cache reset button: recycle icon (replaces legacy recycle emoji). */
+          .st-key-cfg_cache_reset_btn button {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.4rem !important;
+          }
+          .st-key-cfg_cache_reset_btn button::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 0.98rem !important;
+            height: 0.98rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_RECYCLE__") !important;
+            mask-image: url("__ICON_RECYCLE__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 0.98rem !important;
+          }
+
+          /* Cache reset title: recycle icon. */
+          .bbva-icon-recycle-title {
+            display: flex !important;
+            align-items: center !important;
+            gap: 0.42rem !important;
+            margin: 0.2rem 0 0.48rem !important;
+            font-family: var(--bbva-font-ui) !important;
+            font-size: 1.06rem !important;
+            font-weight: 700 !important;
+            line-height: 1.25 !important;
+            color: var(--bbva-text) !important;
+          }
+          .bbva-icon-recycle-title::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 1rem !important;
+            height: 1rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_RECYCLE__") !important;
+            mask-image: url("__ICON_RECYCLE__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 1rem !important;
+          }
+
+          /* Excel downloads: XML icon (replaces legacy download glyphs). */
+          [class*="st-key-cfg_export_jira_sources_xlsx"] button,
+          [class*="st-key-cfg_export_helix_sources_xlsx"] button,
+          [class*="st-key-issues_download_csv"] button,
+          [class*="st-key-"][class*="download_csv"] button,
+          [class*="st-key-"][class*="dl_csv_min"] button {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 0.38rem !important;
+          }
+          [class*="st-key-cfg_export_jira_sources_xlsx"] button::before,
+          [class*="st-key-cfg_export_helix_sources_xlsx"] button::before,
+          [class*="st-key-issues_download_csv"] button::before,
+          [class*="st-key-"][class*="download_csv"] button::before,
+          [class*="st-key-"][class*="dl_csv_min"] button::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 0.98rem !important;
+            height: 0.98rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_XML__") !important;
+            mask-image: url("__ICON_XML__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 0.98rem !important;
+          }
+
+          /* Safe delete section titles: use no-draw icon instead of emoji broom. */
+          .bbva-icon-no-draw-title {
+            display: flex !important;
+            align-items: center !important;
+            gap: 0.42rem !important;
+            margin: 0.2rem 0 0.48rem !important;
+            font-family: var(--bbva-font-ui) !important;
+            font-size: 1.06rem !important;
+            font-weight: 700 !important;
+            line-height: 1.25 !important;
+            color: var(--bbva-text) !important;
+          }
+          .bbva-icon-no-draw-title::before {
+            content: "" !important;
+            display: inline-block !important;
+            width: 1rem !important;
+            height: 1rem !important;
+            background-color: currentColor !important;
+            -webkit-mask-image: url("__ICON_NO_DRAW__") !important;
+            mask-image: url("__ICON_NO_DRAW__") !important;
+            -webkit-mask-repeat: no-repeat !important;
+            mask-repeat: no-repeat !important;
+            -webkit-mask-position: center !important;
+            mask-position: center !important;
+            -webkit-mask-size: contain !important;
+            mask-size: contain !important;
+            flex: 0 0 1rem !important;
+          }
+
           /* Download button: unified pill style across CSV/HTML exports */
           .stDownloadButton {
             width: auto !important;
@@ -1239,7 +1492,13 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         .replace("__ICON_REPORT__", icon_report)
         .replace("__ICON_INGEST__", icon_ingest)
         .replace("__ICON_THEME__", icon_theme)
-        .replace("__ICON_CONFIG__", icon_config),
+        .replace("__ICON_CONFIG__", icon_config)
+        .replace("__ICON_SAVE__", icon_save)
+        .replace("__ICON_NO_DRAW__", icon_no_draw)
+        .replace("__ICON_REINGEST__", icon_reingest)
+        .replace("__ICON_RECYCLE__", icon_recycle)
+        .replace("__ICON_SEARCH__", icon_search)
+        .replace("__ICON_XML__", icon_xml),
         unsafe_allow_html=True,
     )
 

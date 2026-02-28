@@ -65,6 +65,34 @@ jobs:
             mkdir -p "$BUNDLE_DIR/assets/app_icon"
             cp assets/app_icon/bug-resolution-radar.png "$BUNDLE_DIR/assets/app_icon/bug-resolution-radar.png"
           fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-database.svg"
+          fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-no-draw.svg"
+          fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-simulator.svg"
+          fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-save-for-later.svg"
+          fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-recycle.svg"
+          fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-search.svg"
+          fi
+          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg ]; then
+            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
+            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-xml.svg"
+          fi
           if [ -f .env.example ]; then
             cp .env.example "$BUNDLE_DIR/.env.example"
           fi

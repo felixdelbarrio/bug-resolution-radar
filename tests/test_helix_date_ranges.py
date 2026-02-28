@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from bug_resolution_radar.ingest.helix_ingest import (
     _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
+    _cache_pending_refresh_ids,
     _optimize_create_start_from_cache,
     _resolve_create_date_range_ms,
     _utc_year_create_date_range_ms,
@@ -63,7 +64,7 @@ def test_resolve_create_date_range_ms_uses_analysis_lookback_plus_one_month() ->
     assert "effective=13m" in rule
 
 
-def test_optimize_create_start_from_cache_uses_oldest_non_final_in_window() -> None:
+def test_optimize_create_start_from_cache_uses_recent_tail_even_with_non_final_items() -> None:
     base_start = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
     base_end = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
     cached_items = [
@@ -93,9 +94,43 @@ def test_optimize_create_start_from_cache_uses_oldest_non_final_in_window() -> N
         base_end_ms=base_end,
     )
 
-    expected_start = int(datetime(2025, 10, 15, 8, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected_start = int(
+        (datetime(2026, 1, 20, 0, 0, 0, tzinfo=timezone.utc) - timedelta(days=7)).timestamp() * 1000
+    )
     assert optimized_start == expected_start
     assert "cache_non_final=1/3" in rule
+
+
+def test_cache_pending_refresh_ids_returns_only_non_final_ids_within_window() -> None:
+    base_start = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    base_end = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
+    cached_items = [
+        HelixWorkItem(
+            id="INC-1",
+            status="Closed",
+            source_id="helix:mexico:web",
+            target_date="2025-02-01T00:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-2",
+            status="Open",
+            source_id="helix:mexico:web",
+            target_date="2025-10-15T08:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-3",
+            status="Accepted",
+            source_id="helix:mexico:web",
+            target_date="2026-01-20T00:00:00+00:00",
+        ),
+    ]
+
+    pending_ids = _cache_pending_refresh_ids(
+        cached_items,
+        base_start_ms=base_start,
+        base_end_ms=base_end,
+    )
+    assert pending_ids == ["INC-2"]
 
 
 def test_optimize_create_start_from_cache_all_final_uses_recent_tail_from_last_item() -> None:
@@ -129,6 +164,19 @@ def test_optimize_create_start_from_cache_all_final_uses_recent_tail_from_last_i
     )
     assert optimized_start == expected_start
     assert "cache_all_final=2" in rule
+
+
+def test_build_arsql_sql_includes_incident_ids_filter_when_provided() -> None:
+    sql = _build_arsql_sql(
+        create_start_ms=1000,
+        create_end_ms=2000,
+        limit=10,
+        offset=0,
+        incident_ids=["INC-1", "INC-2"],
+        time_fields=["Submit Date"],
+    )
+
+    assert "`HPD:Help Desk`.`Incident Number` IN ('INC-1', 'INC-2')" in sql
 
 
 def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:

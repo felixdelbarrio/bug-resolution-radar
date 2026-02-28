@@ -153,6 +153,66 @@ jobs:
               cfg_target_dir.mkdir(parents=True, exist_ok=True)
               shutil.copy2(streamlit_cfg, cfg_target_dir / "config.toml")
 
+          # Include save-button icon asset in release bundle for traceability/customization.
+          spherica_database_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg"
+          )
+          if spherica_database_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(spherica_database_icon, icon_target_dir / "spherica-database.svg")
+
+          spherica_no_draw_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg"
+          )
+          if spherica_no_draw_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(spherica_no_draw_icon, icon_target_dir / "spherica-no-draw.svg")
+
+          spherica_simulator_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg"
+          )
+          if spherica_simulator_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(spherica_simulator_icon, icon_target_dir / "spherica-simulator.svg")
+
+          spherica_save_for_later_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg"
+          )
+          if spherica_save_for_later_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(
+                  spherica_save_for_later_icon,
+                  icon_target_dir / "spherica-save-for-later.svg",
+              )
+
+          spherica_recycle_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg"
+          )
+          if spherica_recycle_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(spherica_recycle_icon, icon_target_dir / "spherica-recycle.svg")
+
+          spherica_search_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg"
+          )
+          if spherica_search_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(spherica_search_icon, icon_target_dir / "spherica-search.svg")
+
+          spherica_xml_icon = Path(
+              "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg"
+          )
+          if spherica_xml_icon.exists():
+              icon_target_dir = bundle_dir / "assets" / "icons" / "bbva"
+              icon_target_dir.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(spherica_xml_icon, icon_target_dir / "spherica-xml.svg")
+
           # Optional desktop entry + icon for Linux.
           desktop_entry = Path("assets/app_icon/bug-resolution-radar.desktop")
           desktop_icon = Path("assets/app_icon/bug-resolution-radar.png")
