@@ -561,7 +561,9 @@ def _prepare_frozen_runtime() -> None:
     _load_dotenv_if_present(runtime_home / ".env")
     if _corporate_mode_enabled():
         # Conservative defaults for locked-down corporate endpoints.
-        os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+        # Force container-first on corporate endpoints to avoid default-browser UX drift,
+        # even if old .env templates left this value as false.
+        os.environ["BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW"] = "true"
         os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW_FALLBACK_BROWSER", "true")
         os.environ.setdefault("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
         os.environ.setdefault("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
