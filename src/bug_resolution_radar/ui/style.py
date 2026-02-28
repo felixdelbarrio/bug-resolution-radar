@@ -23,6 +23,7 @@ from bug_resolution_radar.theme.design_tokens import (
 from bug_resolution_radar.ui.common import flow_signal_color_map
 
 
+@lru_cache(maxsize=64)
 def _svg_data_uri(*, file_name: str, fallback_svg: str) -> str:
     try:
         icon_ref = (
@@ -168,7 +169,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-midnight: {palette.midnight};
         --bbva-text: {palette.ink};
         --bbva-text-muted: rgba({text_rgb},0.74);
-        --bbva-surface: {palette.white if not dark_mode else '#0A1F45'};
+        --bbva-surface: {palette.white if not dark_mode else "#0A1F45"};
         --bbva-surface-2: {palette.bg_light};
         --bbva-surface-soft: {surface_soft};
         --bbva-surface-elevated: {surface_elevated};
@@ -202,6 +203,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-font-ui: {BBVA_FONT_SANS_MEDIUM};
         --bbva-font-headline: {BBVA_FONT_HEADLINE};
         --bbva-font-label: {BBVA_FONT_SANS_MEDIUM};
+        --bbva-heading-gap: 0.88rem;
+        --bbva-heading-gap-tight: 0.68rem;
+        --bbva-section-gap: 0.34rem;
       }}
     """
 
@@ -342,6 +346,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-size: 2.05rem !important;
             line-height: 1.12 !important;
             letter-spacing: -0.01em;
+            margin-top: 0.16rem !important;
+            margin-bottom: var(--bbva-heading-gap) !important;
           }
           h2, h3, h4,
           [data-testid="stMarkdownContainer"] h2,
@@ -350,6 +356,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-family: var(--bbva-font-ui) !important;
             font-weight: 700 !important;
             letter-spacing: -0.005em;
+            margin-top: 0.12rem !important;
+            margin-bottom: var(--bbva-heading-gap-tight) !important;
           }
           h2, [data-testid="stMarkdownContainer"] h2 {
             font-size: 1.48rem !important;
@@ -382,6 +390,20 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             letter-spacing: -0.01em;
           }
 
+          /* Consistent breathing room between headings and following containers */
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h1),
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h2),
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h3),
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h4) {
+            margin-bottom: 0.28rem !important;
+          }
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h1) + [data-testid="element-container"],
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h2) + [data-testid="element-container"],
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h3) + [data-testid="element-container"],
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h4) + [data-testid="element-container"] {
+            margin-top: var(--bbva-section-gap) !important;
+          }
+
           /* App background + content width */
           [data-testid="stAppViewContainer"] {
             background: var(--bbva-surface-2);
@@ -390,8 +412,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: transparent;
           }
           [data-testid="stAppViewContainer"] .block-container {
-            padding-top: 16px;
-            padding-bottom: 24px;
+            padding-top: 20px;
+            padding-bottom: 28px;
             padding-left: 24px;
             padding-right: 24px;
             max-width: 1280px;
@@ -438,7 +460,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           /* Top nav compact spacing */
           .st-key-workspace_scope_bar {
             margin-top: -0.02rem;
-            margin-bottom: -0.34rem;
+            margin-bottom: -0.12rem;
           }
           .st-key-workspace_scope_bar [data-testid="stHorizontalBlock"] {
             align-items: end !important;
@@ -456,7 +478,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_nav_bar,
           [class*="st-key-workspace_nav_bar_"] {
             margin-top: -0.04rem;
-            margin-bottom: -0.76rem;
+            margin-bottom: 0.04rem;
             border: 1px solid var(--bbva-border-strong);
             border-radius: 14px;
             background: var(--bbva-surface-elevated);
@@ -482,25 +504,25 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           .st-key-workspace_dashboard_content_overview,
           .st-key-workspace_dashboard_content_notes {
-            margin-top: -0.24rem;
+            margin-top: 0.14rem;
           }
           .st-key-workspace_dashboard_content_issues,
           .st-key-workspace_dashboard_content_kanban,
           .st-key-workspace_dashboard_content_trends,
           .st-key-workspace_dashboard_content_insights {
-            margin-top: -0.72rem;
+            margin-top: -0.06rem;
           }
           .st-key-dashboard_filters_panel {
-            margin-top: -0.64rem;
-            margin-bottom: -0.44rem;
+            margin-top: -0.12rem;
+            margin-bottom: -0.04rem;
           }
           .st-key-insights_shell {
-            margin-top: -0.64rem;
+            margin-top: -0.10rem;
           }
           .st-key-issues_tab_issues_shell,
           .st-key-kanban_shell,
           .st-key-trend_chart_shell {
-            margin-top: -0.20rem;
+            margin-top: 0.12rem;
           }
           .st-key-dashboard_filters_panel [data-testid="stVerticalBlockBorderWrapper"],
           .st-key-issues_tab_issues_shell [data-testid="stVerticalBlockBorderWrapper"],

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import multiprocessing as mp
@@ -9,10 +11,14 @@ import os
 import queue
 import re
 import tempfile
+import threading
 import time
-from dataclasses import dataclass
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import pandas as pd
@@ -55,6 +61,14 @@ from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
 _T = TypeVar("_T")
+_PPT_PNG_CACHE_VERSION = "v1"
+_PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES = 24
+_PPT_PNG_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
+_PPT_PNG_CACHE_LOCK = threading.Lock()
+_PPT_RESULT_CACHE_VERSION = "v1"
+_PPT_RESULT_CACHE_DEFAULT_MAX_ENTRIES = 12
+_PPT_RESULT_CACHE: "OrderedDict[str, ExecutiveReportResult]" = OrderedDict()
+_PPT_RESULT_CACHE_LOCK = threading.Lock()
 
 SLIDE_WIDTH = int(Inches(13.333))
 SLIDE_HEIGHT = int(Inches(7.5))
@@ -228,6 +242,7 @@ class _ChartSection:
     subtitle: str
     figure: Optional[go.Figure]
     insight_pack: TrendInsightPack
+    image_png: Optional[bytes] = None
 
 
 @dataclass(frozen=True)
@@ -254,21 +269,6 @@ def _slug(value: str) -> str:
     txt = str(value or "").strip().lower()
     txt = re.sub(r"[^a-z0-9]+", "-", txt).strip("-")
     return txt or "scope"
-
-
-def _to_dt_naive(series: pd.Series | None) -> pd.Series:
-    if series is None:
-        return pd.Series([], dtype="datetime64[ns]")
-    out = pd.to_datetime(series, errors="coerce")
-    try:
-        if hasattr(out.dt, "tz") and out.dt.tz is not None:
-            out = out.dt.tz_localize(None)
-    except Exception:
-        try:
-            out = out.dt.tz_localize(None)
-        except Exception:
-            pass
-    return out
 
 
 def _is_finalist_status(value: object) -> bool:
@@ -834,6 +834,52 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     )
 
 
+def _prerender_section_images(sections: Sequence[_ChartSection]) -> List[_ChartSection]:
+    if not sections:
+        return []
+    if not _bool_env("BUG_RESOLUTION_RADAR_PPT_PRERENDER_CHARTS", True):
+        return list(sections)
+
+    workers = max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_RENDER_WORKERS",
+            _default_ppt_render_workers(),
+        ),
+    )
+    total = len(sections)
+    if workers <= 1 or total <= 1:
+        out: List[_ChartSection] = []
+        for sec in sections:
+            if sec.figure is None:
+                out.append(sec)
+                continue
+            out.append(replace(sec, image_png=_fig_to_png(sec.figure)))
+        return out
+
+    max_workers = min(workers, total)
+    out = list(sections)
+    futures: Dict[Any, int] = {}
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-render") as pool:
+        for idx, sec in enumerate(sections):
+            if sec.figure is None:
+                continue
+            futures[pool.submit(_fig_to_png, sec.figure)] = idx
+        for fut in as_completed(futures):
+            idx = int(futures[fut])
+            try:
+                payload = fut.result()
+            except Exception as exc:
+                LOGGER.warning(
+                    "PPT chart prerender failed: %s (%s)",
+                    sections[idx].chart_id,
+                    exc,
+                )
+                payload = None
+            out[idx] = replace(out[idx], image_png=payload)
+    return out
+
+
 def _build_context(
     settings: Settings,
     *,
@@ -863,10 +909,7 @@ def _build_context(
                 open_df_override.copy(deep=False), settings=settings
             )
             if not dff.empty and not open_df.empty:
-                open_index = set(open_df.index.tolist())
-                closed_df = dff.loc[[idx for idx in dff.index if idx not in open_index]].copy(
-                    deep=False
-                )
+                closed_df = dff.loc[~dff.index.isin(open_df.index)].copy(deep=False)
             else:
                 closed_df = pd.DataFrame()
 
@@ -875,7 +918,7 @@ def _build_context(
             "No hay incidencias para el país/origen y filtros seleccionados. Ajusta scope o filtros."
         )
 
-    sections = _build_sections(settings, dff=dff, open_df=open_df)
+    sections = _prerender_section_images(_build_sections(settings, dff=dff, open_df=open_df))
     return _ScopeContext(
         country=str(country or "").strip(),
         source_id=str(source_id or "").strip(),
@@ -908,6 +951,194 @@ def _bool_env(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _ppt_png_cache_max_entries() -> int:
+    return max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_IMAGE_CACHE_MAX_ENTRIES",
+            _PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+    )
+
+
+def _ppt_result_cache_enabled() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE", True)
+
+
+def _ppt_result_cache_max_entries() -> int:
+    return max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE_MAX_ENTRIES",
+            _PPT_RESULT_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+    )
+
+
+def _compact_df_signature(df: pd.DataFrame | None) -> str:
+    if not isinstance(df, pd.DataFrame):
+        return "none"
+    if df.empty:
+        return "empty"
+
+    preferred_cols = [
+        "key",
+        "summary",
+        "status",
+        "priority",
+        "created",
+        "updated",
+        "resolved",
+        "assignee",
+        "country",
+        "source_id",
+        "source_type",
+        "url",
+    ]
+    cols = [c for c in preferred_cols if c in df.columns]
+    if not cols:
+        cols = list(df.columns)
+    try:
+        hashed = pd.util.hash_pandas_object(
+            df.loc[:, cols],
+            index=True,
+            categorize=True,
+        )
+        digest = hashlib.blake2b(
+            hashed.to_numpy(dtype="uint64", copy=False).tobytes(),
+            digest_size=16,
+        ).hexdigest()
+        return f"{len(df)}:{len(cols)}:{digest}"
+    except Exception:
+        return f"{len(df)}:{len(cols)}:{abs(hash(tuple(cols)))}"
+
+
+def _report_request_cache_key(
+    settings: Settings,
+    *,
+    country: str,
+    source_id: str,
+    status_filters: Sequence[str] | None,
+    priority_filters: Sequence[str] | None,
+    assignee_filters: Sequence[str] | None,
+    dff_override: pd.DataFrame | None,
+) -> str:
+    data_path = Path(str(getattr(settings, "DATA_PATH", "") or "")).expanduser()
+    if data_path.exists():
+        data_rev = f"{int(data_path.stat().st_mtime_ns)}:{int(data_path.stat().st_size)}"
+    else:
+        data_rev = "missing"
+
+    payload = {
+        "cache_version": _PPT_RESULT_CACHE_VERSION,
+        "country": str(country or "").strip(),
+        "source_id": str(source_id or "").strip(),
+        "status_filters": _normalize_filter_values(status_filters),
+        "priority_filters": _normalize_filter_values(priority_filters),
+        "assignee_filters": _normalize_filter_values(assignee_filters),
+        "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
+        "data_path": str(data_path),
+        "data_rev": data_rev,
+        # If callers provide prefiltered frames without backing file changes, keep a
+        # compact signature to safely reuse cached report bytes.
+        "dff_override_sig": _compact_df_signature(dff_override),
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8", errors="replace")
+    return hashlib.blake2b(encoded, digest_size=20).hexdigest()
+
+
+def _ppt_result_cache_get(cache_key: str) -> Optional[ExecutiveReportResult]:
+    if not _ppt_result_cache_enabled():
+        return None
+    with _PPT_RESULT_CACHE_LOCK:
+        item = _PPT_RESULT_CACHE.get(cache_key)
+        if item is None:
+            return None
+        _PPT_RESULT_CACHE.move_to_end(cache_key)
+        return item
+
+
+def _ppt_result_cache_put(cache_key: str, result: ExecutiveReportResult) -> None:
+    if not _ppt_result_cache_enabled():
+        return
+    max_entries = _ppt_result_cache_max_entries()
+    with _PPT_RESULT_CACHE_LOCK:
+        _PPT_RESULT_CACHE[cache_key] = result
+        _PPT_RESULT_CACHE.move_to_end(cache_key)
+        while len(_PPT_RESULT_CACHE) > max_entries:
+            _PPT_RESULT_CACHE.popitem(last=False)
+
+
+def _clear_ppt_result_cache() -> None:
+    with _PPT_RESULT_CACHE_LOCK:
+        _PPT_RESULT_CACHE.clear()
+
+
+def _ppt_png_cache_key(
+    fig_dict: dict[str, object],
+    *,
+    scale: float,
+    export_width: int,
+    export_height: int,
+) -> str:
+    raw = json.dumps(
+        fig_dict,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8", errors="replace")
+    h = hashlib.blake2b(digest_size=20)
+    h.update(raw)
+    h.update(
+        (
+            f"|{_PPT_PNG_CACHE_VERSION}|{float(scale):.3f}|{int(export_width)}|{int(export_height)}"
+        ).encode("utf-8")
+    )
+    return h.hexdigest()
+
+
+def _ppt_png_cache_get(cache_key: str) -> Optional[bytes]:
+    with _PPT_PNG_CACHE_LOCK:
+        item = _PPT_PNG_CACHE.get(cache_key)
+        if item is None:
+            return None
+        _PPT_PNG_CACHE.move_to_end(cache_key)
+        return item
+
+
+def _ppt_png_cache_put(cache_key: str, payload: bytes) -> None:
+    if not payload:
+        return
+    max_entries = _ppt_png_cache_max_entries()
+    with _PPT_PNG_CACHE_LOCK:
+        _PPT_PNG_CACHE[cache_key] = payload
+        _PPT_PNG_CACHE.move_to_end(cache_key)
+        while len(_PPT_PNG_CACHE) > max_entries:
+            _PPT_PNG_CACHE.popitem(last=False)
+
+
+def _clear_ppt_png_cache() -> None:
+    with _PPT_PNG_CACHE_LOCK:
+        _PPT_PNG_CACHE.clear()
+
+
+def _default_ppt_render_workers() -> int:
+    if _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False):
+        return 1
+    cpu_count = int(os.cpu_count() or 2)
+    if cpu_count >= 8:
+        return 3
+    if cpu_count >= 4:
+        return 2
+    return 1
 
 
 def _kaleido_tmp_dir() -> str:
@@ -1055,6 +1286,16 @@ def _kaleido_png_bytes(
         timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20)
     )
     fig_dict = _validate_plotly_fig_to_dict(fig_obj)
+    cache_key = _ppt_png_cache_key(
+        fig_dict,
+        scale=scale,
+        export_width=export_width,
+        export_height=export_height,
+    )
+    cached = _ppt_png_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     tmp_dir = _kaleido_tmp_dir()
 
     use_isolated_process = _bool_env(
@@ -1066,7 +1307,7 @@ def _kaleido_png_bytes(
         False,
     )
     if not use_isolated_process:
-        return _kaleido_calc_fig_sync_png(
+        rendered = _kaleido_calc_fig_sync_png(
             fig_dict,
             scale=scale,
             export_width=export_width,
@@ -1074,17 +1315,20 @@ def _kaleido_png_bytes(
             timeout_s=timeout_s,
             tmp_dir=tmp_dir,
         )
+    else:
+        rendered = _call_in_subprocess_with_timeout(
+            _kaleido_calc_fig_sync_png,
+            fig_dict,
+            scale=scale,
+            export_width=export_width,
+            export_height=export_height,
+            timeout_s=timeout_s,
+            tmp_dir=tmp_dir,
+            hard_timeout_s=float(hard_timeout_s),
+        )
 
-    return _call_in_subprocess_with_timeout(
-        _kaleido_calc_fig_sync_png,
-        fig_dict,
-        scale=scale,
-        export_width=export_width,
-        export_height=export_height,
-        timeout_s=timeout_s,
-        tmp_dir=tmp_dir,
-        hard_timeout_s=float(hard_timeout_s),
-    )
+    _ppt_png_cache_put(cache_key, rendered)
+    return rendered
 
 
 def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
@@ -1761,97 +2005,6 @@ def _section_ribbon_items(section: _ChartSection) -> List[Tuple[str, str, str]]:
     return items[:4]
 
 
-def _add_index_row(
-    tf: Any,
-    *,
-    code: str,
-    title: str,
-    detail: str,
-    code_color: str,
-) -> None:
-    p_code = tf.add_paragraph()
-    p_code.space_before = Pt(7)
-    p_code.space_after = Pt(0)
-    r_code = p_code.add_run()
-    r_code.text = code
-    r_code.font.name = FONT_HEAD
-    r_code.font.bold = True
-    r_code.font.size = Pt(16)
-    r_code.font.color.rgb = _rgb(code_color)
-
-    p_title = tf.add_paragraph()
-    p_title.space_before = Pt(0)
-    p_title.space_after = Pt(0)
-    r_title = p_title.add_run()
-    r_title.text = title
-    r_title.font.name = FONT_HEAD
-    r_title.font.bold = True
-    r_title.font.size = Pt(14)
-    r_title.font.color.rgb = _rgb(PALETTE["ink"])
-
-    p_detail = tf.add_paragraph()
-    p_detail.space_before = Pt(0)
-    p_detail.space_after = Pt(2)
-    r_detail = p_detail.add_run()
-    r_detail.text = detail
-    r_detail.font.name = FONT_BODY_BOOK
-    r_detail.font.size = Pt(10.5)
-    r_detail.font.color.rgb = _rgb(PALETTE["muted"])
-
-
-def _add_index_slide(prs: Any, context: _ScopeContext) -> None:
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, PALETTE["bg"])
-    _add_header(
-        slide,
-        title="Índice",
-        subtitle="Historia del análisis y decisiones sugeridas",
-    )
-    rows: List[Tuple[str, str, str, str]] = [
-        ("01", "Apertura", "Alcance y reglas de lectura del análisis", PALETTE["blue"]),
-        ("02", "Panorama", "Tamaño del problema, foco y prioridades", PALETTE["teal"]),
-    ]
-    idx = 3
-    for theme, themed_sections in _group_sections_by_theme(context.sections):
-        detail = " · ".join([_clip_text(sec.title, max_len=45) for sec in themed_sections])
-        rows.append((f"{idx:02d}", theme, detail, PALETTE["navy"]))
-        idx += 1
-    rows.append(
-        (
-            f"{idx:02d}",
-            "Cierre y acciones",
-            "Plan de trabajo priorizado por impacto",
-            PALETTE["blue"],
-        )
-    )
-
-    body = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-        Inches(0.70),
-        Inches(1.30),
-        Inches(12.00),
-        Inches(5.65),
-    )
-    body.fill.solid()
-    body.fill.fore_color.rgb = _rgb(PALETTE["panel"])
-    body.line.color.rgb = _rgb(PALETTE["line"])
-
-    tf = body.text_frame
-    tf.clear()
-    tf.word_wrap = True
-    tf.paragraphs[0].clear()
-    for row in rows:
-        _add_index_row(
-            tf,
-            code=row[0],
-            title=row[1],
-            detail=row[2],
-            code_color=row[3],
-        )
-
-    _add_footer(slide, context=context)
-
-
 def _dominant_value(series: pd.Series, empty: str) -> str:
     if series.empty:
         return empty
@@ -2116,15 +2269,17 @@ def _add_chart_insight_slide(
     chart_frame.fill.fore_color.rgb = _rgb(PALETTE["panel"])
     chart_frame.line.color.rgb = _rgb(PALETTE["line"])
 
-    chart_render_started = time.monotonic()
-    LOGGER.info("PPT chart render started: %s", section.chart_id)
-    image = _fig_to_png(section.figure)
-    LOGGER.info(
-        "PPT chart render finished: %s (ok=%s, %.2fs)",
-        section.chart_id,
-        image is not None,
-        max(0.0, time.monotonic() - chart_render_started),
-    )
+    image = section.image_png
+    if image is None and section.figure is not None:
+        chart_render_started = time.monotonic()
+        LOGGER.info("PPT chart render started: %s", section.chart_id)
+        image = _fig_to_png(section.figure)
+        LOGGER.info(
+            "PPT chart render finished: %s (ok=%s, %.2fs)",
+            section.chart_id,
+            image is not None,
+            max(0.0, time.monotonic() - chart_render_started),
+        )
     if image is None:
         tf = chart_frame.text_frame
         tf.clear()
@@ -2647,6 +2802,19 @@ def generate_scope_executive_ppt(
     if not source_txt:
         raise ValueError("No se ha seleccionado un origen válido para generar el informe.")
 
+    cache_key = _report_request_cache_key(
+        settings,
+        country=country,
+        source_id=source_txt,
+        status_filters=status_filters,
+        priority_filters=priority_filters,
+        assignee_filters=assignee_filters,
+        dff_override=dff_override,
+    )
+    cached_result = _ppt_result_cache_get(cache_key)
+    if cached_result is not None:
+        return cached_result
+
     if scoped_source_df_override is not None:
         scoped_source_df = scoped_source_df_override
     elif dff_override is not None:
@@ -2686,7 +2854,7 @@ def generate_scope_executive_ppt(
     stamp = context.generated_at.strftime("%Y%m%d-%H%M")
     file_name = f"radar-{_slug(context.country)}-{_slug(context.source_id)}-{stamp}.pptx"
 
-    return ExecutiveReportResult(
+    result = ExecutiveReportResult(
         file_name=file_name,
         content=content,
         slide_count=len(prs.slides),
@@ -2698,3 +2866,5 @@ def generate_scope_executive_ppt(
         source_label=context.source_label,
         applied_filter_summary=context.filters.summary(),
     )
+    _ppt_result_cache_put(cache_key, result)
+    return result

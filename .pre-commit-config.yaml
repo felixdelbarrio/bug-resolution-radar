@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.0
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: dead-private-helpers
+        name: dead-private-helpers
+        entry: python3 scripts/check_dead_private_helpers.py
+        language: system
+        pass_filenames: false
+      - id: docs-references
+        name: docs-references
+        entry: python3 scripts/check_docs_references.py
+        language: system
+        pass_filenames: false

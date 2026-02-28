@@ -119,6 +119,97 @@ def _candidate_streamlit_config_paths() -> list[Path]:
     return uniq
 
 
+def _candidate_runtime_seed_paths(filename: str) -> list[Path]:
+    out: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        out.append(Path(meipass) / filename)
+
+    try:
+        exe = Path(sys.executable).resolve()
+        exe_dir = exe.parent
+        contents_dir = exe_dir.parent
+        out.append(exe_dir / filename)
+        out.append(contents_dir / filename)
+
+        if (
+            sys.platform == "darwin"
+            and exe_dir.name == "MacOS"
+            and contents_dir.name == "Contents"
+            and contents_dir.parent.suffix.lower() == ".app"
+        ):
+            app_dir = contents_dir.parent
+            out.append(contents_dir / "Resources" / filename)
+            out.append(contents_dir / "Frameworks" / filename)
+            out.append(app_dir / filename)
+            out.append(app_dir.parent / filename)
+            out.append(app_dir.parent.parent / filename)
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    uniq: list[Path] = []
+    for path in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(path)
+    return uniq
+
+
+def _first_existing_file(paths: list[Path]) -> Path | None:
+    for path in paths:
+        try:
+            if path.exists() and path.is_file():
+                return path
+        except Exception:
+            continue
+    return None
+
+
+def _ensure_runtime_env_seed(runtime_home: Path) -> None:
+    """
+    Seed runtime `.env` and `.env.example` on first run for packaged desktop app.
+
+    Priority:
+    1) bundled `.env` (if present) -> runtime `.env`
+    2) bundled `.env.example` -> runtime `.env` (fallback)
+    Also copy `.env.example` for user guidance.
+    """
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    target_env = runtime_home / ".env"
+    target_example = runtime_home / ".env.example"
+
+    source_example = _first_existing_file(_candidate_runtime_seed_paths(".env.example"))
+    if source_example is not None and not target_example.exists():
+        try:
+            target_example.write_text(source_example.read_text(encoding="utf-8"), encoding="utf-8")
+            _launcher_log(f"Plantilla .env.example inicializada desde: {source_example}")
+        except Exception:
+            pass
+
+    if target_env.exists():
+        return
+
+    source_env = _first_existing_file(_candidate_runtime_seed_paths(".env"))
+    if source_env is not None:
+        try:
+            target_env.write_text(source_env.read_text(encoding="utf-8"), encoding="utf-8")
+            _launcher_log(f"Configuración .env inicializada desde: {source_env}")
+            return
+        except Exception:
+            pass
+
+    if target_example.exists():
+        try:
+            target_env.write_text(target_example.read_text(encoding="utf-8"), encoding="utf-8")
+            _launcher_log("Configuración .env inicializada desde .env.example en runtime.")
+        except Exception:
+            pass
+
+
 def _load_dotenv_if_present(dotenv_path: Path) -> None:
     """Load a minimal `.env` file before starting Streamlit."""
     try:
@@ -148,6 +239,10 @@ def _bool_env(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _corporate_mode_enabled() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False)
 
 
 def _float_env(name: str, default: float) -> float:
@@ -428,11 +523,9 @@ def _desktop_webview_enabled_for_frozen_binary() -> bool:
     """
     Return whether packaged binaries should use embedded pywebview.
 
-    On macOS we default to external-browser mode to reduce OS permission prompts
-    from embedded WebKit (camera/mic/accessibility/automation checks).
+    Business desktop binaries always run in embedded container mode.
     """
-    default = sys.platform != "darwin"
-    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", default)
+    return True
 
 
 def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
@@ -541,10 +634,20 @@ def _prepare_frozen_runtime() -> None:
     runtime_home.mkdir(parents=True, exist_ok=True)
     _set_launcher_log_file(runtime_home / "logs" / "desktop-launcher.log")
     _launcher_log("Inicializando runtime empaquetado.")
+    _ensure_runtime_env_seed(runtime_home)
     _ensure_streamlit_config(runtime_home)
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
     _load_dotenv_if_present(runtime_home / ".env")
+    # Desktop app UX requirement: always open inside embedded container.
+    os.environ["BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW"] = "true"
+    if _corporate_mode_enabled():
+        # Conservative defaults for locked-down corporate endpoints.
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
+        _launcher_log(
+            "Corporate mode activo: contenedor embebido + mínimos permisos + browser bootstrap sin AppleScript."
+        )
     _ensure_localhost_no_proxy_env()
     _configure_streamlit_runtime_stability_for_binary()
 

@@ -125,20 +125,6 @@ def _encode_env_multiline(v: str) -> str:
     return v.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
 
 
-def _strip_legacy_inline_comment(value: object) -> str:
-    """
-    Backwards-compatibility: older .env.example used inline comments like:
-      THEME=light  # light|dark
-
-    python-dotenv may treat the comment as part of the value, so we strip it
-    for specific enum-like keys.
-    """
-    txt = str(value or "").strip()
-    if " #" in txt:
-        txt = txt.split(" #", 1)[0].strip()
-    return txt
-
-
 def _coerce_str(value: Any) -> str:
     return str(value or "").strip()
 
@@ -221,6 +207,13 @@ class Settings(BaseModel):
     NOTES_PATH: str = "data/notes.json"
     INSIGHTS_LEARNING_PATH: str = "data/insights_learning.json"
     LOG_LEVEL: str = "INFO"
+    BUG_RESOLUTION_RADAR_CORPORATE_MODE: str = "false"
+    BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW: str = ""
+    BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL: str = "false"
+    BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY: str = "true"
+    BUG_RESOLUTION_RADAR_CHROME_BINARY: str = ""
+    BUG_RESOLUTION_RADAR_EDGE_BINARY: str = ""
+    BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS: int = 3
 
     # -------------------------
     # JIRA
@@ -229,8 +222,6 @@ class Settings(BaseModel):
     SUPPORTED_COUNTRIES: str = DEFAULT_SUPPORTED_COUNTRIES_CSV
     JIRA_SOURCES_JSON: str = "[]"
     JIRA_INGEST_DISABLED_SOURCES_JSON: str = "[]"
-    # legacy fallback (solo compatibilidad si no hay JIRA_SOURCES_JSON)
-    JIRA_JQL: str = ""
     JIRA_BROWSER: str = "chrome"
     JIRA_BROWSER_LOGIN_URL: str = ""
     JIRA_BROWSER_LOGIN_WAIT_SECONDS: int = 90
@@ -282,11 +273,7 @@ class Settings(BaseModel):
     DASHBOARD_FILTER_ASSIGNEE_JSON: str = "[]"
     KEEP_CACHE_ON_SOURCE_DELETE: str = "false"
     REPORT_PPT_DOWNLOAD_DIR: str = ""
-    # 0 = auto (máxima antigüedad disponible en backlog)
-    ANALYSIS_LOOKBACK_MONTHS: int = 0
-    # 0 = auto (máxima antigüedad disponible en backlog)
-    # Legacy fallback (mantenido por compatibilidad)
-    ANALYSIS_LOOKBACK_DAYS: int = 0
+    ANALYSIS_LOOKBACK_MONTHS: int = 12
 
 
 def ensure_env() -> None:
@@ -301,14 +288,6 @@ def ensure_env() -> None:
 
 def load_settings() -> Settings:
     vals = {k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None}
-
-    for key in ("THEME", "JIRA_BROWSER"):
-        if key in vals:
-            vals[key] = _strip_legacy_inline_comment(vals[key])
-
-    # Decodificar multilínea
-    if "JIRA_JQL" in vals:
-        vals["JIRA_JQL"] = _decode_env_multiline(vals["JIRA_JQL"])
     settings = Settings.model_validate(vals)
 
     payload = settings.model_dump()
@@ -319,15 +298,34 @@ def load_settings() -> Settings:
 
 def save_settings(settings: Settings) -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
+    existing = {k: v for k, v in dotenv_values(ENV_PATH).items() if k}
     data = settings.model_dump()
-
+    serialized_data: Dict[str, str] = {}
     for k, v in data.items():
-        if isinstance(v, str):
+        value = v
+        if isinstance(value, str):
             if k in _PATH_SETTING_KEYS:
-                v = _to_storable_path(v)
-            v = _encode_env_multiline(v)
-        lines.append(f"{k}={v}")
+                value = _to_storable_path(value)
+            value = _encode_env_multiline(value)
+        serialized_data[k] = str(value)
+
+    ordered_keys: List[str] = []
+    seen: set[str] = set()
+    for key in list(existing.keys()) + list(serialized_data.keys()):
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered_keys.append(key)
+
+    lines: List[str] = []
+    for key in ordered_keys:
+        if key in serialized_data:
+            lines.append(f"{key}={serialized_data[key]}")
+            continue
+        raw_existing = existing.get(key)
+        if raw_existing is None:
+            continue
+        lines.append(f"{key}={_encode_env_multiline(str(raw_existing))}")
 
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -371,24 +369,7 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
             }
         )
 
-    if out:
-        return out
-
-    # Compatibilidad con configuraciones previas sin JIRA_SOURCES_JSON.
-    legacy_jql = _decode_env_multiline(_coerce_str(getattr(settings, "JIRA_JQL", "")))
-    if legacy_jql:
-        country = countries[0] if countries else DEFAULT_SUPPORTED_COUNTRIES[0]
-        alias = "Jira principal"
-        return [
-            {
-                "source_type": "jira",
-                "source_id": build_source_id("jira", country, alias),
-                "country": country,
-                "alias": alias,
-                "jql": legacy_jql,
-            }
-        ]
-    return []
+    return out
 
 
 def helix_sources(settings: Settings) -> List[Dict[str, str]]:

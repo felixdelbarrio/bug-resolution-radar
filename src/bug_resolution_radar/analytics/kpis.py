@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.express as px
 
 from bug_resolution_radar.config import Settings
+
 from .status_semantics import effective_closed_mask
 
 _DT_COLS = ("created", "updated", "resolved")
@@ -24,19 +25,26 @@ def _ensure_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy(deep=False)
 
-    needs_cast = []
+    needs_parse: list[str] = []
+    needs_localize: list[str] = []
     for col in _DT_COLS:
         if col not in df.columns:
             continue
         col_dtype = df[col].dtype
-        if not isinstance(col_dtype, pd.DatetimeTZDtype):
-            needs_cast.append(col)
+        if isinstance(col_dtype, pd.DatetimeTZDtype):
+            continue
+        if pd.api.types.is_datetime64_dtype(col_dtype):
+            needs_localize.append(col)
+            continue
+        needs_parse.append(col)
 
-    if not needs_cast:
+    if not needs_parse and not needs_localize:
         return df.copy(deep=False)
 
     out = df.copy(deep=False)
-    for col in needs_cast:
+    for col in needs_localize:
+        out[col] = out[col].dt.tz_localize("UTC")
+    for col in needs_parse:
         out[col] = pd.to_datetime(out[col], utc=True, errors="coerce")
     return out
 
@@ -53,7 +61,12 @@ def _empty_timeseries_chart() -> Any:
     return px.line(empty_ts, x="date", y=["created", "closed", "open_backlog_proxy"])
 
 
-def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
+def compute_kpis(
+    df: pd.DataFrame,
+    settings: Settings,
+    *,
+    include_timeseries_chart: bool = True,
+) -> Dict[str, Any]:
     now = pd.Timestamp(_utcnow())
     _ = settings  # signature preserved for API compatibility
     work_df = _ensure_datetime_columns(df)
@@ -67,7 +80,7 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
             "open_now_by_priority": {},
             "mean_resolution_days": 0.0,
             "mean_resolution_days_by_priority": {},
-            "timeseries_chart": _empty_timeseries_chart(),
+            "timeseries_chart": _empty_timeseries_chart() if include_timeseries_chart else None,
             "top_open_table": pd.DataFrame(columns=["summary", "open_count"]),
         }
 
@@ -129,29 +142,35 @@ def compute_kpis(df: pd.DataFrame, settings: Settings) -> Dict[str, Any]:
         else:
             mean_by_priority = {}
 
-    range_days = 90
-    start = now - timedelta(days=range_days)
+    timeseries_chart = None
+    if include_timeseries_chart:
+        range_days = 90
+        start = now - timedelta(days=range_days)
 
-    created_daily = (
-        created.loc[created_notna & (created >= start)].dt.floor("D").value_counts(sort=False)
-        if has_created
-        else pd.Series(dtype=int)
-    )
-    closed_daily = (
-        resolved.loc[resolved_notna & (resolved >= start)].dt.floor("D").value_counts(sort=False)
-        if has_resolved
-        else pd.Series(dtype=int)
-    )
+        created_daily = (
+            created.loc[created_notna & (created >= start)].dt.floor("D").value_counts(sort=False)
+            if has_created
+            else pd.Series(dtype=int)
+        )
+        closed_daily = (
+            resolved.loc[resolved_notna & (resolved >= start)]
+            .dt.floor("D")
+            .value_counts(sort=False)
+            if has_resolved
+            else pd.Series(dtype=int)
+        )
 
-    if created_daily.empty and closed_daily.empty:
-        timeseries_chart = _empty_timeseries_chart()
-    else:
-        all_dates = created_daily.index.union(closed_daily.index).sort_values()
-        daily = pd.DataFrame({"date": all_dates})
-        daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
-        daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
-        daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum()
-        timeseries_chart = px.line(daily, x="date", y=["created", "closed", "open_backlog_proxy"])
+        if created_daily.empty and closed_daily.empty:
+            timeseries_chart = _empty_timeseries_chart()
+        else:
+            all_dates = created_daily.index.union(closed_daily.index).sort_values()
+            daily = pd.DataFrame({"date": all_dates})
+            daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
+            daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
+            daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum()
+            timeseries_chart = px.line(
+                daily, x="date", y=["created", "closed", "open_backlog_proxy"]
+            )
 
     if open_now_total > 0 and has_summary:
         top_open = (

@@ -200,15 +200,22 @@ def test_is_internal_server_mode_respects_env_flag(monkeypatch) -> None:
     assert run_streamlit._is_internal_server_mode() is False
 
 
-def test_desktop_webview_default_is_disabled_on_macos(monkeypatch) -> None:
+def test_desktop_webview_default_is_enabled_on_macos(monkeypatch) -> None:
     monkeypatch.delenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", raising=False)
     monkeypatch.setattr(run_streamlit.sys, "platform", "darwin", raising=False)
-    assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is False
+    assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
 
 
-def test_desktop_webview_can_be_force_enabled_on_macos(monkeypatch) -> None:
-    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+def test_desktop_webview_cannot_be_force_disabled_on_macos(monkeypatch) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "false")
     monkeypatch.setattr(run_streamlit.sys, "platform", "darwin", raising=False)
+    assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
+
+
+def test_desktop_webview_is_not_forced_off_by_corporate_mode(monkeypatch) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_CORPORATE_MODE", "true")
+    monkeypatch.delenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", raising=False)
+    monkeypatch.setattr(run_streamlit.sys, "platform", "linux", raising=False)
     assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
 
 

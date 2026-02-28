@@ -87,10 +87,6 @@ def _panel(title: str, subtitle: str | None = None) -> st.delta_generator.DeltaG
     return c
 
 
-def _open_only(df: pd.DataFrame) -> pd.DataFrame:
-    return df[df["resolved"].isna()].copy() if "resolved" in df.columns else df.copy()
-
-
 # ---------------------------------------------------------------------
 # Overview
 # ---------------------------------------------------------------------
@@ -196,11 +192,13 @@ def render_kanban(
         st.info("No hay incidencias abiertas para mostrar.")
         return
 
-    kan = open_df.copy()
+    kan = open_df.copy(deep=False)
     kan["status"] = normalize_text_col(kan["status"], "(sin estado)")
 
     status_counts = kan["status"].value_counts()
     all_statuses = status_counts.index.tolist()
+    grouped = kan.groupby("status", sort=False)
+    status_groups: Dict[str, pd.DataFrame] = {str(name): frame for name, frame in grouped}
 
     # If user has status filter active, show exactly those statuses
     selected_statuses = list(st.session_state.get(FILTER_STATUS_KEY) or [])
@@ -229,7 +227,7 @@ def render_kanban(
         st.session_state[FILTER_STATUS_KEY] = [st_name]
 
     for col, st_name in zip(cols, selected_statuses):
-        sub = kan[kan["status"] == st_name].copy()
+        sub = status_groups.get(st_name, pd.DataFrame()).copy(deep=False)
         if "priority" in sub.columns:
             sub["_prio_rank"] = sub["priority"].astype(str).map(priority_rank)
         else:
@@ -255,12 +253,13 @@ def render_kanban(
             else:
                 st.markdown(f"**{st_name}**")
 
-            st.caption(f"{len(kan[kan['status'] == st_name])} issues")
+            st.caption(f"{int(status_counts.get(st_name, 0))} issues")
 
-            for _, r in sub.iterrows():
-                key = html.escape(str(r.get("key", "") or ""))
-                url = html.escape(str(r.get("url", "") or ""))
-                summ = html.escape(str(r.get("summary", "") or ""))
+            display_rows = sub.reindex(columns=["key", "url", "summary"], fill_value="")
+            for key_val, url_val, summary_val in display_rows.itertuples(index=False, name=None):
+                key = html.escape(str(key_val or ""))
+                url = html.escape(str(url_val or ""))
+                summ = html.escape(str(summary_val or ""))
                 if len(summ) > 80:
                     summ = summ[:77] + "..."
                 st.markdown(

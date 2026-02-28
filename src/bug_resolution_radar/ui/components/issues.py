@@ -24,16 +24,6 @@ MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
 
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = (hex_color or "").strip().lstrip("#")
-    if len(h) != 6:
-        return f"rgba(127,146,178,{alpha:.3f})"
-    r = int(h[0:2], 16)
-    g = int(h[2:4], 16)
-    b = int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha:.3f})"
-
-
 def _safe_cell_text(value: object) -> str:
     null_tokens = {"nan", "none", "nat", "undefined", "null", ""}
 
@@ -105,11 +95,7 @@ def _chip_html(value: object, *, for_priority: bool) -> str:
         return '<span class="issue-table-chip issue-table-chip-neutral">—</span>'
     color = priority_color(txt) if for_priority else status_color(txt)
     if color.upper() == "#E2E6EE":
-        return (
-            '<span class="issue-table-chip issue-table-chip-neutral">'
-            f"{html.escape(txt)}"
-            "</span>"
-        )
+        return f'<span class="issue-table-chip issue-table-chip-neutral">{html.escape(txt)}</span>'
     style = chip_style_from_color(color)
     return f'<span class="issue-table-chip" style="{style}">{html.escape(txt)}</span>'
 
@@ -284,8 +270,8 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
         <div class="issue-table-shell">
           <div class="issue-table-scroll">
             <table class="issue-table">
-              <thead><tr>{''.join(header_cells)}</tr></thead>
-              <tbody>{''.join(rows_html)}</tbody>
+              <thead><tr>{"".join(header_cells)}</tr></thead>
+              <tbody>{"".join(rows_html)}</tbody>
             </table>
           </div>
         </div>
@@ -456,7 +442,7 @@ def render_issue_cards(
             gap: 12px;
           }}
         </style>
-        <div class="issue-cards-stack">{''.join(cards)}</div>
+        <div class="issue-cards-stack">{"".join(cards)}</div>
         """,
         unsafe_allow_html=True,
     )

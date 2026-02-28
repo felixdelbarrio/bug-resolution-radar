@@ -10,13 +10,18 @@ from urllib.parse import urlparse
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from ..config import Settings, build_source_id, supported_countries
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
+from ..config import Settings, build_source_id, jira_sources, supported_countries
 from ..models.schema import IssuesDocument, NormalizedIssue
 from .browser_runtime import (
     is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
+)
+from .browser_runtime import (
     open_url_in_configured_browser as _open_url_in_browser,
+)
+from .browser_runtime import (
+    open_urls_in_configured_browser as _open_urls_in_browser,
 )
 from .jira_session import get_jira_session_cookie
 
@@ -37,6 +42,22 @@ def _is_target_page_open_in_configured_browser(url: str, browser: str) -> Option
     return _is_target_page_open_in_browser(url=url, browser=browser)
 
 
+def _root_from_url(url: str) -> str:
+    txt = str(url or "").strip()
+    if not txt:
+        return ""
+    parsed = urlparse(txt)
+    scheme = str(parsed.scheme or "").strip()
+    host = str(parsed.hostname or "").strip()
+    if not scheme or not host:
+        return ""
+    return f"{scheme}://{host}"
+
+
+def _open_urls_in_configured_browser(urls: List[str], browser: str) -> int:
+    return int(_open_urls_in_browser(urls=urls, browser=browser))
+
+
 def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bool:
     is_open = _is_target_page_open_in_configured_browser(url, browser)
     if is_open is True:
@@ -44,6 +65,18 @@ def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bo
     if is_open is False:
         return _open_url_in_configured_browser(url, browser)
     return False
+
+
+def _jira_cookie_bootstrap_urls(login_url: str) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for candidate in [str(login_url or "").strip(), _root_from_url(login_url)]:
+        txt = str(candidate or "").strip()
+        if not txt or txt in seen:
+            continue
+        seen.add(txt)
+        out.append(txt)
+    return out
 
 
 def _cookie_names_from_header(cookie_header: str) -> List[str]:
@@ -88,7 +121,7 @@ def _bootstrap_jira_cookie_from_browser(
     if not page_already_ensured:
         page_already_ensured = _ensure_target_page_open_in_configured_browser(login_url, browser)
     if not page_already_ensured:
-        _open_url_in_configured_browser(login_url, browser)
+        _open_urls_in_configured_browser(_jira_cookie_bootstrap_urls(login_url), browser)
 
     try:
         existing = get_jira_session_cookie(browser=browser, host=host)
@@ -126,11 +159,20 @@ def _resolve_source_scope(
         )
         return country, alias, source_id, jql
 
+    configured_sources = jira_sources(settings)
+    if configured_sources:
+        primary = configured_sources[0]
+        country = str(primary.get("country") or "").strip() or fallback_country
+        alias = str(primary.get("alias") or "").strip() or "Jira principal"
+        jql = str(primary.get("jql") or "").strip()
+        source_id = str(primary.get("source_id") or "").strip() or build_source_id(
+            "jira", country, alias
+        )
+        return country, alias, source_id, jql
+
     alias = "Jira principal"
-    country = fallback_country
-    jql = str(settings.JIRA_JQL or "").strip()
-    source_id = build_source_id("jira", country, alias)
-    return country, alias, source_id, jql
+    source_id = build_source_id("jira", fallback_country, alias)
+    return fallback_country, alias, source_id, ""
 
 
 def _merge_key(issue: NormalizedIssue) -> str:
@@ -317,7 +359,7 @@ def ingest_jira(
                     components=components,
                     resolution=resolution,
                     resolution_type=res_type,
-                    url=f"{base}/browse/{it.get('key','')}",
+                    url=f"{base}/browse/{it.get('key', '')}",
                     country=country,
                     source_type="jira",
                     source_alias=alias,

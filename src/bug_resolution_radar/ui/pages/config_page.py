@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 from html import escape
-from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.analytics.analysis_window import (
-    effective_analysis_lookback_months,
     max_available_backlog_months,
+    parse_analysis_lookback_months,
 )
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
+    config_home,
     helix_sources,
     jira_sources,
     save_settings,
@@ -649,17 +649,6 @@ def _selected_sources_from_editor(
     return selected_ids, label_by_id
 
 
-def _clear_delete_confirmation_widget_state() -> None:
-    _queue_widget_state_clear(
-        [
-            "cfg_jira_delete_confirm",
-            "cfg_jira_delete_phrase",
-            "cfg_helix_delete_confirm",
-            "cfg_helix_delete_phrase",
-        ]
-    )
-
-
 def _clear_jira_delete_widget_state() -> None:
     _queue_widget_state_clear(
         [
@@ -712,12 +701,6 @@ def _apply_queued_widget_state_clear() -> None:
             st.session_state.pop(k, None)
 
 
-def _clear_config_delete_widget_state() -> None:
-    _clear_delete_confirmation_widget_state()
-    _clear_jira_delete_widget_state()
-    _clear_helix_delete_widget_state()
-
-
 def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
@@ -747,7 +730,8 @@ def _analysis_window_defaults(settings: Settings) -> Tuple[int, int]:
     scoped_df = _apply_workspace_scope(df_all)
     base_df = scoped_df if not scoped_df.empty else df_all
     available_months = int(max_available_backlog_months(base_df))
-    current_months = int(effective_analysis_lookback_months(settings, df=base_df))
+    configured_months = int(parse_analysis_lookback_months(settings))
+    current_months = max(1, min(configured_months, available_months))
     return max(1, available_months), max(1, min(current_months, available_months))
 
 
@@ -1097,6 +1081,16 @@ def render(settings: Settings) -> None:
                 )
                 st.caption("Se guarda en el .env como preferencia del usuario.")
 
+            with st.container(key="cfg_prefs_card_permissions"):
+                st.markdown("#### Compatibilidad corporativa")
+                st.info(
+                    "Los ajustes técnicos de permisos y navegador se gestionan en `.env` "
+                    "(plantilla simplificada en `.env.example`)."
+                )
+                st.caption(
+                    "En binario de escritorio, la app se ejecuta en contenedor embebido por defecto."
+                )
+
             with st.container(key="cfg_prefs_card_analysis"):
                 st.markdown("#### Profundidad del análisis")
                 analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
@@ -1111,9 +1105,7 @@ def render(settings: Settings) -> None:
                         index=0,
                         key="cfg_analysis_depth_months_single",
                         disabled=True,
-                        format_func=lambda m: (
-                            f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses"
-                        ),
+                        format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
                         help=(
                             "Se habilita automáticamente cuando exista histórico suficiente "
                             "en la caché de incidencias."
@@ -1127,31 +1119,29 @@ def render(settings: Settings) -> None:
                         value=_nearest_option(analysis_selected_months, options=month_options),
                         key="cfg_analysis_depth_months",
                         format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
-                        help=(
-                            "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
-                            "Si lo dejas al máximo, se usa toda la profundidad disponible."
-                        ),
+                        help="Filtro global aplicado en dashboard, insights e informe PPT.",
                     )
-                if int(analysis_selected_months) >= int(analysis_max_months):
-                    st.caption("Estado: profundidad máxima disponible (modo automático).")
-                else:
-                    st.caption(
-                        f"Estado: últimos {int(analysis_selected_months)} "
-                        f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
-                    )
+                st.caption(
+                    f"Estado: últimos {int(analysis_selected_months)} "
+                    f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
+                )
 
             with st.container(key="cfg_prefs_card_ppt"):
                 st.markdown("#### Descargas del informe PPT")
                 st.markdown("**Carpeta de guardado**")
                 report_ppt_download_dir_default = str(
                     getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
-                ).strip() or str((Path.home() / "Downloads").expanduser())
+                ).strip() or str((config_home() / "exports").expanduser())
                 report_ppt_download_dir = st.text_input(
                     "Carpeta de guardado del informe PPT",
                     value=report_ppt_download_dir_default,
                     key="cfg_report_ppt_download_dir",
                     label_visibility="collapsed",
-                    placeholder=str((Path.home() / "Downloads").expanduser()),
+                    placeholder=str((config_home() / "exports").expanduser()),
+                )
+                st.caption(
+                    "Sugerencia: usa una carpeta de la app (Application Support/config) para evitar "
+                    "prompts de permisos en macOS corporativo."
                 )
 
             with st.container(key="cfg_prefs_card_favs"):
@@ -1205,11 +1195,6 @@ def render(settings: Settings) -> None:
 
             if st.button("Guardar configuración", key="cfg_save_prefs_btn"):
                 summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
-                analysis_lookback_months_to_store = (
-                    0
-                    if int(analysis_selected_months) >= int(analysis_max_months)
-                    else int(analysis_selected_months)
-                )
                 new_settings = _safe_update_settings(
                     settings,
                     {
@@ -1217,8 +1202,7 @@ def render(settings: Settings) -> None:
                         "DASHBOARD_SUMMARY_CHARTS": summary_csv,
                         "TREND_SELECTED_CHARTS": summary_csv,
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
-                        "ANALYSIS_LOOKBACK_MONTHS": analysis_lookback_months_to_store,
-                        "ANALYSIS_LOOKBACK_DAYS": 0,
+                        "ANALYSIS_LOOKBACK_MONTHS": int(analysis_selected_months),
                     },
                 )
                 save_settings(new_settings)

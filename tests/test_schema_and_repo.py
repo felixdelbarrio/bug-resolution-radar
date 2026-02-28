@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 
 
 def test_issues_document_empty_defaults() -> None:

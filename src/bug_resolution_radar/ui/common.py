@@ -9,8 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-from bug_resolution_radar.models.schema import IssuesDocument
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.models.schema import IssuesDocument
 
 # ----------------------------
 # Persistence: IssuesDocument

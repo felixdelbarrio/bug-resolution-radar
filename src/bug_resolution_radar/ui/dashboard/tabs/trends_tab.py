@@ -12,14 +12,13 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -333,13 +332,6 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     if pl == "supone un impedimento":
         return (-1, pl)
     return (priority_rank(p), pl)
-
-
-def _resolution_band(days: pd.Series) -> pd.Categorical:
-    """Build resolution speed bands for semantic coloring."""
-    bins = [-np.inf, 7, 30, np.inf]
-    labels = ["Rapida (0-7d)", "Media (8-30d)", "Lenta (>30d)"]
-    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
 
 
 def _resolution_bucket(days: pd.Series) -> pd.Categorical:

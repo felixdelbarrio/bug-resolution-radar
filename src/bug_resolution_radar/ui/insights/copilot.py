@@ -96,15 +96,6 @@ def _fmt_pct(x: float) -> str:
     return f"{x * 100.0:.1f}%"
 
 
-def _fmt_days(x: float | None) -> str:
-    if x is None or pd.isna(x):
-        return "—"
-    v = max(0.0, float(x))
-    if v < 10:
-        return f"{v:.1f} d"
-    return f"{v:.0f} d"
-
-
 def _norm(txt: str) -> str:
     t = unicodedata.normalize("NFKD", str(txt or "").strip().lower())
     t = "".join(ch for ch in t if not unicodedata.combining(ch))
@@ -554,7 +545,7 @@ def build_session_delta_lines(
             candidates.append(
                 (
                     magnitude,
-                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if d > 0 else ''}{d*100.0:.1f} pp).",
+                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if d > 0 else ''}{d * 100.0:.1f} pp).",
                 )
             )
         else:

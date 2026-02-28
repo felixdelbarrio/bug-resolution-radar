@@ -187,19 +187,6 @@ def _apply_action(
     st.session_state["__jump_to_tab"] = str(target_section or "issues")
 
 
-def _filters_caption(
-    *, status_filters: List[str], priority_filters: List[str], assignee_filters: List[str]
-) -> str:
-    parts: List[str] = []
-    if status_filters:
-        parts.append(f"Status: {', '.join(status_filters)}")
-    if priority_filters:
-        parts.append(f"Priority: {', '.join(priority_filters)}")
-    if assignee_filters:
-        parts.append(f"Owner: {', '.join(assignee_filters)}")
-    return " · ".join(parts) if parts else "Sin filtro adicional"
-
-
 def _chips_html(values: List[str], *, color_fn: Callable[[str], str]) -> str:
     chips: List[str] = []
     for raw in list(values or []):
@@ -214,7 +201,9 @@ def _chips_html(values: List[str], *, color_fn: Callable[[str], str]) -> str:
 def _filters_markup(
     *, status_filters: List[str], priority_filters: List[str], assignee_filters: List[str]
 ) -> str:
-    del assignee_filters  # Owner is intentionally omitted: it is already implicit in the insight context.
+    del (
+        assignee_filters
+    )  # Owner is intentionally omitted: it is already implicit in the insight context.
     status_chips = _chips_html(status_filters, color_fn=status_color)
     priority_chips = _chips_html(priority_filters, color_fn=priority_color)
     if not status_chips and not priority_chips:

@@ -15,7 +15,6 @@ from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -69,13 +68,7 @@ class ChartSpec:
 # Helpers (safe datetime + insights)
 # ---------------------------------------------------------------------
 def _fmt_pct(x: float) -> str:
-    return f"{x*100:.1f}%"
-
-
-def _safe_series(df: pd.DataFrame, col: str) -> pd.Series:
-    if df is None or df.empty or col not in df.columns:
-        return pd.Series([], dtype=float)
-    return df[col]
+    return f"{x * 100:.1f}%"
 
 
 def _quantile_hint(values: Sequence[float], q: float) -> Optional[float]:
