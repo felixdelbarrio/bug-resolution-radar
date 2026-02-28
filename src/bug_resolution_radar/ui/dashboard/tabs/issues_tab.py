@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,8 +10,8 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.ui.components.issues import (
     prepare_issue_cards_df,
     render_issue_cards,
@@ -19,8 +20,8 @@ from bug_resolution_radar.ui.components.issues import (
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     CsvDownloadSpec,
     build_download_filename,
-    download_button_for_df,
     dfs_to_excel_bytes,
+    download_button_for_df,
     make_table_export_df,
 )
 from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
@@ -28,6 +29,8 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 )
 
 MAX_CARDS_RENDER = 250
+CARDS_PAGE_SIZE_OPTIONS = (20, 40, 60, 100)
+DEFAULT_CARDS_PAGE_SIZE = 40
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -40,6 +43,61 @@ def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 def _set_issues_view(view_key: str, value: str) -> None:
     st.session_state[view_key] = value
+
+
+def _paginate_cards_df(
+    cards_df: pd.DataFrame,
+    *,
+    key_prefix: str,
+) -> tuple[pd.DataFrame, int, int]:
+    if cards_df is None or cards_df.empty:
+        return pd.DataFrame(), 0, 0
+
+    page_size_key = f"{key_prefix}::cards_page_size"
+    page_key = f"{key_prefix}::cards_page"
+
+    if int(st.session_state.get(page_size_key) or 0) not in CARDS_PAGE_SIZE_OPTIONS:
+        st.session_state[page_size_key] = DEFAULT_CARDS_PAGE_SIZE
+
+    total = int(len(cards_df))
+    page_size = int(st.session_state.get(page_size_key) or DEFAULT_CARDS_PAGE_SIZE)
+    page_size = max(1, page_size)
+    total_pages = max(1, int(math.ceil(float(total) / float(page_size))))
+    current_page = int(st.session_state.get(page_key) or 1)
+    current_page = min(max(1, current_page), total_pages)
+    st.session_state[page_key] = current_page
+
+    with st.container(key=f"{key_prefix}::cards_pager"):
+        c_size, c_page, c_info = st.columns([1.05, 1.0, 1.4], gap="small")
+        with c_size:
+            st.selectbox(
+                "Cards por página",
+                options=list(CARDS_PAGE_SIZE_OPTIONS),
+                key=page_size_key,
+                label_visibility="collapsed",
+            )
+        # Recalculate in case page size changed in this rerun.
+        page_size = int(st.session_state.get(page_size_key) or DEFAULT_CARDS_PAGE_SIZE)
+        page_size = max(1, page_size)
+        total_pages = max(1, int(math.ceil(float(total) / float(page_size))))
+        if int(st.session_state.get(page_key) or 1) > total_pages:
+            st.session_state[page_key] = total_pages
+        with c_page:
+            st.number_input(
+                "Página",
+                min_value=1,
+                max_value=total_pages,
+                step=1,
+                key=page_key,
+                label_visibility="collapsed",
+            )
+        current_page = int(st.session_state.get(page_key) or 1)
+        start = int((current_page - 1) * page_size)
+        end = min(total, start + page_size)
+        with c_info:
+            st.caption(f"Mostrando {start + 1:,}-{end:,} de {total:,} cards")
+
+    return cards_df.iloc[start:end].copy(deep=False), current_page, total_pages
 
 
 @lru_cache(maxsize=8)
@@ -378,11 +436,17 @@ def render_issues_section(
                     f"Vista Cards mostrando {max_cards}/{len(dff_show)}. "
                     "Usa Tabla para ver todos los resultados."
                 )
+            paged_cards_df, current_page, total_pages = _paginate_cards_df(
+                cards_df,
+                key_prefix=key_prefix,
+            )
+            if total_pages > 1:
+                st.caption(f"Página {current_page}/{total_pages}")
             render_issue_cards(
                 dff_show,
-                max_cards=max_cards,
+                max_cards=len(paged_cards_df),
                 title="",
-                prepared_df=cards_df,
+                prepared_df=paged_cards_df,
             )
             return
 

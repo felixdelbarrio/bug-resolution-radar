@@ -448,7 +448,8 @@ def render(settings: Settings) -> None:
                 ctx = build_dashboard_data_context(
                     df_all=scoped_df,
                     settings=settings,
-                    include_kpis=True,
+                    include_kpis=False,
+                    include_timeseries_chart=False,
                 )
 
                 result = generate_scope_executive_ppt(

@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import pandas as pd
@@ -64,6 +65,10 @@ _PPT_PNG_CACHE_VERSION = "v1"
 _PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES = 24
 _PPT_PNG_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
 _PPT_PNG_CACHE_LOCK = threading.Lock()
+_PPT_RESULT_CACHE_VERSION = "v1"
+_PPT_RESULT_CACHE_DEFAULT_MAX_ENTRIES = 12
+_PPT_RESULT_CACHE: "OrderedDict[str, ExecutiveReportResult]" = OrderedDict()
+_PPT_RESULT_CACHE_LOCK = threading.Lock()
 
 SLIDE_WIDTH = int(Inches(13.333))
 SLIDE_HEIGHT = int(Inches(7.5))
@@ -919,10 +924,7 @@ def _build_context(
                 open_df_override.copy(deep=False), settings=settings
             )
             if not dff.empty and not open_df.empty:
-                open_index = set(open_df.index.tolist())
-                closed_df = dff.loc[[idx for idx in dff.index if idx not in open_index]].copy(
-                    deep=False
-                )
+                closed_df = dff.loc[~dff.index.isin(open_df.index)].copy(deep=False)
             else:
                 closed_df = pd.DataFrame()
 
@@ -974,6 +976,125 @@ def _ppt_png_cache_max_entries() -> int:
             _PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES,
         ),
     )
+
+
+def _ppt_result_cache_enabled() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE", True)
+
+
+def _ppt_result_cache_max_entries() -> int:
+    return max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE_MAX_ENTRIES",
+            _PPT_RESULT_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+    )
+
+
+def _compact_df_signature(df: pd.DataFrame | None) -> str:
+    if not isinstance(df, pd.DataFrame):
+        return "none"
+    if df.empty:
+        return "empty"
+
+    preferred_cols = [
+        "key",
+        "summary",
+        "status",
+        "priority",
+        "created",
+        "updated",
+        "resolved",
+        "assignee",
+        "country",
+        "source_id",
+        "source_type",
+        "url",
+    ]
+    cols = [c for c in preferred_cols if c in df.columns]
+    if not cols:
+        cols = list(df.columns)
+    try:
+        hashed = pd.util.hash_pandas_object(
+            df.loc[:, cols],
+            index=True,
+            categorize=True,
+        )
+        digest = hashlib.blake2b(
+            hashed.to_numpy(dtype="uint64", copy=False).tobytes(),
+            digest_size=16,
+        ).hexdigest()
+        return f"{len(df)}:{len(cols)}:{digest}"
+    except Exception:
+        return f"{len(df)}:{len(cols)}:{abs(hash(tuple(cols)))}"
+
+
+def _report_request_cache_key(
+    settings: Settings,
+    *,
+    country: str,
+    source_id: str,
+    status_filters: Sequence[str] | None,
+    priority_filters: Sequence[str] | None,
+    assignee_filters: Sequence[str] | None,
+    dff_override: pd.DataFrame | None,
+) -> str:
+    data_path = Path(str(getattr(settings, "DATA_PATH", "") or "")).expanduser()
+    if data_path.exists():
+        data_rev = f"{int(data_path.stat().st_mtime_ns)}:{int(data_path.stat().st_size)}"
+    else:
+        data_rev = "missing"
+
+    payload = {
+        "cache_version": _PPT_RESULT_CACHE_VERSION,
+        "country": str(country or "").strip(),
+        "source_id": str(source_id or "").strip(),
+        "status_filters": _normalize_filter_values(status_filters),
+        "priority_filters": _normalize_filter_values(priority_filters),
+        "assignee_filters": _normalize_filter_values(assignee_filters),
+        "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
+        "analysis_lookback_days": int(getattr(settings, "ANALYSIS_LOOKBACK_DAYS", 0) or 0),
+        "data_path": str(data_path),
+        "data_rev": data_rev,
+        # If callers provide prefiltered frames without backing file changes, keep a
+        # compact signature to safely reuse cached report bytes.
+        "dff_override_sig": _compact_df_signature(dff_override),
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8", errors="replace")
+    return hashlib.blake2b(encoded, digest_size=20).hexdigest()
+
+
+def _ppt_result_cache_get(cache_key: str) -> Optional[ExecutiveReportResult]:
+    if not _ppt_result_cache_enabled():
+        return None
+    with _PPT_RESULT_CACHE_LOCK:
+        item = _PPT_RESULT_CACHE.get(cache_key)
+        if item is None:
+            return None
+        _PPT_RESULT_CACHE.move_to_end(cache_key)
+        return item
+
+
+def _ppt_result_cache_put(cache_key: str, result: ExecutiveReportResult) -> None:
+    if not _ppt_result_cache_enabled():
+        return
+    max_entries = _ppt_result_cache_max_entries()
+    with _PPT_RESULT_CACHE_LOCK:
+        _PPT_RESULT_CACHE[cache_key] = result
+        _PPT_RESULT_CACHE.move_to_end(cache_key)
+        while len(_PPT_RESULT_CACHE) > max_entries:
+            _PPT_RESULT_CACHE.popitem(last=False)
+
+
+def _clear_ppt_result_cache() -> None:
+    with _PPT_RESULT_CACHE_LOCK:
+        _PPT_RESULT_CACHE.clear()
 
 
 def _ppt_png_cache_key(
@@ -2789,6 +2910,19 @@ def generate_scope_executive_ppt(
     if not source_txt:
         raise ValueError("No se ha seleccionado un origen válido para generar el informe.")
 
+    cache_key = _report_request_cache_key(
+        settings,
+        country=country,
+        source_id=source_txt,
+        status_filters=status_filters,
+        priority_filters=priority_filters,
+        assignee_filters=assignee_filters,
+        dff_override=dff_override,
+    )
+    cached_result = _ppt_result_cache_get(cache_key)
+    if cached_result is not None:
+        return cached_result
+
     if scoped_source_df_override is not None:
         scoped_source_df = scoped_source_df_override
     elif dff_override is not None:
@@ -2828,7 +2962,7 @@ def generate_scope_executive_ppt(
     stamp = context.generated_at.strftime("%Y%m%d-%H%M")
     file_name = f"radar-{_slug(context.country)}-{_slug(context.source_id)}-{stamp}.pptx"
 
-    return ExecutiveReportResult(
+    result = ExecutiveReportResult(
         file_name=file_name,
         content=content,
         slide_count=len(prs.slides),
@@ -2840,3 +2974,5 @@ def generate_scope_executive_ppt(
         source_label=context.source_label,
         applied_filter_summary=context.filters.summary(),
     )
+    _ppt_result_cache_put(cache_key, result)
+    return result
