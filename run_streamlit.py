@@ -424,6 +424,17 @@ def _is_internal_server_mode() -> bool:
     return _bool_env(_INTERNAL_SERVER_ENV, False)
 
 
+def _desktop_webview_enabled_for_frozen_binary() -> bool:
+    """
+    Return whether packaged binaries should use embedded pywebview.
+
+    On macOS we default to external-browser mode to reduce OS permission prompts
+    from embedded WebKit (camera/mic/accessibility/automation checks).
+    """
+    default = sys.platform != "darwin"
+    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", default)
+
+
 def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
     env = os.environ.copy()
     env[_INTERNAL_SERVER_ENV] = "1"
@@ -550,6 +561,13 @@ def main() -> int:
         _start_binary_auto_shutdown_monitor()
         port = max(1, _int_env(_INTERNAL_SERVER_PORT_ENV, 8501))
         return _run_streamlit_cli(script, port=port, headless=True)
+
+    if not _desktop_webview_enabled_for_frozen_binary():
+        _launcher_log(
+            "Modo desktop sin pywebview activado: usando navegador del sistema para minimizar permisos."
+        )
+        _start_binary_auto_shutdown_monitor()
+        return _run_streamlit_cli(script, port=None, headless=False)
 
     try:
         return _run_desktop_container()
