@@ -1,16 +1,23 @@
-"""PyInstaller entrypoint that runs the app through Streamlit CLI."""
+"""PyInstaller entrypoint for desktop and CLI Streamlit runtimes."""
 
 from __future__ import annotations
 
 import multiprocessing as mp
 import os
 import runpy
+import socket
+import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from streamlit.web import cli as stcli
+
+_INTERNAL_SERVER_ENV = "BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_SERVER"
+_INTERNAL_SERVER_PORT_ENV = "BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_PORT"
 
 
 def _maybe_run_choreographer_wrapper_passthrough() -> int | None:
@@ -94,13 +101,7 @@ def _candidate_streamlit_config_paths() -> list[Path]:
 
 
 def _load_dotenv_if_present(dotenv_path: Path) -> None:
-    """
-    Load a minimal `.env` file before starting Streamlit.
-
-    Streamlit opens the UI browser before `app.py` runs, so bundled builds need
-    environment configuration in place ahead of time (paths, proxies, Helix/Jira
-    settings, etc.).
-    """
+    """Load a minimal `.env` file before starting Streamlit."""
     try:
         path = Path(dotenv_path)
         if not path.exists() or not path.is_file():
@@ -140,50 +141,14 @@ def _float_env(name: str, default: float) -> float:
         return float(default)
 
 
-def _macos_has_app(app_name: str) -> bool:
-    for base in (Path("/Applications"), Path.home() / "Applications"):
-        try:
-            if (base / f"{app_name}.app").exists():
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def _configure_streamlit_ui_browser_env() -> None:
-    """
-    Keep Streamlit UI browser selection independent from Helix/Jira ingestion browsers.
-
-    - Default: open the system default browser (Safari, etc.).
-    - Optional: set `BUG_RESOLUTION_RADAR_UI_BROWSER=chrome|edge` to force.
-    """
-    ui_browser = str(os.environ.get("BUG_RESOLUTION_RADAR_UI_BROWSER") or "").strip().lower()
-
-    # Avoid "bounce" behavior when BROWSER is set to ambiguous tokens (e.g. "chrome")
-    # and the bundle cannot resolve it.
-    if not ui_browser or ui_browser == "default":
-        current = str(os.environ.get("BROWSER") or "").strip().lower()
-        if current in {
-            "chrome",
-            "google-chrome",
-            "google chrome",
-            "edge",
-            "msedge",
-            "microsoft-edge",
-            "microsoft edge",
-        }:
-            os.environ.pop("BROWSER", None)
-        return
-
-    if ui_browser not in {"chrome", "edge"}:
-        return
-
-    if sys.platform == "darwin":
-        app = "Google Chrome" if ui_browser == "chrome" else "Microsoft Edge"
-        os.environ["BROWSER"] = f'open -a "{app}"'
-        return
-
-    os.environ["BROWSER"] = "microsoft-edge" if ui_browser == "edge" else "google-chrome"
+def _int_env(name: str, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
 
 
 def _ensure_streamlit_config(runtime_home: Path) -> None:
@@ -232,12 +197,7 @@ def _ensure_streamlit_credentials(email: str) -> None:
 
 
 def _configure_streamlit_first_run_noninteractive_defaults() -> None:
-    """
-    Prevent Streamlit's first-run email prompt in packaged builds.
-
-    We intentionally avoid forcing `server.headless=true` so the binary can keep
-    auto-opening the browser for non-technical users.
-    """
+    """Prevent Streamlit's first-run email prompt in packaged builds."""
     os.environ.setdefault("STREAMLIT_SERVER_SHOW_EMAIL_PROMPT", "false")
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
 
@@ -254,8 +214,7 @@ def _configure_streamlit_runtime_stability_for_binary() -> None:
 
     Long-running operations (e.g. PPT generation with Plotly/Kaleido) may create
     temp files. Streamlit's file watcher can interpret those changes as source
-    changes in frozen apps and restart the report, which looks like "spinner
-    eterno" and may reopen browser tabs.
+    changes in frozen apps and restart the report.
     """
     os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
     os.environ.setdefault("STREAMLIT_SERVER_RUN_ON_SAVE", "false")
@@ -276,10 +235,10 @@ def _binary_active_session_count(runtime_obj: object) -> int:
 
 def _binary_auto_shutdown_monitor_loop(*, grace_s: float, poll_s: float) -> None:
     """
-    Stop the Streamlit runtime after the last browser session disconnects.
+    Stop the Streamlit runtime after the last desktop session disconnects.
 
     We arm shutdown only after at least one active session has been observed, so
-    the binary can stay open while the user takes time to open the first tab.
+    startup races do not terminate the process too early.
     """
     seen_active_session = False
     no_session_since: float | None = None
@@ -317,7 +276,7 @@ def _binary_auto_shutdown_monitor_loop(*, grace_s: float, poll_s: float) -> None
 
 def _start_binary_auto_shutdown_monitor() -> None:
     """
-    Start a background monitor that stops the server when the last tab closes.
+    Start a background monitor that stops the server when the last session closes.
 
     Defaults are conservative and only apply to packaged binaries.
     """
@@ -349,20 +308,8 @@ def _runtime_home_for_binary() -> Path:
     return (base / "bug-resolution-radar").expanduser()
 
 
-def main() -> int:
-    if getattr(sys, "frozen", False):
-        runtime_home = _runtime_home_for_binary()
-        os.environ.setdefault("BUG_RESOLUTION_RADAR_HOME", str(runtime_home))
-        runtime_home.mkdir(parents=True, exist_ok=True)
-        _ensure_streamlit_config(runtime_home)
-        _configure_streamlit_first_run_noninteractive_defaults()
-        os.chdir(runtime_home)
-        _load_dotenv_if_present(runtime_home / ".env")
-        _configure_streamlit_ui_browser_env()
-        _configure_streamlit_runtime_stability_for_binary()
-        _start_binary_auto_shutdown_monitor()
-    script = _resolve_app_script()
-    sys.argv = [
+def _build_streamlit_argv(script: Path, *, port: int | None, headless: bool) -> list[str]:
+    argv = [
         "streamlit",
         "run",
         str(script),
@@ -370,7 +317,158 @@ def main() -> int:
         "--server.fileWatcherType=none",
         "--server.runOnSave=false",
     ]
+    if port is not None:
+        argv.extend(
+            [
+                "--server.address=127.0.0.1",
+                f"--server.port={int(port)}",
+            ]
+        )
+    if headless:
+        argv.append("--server.headless=true")
+    return argv
+
+
+def _run_streamlit_cli(script: Path, *, port: int | None, headless: bool) -> int:
+    if headless:
+        os.environ["BROWSER"] = "none"
+    sys.argv = _build_streamlit_argv(script, port=port, headless=headless)
     return int(stcli.main())
+
+
+def _find_free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        port = int(sock.getsockname()[1])
+    return port
+
+
+def _streamlit_base_url(port: int) -> str:
+    return f"http://127.0.0.1:{int(port)}"
+
+
+def _wait_for_streamlit_ready(
+    *, port: int, proc: subprocess.Popen[bytes], timeout_s: float
+) -> None:
+    health_url = f"{_streamlit_base_url(port)}/_stcore/health"
+    deadline = time.monotonic() + max(1.0, float(timeout_s))
+    while time.monotonic() < deadline:
+        return_code = proc.poll()
+        if return_code is not None:
+            raise RuntimeError(
+                f"El servidor interno finalizó antes de iniciar (exit={return_code})."
+            )
+        try:
+            with urllib.request.urlopen(health_url, timeout=1.0) as response:
+                if int(getattr(response, "status", 200)) < 500:
+                    return
+        except (urllib.error.URLError, TimeoutError, OSError):
+            pass
+        time.sleep(0.2)
+    raise TimeoutError(f"Timeout esperando Streamlit en {health_url}.")
+
+
+def _is_internal_server_mode() -> bool:
+    return _bool_env(_INTERNAL_SERVER_ENV, False)
+
+
+def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
+    env = os.environ.copy()
+    env[_INTERNAL_SERVER_ENV] = "1"
+    env[_INTERNAL_SERVER_PORT_ENV] = str(int(port))
+    env["BROWSER"] = "none"
+    return subprocess.Popen([sys.executable], env=env, cwd=os.getcwd())
+
+
+def _stop_internal_streamlit_subprocess(proc: subprocess.Popen[bytes]) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=10)
+        return
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
+def _run_desktop_container() -> int:
+    port = _find_free_local_port()
+    proc = _start_internal_streamlit_subprocess(port)
+    try:
+        _wait_for_streamlit_ready(
+            port=port,
+            proc=proc,
+            timeout_s=_float_env("BUG_RESOLUTION_RADAR_SERVER_BOOT_TIMEOUT_S", 45.0),
+        )
+        try:
+            import webview
+        except Exception as exc:
+            raise RuntimeError(
+                "No se pudo cargar pywebview para abrir el contenedor de escritorio."
+            ) from exc
+
+        title = str(os.environ.get("APP_TITLE") or "Bug Resolution Radar").strip() or (
+            "Bug Resolution Radar"
+        )
+        width = max(960, _int_env("BUG_RESOLUTION_RADAR_WINDOW_WIDTH", 1480))
+        height = max(700, _int_env("BUG_RESOLUTION_RADAR_WINDOW_HEIGHT", 940))
+        min_width = max(800, _int_env("BUG_RESOLUTION_RADAR_WINDOW_MIN_WIDTH", 1024))
+        min_height = max(600, _int_env("BUG_RESOLUTION_RADAR_WINDOW_MIN_HEIGHT", 700))
+
+        webview.create_window(
+            title=title,
+            url=_streamlit_base_url(port),
+            width=width,
+            height=height,
+            min_size=(min_width, min_height),
+        )
+        gui_backend = str(os.environ.get("BUG_RESOLUTION_RADAR_WEBVIEW_GUI") or "").strip()
+        if gui_backend:
+            webview.start(gui=gui_backend, debug=False)
+        else:
+            webview.start(debug=False)
+        return 0
+    finally:
+        _stop_internal_streamlit_subprocess(proc)
+
+
+def _prepare_frozen_runtime() -> None:
+    runtime_home = _runtime_home_for_binary()
+    os.environ.setdefault("BUG_RESOLUTION_RADAR_HOME", str(runtime_home))
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    _ensure_streamlit_config(runtime_home)
+    _configure_streamlit_first_run_noninteractive_defaults()
+    os.chdir(runtime_home)
+    _load_dotenv_if_present(runtime_home / ".env")
+    _configure_streamlit_runtime_stability_for_binary()
+
+
+def main() -> int:
+    script = _resolve_app_script()
+
+    if not getattr(sys, "frozen", False):
+        return _run_streamlit_cli(script, port=None, headless=False)
+
+    _prepare_frozen_runtime()
+
+    if _is_internal_server_mode():
+        _start_binary_auto_shutdown_monitor()
+        port = max(1, _int_env(_INTERNAL_SERVER_PORT_ENV, 8501))
+        return _run_streamlit_cli(script, port=port, headless=True)
+
+    try:
+        return _run_desktop_container()
+    except Exception as exc:
+        print(f"Error iniciando contenedor de escritorio: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

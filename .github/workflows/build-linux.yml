@@ -50,7 +50,7 @@ jobs:
           if [ -f .streamlit/config.toml ]; then
             EXTRA_ARGS+=(--add-data "$ROOT_DIR/.streamlit/config.toml:.streamlit")
           fi
-          pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "$ROOT_DIR/app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
+          pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --workpath build --specpath build --add-data "$ROOT_DIR/app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all webview --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
 
       - name: Prepare distributable bundle
         run: |

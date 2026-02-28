@@ -13,6 +13,7 @@ PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
 
 PYINSTALLER_COLLECT_ALL_ARGS = \
 	--collect-all streamlit \
+	--collect-all webview \
 	--collect-all watchdog \
 	--collect-all plotly \
 	--collect-all pptx \

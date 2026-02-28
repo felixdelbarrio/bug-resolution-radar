@@ -63,6 +63,9 @@ make run
 
 App disponible en `http://localhost:8501`.
 
+Las distribuciones binarias (`.app`, `.exe`, Linux) se abren en su propia ventana
+de escritorio y no lanzan el navegador del sistema.
+
 ## Instalación manual
 
 ```bash
