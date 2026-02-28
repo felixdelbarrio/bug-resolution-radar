@@ -92,6 +92,34 @@ jobs:
           if (Test-Path ".env.example" -PathType Leaf) {
             Copy-Item ".env.example" "$bundleDir/.env.example" -Force
           }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg" "$bundleDir/assets/icons/bbva/spherica-database.svg" -Force
+          }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg" "$bundleDir/assets/icons/bbva/spherica-no-draw.svg" -Force
+          }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg" "$bundleDir/assets/icons/bbva/spherica-simulator.svg" -Force
+          }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg" "$bundleDir/assets/icons/bbva/spherica-save-for-later.svg" -Force
+          }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg" "$bundleDir/assets/icons/bbva/spherica-recycle.svg" -Force
+          }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg" "$bundleDir/assets/icons/bbva/spherica-search.svg" -Force
+          }
+          if (Test-Path "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg" -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path "$bundleDir/assets/icons/bbva" | Out-Null
+            Copy-Item "src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg" "$bundleDir/assets/icons/bbva/spherica-xml.svg" -Force
+          }
           if (Test-Path ".streamlit/config.toml" -PathType Leaf) {
             New-Item -ItemType Directory -Force -Path "$bundleDir/.streamlit" | Out-Null
             Copy-Item ".streamlit/config.toml" "$bundleDir/.streamlit/config.toml" -Force

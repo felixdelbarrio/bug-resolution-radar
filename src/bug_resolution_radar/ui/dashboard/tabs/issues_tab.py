@@ -142,7 +142,7 @@ def _render_issues_download_button(
     if export_df is None or export_df.empty:
         download_button_for_df(
             export_df,
-            label="⬇ Excel",
+            label="Excel",
             key=f"{key_prefix}::download_csv",
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
@@ -154,7 +154,7 @@ def _render_issues_download_button(
     if not helix_only:
         download_button_for_df(
             export_df,
-            label="⬇ Excel",
+            label="Excel",
             key=f"{key_prefix}::download_csv",
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
@@ -203,7 +203,7 @@ def _render_issues_download_button(
     if xlsx_bytes is None:
         download_button_for_df(
             export_df,
-            label="⬇ Excel",
+            label="Excel",
             key=f"{key_prefix}::download_csv",
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
@@ -213,7 +213,7 @@ def _render_issues_download_button(
         return
 
     st.download_button(
-        label="⬇ Excel",
+        label="Excel",
         data=xlsx_bytes,
         file_name=build_download_filename("issues_filtradas", suffix="issues", ext="xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
