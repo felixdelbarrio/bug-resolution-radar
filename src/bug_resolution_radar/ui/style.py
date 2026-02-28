@@ -203,6 +203,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-font-ui: {BBVA_FONT_SANS_MEDIUM};
         --bbva-font-headline: {BBVA_FONT_HEADLINE};
         --bbva-font-label: {BBVA_FONT_SANS_MEDIUM};
+        --bbva-heading-gap: 0.72rem;
+        --bbva-heading-gap-tight: 0.58rem;
       }}
     """
 
@@ -343,6 +345,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-size: 2.05rem !important;
             line-height: 1.12 !important;
             letter-spacing: -0.01em;
+            margin-top: 0.16rem !important;
+            margin-bottom: var(--bbva-heading-gap) !important;
           }
           h2, h3, h4,
           [data-testid="stMarkdownContainer"] h2,
@@ -351,6 +355,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-family: var(--bbva-font-ui) !important;
             font-weight: 700 !important;
             letter-spacing: -0.005em;
+            margin-top: 0.12rem !important;
+            margin-bottom: var(--bbva-heading-gap-tight) !important;
           }
           h2, [data-testid="stMarkdownContainer"] h2 {
             font-size: 1.48rem !important;
@@ -381,6 +387,14 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .bbva-hero-title {
             font-family: var(--bbva-font-headline);
             letter-spacing: -0.01em;
+          }
+
+          /* Consistent breathing room between headings and following containers */
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h1),
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h2),
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h3),
+          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h4) {
+            margin-bottom: 0.20rem !important;
           }
 
           /* App background + content width */
@@ -457,7 +471,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_nav_bar,
           [class*="st-key-workspace_nav_bar_"] {
             margin-top: -0.04rem;
-            margin-bottom: -0.76rem;
+            margin-bottom: -0.24rem;
             border: 1px solid var(--bbva-border-strong);
             border-radius: 14px;
             background: var(--bbva-surface-elevated);
@@ -483,25 +497,25 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           .st-key-workspace_dashboard_content_overview,
           .st-key-workspace_dashboard_content_notes {
-            margin-top: -0.24rem;
+            margin-top: 0.02rem;
           }
           .st-key-workspace_dashboard_content_issues,
           .st-key-workspace_dashboard_content_kanban,
           .st-key-workspace_dashboard_content_trends,
           .st-key-workspace_dashboard_content_insights {
-            margin-top: -0.72rem;
+            margin-top: -0.20rem;
           }
           .st-key-dashboard_filters_panel {
-            margin-top: -0.64rem;
-            margin-bottom: -0.44rem;
+            margin-top: -0.28rem;
+            margin-bottom: -0.20rem;
           }
           .st-key-insights_shell {
-            margin-top: -0.64rem;
+            margin-top: -0.28rem;
           }
           .st-key-issues_tab_issues_shell,
           .st-key-kanban_shell,
           .st-key-trend_chart_shell {
-            margin-top: -0.20rem;
+            margin-top: 0.02rem;
           }
           .st-key-dashboard_filters_panel [data-testid="stVerticalBlockBorderWrapper"],
           .st-key-issues_tab_issues_shell [data-testid="stVerticalBlockBorderWrapper"],
