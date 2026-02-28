@@ -29,6 +29,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Verify desktop runtime dependencies
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          missing = [
+              mod for mod in ("streamlit", "webview") if importlib.util.find_spec(mod) is None
+          ]
+          if missing:
+              raise SystemExit(f"Missing desktop runtime modules: {', '.join(missing)}")
+
+          print("Desktop runtime dependencies OK")
+          PY
+
       - name: Run POSIX PPT binary regression tests
         run: |
           pytest -q tests/test_executive_report_ppt.py -k "subprocess_with_timeout"

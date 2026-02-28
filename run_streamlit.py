@@ -11,12 +11,32 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
+from traceback import format_exc
 
 from streamlit.web import cli as stcli
 
 _INTERNAL_SERVER_ENV = "BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_SERVER"
 _INTERNAL_SERVER_PORT_ENV = "BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_PORT"
+_LAUNCHER_LOG_FILE: Path | None = None
+
+
+def _set_launcher_log_file(path: Path) -> None:
+    global _LAUNCHER_LOG_FILE
+    _LAUNCHER_LOG_FILE = path
+
+
+def _launcher_log(message: str) -> None:
+    stamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    line = f"[{stamp}] {message}\n"
+    try:
+        if _LAUNCHER_LOG_FILE is not None:
+            _LAUNCHER_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with _LAUNCHER_LOG_FILE.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+    except Exception:
+        pass
 
 
 def _maybe_run_choreographer_wrapper_passthrough() -> int | None:
@@ -376,10 +396,16 @@ def _wait_for_streamlit_ready(
     *, port: int, proc: subprocess.Popen[bytes], timeout_s: float
 ) -> None:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    _launcher_log(
+        f"Esperando healthcheck de Streamlit en puerto {port} (timeout={timeout_s:.1f}s)."
+    )
     deadline = time.monotonic() + max(1.0, float(timeout_s))
     while time.monotonic() < deadline:
         return_code = proc.poll()
         if return_code is not None:
+            _launcher_log(
+                f"Servidor interno terminó antes de estar listo. Exit code={return_code}."
+            )
             raise RuntimeError(
                 f"El servidor interno finalizó antes de iniciar (exit={return_code})."
             )
@@ -405,6 +431,7 @@ def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
     env["BROWSER"] = "none"
     for key in ("NO_PROXY", "no_proxy"):
         env[key] = str(os.environ.get(key) or "localhost,127.0.0.1,::1")
+    _launcher_log(f"Iniciando servidor interno de Streamlit en puerto {port}.")
     return subprocess.Popen([sys.executable], env=env, cwd=os.getcwd())
 
 
@@ -413,6 +440,7 @@ def _stop_internal_streamlit_subprocess(proc: subprocess.Popen[bytes]) -> None:
         return
     try:
         proc.terminate()
+        _launcher_log("Solicitado terminate() del servidor interno.")
     except Exception:
         pass
     try:
@@ -422,6 +450,7 @@ def _stop_internal_streamlit_subprocess(proc: subprocess.Popen[bytes]) -> None:
         pass
     try:
         proc.kill()
+        _launcher_log("Ejecutado kill() del servidor interno tras timeout.")
     except Exception:
         pass
 
@@ -441,9 +470,13 @@ def _run_desktop_container() -> int:
                 )
                 proc = candidate_proc
                 chosen_port = port
+                _launcher_log(f"Servidor interno listo en puerto {chosen_port}.")
                 break
             except Exception as exc:
                 last_error = exc
+                _launcher_log(
+                    f"Fallo arrancando servidor interno en puerto {port}: {type(exc).__name__}: {exc}"
+                )
                 _stop_internal_streamlit_subprocess(candidate_proc)
                 continue
 
@@ -455,6 +488,9 @@ def _run_desktop_container() -> int:
         try:
             import webview
         except Exception as exc:
+            _launcher_log(
+                "Error importando webview para contenedor de escritorio.\n" + format_exc()
+            )
             raise RuntimeError(
                 "No se pudo cargar pywebview para abrir el contenedor de escritorio."
             ) from exc
@@ -476,9 +512,12 @@ def _run_desktop_container() -> int:
         )
         gui_backend = str(os.environ.get("BUG_RESOLUTION_RADAR_WEBVIEW_GUI") or "").strip()
         if gui_backend:
+            _launcher_log(f"Abriendo contenedor desktop con GUI backend explícito: {gui_backend}")
             webview.start(gui=gui_backend, debug=False)
         else:
+            _launcher_log("Abriendo contenedor desktop con GUI backend automático.")
             webview.start(debug=False)
+        _launcher_log("Contenedor desktop finalizado correctamente.")
         return 0
     finally:
         if proc is not None:
@@ -489,6 +528,8 @@ def _prepare_frozen_runtime() -> None:
     runtime_home = _runtime_home_for_binary()
     os.environ.setdefault("BUG_RESOLUTION_RADAR_HOME", str(runtime_home))
     runtime_home.mkdir(parents=True, exist_ok=True)
+    _set_launcher_log_file(runtime_home / "logs" / "desktop-launcher.log")
+    _launcher_log("Inicializando runtime empaquetado.")
     _ensure_streamlit_config(runtime_home)
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
@@ -513,7 +554,9 @@ def main() -> int:
     try:
         return _run_desktop_container()
     except Exception as exc:
-        print(f"Error iniciando contenedor de escritorio: {exc}", file=sys.stderr)
+        _launcher_log("Error fatal iniciando contenedor desktop.\n" + format_exc())
+        log_hint = f" Revisa: {_LAUNCHER_LOG_FILE}" if _LAUNCHER_LOG_FILE is not None else ""
+        print(f"Error iniciando contenedor de escritorio: {exc}.{log_hint}", file=sys.stderr)
         return 1
 
 

@@ -54,7 +54,8 @@ endef
 .DEFAULT_GOAL := help
 
 .PHONY: help setup format lint typecheck test run clean clean-build \
-	ensure-build-tools test-ppt-regression build-local build-macos build-linux
+	ensure-build-tools ensure-desktop-runtime-deps sync-build-env \
+	test-ppt-regression build-local build-macos build-linux
 
 help:
 	@echo ""
@@ -67,6 +68,7 @@ help:
 	@echo "  make typecheck   Typecheck (mypy, si está instalado)"
 	@echo "  make test        Tests (pytest, si está instalado)"
 	@echo "  make test-ppt-regression  Regresión PPT/Kaleido (igual que en workflows POSIX)"
+	@echo "  make sync-build-env Sincroniza deps de build/runtime desktop antes de empaquetar"
 	@echo "  make build-local Auto-detecta OS (macOS/Linux) y construye binario local"
 	@echo "  make build-macos Construye .app + zip local (igual a .github/workflows/build-macos.yml)"
 	@echo "  make build-linux Construye binario Linux + bundle local (igual a .github/workflows/build-linux.yml)"
@@ -127,6 +129,14 @@ ensure-build-tools:
 		exit 1; \
 	fi
 
+ensure-desktop-runtime-deps:
+	@$(PYTHON) -c "import importlib.util,sys;missing=[m for m in ('streamlit','webview') if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias de runtime desktop: '+', '.join(missing)+'. Ejecuta: make sync-build-env\\n') or sys.exit(2)) if missing else print('Runtime desktop OK (streamlit + webview).')"
+
+sync-build-env: ensure-build-tools
+	$(PIP) install -U pip
+	$(PIP) install -e ".[dev]"
+	$(MAKE) ensure-desktop-runtime-deps
+
 test-ppt-regression: ensure-build-tools
 	$(PYTEST) -q tests/test_executive_report_ppt.py -k "$(PPT_REGRESSION_TEST_EXPR)"
 	$(PYTEST) -q tests/test_run_streamlit_entrypoint.py
@@ -139,7 +149,7 @@ build-local:
 		*) echo "OS no soportado para build-local: $(HOST_UNAME)"; exit 1 ;; \
 	esac
 
-build-macos: test-ppt-regression
+build-macos: sync-build-env test-ppt-regression
 	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
 		echo "El target build-macos requiere ejecutarse en macOS."; \
 		exit 1; \
@@ -189,7 +199,7 @@ build-macos: test-ppt-regression
 	@echo "  - dist_app/bug-resolution-radar.app"
 	@echo "  - bug-resolution-radar-macos.zip"
 
-build-linux: test-ppt-regression
+build-linux: sync-build-env test-ppt-regression
 	@if [ "$(HOST_UNAME)" != "Linux" ]; then \
 		echo "El target build-linux requiere ejecutarse en Linux."; \
 		exit 1; \
