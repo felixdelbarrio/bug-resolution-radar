@@ -215,11 +215,14 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         ),
     )
     icon_ingest = _svg_data_uri(
-        file_name="spherica-database.svg",
+        file_name="spherica-down-cloud.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<ellipse cx="12" cy="6" rx="7" ry="3" fill="#000"/>'
-            '<path d="M5 6v10c0 1.7 3.1 3 7 3s7-1.3 7-3V6" fill="none" stroke="#000" stroke-width="2"/>'
+            '<path d="M7 17h10a4 4 0 0 0 0-8h-.3A5.5 5.5 0 0 0 6.4 10.6 3.5 3.5 0 0 0 7 17z" '
+            'fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            '<path d="M12 11v5" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M10 14l2 2 2-2" stroke="#000" stroke-width="2" stroke-linecap="round" '
+            'stroke-linejoin="round" fill="none"/>'
             "</svg>"
         ),
     )
@@ -250,11 +253,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         ),
     )
     icon_save = _svg_data_uri(
-        file_name="spherica-database.svg",
+        file_name="spherica-checkmark.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<ellipse cx="12" cy="6" rx="7" ry="3" fill="#000"/>'
-            '<path d="M5 6v10c0 1.7 3.1 3 7 3s7-1.3 7-3V6" fill="none" stroke="#000" stroke-width="2"/>'
+            '<path d="M6 12l4 4 8-8" fill="none" stroke="#000" stroke-width="2.4" '
+            'stroke-linecap="round" stroke-linejoin="round"/>'
             "</svg>"
         ),
     )
@@ -915,11 +918,12 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_btn_slot_config button,
           .st-key-workspace_btn_config button { --bbva-btn-icon: url("__ICON_CONFIG__"); }
 
-          /* Save buttons: consistent database icon (replaces legacy diskette emoji). */
+          /* Save buttons: consistent checkmark icon (replaces legacy diskette emoji). */
           .st-key-cfg_save_jira_btn button,
           .st-key-cfg_save_helix_btn button,
           .st-key-cfg_save_prefs_btn button,
-          .st-key-notes_save_btn button {
+          .st-key-notes_save_btn button,
+          [class*="st-key-btn_save_scope_ppt"] button {
             display: inline-flex !important;
             align-items: center !important;
             justify-content: center !important;
@@ -928,7 +932,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-cfg_save_jira_btn button::before,
           .st-key-cfg_save_helix_btn button::before,
           .st-key-cfg_save_prefs_btn button::before,
-          .st-key-notes_save_btn button::before {
+          .st-key-notes_save_btn button::before,
+          [class*="st-key-btn_save_scope_ppt"] button::before {
             content: "" !important;
             display: inline-block !important;
             width: 0.98rem !important;
