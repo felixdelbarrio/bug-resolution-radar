@@ -748,6 +748,29 @@ def _nearest_option(value: int, *, options: List[int]) -> int:
     return min(options, key=lambda opt: abs(int(opt) - tgt))
 
 
+def _bool_to_env(value: bool) -> str:
+    return "true" if bool(value) else "false"
+
+
+def _corporate_profile_score(
+    *,
+    corporate_mode: bool,
+    desktop_webview: bool,
+    browser_app_control: bool,
+    prefer_selected_binary: bool,
+) -> int:
+    score = 0
+    if not corporate_mode:
+        score += 1
+    if desktop_webview:
+        score += 2
+    if browser_app_control:
+        score += 3
+    if not prefer_selected_binary:
+        score += 1
+    return score
+
+
 def render(settings: Settings) -> None:
     _apply_queued_widget_state_clear()
     flash_success = str(st.session_state.pop("__cfg_flash_success", "") or "").strip()
@@ -1080,6 +1103,104 @@ def render(settings: Settings) -> None:
                 )
                 st.caption("Se guarda en el .env como preferencia del usuario.")
 
+            with st.container(key="cfg_prefs_card_permissions"):
+                st.markdown("#### Compatibilidad corporativa y permisos")
+                corporate_mode = st.checkbox(
+                    "Modo corporativo estricto (recomendado en equipos gestionados)",
+                    value=_boolish(
+                        getattr(settings, "BUG_RESOLUTION_RADAR_CORPORATE_MODE", "false"),
+                        default=False,
+                    ),
+                    key="cfg_corp_mode",
+                )
+                desktop_webview = st.checkbox(
+                    "Usar contenedor desktop embebido (pywebview)",
+                    value=_boolish(
+                        getattr(settings, "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", ""),
+                        default=False,
+                    ),
+                    key="cfg_desktop_webview",
+                    help="Si está activo puede elevar prompts de permisos en macOS corporativo.",
+                )
+                browser_app_control = st.checkbox(
+                    "Permitir control explícito de app navegador (Apple events/open -a)",
+                    value=_boolish(
+                        getattr(settings, "BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false"),
+                        default=False,
+                    ),
+                    key="cfg_browser_app_control",
+                    help="Solo actívalo si necesitas automatización avanzada y tu endpoint lo permite.",
+                )
+                prefer_selected_binary = st.checkbox(
+                    "Priorizar ejecutable del navegador seleccionado (Chrome/Edge)",
+                    value=_boolish(
+                        getattr(
+                            settings, "BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true"
+                        ),
+                        default=True,
+                    ),
+                    key="cfg_prefer_browser_binary",
+                    help="Abre URLs de bootstrap en el browser elegido con mínimos prompts.",
+                )
+
+                bootstrap_max_tabs = st.slider(
+                    "Máximo de pestañas automáticas para bootstrap de login",
+                    min_value=1,
+                    max_value=6,
+                    value=max(
+                        1,
+                        min(
+                            6,
+                            int(
+                                getattr(
+                                    settings,
+                                    "BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS",
+                                    3,
+                                )
+                                or 3
+                            ),
+                        ),
+                    ),
+                    key="cfg_browser_bootstrap_max_tabs",
+                )
+
+                c_browser_1, c_browser_2 = st.columns(2)
+                with c_browser_1:
+                    chrome_binary = st.text_input(
+                        "Ruta Chrome (opcional)",
+                        value=str(
+                            getattr(settings, "BUG_RESOLUTION_RADAR_CHROME_BINARY", "") or ""
+                        ),
+                        key="cfg_chrome_binary",
+                        placeholder="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    )
+                with c_browser_2:
+                    edge_binary = st.text_input(
+                        "Ruta Edge (opcional)",
+                        value=str(getattr(settings, "BUG_RESOLUTION_RADAR_EDGE_BINARY", "") or ""),
+                        key="cfg_edge_binary",
+                        placeholder="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                    )
+
+                risk_score = _corporate_profile_score(
+                    corporate_mode=bool(corporate_mode),
+                    desktop_webview=bool(desktop_webview),
+                    browser_app_control=bool(browser_app_control),
+                    prefer_selected_binary=bool(prefer_selected_binary),
+                )
+                if risk_score <= 1:
+                    st.success(
+                        "Perfil de permisos: mínimo. Adecuado para la mayoría de entornos corporativos."
+                    )
+                elif risk_score <= 3:
+                    st.info(
+                        "Perfil de permisos: intermedio. Compatible en muchos equipos, pero puede mostrar prompts."
+                    )
+                else:
+                    st.warning(
+                        "Perfil de permisos: elevado. En equipos corporativos restrictivos puede fallar o pedir autorizaciones."
+                    )
+
             with st.container(key="cfg_prefs_card_analysis"):
                 st.markdown("#### Profundidad del análisis")
                 analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
@@ -1094,9 +1215,7 @@ def render(settings: Settings) -> None:
                         index=0,
                         key="cfg_analysis_depth_months_single",
                         disabled=True,
-                        format_func=lambda m: (
-                            f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses"
-                        ),
+                        format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
                         help=(
                             "Se habilita automáticamente cuando exista histórico suficiente "
                             "en la caché de incidencias."
@@ -1202,6 +1321,17 @@ def render(settings: Settings) -> None:
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
                         "ANALYSIS_LOOKBACK_MONTHS": analysis_lookback_months_to_store,
                         "ANALYSIS_LOOKBACK_DAYS": 0,
+                        "BUG_RESOLUTION_RADAR_CORPORATE_MODE": _bool_to_env(corporate_mode),
+                        "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW": _bool_to_env(desktop_webview),
+                        "BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL": _bool_to_env(
+                            browser_app_control
+                        ),
+                        "BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY": _bool_to_env(
+                            prefer_selected_binary
+                        ),
+                        "BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS": int(bootstrap_max_tabs),
+                        "BUG_RESOLUTION_RADAR_CHROME_BINARY": str(chrome_binary).strip(),
+                        "BUG_RESOLUTION_RADAR_EDGE_BINARY": str(edge_binary).strip(),
                     },
                 )
                 save_settings(new_settings)

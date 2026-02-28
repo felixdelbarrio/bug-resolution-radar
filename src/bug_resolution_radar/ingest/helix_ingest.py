@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import calendar
 import os
 import re
 import time
 import warnings
-import calendar
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
@@ -22,13 +22,18 @@ from tenacity import (
     wait_exponential,
 )
 
-from ..config import build_source_id
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
+from ..config import build_source_id
 from ..models.schema_helix import HelixDocument, HelixWorkItem
 from .browser_runtime import (
     is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
+)
+from .browser_runtime import (
     open_url_in_configured_browser as _open_url_in_browser,
+)
+from .browser_runtime import (
+    open_urls_in_configured_browser as _open_urls_in_browser,
 )
 from .helix_mapper import (
     is_allowed_helix_business_incident_type,
@@ -348,6 +353,10 @@ def _is_target_page_open_in_configured_browser(url: str, browser: str) -> Option
     if not _root_from_url(url):
         return False
     return _is_target_page_open_in_browser(url=url, browser=browser)
+
+
+def _open_urls_in_configured_browser(urls: List[str], browser: str) -> int:
+    return int(_open_urls_in_browser(urls=urls, browser=browser))
 
 
 def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bool:
@@ -903,11 +912,13 @@ def _dry_run_timeouts(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception(
-        lambda e: isinstance(
-            e,
-            (RuntimeError, requests.exceptions.ConnectionError),
+        lambda e: (
+            isinstance(
+                e,
+                (RuntimeError, requests.exceptions.ConnectionError),
+            )
+            and not isinstance(e, requests.exceptions.SSLError)
         )
-        and not isinstance(e, requests.exceptions.SSLError)
     ),
 )
 def _request(
@@ -1480,6 +1491,36 @@ def ingest_helix(
         return out
 
     auth_cookie_hosts = _auth_cookie_hosts()
+
+    def _cookie_bootstrap_urls() -> List[str]:
+        out: List[str] = []
+        seen: set[str] = set()
+
+        def _push(url: str) -> None:
+            txt = str(url or "").strip()
+            if not txt:
+                return
+            if txt in seen:
+                return
+            seen.add(txt)
+            out.append(txt)
+
+        _push(login_bootstrap_url)
+        _push(ticket_console_url)
+        _push(_root_from_url(login_bootstrap_url))
+        _push(_root_from_url(ticket_console_url))
+
+        bootstrap_scheme = str(urlparse(login_bootstrap_url).scheme or "https").strip() or "https"
+        for h in auth_cookie_hosts:
+            if len(out) >= 6:
+                break
+            host = str(h or "").strip().lower()
+            if not host:
+                continue
+            _push(f"{bootstrap_scheme}://{host}/")
+
+        return out
+
     can_bootstrap_page = bool(auth_cookie_hosts) and bool(_root_from_url(login_bootstrap_url))
     bootstrap_page_checked = False
     bootstrap_page_ready = False
@@ -1525,7 +1566,7 @@ def ingest_helix(
         if not can_bootstrap_page:
             return None, ""
         if not page_ready:
-            page_ready = _open_url_in_configured_browser(login_bootstrap_url, browser)
+            page_ready = _open_urls_in_configured_browser(_cookie_bootstrap_urls(), browser) > 0
             if page_ready:
                 bootstrap_page_ready = True
 
@@ -1551,9 +1592,7 @@ def ingest_helix(
         details = f" Detalle: {cookie_error}" if cookie_error else ""
         hint = ""
         if not auth_cookie_hosts:
-            hint = (
-                " Revisa HELIX_DASHBOARD_URL (URL absoluta de SmartIT) " "o HELIX_ARSQL_BASE_URL."
-            )
+            hint = " Revisa HELIX_DASHBOARD_URL (URL absoluta de SmartIT) o HELIX_ARSQL_BASE_URL."
         elif not can_bootstrap_page:
             hint = (
                 " Revisa HELIX_DASHBOARD_URL/HELIX_ARSQL_DASHBOARD_URL: "
@@ -1730,8 +1769,7 @@ def ingest_helix(
     )
     create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
     create_window_rule = (
-        f"{create_window_rule}; {cache_window_rule}; "
-        f"pending_ids={len(arsql_pending_incident_ids)}"
+        f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )
     # Keep official extraction filters for business type/environment/time fields.
     # Only the temporal window changes according to configured analysis depth.

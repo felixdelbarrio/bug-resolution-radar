@@ -221,6 +221,13 @@ class Settings(BaseModel):
     NOTES_PATH: str = "data/notes.json"
     INSIGHTS_LEARNING_PATH: str = "data/insights_learning.json"
     LOG_LEVEL: str = "INFO"
+    BUG_RESOLUTION_RADAR_CORPORATE_MODE: str = "false"
+    BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW: str = ""
+    BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL: str = "false"
+    BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY: str = "true"
+    BUG_RESOLUTION_RADAR_CHROME_BINARY: str = ""
+    BUG_RESOLUTION_RADAR_EDGE_BINARY: str = ""
+    BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS: int = 3
 
     # -------------------------
     # JIRA
@@ -319,15 +326,34 @@ def load_settings() -> Settings:
 
 def save_settings(settings: Settings) -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
+    existing = {k: v for k, v in dotenv_values(ENV_PATH).items() if k}
     data = settings.model_dump()
-
+    serialized_data: Dict[str, str] = {}
     for k, v in data.items():
-        if isinstance(v, str):
+        value = v
+        if isinstance(value, str):
             if k in _PATH_SETTING_KEYS:
-                v = _to_storable_path(v)
-            v = _encode_env_multiline(v)
-        lines.append(f"{k}={v}")
+                value = _to_storable_path(value)
+            value = _encode_env_multiline(value)
+        serialized_data[k] = str(value)
+
+    ordered_keys: List[str] = []
+    seen: set[str] = set()
+    for key in list(existing.keys()) + list(serialized_data.keys()):
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered_keys.append(key)
+
+    lines: List[str] = []
+    for key in ordered_keys:
+        if key in serialized_data:
+            lines.append(f"{key}={serialized_data[key]}")
+            continue
+        raw_existing = existing.get(key)
+        if raw_existing is None:
+            continue
+        lines.append(f"{key}={_encode_env_multiline(str(raw_existing))}")
 
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

@@ -93,9 +93,15 @@ Para máxima compatibilidad en equipos restringidos:
 - `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=false`
 - `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL=false`
 - `BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY=true`
+- `BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS=3`
 
 Con esta combinación se evita automatización AppleScript y se mantiene la
 apertura automática de URLs de login en el navegador seleccionado.
+
+Si el navegador corporativo está en una ruta no estándar, puedes forzar binario:
+
+- `BUG_RESOLUTION_RADAR_CHROME_BINARY=/ruta/a/chrome`
+- `BUG_RESOLUTION_RADAR_EDGE_BINARY=/ruta/a/msedge`
 
 ## Firma y notarización (opcional, preparado)
 
@@ -131,7 +137,9 @@ Variables más relevantes:
 - App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`.
 - Desktop/permisos (macOS): `BUG_RESOLUTION_RADAR_CORPORATE_MODE`,
   `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW`, `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL`,
-  `BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY`.
+  `BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY`,
+  `BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS`,
+  `BUG_RESOLUTION_RADAR_CHROME_BINARY`, `BUG_RESOLUTION_RADAR_EDGE_BINARY`.
 - Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_BROWSER`.
 - Helix: `HELIX_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
 - Helix avanzado: `HELIX_QUERY_MODE` (`person_workitems|arsql|auto`), `HELIX_ARSQL_BASE_URL`,

@@ -114,6 +114,26 @@ def test_config_resolves_relative_data_paths_against_env_location(
     assert "REPORT_PPT_DOWNLOAD_DIR=exports/ppt" in saved
 
 
+def test_config_save_settings_preserves_unknown_env_keys(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        ("APP_TITLE=Radar\nBUG_RESOLUTION_RADAR_CORPORATE_MODE=true\nCUSTOM_CORP_FLAG=keep-me\n"),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    settings.APP_TITLE = "Radar Pro"
+    cfg.save_settings(settings)
+
+    saved = env_path.read_text(encoding="utf-8")
+    assert "APP_TITLE=Radar Pro" in saved
+    assert "BUG_RESOLUTION_RADAR_CORPORATE_MODE=true" in saved
+    assert "CUSTOM_CORP_FLAG=keep-me" in saved
+
+
 def test_semantic_status_and_priority_colors() -> None:
     assert status_color("New") == "#E85D63"
     assert status_color("Ready") == "#E85D63"

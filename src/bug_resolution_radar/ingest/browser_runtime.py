@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import webbrowser
 from platform import system as platform_system
-from typing import List, Optional
+from typing import Iterable, List, Optional
 from urllib.parse import urlparse
 
 
@@ -72,26 +73,77 @@ def _prefer_selected_browser_binary(platform: str) -> bool:
 
 
 def _browser_binary_candidates(platform: str, *, use_chrome: bool) -> List[List[str]]:
+    env_key = (
+        "BUG_RESOLUTION_RADAR_CHROME_BINARY" if use_chrome else "BUG_RESOLUTION_RADAR_EDGE_BINARY"
+    )
+    explicit = str(os.environ.get(env_key) or "").strip()
+    out: List[List[str]] = []
+    if explicit:
+        out.append([explicit])
+
     if platform == "darwin":
         if use_chrome:
-            return [
-                ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
-                ["/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"],
-                ["google-chrome"],
-                ["chrome"],
+            out.extend(
+                [
+                    ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+                    ["/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"],
+                    ["google-chrome"],
+                    ["chrome"],
+                ]
+            )
+            return out
+        out.extend(
+            [
+                ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+                ["microsoft-edge"],
+                ["msedge"],
             ]
-        return [
-            ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
-            ["microsoft-edge"],
-            ["msedge"],
-        ]
+        )
+        return out
     if platform == "linux":
         if use_chrome:
-            return [["google-chrome"], ["chrome"], ["chromium"]]
-        return [["microsoft-edge"], ["msedge"]]
+            out.extend([["google-chrome"], ["chrome"], ["chromium"]])
+            return out
+        out.extend([["microsoft-edge"], ["msedge"]])
+        return out
     if platform == "windows":
-        return [["chrome"]] if use_chrome else [["msedge"]]
-    return []
+        if use_chrome:
+            out.extend(
+                [
+                    ["chrome"],
+                    [r"C:\Program Files\Google\Chrome\Application\chrome.exe"],
+                    [r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"],
+                ]
+            )
+            return out
+        out.extend(
+            [
+                ["msedge"],
+                [r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"],
+                [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"],
+            ]
+        )
+        return out
+    return out
+
+
+def _resolve_base_command(base_cmd: List[str]) -> Optional[List[str]]:
+    if not base_cmd:
+        return None
+    executable = str(base_cmd[0] or "").strip()
+    if not executable:
+        return None
+
+    if os.path.isabs(executable):
+        path = executable
+        if not (os.path.exists(path) and os.path.isfile(path)):
+            return None
+        return [path, *base_cmd[1:]]
+
+    resolved = shutil.which(executable)
+    if not resolved:
+        return None
+    return [resolved, *base_cmd[1:]]
 
 
 def _launch_url_with_selected_browser_binary(
@@ -100,7 +152,10 @@ def _launch_url_with_selected_browser_binary(
     platform: str,
     use_chrome: bool,
 ) -> bool:
-    for base_cmd in _browser_binary_candidates(platform, use_chrome=use_chrome):
+    for candidate in _browser_binary_candidates(platform, use_chrome=use_chrome):
+        base_cmd = _resolve_base_command(candidate)
+        if not base_cmd:
+            continue
         cmd = [*base_cmd, url]
         try:
             subprocess.Popen(
@@ -161,6 +216,54 @@ def open_url_in_configured_browser(url: str, browser: str) -> bool:
         return bool(webbrowser.open(url, new=2, autoraise=True))
     except Exception:
         return False
+
+
+def open_urls_in_configured_browser(
+    urls: Iterable[str],
+    browser: str,
+    *,
+    max_urls: Optional[int] = None,
+) -> int:
+    """
+    Open multiple valid URLs in the configured browser (best effort).
+
+    Returns the number of successful launches. URLs are de-duplicated while
+    preserving order.
+    """
+    cap = max_urls
+    if cap is None:
+        cap_raw = str(
+            os.environ.get("BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS") or ""
+        ).strip()
+        if cap_raw:
+            try:
+                cap = int(cap_raw)
+            except Exception:
+                cap = 3
+        else:
+            cap = 3
+    cap = max(1, int(cap or 1))
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for raw in urls:
+        url = str(raw or "").strip()
+        if not url:
+            continue
+        if not _root_from_url(url):
+            continue
+        if url in seen:
+            continue
+        normalized.append(url)
+        seen.add(url)
+        if len(normalized) >= cap:
+            break
+
+    opened = 0
+    for url in normalized:
+        if open_url_in_configured_browser(url, browser):
+            opened += 1
+    return opened
 
 
 def is_target_page_open_in_configured_browser(url: str, browser: str) -> Optional[bool]:
