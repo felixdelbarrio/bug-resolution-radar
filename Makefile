@@ -159,6 +159,12 @@ build-macos: test-ppt-regression
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
 	$(PYINSTALLER) --noconfirm --clean --windowed --name bug-resolution-radar --icon "$$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "$$ROOT_DIR/app.py:." "$${EXTRA_ARGS[@]}" $(PYINSTALLER_COLLECT_ALL_ARGS) "$$ROOT_DIR/run_streamlit.py"
+	APP_INFO_PLIST="dist_app/bug-resolution-radar.app/Contents/Info.plist"; \
+	if [ -f "$$APP_INFO_PLIST" ]; then \
+		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$$APP_INFO_PLIST" 2>/dev/null || true; \
+		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" "$$APP_INFO_PLIST"; \
+		/usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent true" "$$APP_INFO_PLIST"; \
+	fi
 	BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"; \
 	mkdir -p "$$BUNDLE_DIR/dist"; \
 	if [ -d dist_app/bug-resolution-radar.app ]; then \

@@ -5,7 +5,6 @@ from __future__ import annotations
 import multiprocessing as mp
 import os
 import runpy
-import socket
 import subprocess
 import sys
 import threading
@@ -149,6 +148,20 @@ def _int_env(name: str, default: int) -> int:
         return int(raw)
     except Exception:
         return int(default)
+
+
+def _ensure_localhost_no_proxy_env() -> None:
+    tokens = ["localhost", "127.0.0.1", "::1"]
+    for key in ("NO_PROXY", "no_proxy"):
+        raw = str(os.environ.get(key) or "").strip()
+        if not raw:
+            os.environ[key] = ",".join(tokens)
+            continue
+        existing = [part.strip() for part in raw.split(",") if part.strip()]
+        for token in tokens:
+            if token not in existing:
+                existing.append(token)
+        os.environ[key] = ",".join(existing)
 
 
 def _ensure_streamlit_config(runtime_home: Path) -> None:
@@ -336,22 +349,33 @@ def _run_streamlit_cli(script: Path, *, port: int | None, headless: bool) -> int
     return int(stcli.main())
 
 
-def _find_free_local_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        sock.listen(1)
-        port = int(sock.getsockname()[1])
-    return port
+def _desktop_candidate_ports() -> list[int]:
+    first = max(1, _int_env("BUG_RESOLUTION_RADAR_DESKTOP_PORT", 8501))
+    out: list[int] = [first]
+    for offset in range(1, 6):
+        candidate = first + offset
+        if candidate > 65535:
+            break
+        out.append(candidate)
+    return out
 
 
 def _streamlit_base_url(port: int) -> str:
-    return f"http://127.0.0.1:{int(port)}"
+    return f"http://localhost:{int(port)}"
+
+
+def _healthcheck_urls(port: int) -> list[str]:
+    p = int(port)
+    return [
+        f"http://127.0.0.1:{p}/_stcore/health",
+        f"http://localhost:{p}/_stcore/health",
+    ]
 
 
 def _wait_for_streamlit_ready(
     *, port: int, proc: subprocess.Popen[bytes], timeout_s: float
 ) -> None:
-    health_url = f"{_streamlit_base_url(port)}/_stcore/health"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     deadline = time.monotonic() + max(1.0, float(timeout_s))
     while time.monotonic() < deadline:
         return_code = proc.poll()
@@ -359,14 +383,15 @@ def _wait_for_streamlit_ready(
             raise RuntimeError(
                 f"El servidor interno finalizó antes de iniciar (exit={return_code})."
             )
-        try:
-            with urllib.request.urlopen(health_url, timeout=1.0) as response:
-                if int(getattr(response, "status", 200)) < 500:
-                    return
-        except (urllib.error.URLError, TimeoutError, OSError):
-            pass
+        for health_url in _healthcheck_urls(port):
+            try:
+                with opener.open(health_url, timeout=1.0) as response:
+                    if int(getattr(response, "status", 200)) < 500:
+                        return
+            except (urllib.error.URLError, TimeoutError, OSError):
+                continue
         time.sleep(0.2)
-    raise TimeoutError(f"Timeout esperando Streamlit en {health_url}.")
+    raise TimeoutError(f"Timeout esperando Streamlit en {_streamlit_base_url(port)}.")
 
 
 def _is_internal_server_mode() -> bool:
@@ -378,6 +403,8 @@ def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
     env[_INTERNAL_SERVER_ENV] = "1"
     env[_INTERNAL_SERVER_PORT_ENV] = str(int(port))
     env["BROWSER"] = "none"
+    for key in ("NO_PROXY", "no_proxy"):
+        env[key] = str(os.environ.get(key) or "localhost,127.0.0.1,::1")
     return subprocess.Popen([sys.executable], env=env, cwd=os.getcwd())
 
 
@@ -400,14 +427,31 @@ def _stop_internal_streamlit_subprocess(proc: subprocess.Popen[bytes]) -> None:
 
 
 def _run_desktop_container() -> int:
-    port = _find_free_local_port()
-    proc = _start_internal_streamlit_subprocess(port)
+    last_error: Exception | None = None
+    chosen_port: int | None = None
+    proc: subprocess.Popen[bytes] | None = None
     try:
-        _wait_for_streamlit_ready(
-            port=port,
-            proc=proc,
-            timeout_s=_float_env("BUG_RESOLUTION_RADAR_SERVER_BOOT_TIMEOUT_S", 45.0),
-        )
+        for port in _desktop_candidate_ports():
+            candidate_proc = _start_internal_streamlit_subprocess(port)
+            try:
+                _wait_for_streamlit_ready(
+                    port=port,
+                    proc=candidate_proc,
+                    timeout_s=_float_env("BUG_RESOLUTION_RADAR_SERVER_BOOT_TIMEOUT_S", 45.0),
+                )
+                proc = candidate_proc
+                chosen_port = port
+                break
+            except Exception as exc:
+                last_error = exc
+                _stop_internal_streamlit_subprocess(candidate_proc)
+                continue
+
+        if proc is None or chosen_port is None:
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("No se pudo iniciar el servidor interno de Streamlit.")
+
         try:
             import webview
         except Exception as exc:
@@ -425,7 +469,7 @@ def _run_desktop_container() -> int:
 
         webview.create_window(
             title=title,
-            url=_streamlit_base_url(port),
+            url=_streamlit_base_url(chosen_port),
             width=width,
             height=height,
             min_size=(min_width, min_height),
@@ -437,7 +481,8 @@ def _run_desktop_container() -> int:
             webview.start(debug=False)
         return 0
     finally:
-        _stop_internal_streamlit_subprocess(proc)
+        if proc is not None:
+            _stop_internal_streamlit_subprocess(proc)
 
 
 def _prepare_frozen_runtime() -> None:
@@ -448,6 +493,7 @@ def _prepare_frozen_runtime() -> None:
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
     _load_dotenv_if_present(runtime_home / ".env")
+    _ensure_localhost_no_proxy_env()
     _configure_streamlit_runtime_stability_for_binary()
 
 
