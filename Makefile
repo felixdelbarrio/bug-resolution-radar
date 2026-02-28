@@ -258,6 +258,9 @@ build-macos: sync-build-env test-ppt-regression
 	if [ -f .env.example ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.env.example:."); \
 	fi; \
+	if [ -f .env ]; then \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.env:."); \
+	fi; \
 	if [ -f .streamlit/config.toml ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
@@ -313,6 +316,9 @@ build-macos: sync-build-env test-ppt-regression
 	if [ -f .env.example ]; then \
 		cp .env.example "$$BUNDLE_DIR/.env.example"; \
 	fi; \
+	if [ -f .env ]; then \
+		cp .env "$$BUNDLE_DIR/.env"; \
+	fi; \
 	if [ -f .streamlit/config.toml ]; then \
 		mkdir -p "$$BUNDLE_DIR/.streamlit"; \
 		cp .streamlit/config.toml "$$BUNDLE_DIR/.streamlit/config.toml"; \
@@ -340,6 +346,9 @@ build-linux: sync-build-env test-ppt-regression
 	if [ -f .env.example ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.env.example:."); \
 	fi; \
+	if [ -f .env ]; then \
+		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.env:."); \
+	fi; \
 	if [ -f .streamlit/config.toml ]; then \
 		EXTRA_ARGS+=(--add-data "$$ROOT_DIR/.streamlit/config.toml:.streamlit"); \
 	fi; \
@@ -357,6 +366,9 @@ build-linux: sync-build-env test-ppt-regression
 	fi; \
 	if [ -f .env.example ]; then \
 		cp .env.example "$$BUNDLE_DIR/.env.example"; \
+	fi; \
+	if [ -f .env ]; then \
+		cp .env "$$BUNDLE_DIR/.env"; \
 	fi; \
 	if [ -f .streamlit/config.toml ]; then \
 		mkdir -p "$$BUNDLE_DIR/.streamlit"; \
