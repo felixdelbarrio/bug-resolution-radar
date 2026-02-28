@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import html
-from io import BytesIO
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from io import BytesIO
 from typing import Any, Iterable, Literal, Optional, Sequence
 
 import pandas as pd
@@ -81,14 +81,15 @@ def _csv_key_as_link_df(df: pd.DataFrame) -> pd.DataFrame:
     if "key" not in df.columns or "url" not in df.columns:
         return df
 
-    out = df.copy()
+    out = df.copy(deep=False)
+    key_values = out["key"].tolist()
+    url_values = out["url"].tolist()
     link_values = [
-        _csv_hyperlink_formula(url=row.get("url"), label=row.get("key"))
-        for _, row in out[["key", "url"]].iterrows()
+        _csv_hyperlink_formula(url=url, label=key) for key, url in zip(key_values, url_values)
     ]
     out["key"] = [
         link if link is not None else str(orig if orig is not None else "")
-        for link, orig in zip(link_values, out["key"].tolist())
+        for link, orig in zip(link_values, key_values)
     ]
     # Once the link is embedded in `key`, the raw `url` column is redundant in the CSV export.
     out = out.drop(columns=["url"], errors="ignore")

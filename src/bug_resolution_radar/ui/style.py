@@ -23,6 +23,7 @@ from bug_resolution_radar.theme.design_tokens import (
 from bug_resolution_radar.ui.common import flow_signal_color_map
 
 
+@lru_cache(maxsize=64)
 def _svg_data_uri(*, file_name: str, fallback_svg: str) -> str:
     try:
         icon_ref = (

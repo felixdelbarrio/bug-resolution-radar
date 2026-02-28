@@ -13,10 +13,10 @@ from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.components.filters import render_filters, render_status_priority_matrix
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
-from bug_resolution_radar.ui.dashboard.tabs.issues_tab import render_issues_tab
-from bug_resolution_radar.ui.dashboard.tabs.kanban_tab import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.layout import apply_dashboard_layout
 from bug_resolution_radar.ui.dashboard.next_best_banner import render_next_best_banner
+from bug_resolution_radar.ui.dashboard.tabs.issues_tab import render_issues_tab
+from bug_resolution_radar.ui.dashboard.tabs.kanban_tab import render_kanban_tab
 from bug_resolution_radar.ui.dashboard.tabs.notes_tab import render_notes_tab
 from bug_resolution_radar.ui.dashboard.tabs.overview_tab import (
     render_overview_kpis,
@@ -61,6 +61,8 @@ def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
         mask &= df["country"].fillna("").astype(str).eq(selected_country)
     if selected_source_id and "source_id" in df.columns:
         mask &= df["source_id"].fillna("").astype(str).eq(selected_source_id)
+    if bool(mask.all()):
+        return df.copy(deep=False)
     return df.loc[mask].copy(deep=False)
 
 
@@ -92,6 +94,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         df_all=scoped_df,
         settings=settings,
         include_kpis=section in {"overview", "trends", "insights"},
+        include_timeseries_chart=section in {"overview", "trends"},
     )
     if ctx.df_all.empty:
         st.warning(
