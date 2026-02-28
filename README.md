@@ -149,6 +149,8 @@ make format
 make lint
 make typecheck
 make test
+make deadcode-private
+make quality-core
 ```
 
 Con cobertura:
@@ -158,6 +160,12 @@ pytest -q --cov=bug_resolution_radar --cov-report=term-missing
 ```
 
 Umbral configurado de cobertura: `80%`.
+
+Guardias adicionales:
+
+- `make deadcode-private`: detecta helpers privados huérfanos en `src/` (evita acumulación de código muerto).
+- `make quality-core`: ejecuta guardia de código muerto + `mypy` + `pytest`.
+- `make install-hooks`: instala hooks de `pre-commit` (Black, Ruff y guardia de código muerto).
 
 ## GitFlow
 

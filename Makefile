@@ -55,7 +55,7 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup format lint typecheck test run clean clean-build \
+.PHONY: help setup format lint typecheck test deadcode-private quality-core install-hooks run clean clean-build \
 	ensure-build-tools ensure-desktop-runtime-deps sync-build-env \
 	test-ppt-regression build-local build-macos build-linux verify-macos-app
 
@@ -69,6 +69,9 @@ help:
 	@echo "  make lint        Lint (ruff, si está instalado)"
 	@echo "  make typecheck   Typecheck (mypy, si está instalado)"
 	@echo "  make test        Tests (pytest, si está instalado)"
+	@echo "  make deadcode-private  Detecta helpers privados huérfanos en src"
+	@echo "  make quality-core Ejecuta guardias base (deadcode + mypy + tests)"
+	@echo "  make install-hooks Instala pre-commit hooks locales"
 	@echo "  make test-ppt-regression  Regresión PPT/Kaleido (igual que en workflows POSIX)"
 	@echo "  make sync-build-env Sincroniza deps de build/runtime desktop antes de empaquetar"
 	@echo "  make build-local Auto-detecta OS (macOS/Linux) y construye binario local"
@@ -118,6 +121,37 @@ test:
 		$(VENV)/bin/pytest -q ; \
 	else \
 		echo "pytest no está instalado en el venv."; \
+	fi
+
+deadcode-private:
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) scripts/check_dead_private_helpers.py ; \
+	else \
+		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
+		exit 1; \
+	fi
+
+quality-core: deadcode-private
+	@if [ -x "$(VENV)/bin/mypy" ]; then \
+		$(VENV)/bin/mypy src ; \
+	else \
+		echo "mypy no está instalado en el venv."; \
+		exit 1; \
+	fi
+	@if [ -x "$(VENV)/bin/pytest" ]; then \
+		$(VENV)/bin/pytest -q ; \
+	else \
+		echo "pytest no está instalado en el venv."; \
+		exit 1; \
+	fi
+
+install-hooks:
+	@if [ -x "$(VENV)/bin/pre-commit" ]; then \
+		$(VENV)/bin/pre-commit install ; \
+		echo "pre-commit hooks instalados."; \
+	else \
+		echo "pre-commit no está instalado en el venv. Ejecuta: make setup"; \
+		exit 1; \
 	fi
 
 ensure-build-tools:

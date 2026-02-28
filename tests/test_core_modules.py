@@ -7,8 +7,9 @@ from typing import Any
 import pandas as pd
 
 from bug_resolution_radar import config as cfg
-from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.common.security import mask_secret, safe_log_text
+from bug_resolution_radar.common.utils import now_iso, parse_age_buckets, parse_int_list
+from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     flow_signal_color_map,
@@ -18,7 +19,6 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
-from bug_resolution_radar.common.utils import now_iso, parse_age_buckets, parse_int_list
 
 
 def test_now_iso_is_valid_utc_timestamp() -> None:

@@ -136,10 +136,10 @@ def _sources_with_results(
     # Legacy fallback: if dataset has no source_id metadata, filter by country only.
     use_country_fallback = not source_ids_with_results and has_country_column
     if not has_source_id_column and not has_country_column:
-        return configured_sources
+        return source_rows
 
     filtered_sources: List[Dict[str, str]] = []
-    for src in configured_sources:
+    for src in source_rows:
         sid = str(src.get("source_id") or "").strip()
         country = str(src.get("country") or "").strip()
 

@@ -4,15 +4,15 @@ import json
 from pathlib import Path
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.services.source_maintenance import (
     cache_inventory,
     purge_source_cache,
-    reset_cache_store,
     remove_helix_source_from_settings,
     remove_jira_source_from_settings,
+    reset_cache_store,
     source_cache_impact,
 )
 from bug_resolution_radar.ui.common import save_issues_doc

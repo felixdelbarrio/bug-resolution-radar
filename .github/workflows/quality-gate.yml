@@ -1,0 +1,38 @@
+name: Quality Gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Dead private helper guard
+        run: |
+          python scripts/check_dead_private_helpers.py
+
+      - name: Smoke quality checks
+        run: |
+          ruff check src/bug_resolution_radar/reports src/bug_resolution_radar/ui tests
+          mypy src
+          pytest -q

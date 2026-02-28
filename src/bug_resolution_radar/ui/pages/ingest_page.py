@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Literal, Tuple, cast
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
     helix_sources,
@@ -20,11 +21,10 @@ from bug_resolution_radar.config import (
 )
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
-from bug_resolution_radar.common.utils import now_iso
 
 
 @dataclass
