@@ -27,8 +27,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pyinstaller
+          pip install -e ".[dev]"
+
+      - name: Verify desktop runtime dependencies
+        shell: pwsh
+        run: |
+          python -c "import importlib.util,sys;missing=[m for m in ('streamlit','webview') if importlib.util.find_spec(m) is None];sys.exit('Missing desktop runtime modules: ' + ', '.join(missing)) if missing else print('Desktop runtime dependencies OK')"
+
+      - name: Run Windows entrypoint regression tests
+        shell: pwsh
+        run: |
+          pytest -q tests/test_run_streamlit_entrypoint.py
 
       - name: Generate Windows .ico from PNG
         shell: pwsh
@@ -63,6 +72,7 @@ jobs:
           }
           $args += @(
             "--collect-all", "streamlit",
+            "--collect-all", "webview",
             "--collect-all", "watchdog",
             "--collect-all", "plotly",
             "--collect-all", "pptx",

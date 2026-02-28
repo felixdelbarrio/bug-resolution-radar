@@ -75,6 +75,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Verify desktop runtime dependencies
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          missing = [
+              mod for mod in ("streamlit", "webview") if importlib.util.find_spec(mod) is None
+          ]
+          if missing:
+              raise SystemExit(f"Missing desktop runtime modules: {', '.join(missing)}")
+
+          print("Desktop runtime dependencies OK")
+          PY
+
       - name: Run POSIX PPT binary regression tests
         if: matrix.archive_suffix != 'windows'
         run: |
@@ -115,9 +130,15 @@ jobs:
             EXTRA_ARGS+=(--add-data "$ROOT_DIR/.streamlit/config.toml${SEP}.streamlit")
           fi
           if [ "${{ matrix.archive_suffix }}" = "macos" ]; then
-            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "$ICON_PATH" --distpath dist_app --workpath build_app --specpath build_app --add-data "$APP_DATA_ARG" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
+            pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "$ICON_PATH" --distpath dist_app --workpath build_app --specpath build_app --add-data "$APP_DATA_ARG" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all webview --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
+            APP_INFO_PLIST="dist_app/bug-resolution-radar.app/Contents/Info.plist"
+            if [ -f "$APP_INFO_PLIST" ]; then
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$APP_INFO_PLIST" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" "$APP_INFO_PLIST"
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent true" "$APP_INFO_PLIST"
+            fi
           else
-            pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$ICON_PATH" --workpath build --specpath build --add-data "$APP_DATA_ARG" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
+            pyinstaller --noconfirm --clean --onefile --windowed --name bug-resolution-radar --icon "$ICON_PATH" --workpath build --specpath build --add-data "$APP_DATA_ARG" "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all webview --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
           fi
 
       - name: Package release archive

@@ -63,6 +63,23 @@ make run
 
 App disponible en `http://localhost:8501`.
 
+Las distribuciones binarias (`.app`, `.exe`, Linux) se abren en su propia ventana
+de escritorio y no lanzan el navegador del sistema.
+
+Para empaquetado local robusto, usa:
+
+```bash
+make sync-build-env
+make build-macos   # o make build-linux
+```
+
+Esto valida explícitamente las dependencias de runtime desktop (`streamlit`,
+`webview`) antes de generar binarios.
+
+Si una build de escritorio falla al arrancar, revisa:
+
+- macOS: `~/Library/Application Support/bug-resolution-radar/logs/desktop-launcher.log`
+
 ## Instalación manual
 
 ```bash
