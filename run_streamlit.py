@@ -432,21 +432,9 @@ def _desktop_webview_enabled_for_frozen_binary() -> bool:
     """
     Return whether packaged binaries should use embedded pywebview.
 
-    We run in container-first mode to keep UX consistent across environments and
-    avoid forcing the system default browser for the main app shell.
+    Business desktop binaries always run in embedded container mode.
     """
-    default = True
-    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", default)
-
-
-def _desktop_webview_browser_fallback_enabled() -> bool:
-    """
-    Allow automatic fallback to external browser if desktop container fails.
-
-    This keeps the app usable even when pywebview backend initialization fails on
-    a locked-down endpoint.
-    """
-    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW_FALLBACK_BROWSER", True)
+    return True
 
 
 def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
@@ -559,12 +547,10 @@ def _prepare_frozen_runtime() -> None:
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
     _load_dotenv_if_present(runtime_home / ".env")
+    # Desktop app UX requirement: always open inside embedded container.
+    os.environ["BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW"] = "true"
     if _corporate_mode_enabled():
         # Conservative defaults for locked-down corporate endpoints.
-        # Force container-first on corporate endpoints to avoid default-browser UX drift,
-        # even if old .env templates left this value as false.
-        os.environ["BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW"] = "true"
-        os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW_FALLBACK_BROWSER", "true")
         os.environ.setdefault("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
         os.environ.setdefault("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
         _launcher_log(
@@ -598,12 +584,6 @@ def main() -> int:
         return _run_desktop_container()
     except Exception as exc:
         _launcher_log("Error fatal iniciando contenedor desktop.\n" + format_exc())
-        if _desktop_webview_browser_fallback_enabled():
-            _launcher_log(
-                "Fallback automático a navegador del sistema tras fallo de contenedor desktop."
-            )
-            _start_binary_auto_shutdown_monitor()
-            return _run_streamlit_cli(script, port=None, headless=False)
         log_hint = f" Revisa: {_LAUNCHER_LOG_FILE}" if _LAUNCHER_LOG_FILE is not None else ""
         print(f"Error iniciando contenedor de escritorio: {exc}.{log_hint}", file=sys.stderr)
         return 1

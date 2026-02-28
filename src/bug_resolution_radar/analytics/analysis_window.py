@@ -18,13 +18,15 @@ def _utc_timestamp(value: datetime | None = None) -> pd.Timestamp:
 
 
 def parse_analysis_lookback_months(settings: Settings) -> int:
-    """Return configured lookback in months (0 means auto/max)."""
-    raw = getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0)
+    """Return configured lookback in months with a business default of 12."""
+    raw = getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 12)
     try:
         value = int(str(raw).strip())
     except Exception:
-        return 0
-    return max(0, value)
+        return 12
+    if value <= 0:
+        return 12
+    return value
 
 
 def max_available_backlog_days(df: pd.DataFrame, *, now: datetime | None = None) -> int:
@@ -57,10 +59,7 @@ def effective_analysis_lookback_months(
     """Resolve configured monthly lookback, clamped to available backlog window."""
     available = max_available_backlog_months(df, now=now)
     configured_months = parse_analysis_lookback_months(settings)
-    if configured_months > 0:
-        return max(1, min(configured_months, available))
-
-    return available
+    return max(1, min(configured_months, available))
 
 
 def apply_analysis_depth_filter(

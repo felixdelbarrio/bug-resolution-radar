@@ -27,7 +27,7 @@ def test_max_available_backlog_days_uses_oldest_created() -> None:
     assert max_available_backlog_days(df, now=now) == 11
 
 
-def test_effective_analysis_lookback_months_auto_uses_available() -> None:
+def test_effective_analysis_lookback_months_defaults_to_12_then_clamps() -> None:
     now = datetime(2026, 2, 20, tzinfo=timezone.utc)
     df = pd.DataFrame({"created": [now - timedelta(days=7), now - timedelta(days=30)]})
     settings = Settings(ANALYSIS_LOOKBACK_MONTHS=0)

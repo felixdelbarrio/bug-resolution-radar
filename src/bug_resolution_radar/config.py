@@ -273,8 +273,7 @@ class Settings(BaseModel):
     DASHBOARD_FILTER_ASSIGNEE_JSON: str = "[]"
     KEEP_CACHE_ON_SOURCE_DELETE: str = "false"
     REPORT_PPT_DOWNLOAD_DIR: str = ""
-    # 0 = auto (máxima antigüedad disponible en backlog)
-    ANALYSIS_LOOKBACK_MONTHS: int = 0
+    ANALYSIS_LOOKBACK_MONTHS: int = 12
 
 
 def ensure_env() -> None:

@@ -1729,7 +1729,7 @@ def ingest_helix(
                 None,
             )
 
-    analysis_lookback_months = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 0)
+    analysis_lookback_months = max(1, _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 12))
     cache_reference_doc = cache_doc if cache_doc is not None else existing_doc
     source_cached_items = _cached_items_for_source(
         cache_reference_doc,
@@ -1738,9 +1738,7 @@ def ingest_helix(
         alias=alias_value,
     )
     if source_cached_items:
-        rolling_lookback_months = (
-            int(analysis_lookback_months) if analysis_lookback_months > 0 else 12
-        )
+        rolling_lookback_months = int(analysis_lookback_months)
         create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
             analysis_lookback_months=rolling_lookback_months,
         )
@@ -1751,7 +1749,7 @@ def ingest_helix(
     else:
         create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
             create_date_year=create_date_year,
-            analysis_lookback_months=0,
+            analysis_lookback_months=analysis_lookback_months,
         )
         create_window_rule = f"{create_window_rule}; first_ingest=true"
 
