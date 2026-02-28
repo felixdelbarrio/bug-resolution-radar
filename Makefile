@@ -47,15 +47,31 @@ for path in $(1); do \
 	if [ ! -e "$$path" ]; then \
 		continue; \
 	fi; \
-	for attempt in 1 2 3; do \
-		find "$$path" -name .DS_Store -delete 2>/dev/null || true; \
-		if rm -rf "$$path"; then \
+	for attempt in 1 2 3 4 5; do \
+		if [ ! -e "$$path" ]; then \
+			break; \
+		fi; \
+		find "$$path" \( -name .DS_Store -o -name "Icon?" \) -delete 2>/dev/null || true; \
+		if [ "$$(uname -s 2>/dev/null || echo unknown)" = "Darwin" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+		fi; \
+		chmod -R u+w "$$path" 2>/dev/null || true; \
+		rm -rf "$$path" 2>/dev/null || true; \
+		if [ ! -e "$$path" ]; then \
+			break; \
+		fi; \
+		if [ -d "$$path" ]; then \
+			find "$$path" -mindepth 1 -exec rm -rf {} + 2>/dev/null || true; \
+			rmdir "$$path" 2>/dev/null || true; \
+		fi; \
+		if [ ! -e "$$path" ]; then \
 			break; \
 		fi; \
 		sleep 1; \
 	done; \
 	if [ -e "$$path" ]; then \
-		echo "No se pudo eliminar $$path (Finder/Quick Look puede estar recreando .DS_Store)." >&2; \
+		echo "No se pudo eliminar $$path tras varios intentos (posible bloqueo de Finder/Quick Look)." >&2; \
+		ls -la "$$path" 2>/dev/null || true; \
 		exit 1; \
 	fi; \
 done
