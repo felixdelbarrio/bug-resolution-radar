@@ -172,3 +172,58 @@ def test_start_binary_auto_shutdown_monitor_starts_daemon_thread(monkeypatch) ->
     assert captured["daemon"] is True
     assert captured["name"] == "brr-auto-shutdown-monitor"
     assert captured["started"] is True
+
+
+def test_build_streamlit_argv_for_internal_server_headless() -> None:
+    script = Path("/tmp/app.py")
+    argv = run_streamlit._build_streamlit_argv(script, port=9876, headless=True)
+
+    assert argv[0:3] == ["streamlit", "run", str(script)]
+    assert "--server.address=127.0.0.1" in argv
+    assert "--server.port=9876" in argv
+    assert "--server.headless=true" in argv
+
+
+def test_build_streamlit_argv_for_local_dev_browser_mode() -> None:
+    script = Path("/tmp/app.py")
+    argv = run_streamlit._build_streamlit_argv(script, port=None, headless=False)
+
+    assert "--server.address=127.0.0.1" not in argv
+    assert "--server.headless=true" not in argv
+
+
+def test_is_internal_server_mode_respects_env_flag(monkeypatch) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_SERVER", "1")
+    assert run_streamlit._is_internal_server_mode() is True
+
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_SERVER", "false")
+    assert run_streamlit._is_internal_server_mode() is False
+
+
+def test_start_internal_streamlit_subprocess_passes_internal_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeProcess:
+        def poll(self) -> None:
+            return None
+
+    def _fake_popen(cmd, *, env, cwd):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["cwd"] = cwd
+        return _FakeProcess()
+
+    monkeypatch.setattr(run_streamlit.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(run_streamlit.sys, "executable", "/tmp/brr-bin")
+    monkeypatch.setenv("EXISTING_ENV", "keep-me")
+
+    proc = run_streamlit._start_internal_streamlit_subprocess(9123)
+
+    assert isinstance(proc, _FakeProcess)
+    assert captured["cmd"] == ["/tmp/brr-bin"]
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_SERVER"] == "1"
+    assert env["BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_PORT"] == "9123"
+    assert env["BROWSER"] == "none"
+    assert env["EXISTING_ENV"] == "keep-me"

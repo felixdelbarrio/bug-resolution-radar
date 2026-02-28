@@ -126,6 +126,13 @@ def _source_label(source: Dict[str, str], *, fallback: str) -> str:
     return fallback
 
 
+def _pick_test_source(selected_sources: List[Dict[str, str]]) -> Dict[str, str] | None:
+    if not selected_sources:
+        return None
+    # Keep tests fast: use only the first selected source.
+    return dict(selected_sources[0])
+
+
 def _is_retryable_helix_failure(message: str) -> bool:
     txt = str(message or "").strip().lower()
     if not txt:
@@ -729,14 +736,23 @@ def render(settings: Settings) -> None:
             if not jira_cfg:
                 st.error("No hay fuentes Jira configuradas.")
             elif not jira_cfg_selected:
-                st.warning("No hay fuentes Jira seleccionadas para ingesta.")
+                st.warning(
+                    "Selecciona al menos una fuente Jira para poder hacer el test de conectividad."
+                )
             else:
-                messages: List[Tuple[bool, str]] = []
-                with st.spinner("Probando fuentes Jira seleccionadas..."):
-                    for src in jira_cfg_selected:
-                        ok, msg, _ = ingest_jira(settings=settings, dry_run=True, source=src)
-                        messages.append((ok, msg))
-                _render_batch_messages(messages)
+                test_source = _pick_test_source(jira_cfg_selected)
+                if test_source is None:
+                    st.warning(
+                        "Selecciona al menos una fuente Jira para poder hacer el test de conectividad."
+                    )
+                else:
+                    with st.spinner("Probando una fuente Jira seleccionada..."):
+                        ok, msg, _ = ingest_jira(
+                            settings=settings,
+                            dry_run=True,
+                            source=test_source,
+                        )
+                    _render_batch_messages([(ok, msg)])
 
         if run_jira:
             if not jira_cfg:
@@ -890,26 +906,31 @@ def render(settings: Settings) -> None:
             if not helix_cfg:
                 st.error("No hay fuentes Helix configuradas.")
             elif not helix_cfg_selected:
-                st.warning("No hay fuentes Helix seleccionadas para ingesta.")
+                st.warning(
+                    "Selecciona al menos una fuente Helix para poder hacer el test de conectividad."
+                )
             else:
-                messages = []
-                with st.spinner("Probando fuentes Helix seleccionadas..."):
-                    for src in helix_cfg_selected:
+                test_source = _pick_test_source(helix_cfg_selected)
+                if test_source is None:
+                    st.warning(
+                        "Selecciona al menos una fuente Helix para poder hacer el test de conectividad."
+                    )
+                else:
+                    with st.spinner("Probando una fuente Helix seleccionada..."):
                         ok, msg, _ = ingest_helix(
                             browser=helix_browser,
-                            country=str(src.get("country", "")).strip(),
-                            source_alias=str(src.get("alias", "")).strip(),
-                            source_id=str(src.get("source_id", "")).strip(),
+                            country=str(test_source.get("country", "")).strip(),
+                            source_alias=str(test_source.get("alias", "")).strip(),
+                            source_id=str(test_source.get("source_id", "")).strip(),
                             proxy=helix_proxy,
                             ssl_verify=helix_ssl_verify,
-                            service_origin_buug=src.get("service_origin_buug"),
-                            service_origin_n1=src.get("service_origin_n1"),
-                            service_origin_n2=src.get("service_origin_n2"),
+                            service_origin_buug=test_source.get("service_origin_buug"),
+                            service_origin_n1=test_source.get("service_origin_n1"),
+                            service_origin_n2=test_source.get("service_origin_n2"),
                             dry_run=True,
                             existing_doc=HelixDocument.empty(),
                         )
-                        messages.append((ok, msg))
-                _render_batch_messages(messages)
+                    _render_batch_messages([(ok, msg)])
 
         if run_helix:
             if not helix_cfg:
