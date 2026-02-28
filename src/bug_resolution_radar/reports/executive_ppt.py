@@ -1039,7 +1039,6 @@ def _report_request_cache_key(
         "priority_filters": _normalize_filter_values(priority_filters),
         "assignee_filters": _normalize_filter_values(assignee_filters),
         "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
-        "analysis_lookback_days": int(getattr(settings, "ANALYSIS_LOOKBACK_DAYS", 0) or 0),
         "data_path": str(data_path),
         "data_rev": data_rev,
         # If callers provide prefiltered frames without backing file changes, keep a
@@ -1100,8 +1099,7 @@ def _ppt_png_cache_key(
     h.update(raw)
     h.update(
         (
-            f"|{_PPT_PNG_CACHE_VERSION}|{float(scale):.3f}|"
-            f"{int(export_width)}|{int(export_height)}"
+            f"|{_PPT_PNG_CACHE_VERSION}|{float(scale):.3f}|{int(export_width)}|{int(export_height)}"
         ).encode("utf-8")
     )
     return h.hexdigest()

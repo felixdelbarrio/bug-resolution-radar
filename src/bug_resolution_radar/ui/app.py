@@ -98,7 +98,9 @@ def _sources_with_results(
     configured_sources: List[Dict[str, str]] | None = None,
 ) -> List[Dict[str, str]]:
     """Return configured sources that currently have ingested rows."""
-    source_rows = configured_sources if configured_sources is not None else all_configured_sources(settings)
+    source_rows = (
+        configured_sources if configured_sources is not None else all_configured_sources(settings)
+    )
     if not source_rows:
         return []
 
@@ -111,42 +113,15 @@ def _sources_with_results(
         return []
 
     has_source_id_column = "source_id" in df.columns
-    has_country_column = "country" in df.columns
+    if not has_source_id_column:
+        return []
 
-    source_ids_with_results: set[str] = set()
-    if has_source_id_column:
-        source_ids = (
-            df["source_id"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        source_ids_with_results = {sid for sid in source_ids.unique().tolist() if sid}
-
-    countries_with_results: set[str] = set()
-    if has_country_column:
-        countries = (
-            df["country"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        countries_with_results = {country for country in countries.unique().tolist() if country}
-
-    # Legacy fallback: if dataset has no source_id metadata, filter by country only.
-    use_country_fallback = not source_ids_with_results and has_country_column
-    if not has_source_id_column and not has_country_column:
-        return source_rows
+    source_ids = df["source_id"].dropna().astype(str).str.strip()
+    source_ids_with_results = {sid for sid in source_ids.unique().tolist() if sid}
 
     filtered_sources: List[Dict[str, str]] = []
     for src in source_rows:
         sid = str(src.get("source_id") or "").strip()
-        country = str(src.get("country") or "").strip()
-
-        if use_country_fallback:
-            if country and country in countries_with_results:
-                filtered_sources.append(src)
-            continue
 
         if sid and sid in source_ids_with_results:
             filtered_sources.append(src)

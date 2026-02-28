@@ -545,7 +545,7 @@ def build_session_delta_lines(
             candidates.append(
                 (
                     magnitude,
-                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if d > 0 else ''}{d*100.0:.1f} pp).",
+                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if d > 0 else ''}{d * 100.0:.1f} pp).",
                 )
             )
         else:

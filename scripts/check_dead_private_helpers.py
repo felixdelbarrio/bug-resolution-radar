@@ -55,7 +55,9 @@ def _module_name_for(file_path: Path, *, scan_root: ScanRoot) -> str:
     return ".".join(part for part in parts if part)
 
 
-def _top_level_private_defs(tree: ast.Module, *, file_path: Path, module_name: str) -> List[Candidate]:
+def _top_level_private_defs(
+    tree: ast.Module, *, file_path: Path, module_name: str
+) -> List[Candidate]:
     out: List[Candidate] = []
     for node in list(tree.body):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -85,7 +87,9 @@ def _name_load_counts(tree: ast.Module) -> Dict[str, int]:
     return counts
 
 
-def _resolve_from_import_module(current_module: str, *, level: int, module: str | None) -> str | None:
+def _resolve_from_import_module(
+    current_module: str, *, level: int, module: str | None
+) -> str | None:
     if level <= 0:
         return module
 

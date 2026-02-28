@@ -556,7 +556,9 @@ def _prepare_frozen_runtime() -> None:
         os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "false")
         os.environ.setdefault("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
         os.environ.setdefault("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
-        _launcher_log("Corporate mode activo: mínimos permisos y browser bootstrap sin AppleScript.")
+        _launcher_log(
+            "Corporate mode activo: mínimos permisos y browser bootstrap sin AppleScript."
+        )
     _ensure_localhost_no_proxy_env()
     _configure_streamlit_runtime_stability_for_binary()
 

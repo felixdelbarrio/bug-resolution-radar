@@ -608,7 +608,7 @@ def figures_to_html_bytes(
   <body>
     <h1>{html.escape(title)}</h1>
     <div class="wrap">
-      {''.join(blocks)}
+      {"".join(blocks)}
     </div>
   </body>
 </html>

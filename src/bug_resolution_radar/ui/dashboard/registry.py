@@ -68,7 +68,7 @@ class ChartSpec:
 # Helpers (safe datetime + insights)
 # ---------------------------------------------------------------------
 def _fmt_pct(x: float) -> str:
-    return f"{x*100:.1f}%"
+    return f"{x * 100:.1f}%"
 
 
 def _quantile_hint(values: Sequence[float], q: float) -> Optional[float]:

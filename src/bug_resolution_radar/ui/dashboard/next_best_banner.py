@@ -201,7 +201,9 @@ def _chips_html(values: List[str], *, color_fn: Callable[[str], str]) -> str:
 def _filters_markup(
     *, status_filters: List[str], priority_filters: List[str], assignee_filters: List[str]
 ) -> str:
-    del assignee_filters  # Owner is intentionally omitted: it is already implicit in the insight context.
+    del (
+        assignee_filters
+    )  # Owner is intentionally omitted: it is already implicit in the insight context.
     status_chips = _chips_html(status_filters, color_fn=status_color)
     priority_chips = _chips_html(priority_filters, color_fn=priority_color)
     if not status_chips and not priority_chips:

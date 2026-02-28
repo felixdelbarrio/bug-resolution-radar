@@ -153,7 +153,9 @@ def compute_kpis(
             else pd.Series(dtype=int)
         )
         closed_daily = (
-            resolved.loc[resolved_notna & (resolved >= start)].dt.floor("D").value_counts(sort=False)
+            resolved.loc[resolved_notna & (resolved >= start)]
+            .dt.floor("D")
+            .value_counts(sort=False)
             if has_resolved
             else pd.Series(dtype=int)
         )

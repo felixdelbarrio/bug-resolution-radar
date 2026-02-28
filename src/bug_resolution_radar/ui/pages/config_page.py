@@ -1320,7 +1320,6 @@ def render(settings: Settings) -> None:
                         "TREND_SELECTED_CHARTS": summary_csv,
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
                         "ANALYSIS_LOOKBACK_MONTHS": analysis_lookback_months_to_store,
-                        "ANALYSIS_LOOKBACK_DAYS": 0,
                         "BUG_RESOLUTION_RADAR_CORPORATE_MODE": _bool_to_env(corporate_mode),
                         "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW": _bool_to_env(desktop_webview),
                         "BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL": _bool_to_env(

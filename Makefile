@@ -7,6 +7,7 @@ PYTHON=$(VENV)/bin/python
 RUN=$(VENV)/bin/streamlit
 PYTEST=$(VENV)/bin/pytest
 PYINSTALLER=$(VENV)/bin/pyinstaller
+PRECOMMIT=$(VENV)/bin/pre-commit
 
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
@@ -55,7 +56,7 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup format lint typecheck test deadcode-private quality-core install-hooks run clean clean-build \
+.PHONY: help setup format lint typecheck test test-cov deadcode-private docs-check precommit quality quality-core install-hooks run clean clean-build \
 	ensure-build-tools ensure-desktop-runtime-deps sync-build-env \
 	test-ppt-regression build-local build-macos build-linux verify-macos-app
 
@@ -63,14 +64,18 @@ help:
 	@echo ""
 	@echo "Bug Resolution Radar - comandos"
 	@echo ""
-	@echo "  make setup       Prepara/actualiza el entorno completo (venv + deps dev, incluye black)"
+	@echo "  make setup       Prepara/actualiza el entorno completo (venv + deps dev)"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
-	@echo "  make format      Formatea el código (black, si está instalado)"
+	@echo "  make format      Formatea el código (ruff format)"
 	@echo "  make lint        Lint (ruff, si está instalado)"
 	@echo "  make typecheck   Typecheck (mypy, si está instalado)"
 	@echo "  make test        Tests (pytest, si está instalado)"
+	@echo "  make test-cov    Tests con cobertura (fail-under según pyproject.toml)"
 	@echo "  make deadcode-private  Detecta helpers privados huérfanos en src"
-	@echo "  make quality-core Ejecuta guardias base (deadcode + mypy + tests)"
+	@echo "  make docs-check  Valida integridad de documentación y referencias"
+	@echo "  make precommit   Ejecuta hooks de pre-commit sobre todo el repo"
+	@echo "  make quality     Cadena completa local (precommit + deadcode + docs + mypy + tests)"
+	@echo "  make quality-core Alias de make quality"
 	@echo "  make install-hooks Instala pre-commit hooks locales"
 	@echo "  make test-ppt-regression  Regresión PPT/Kaleido (igual que en workflows POSIX)"
 	@echo "  make sync-build-env Sincroniza deps de build/runtime desktop antes de empaquetar"
@@ -96,10 +101,10 @@ setup:
 	@echo "Activa con: source .venv/bin/activate"
 
 format:
-	@if [ -f $(VENV)/bin/black ]; then \
-		$(VENV)/bin/black . ; \
+	@if [ -f $(VENV)/bin/ruff ]; then \
+		$(VENV)/bin/ruff format . ; \
 	else \
-		echo "black no está instalado en el venv."; \
+		echo "ruff no está instalado en el venv."; \
 	fi
 
 lint:
@@ -123,6 +128,14 @@ test:
 		echo "pytest no está instalado en el venv."; \
 	fi
 
+test-cov:
+	@if [ -f "$(PYTEST)" ]; then \
+		$(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml ; \
+	else \
+		echo "pytest no está instalado en el venv."; \
+		exit 1; \
+	fi
+
 deadcode-private:
 	@if [ -x "$(PYTHON)" ]; then \
 		$(PYTHON) scripts/check_dead_private_helpers.py ; \
@@ -131,19 +144,37 @@ deadcode-private:
 		exit 1; \
 	fi
 
-quality-core: deadcode-private
+docs-check:
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) scripts/check_docs_references.py ; \
+	else \
+		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
+		exit 1; \
+	fi
+
+precommit:
+	@if [ -x "$(PRECOMMIT)" ]; then \
+		$(PRECOMMIT) run --all-files ; \
+	else \
+		echo "pre-commit no está instalado en el venv. Ejecuta: make setup"; \
+		exit 1; \
+	fi
+
+quality: precommit deadcode-private docs-check
 	@if [ -x "$(VENV)/bin/mypy" ]; then \
 		$(VENV)/bin/mypy src ; \
 	else \
 		echo "mypy no está instalado en el venv."; \
 		exit 1; \
 	fi
-	@if [ -x "$(VENV)/bin/pytest" ]; then \
-		$(VENV)/bin/pytest -q ; \
+	@if [ -x "$(PYTEST)" ]; then \
+		$(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml ; \
 	else \
 		echo "pytest no está instalado en el venv."; \
 		exit 1; \
 	fi
+
+quality-core: quality
 
 install-hooks:
 	@if [ -x "$(VENV)/bin/pre-commit" ]; then \

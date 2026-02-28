@@ -228,7 +228,7 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                 _progress_append_message(
                     "jira",
                     ok=False,
-                    msg=("Error guardando resultados Jira: " f"{type(e).__name__}: {e}"),
+                    msg=(f"Error guardando resultados Jira: {type(e).__name__}: {e}"),
                     count_source=False,
                 )
                 _progress_finish(
@@ -394,7 +394,7 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                 _progress_append_message(
                     "helix",
                     ok=False,
-                    msg=("Error guardando resultados Helix: " f"{type(e).__name__}: {e}"),
+                    msg=(f"Error guardando resultados Helix: {type(e).__name__}: {e}"),
                     count_source=False,
                 )
                 _progress_finish(
@@ -490,8 +490,7 @@ def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
     closed_date = str(item.closed_date or "").strip() or None
     resolved = closed_date or (updated if _is_closed_status(status) else None)
     label = (
-        f"{str(item.matrix_service_n1 or '').strip()} "
-        f"{str(item.source_service_n1 or '').strip()}"
+        f"{str(item.matrix_service_n1 or '').strip()} {str(item.source_service_n1 or '').strip()}"
     ).strip()
     impacted = str(item.impacted_service or item.service or "").strip()
     components = [impacted] if impacted else []

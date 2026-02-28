@@ -408,9 +408,7 @@ def _inject_colored_multiselect_css(
         )
 
     def _tag_sel(v: str) -> str:
-        return (
-            f'[data-baseweb="tag"][title*="{v}" i], ' f'[data-baseweb="tag"]:has([title*="{v}" i])'
-        )
+        return f'[data-baseweb="tag"][title*="{v}" i], [data-baseweb="tag"]:has([title*="{v}" i])'
 
     for label in status_labels:
         raw = (label or "").strip()

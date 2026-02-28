@@ -169,7 +169,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-midnight: {palette.midnight};
         --bbva-text: {palette.ink};
         --bbva-text-muted: rgba({text_rgb},0.74);
-        --bbva-surface: {palette.white if not dark_mode else '#0A1F45'};
+        --bbva-surface: {palette.white if not dark_mode else "#0A1F45"};
         --bbva-surface-2: {palette.bg_light};
         --bbva-surface-soft: {surface_soft};
         --bbva-surface-elevated: {surface_elevated};

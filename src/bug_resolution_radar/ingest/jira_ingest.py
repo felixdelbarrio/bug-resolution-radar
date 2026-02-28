@@ -12,7 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
-from ..config import Settings, build_source_id, supported_countries
+from ..config import Settings, build_source_id, jira_sources, supported_countries
 from ..models.schema import IssuesDocument, NormalizedIssue
 from .browser_runtime import (
     is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
@@ -159,11 +159,20 @@ def _resolve_source_scope(
         )
         return country, alias, source_id, jql
 
+    configured_sources = jira_sources(settings)
+    if configured_sources:
+        primary = configured_sources[0]
+        country = str(primary.get("country") or "").strip() or fallback_country
+        alias = str(primary.get("alias") or "").strip() or "Jira principal"
+        jql = str(primary.get("jql") or "").strip()
+        source_id = str(primary.get("source_id") or "").strip() or build_source_id(
+            "jira", country, alias
+        )
+        return country, alias, source_id, jql
+
     alias = "Jira principal"
-    country = fallback_country
-    jql = str(settings.JIRA_JQL or "").strip()
-    source_id = build_source_id("jira", country, alias)
-    return country, alias, source_id, jql
+    source_id = build_source_id("jira", fallback_country, alias)
+    return fallback_country, alias, source_id, ""
 
 
 def _merge_key(issue: NormalizedIssue) -> str:

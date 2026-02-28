@@ -140,7 +140,7 @@ def render_slides(
 
     with mid:
         st.markdown(
-            f'<div class="bbva-slide-toolbar"><div class="meta">Gráfico {idx+1} / {len(deck)}</div></div>',
+            f'<div class="bbva-slide-toolbar"><div class="meta">Gráfico {idx + 1} / {len(deck)}</div></div>',
             unsafe_allow_html=True,
         )
 

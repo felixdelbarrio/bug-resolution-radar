@@ -57,9 +57,9 @@ def test_apply_analysis_depth_filter_filters_old_rows_and_excludes_unknown_creat
     assert set(out["key"].tolist()) == {"A"}
 
 
-def test_effective_analysis_lookback_months_uses_legacy_days_if_months_not_set() -> None:
+def test_effective_analysis_lookback_months_clamps_to_available_window() -> None:
     now = datetime(2026, 2, 20, tzinfo=timezone.utc)
     df = pd.DataFrame({"created": [now - timedelta(days=130)]})
-    settings = Settings(ANALYSIS_LOOKBACK_MONTHS=0, ANALYSIS_LOOKBACK_DAYS=60)
+    settings = Settings(ANALYSIS_LOOKBACK_MONTHS=99)
 
-    assert effective_analysis_lookback_months(settings, df=df, now=now) == 2
+    assert effective_analysis_lookback_months(settings, df=df, now=now) == 5

@@ -113,7 +113,6 @@ def _dashboard_data_cache_signature(
             "kpis=1" if include_kpis else "kpis=0",
             "ts=1" if include_timeseries_chart else "ts=0",
             f"lookback_m={getattr(settings, 'ANALYSIS_LOOKBACK_MONTHS', 0)}",
-            f"lookback_d={getattr(settings, 'ANALYSIS_LOOKBACK_DAYS', 0)}",
             scoped_sig,
             str(filters_sig),
         ]

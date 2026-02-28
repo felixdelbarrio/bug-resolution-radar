@@ -59,7 +59,11 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
     env_path = tmp_path / ".env"
     env_example = tmp_path / ".env.example"
     env_example.write_text(
-        "APP_TITLE=Radar\nJIRA_JQL=project = X\\\\nAND status = Open\n", encoding="utf-8"
+        (
+            "APP_TITLE=Radar\n"
+            'JIRA_SOURCES_JSON=[{"country":"México","alias":"Core","jql":"project = X\\\\nAND status = Open"}]\n'
+        ),
+        encoding="utf-8",
     )
 
     monkeypatch.setattr(cfg, "ENV_PATH", env_path)
@@ -70,12 +74,15 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
 
     settings = cfg.load_settings()
     assert settings.APP_TITLE == "Radar"
-    assert "\n" in settings.JIRA_JQL
+    jira_cfg = cfg.jira_sources(settings)
+    assert len(jira_cfg) == 1
+    assert "\n" in jira_cfg[0]["jql"]
 
-    settings.JIRA_JQL = "linea 1\nlinea 2"
+    settings.JIRA_SOURCES_JSON = '[{"country":"México","alias":"Core","jql":"linea 1\\nlinea 2"}]'
     cfg.save_settings(settings)
     saved = env_path.read_text(encoding="utf-8")
-    assert "JIRA_JQL=linea 1\\nlinea 2" in saved
+    assert "JIRA_SOURCES_JSON=" in saved
+    assert "linea 1\\nlinea 2" in saved
 
 
 def test_config_resolves_relative_data_paths_against_env_location(

@@ -26,7 +26,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "black==25.11.0",
   "ruff>=0.5",
   "mypy>=1.10",
   "pytest>=8.2",
@@ -48,10 +47,6 @@ bug_resolution_radar = [
   "ui/assets/fonts/bbva/*.woff",
   "ui/assets/fonts/bbva/*.woff2",
 ]
-
-[tool.black]
-line-length = 100
-target-version = ["py39"]
 
 [tool.ruff]
 line-length = 100
