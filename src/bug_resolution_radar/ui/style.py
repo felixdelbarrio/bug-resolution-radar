@@ -131,8 +131,9 @@ def _font_face_css() -> str:
     return "\n".join(blocks)
 
 
-def inject_bbva_css(*, dark_mode: bool = False) -> None:
-    """Inject global CSS tokens and components for light/dark runtime themes."""
+@lru_cache(maxsize=2)
+def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
+    """Compile global CSS tokens/components for light/dark runtime themes."""
     palette = BBVA_DARK if dark_mode else BBVA_LIGHT
     if dark_mode:
         surface_base = BBVA_DARK_SURFACE
@@ -739,18 +740,25 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             margin: 0 !important;
             padding: 0.24rem 0 !important;
             padding-inline-start: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
             gap: 0 !important;
             row-gap: 0 !important;
             column-gap: 0 !important;
           }
-          /* BaseWeb may wrap options in virtualized row nodes; force compact rows globally. */
+          /* BaseWeb may wrap options in virtualized row nodes; force one compact row per option. */
           div[data-baseweb="popover"] [role="listbox"] > *,
           div[data-baseweb="popover"] [role="menu"] > *,
+          div[data-baseweb="popover"] ul > li,
           div[data-baseweb="popover"] ul > * {
             margin: 0 !important;
             padding: 0 !important;
-            min-height: 0 !important;
+            min-height: 1.92rem !important;
+            height: 1.92rem !important;
+            max-height: 1.92rem !important;
             box-sizing: border-box !important;
+            display: flex !important;
+            align-items: stretch !important;
           }
           div[data-baseweb="popover"] li {
             list-style: none !important;
@@ -766,7 +774,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: transparent !important;
             margin: 0 !important;
             min-height: 1.92rem !important;
-            height: 1.92rem !important;
+            height: 100% !important;
             max-height: 1.92rem !important;
             line-height: 1.18 !important;
             padding: 0.34rem 0.72rem !important;
@@ -774,6 +782,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             display: flex !important;
             align-items: center !important;
             white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
             --bbva-opt-dot: transparent;
           }
           div[data-baseweb="popover"] [role="option"] > div,
@@ -782,6 +792,13 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 0 !important;
             min-height: 0 !important;
             box-sizing: border-box !important;
+            width: 100% !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 0 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
           }
           __SEMANTIC_POPOVER_RULES__
           div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"],
@@ -799,12 +816,14 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             margin-top: 0 !important;
             margin-bottom: 0 !important;
             line-height: inherit !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
           }
-          div[data-baseweb="popover"] [role="option"] *,
-          div[data-baseweb="popover"] li[role="option"] * {
+          div[data-baseweb="popover"] [role="option"] span,
+          div[data-baseweb="popover"] li[role="option"] span {
             margin: 0 !important;
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
+            padding: 0 !important;
             line-height: 1.18 !important;
           }
           div[data-baseweb="popover"] [role="option"] p,
@@ -815,6 +834,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 0 !important;
             display: inline !important;
             line-height: 1.18 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
           }
           div[data-baseweb="popover"] [role="option"]:hover,
           div[data-baseweb="popover"] li[role="option"]:hover {
@@ -1732,7 +1754,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
         </style>
         """
-    st.markdown(
+    return (
         css_template.replace("__CSS_VARS__", css_vars)
         .replace("__SEMANTIC_POPOVER_RULES__", semantic_popover_css_rules())
         .replace("__FONT_FACE_CSS__", _font_face_css())
@@ -1745,9 +1767,13 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         .replace("__ICON_REINGEST__", icon_reingest)
         .replace("__ICON_RECYCLE__", icon_recycle)
         .replace("__ICON_SEARCH__", icon_search)
-        .replace("__ICON_XML__", icon_xml),
-        unsafe_allow_html=True,
+        .replace("__ICON_XML__", icon_xml)
     )
+
+
+def inject_bbva_css(*, dark_mode: bool = False) -> None:
+    """Inject global CSS tokens and components for light/dark runtime themes."""
+    st.markdown(_compiled_bbva_css(dark_mode=bool(dark_mode)), unsafe_allow_html=True)
 
 
 def render_hero(app_title: str) -> None:

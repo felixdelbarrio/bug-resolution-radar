@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import re
+from functools import lru_cache
 from typing import List, Tuple
 from urllib.parse import quote, unquote
 
@@ -38,6 +39,8 @@ MAX_TABLE_NATIVE_ROWS = 2500
 # Keep styled rendering for the full native table range shown to users.
 # Fast path remains only as an emergency fallback for oversized direct calls.
 MAX_TABLE_STYLED_ROWS = MAX_TABLE_NATIVE_ROWS
+MAX_CARD_TITLE_CHARS = 220
+MAX_CARD_DESCRIPTION_CHARS = 420
 _NEUTRAL_TOKEN = BBVA_NEUTRAL_SOFT.upper()
 _NEUTRAL_BORDER = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[1]
 _NEUTRAL_BG = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[2]
@@ -146,6 +149,17 @@ def _title_and_description_from_row(
     return txt, ""
 
 
+def _truncate_issue_card_text(value: str, *, max_chars: int) -> str:
+    txt = str(value or "").strip()
+    if not txt or txt == "—" or len(txt) <= max_chars:
+        return txt
+    trimmed = txt[: max_chars + 1]
+    if " " in trimmed:
+        trimmed = trimmed.rsplit(" ", 1)[0]
+    return trimmed.rstrip(" -–—:;,.") + "…"
+
+
+@lru_cache(maxsize=4096)
 def _normalize_issue_card_text(value: str) -> str:
     txt = str(value or "").strip()
     if not txt or txt == "—":
@@ -578,8 +592,12 @@ def render_issue_cards(
             url_raw = str(row.get("url") or "").strip()
             source_type = _normalize_source_type(row.get("source_type"))
             title_txt, desc_txt = _title_and_description_from_row(row)
-            issue_title = html.escape(title_txt)
-            issue_desc = html.escape(desc_txt)
+            issue_title = html.escape(
+                _truncate_issue_card_text(title_txt, max_chars=MAX_CARD_TITLE_CHARS)
+            )
+            issue_desc = html.escape(
+                _truncate_issue_card_text(desc_txt, max_chars=MAX_CARD_DESCRIPTION_CHARS)
+            )
             issue_desc_html = (
                 f'<div class="issue-description">{issue_desc}</div>' if issue_desc else ""
             )

@@ -8,6 +8,7 @@ import pandas as pd
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.dashboard import state as dashboard_state
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
+from bug_resolution_radar.ui.pages import dashboard_page
 
 
 class _FakeStreamlitState:
@@ -75,3 +76,45 @@ def test_build_dashboard_data_context_applies_issue_scope_like_filter(monkeypatc
     )
 
     assert ctx.dff["key"].tolist() == ["MEXBMI1-283490"]
+
+
+def test_dashboard_data_cache_signature_ignores_section_label_when_shape_and_flags_match(
+    monkeypatch: Any,
+) -> None:
+    fake_state = _FakeStreamlitState(
+        {
+            "workspace_country": "México",
+            "workspace_source_id": "jira:mexico:core",
+            dashboard_state.FILTER_STATUS_KEY: ["New"],
+            dashboard_state.FILTER_PRIORITY_KEY: ["High"],
+            dashboard_state.FILTER_ASSIGNEE_KEY: [],
+            dashboard_state.ISSUES_SCOPE_SORT_COL_KEY: "summary",
+            dashboard_state.ISSUES_SCOPE_LIKE_QUERY_KEY: "dashboard",
+        }
+    )
+    monkeypatch.setattr(dashboard_page, "st", fake_state)
+
+    df = pd.DataFrame(
+        [
+            {"key": "A-1", "summary": "x", "status": "New", "priority": "High", "assignee": "ana"},
+            {"key": "A-2", "summary": "y", "status": "New", "priority": "High", "assignee": "ana"},
+        ]
+    )
+    settings = Settings(DATA_PATH="data/issues.json", ANALYSIS_LOOKBACK_MONTHS=12)
+
+    sig_overview = dashboard_page._dashboard_data_cache_signature(
+        settings=settings,
+        section="overview",
+        scoped_df=df,
+        include_kpis=True,
+        include_timeseries_chart=True,
+    )
+    sig_trends = dashboard_page._dashboard_data_cache_signature(
+        settings=settings,
+        section="trends",
+        scoped_df=df,
+        include_kpis=True,
+        include_timeseries_chart=True,
+    )
+
+    assert sig_overview == sig_trends

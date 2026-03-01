@@ -5,6 +5,7 @@ import pandas as pd
 from bug_resolution_radar.ui.components.issues import (
     _normalize_issue_card_text,
     _title_and_description_from_row,
+    _truncate_issue_card_text,
     prepare_issue_cards_df,
 )
 
@@ -111,3 +112,11 @@ def test_title_and_description_from_row_normalizes_rich_text_description() -> No
     assert "<p>" not in description
     assert "Hacer login en GEMA" in description
     assert "Path:" in description
+
+
+def test_truncate_issue_card_text_keeps_words_and_adds_ellipsis() -> None:
+    raw = " ".join(["detalle"] * 120)
+    out = _truncate_issue_card_text(raw, max_chars=80)
+    assert out.endswith("…")
+    assert len(out) <= 81
+    assert not out.endswith(" …")

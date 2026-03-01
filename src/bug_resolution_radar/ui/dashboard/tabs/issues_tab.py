@@ -214,15 +214,18 @@ def _render_pager_shell(
         )
 
 
-def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
-    """Apply a lightweight literal-like filter over the selected sort column."""
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_apply_shared_like_filter(
+    df: pd.DataFrame, *, sort_col: str, query: str
+) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df
     if sort_col not in df.columns:
         return df
-
-    query_key = f"{key_prefix}::sort_like_query"
-    query = str(st.session_state.get(query_key) or "").strip()
     if not query:
         return df
 
@@ -244,13 +247,33 @@ def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: st
     return df.loc[mask]
 
 
+def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
+    """Apply a lightweight literal-like filter over the selected sort column."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    if sort_col not in df.columns:
+        return df
+
+    query_key = f"{key_prefix}::sort_like_query"
+    query = str(st.session_state.get(query_key) or "").strip()
+    if not query:
+        return df
+
+    return _cached_apply_shared_like_filter(df, sort_col=sort_col, query=query)
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df
     if sort_col not in df.columns:
         return df
 
-    out = df.copy(deep=False).copy()
+    out = df.copy()
     sort_col_norm = str(sort_col).strip().lower()
     key_col = "__sort_shared_key"
     tie_col = "__sort_shared_updated"
@@ -384,19 +407,33 @@ def _inject_helix_descriptions(
     if "source_type" not in dff.columns or "key" not in dff.columns:
         return dff
 
-    stype = dff["source_type"].astype(str).str.strip().str.lower()
-    helix_mask = stype.eq("helix")
-    if not bool(helix_mask.any()):
-        return dff
-
     helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
     if not helix_path:
         return dff
     desc_map = _load_helix_descriptions_cached(helix_path, helix_mtime_ns)
     if not desc_map:
         return dff
+    return _inject_helix_descriptions_from_desc_map(dff, desc_map=desc_map)
 
-    out = dff.copy(deep=False).copy()
+
+def _inject_helix_descriptions_from_desc_map(
+    dff: pd.DataFrame,
+    *,
+    desc_map: dict[str, str],
+) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    if not desc_map:
+        return dff
+    if "source_type" not in dff.columns or "key" not in dff.columns:
+        return dff
+
+    stype = dff["source_type"].astype(str).str.strip().str.lower()
+    helix_mask = stype.eq("helix")
+    if not bool(helix_mask.any()):
+        return dff
+
+    out = dff.copy()
     if "description" not in out.columns:
         out["description"] = ""
     key_upper = out["key"].fillna("").astype(str).str.strip().str.upper()
@@ -441,6 +478,36 @@ def _inject_missing_jira_descriptions_from_summary(dff: pd.DataFrame) -> pd.Data
     out = dff.copy(deep=False).copy()
     out["description"] = ""
     return out
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_prepare_issues_base_df(
+    dff: pd.DataFrame,
+    *,
+    helix_path: str,
+    helix_mtime_ns: int,
+) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    out = _sorted_for_display(dff)
+    desc_map = (
+        _load_helix_descriptions_cached(helix_path, helix_mtime_ns) if helix_path else {}
+    )
+    out = _inject_helix_descriptions_from_desc_map(out, desc_map=desc_map)
+    return _inject_missing_jira_descriptions_from_summary(out)
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_make_table_export_df(dff: pd.DataFrame) -> pd.DataFrame:
+    return make_table_export_df(dff, preferred_cols=ISSUES_TABLE_PREFERRED_COLS)
 
 
 @st.cache_data(
@@ -619,63 +686,67 @@ def _official_export_input_df(export_df: pd.DataFrame) -> pd.DataFrame:
     return export_df[cols].copy(deep=False)
 
 
+@lru_cache(maxsize=8)
+def _issues_view_toggle_css(scope_key: str) -> str:
+    return f"""
+    <style>
+      .st-key-{scope_key} .stButton > button {{
+        min-height: 2.15rem !important;
+        padding: 0.35rem 0.78rem !important;
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+        border: 1px solid var(--bbva-tab-soft-border) !important;
+        background: var(--bbva-tab-soft-bg) !important;
+        color: var(--bbva-tab-soft-text) !important;
+      }}
+      .st-key-{scope_key} .stButton > button[kind="primary"] {{
+        border-color: var(--bbva-tab-active-border) !important;
+        background: var(--bbva-tab-active-bg) !important;
+        color: var(--bbva-tab-active-text) !important;
+      }}
+      .st-key-{scope_key} .stButton > button * {{
+        color: inherit !important;
+        fill: currentColor !important;
+      }}
+    </style>
+    """
+
+
 def _inject_issues_view_toggle_css(*, scope_key: str) -> None:
     """Scoped style for Issues Cards/Tabla toggle buttons."""
-    st.markdown(
-        f"""
-        <style>
-          .st-key-{scope_key} .stButton > button {{
-            min-height: 2.15rem !important;
-            padding: 0.35rem 0.78rem !important;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
-            border: 1px solid var(--bbva-tab-soft-border) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            color: var(--bbva-tab-soft-text) !important;
-          }}
-          .st-key-{scope_key} .stButton > button[kind="primary"] {{
-            border-color: var(--bbva-tab-active-border) !important;
-            background: var(--bbva-tab-active-bg) !important;
-            color: var(--bbva-tab-active-text) !important;
-          }}
-          .st-key-{scope_key} .stButton > button * {{
-            color: inherit !important;
-            fill: currentColor !important;
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(_issues_view_toggle_css(scope_key), unsafe_allow_html=True)
+
+
+@lru_cache(maxsize=8)
+def _issues_sort_export_css(scope_key: str) -> str:
+    return f"""
+    <style>
+      .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
+        gap: 0.72rem !important;
+        align-items: end !important;
+      }}
+      .st-key-{scope_key} .stDownloadButton {{
+        width: 100% !important;
+        display: flex;
+        justify-content: flex-end;
+        padding-right: 0.28rem;
+        box-sizing: border-box;
+      }}
+      .st-key-{scope_key} .stDownloadButton > button {{
+        margin-left: auto !important;
+      }}
+      .st-key-{scope_key} [class*="st-key-"] [data-testid="stToggle"] {{
+        display: flex;
+        justify-content: flex-end;
+        margin-right: 0.12rem;
+      }}
+    </style>
+    """
 
 
 def _inject_issues_sort_export_css(*, scope_key: str) -> None:
     """Scoped style for sort/export container alignment."""
-    st.markdown(
-        f"""
-        <style>
-          .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
-            gap: 0.72rem !important;
-            align-items: end !important;
-          }}
-          .st-key-{scope_key} .stDownloadButton {{
-            width: 100% !important;
-            display: flex;
-            justify-content: flex-end;
-            padding-right: 0.28rem;
-            box-sizing: border-box;
-          }}
-          .st-key-{scope_key} .stDownloadButton > button {{
-            margin-left: auto !important;
-          }}
-          .st-key-{scope_key} [class*="st-key-"] [data-testid="stToggle"] {{
-            display: flex;
-            justify-content: flex-end;
-            margin-right: 0.12rem;
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(_issues_sort_export_css(scope_key), unsafe_allow_html=True)
 
 
 def render_issues_section(
@@ -695,14 +766,18 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
-        dff_show_raw = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
-        dff_show_raw = _inject_missing_jira_descriptions_from_summary(dff_show_raw)
+        helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
+        dff_show_raw = _cached_prepare_issues_base_df(
+            dff,
+            helix_path=helix_path,
+            helix_mtime_ns=helix_mtime_ns,
+        )
         sort_col, sort_asc = _ensure_shared_sort_state(dff_show_raw, key_prefix=key_prefix)
         dff_like = _apply_shared_like_filter(dff_show_raw, sort_col=sort_col, key_prefix=key_prefix)
         dff_show = _apply_shared_sort(dff_like, sort_col=sort_col, sort_asc=sort_asc)
 
         # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
-        table_df = make_table_export_df(dff_show, preferred_cols=ISSUES_TABLE_PREFERRED_COLS)
+        table_df = _cached_make_table_export_df(dff_show)
         export_df = table_df.copy(deep=False)
 
         # Compact toolbar: top row for view toggle + count.

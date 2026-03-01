@@ -324,15 +324,18 @@ def test_select_popover_rows_keep_compact_single_line_layout() -> None:
     assert 'div[data-baseweb="popover"] [role="option"],' in css
     assert "div[data-baseweb=\"popover\"] li[role=\"option\"]" in css
     assert 'div[data-baseweb="popover"] [role="listbox"] > *,' in css
+    assert 'div[data-baseweb="popover"] ul > li,' in css
     assert "min-height: 1.92rem !important;" in css
     assert "height: 1.92rem !important;" in css
     assert "display: flex !important;" in css
+    assert "align-items: stretch !important;" in css
     assert "padding: 0.34rem 0.72rem !important;" in css
+    assert "overflow: hidden !important;" in css
+    assert "text-overflow: ellipsis !important;" in css
     assert '[role="option"]:is([aria-label*="new" i], [title*="new" i])' in css
     assert "border-left: 2px solid color-mix(in srgb, #E85D63 72%, transparent);" in css
     assert '[role="option"][data-bbva-semantic="1"] {\n            position: relative !important;' not in css
     assert "background-image: radial-gradient(" in css
-    assert "div[data-baseweb=\"popover\"] [role=\"option\"] *," in css
     assert "div[data-baseweb=\"popover\"] [role=\"option\"] p," in css
 
 
