@@ -9,6 +9,7 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT, hex_to_rgba
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     normalize_text_col,
@@ -22,6 +23,7 @@ from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
 MAX_KANBAN_ITEMS_PER_COLUMN = 220
 MAX_KANBAN_TOTAL_ITEMS = 1200
+_KANBAN_FALLBACK_COLOR = BBVA_NEUTRAL_SOFT
 
 
 def _kanban_set_status_filter(st_name: str) -> None:
@@ -41,16 +43,6 @@ def _order_statuses_canonical(statuses: List[str]) -> List[str]:
     return [s for _, s in sorted(list(enumerate(statuses)), key=key_fn)]
 
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = (hex_color or "").strip().lstrip("#")
-    if len(h) != 6:
-        return f"rgba(127,146,178,{alpha:.3f})"
-    r = int(h[0:2], 16)
-    g = int(h[2:4], 16)
-    b = int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha:.3f})"
-
-
 def _status_slug(status: str, i: int) -> str:
     base = re.sub(r"[^a-z0-9]+", "_", (status or "").strip().lower()).strip("_")
     return f"{base or 'status'}_{i}"
@@ -60,10 +52,10 @@ def _inject_kanban_header_chip_css(headers: List[tuple[str, str, bool]]) -> None
     rules: List[str] = []
     for status_name, slug, is_active in headers:
         color = status_color(status_name)
-        bg = _hex_to_rgba(color, 0.20 if is_active else 0.12)
-        border = _hex_to_rgba(color, 0.72 if is_active else 0.45)
-        hover_bg = _hex_to_rgba(color, 0.16 if is_active else 0.14)
-        ring = _hex_to_rgba(color, 0.20)
+        bg = hex_to_rgba(color, 0.20 if is_active else 0.12, fallback=_KANBAN_FALLBACK_COLOR)
+        border = hex_to_rgba(color, 0.72 if is_active else 0.45, fallback=_KANBAN_FALLBACK_COLOR)
+        hover_bg = hex_to_rgba(color, 0.16 if is_active else 0.14, fallback=_KANBAN_FALLBACK_COLOR)
+        ring = hex_to_rgba(color, 0.20, fallback=_KANBAN_FALLBACK_COLOR)
 
         rules.append(
             f"""

@@ -12,7 +12,12 @@ import pandas as pd
 import streamlit as st
 from openpyxl.utils import get_column_letter
 
-from bug_resolution_radar.theme.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_FONT_HEADLINE,
+    BBVA_FONT_SANS,
+    BBVA_LIGHT,
+    hex_to_rgba,
+)
 from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
 
 EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
@@ -571,6 +576,8 @@ def figures_to_html_bytes(
     if not blocks:
         return b""
 
+    panel_border = hex_to_rgba(BBVA_LIGHT.ink, 0.14, fallback=BBVA_LIGHT.ink)
+    subtitle_color = hex_to_rgba(BBVA_LIGHT.ink, 0.72, fallback=BBVA_LIGHT.ink)
     doc = f"""<!doctype html>
 <html lang="en">
   <head>
@@ -593,7 +600,7 @@ def figures_to_html_bytes(
       }}
       .panel {{
         background: {BBVA_LIGHT.white};
-        border: 1px solid rgba(17,25,45,0.14);
+        border: 1px solid {panel_border};
         border-radius: 16px;
         padding: 12px;
       }}
@@ -606,7 +613,7 @@ def figures_to_html_bytes(
         margin: 0 0 8px 0;
         font-size: 0.9rem;
         font-weight: 700;
-        color: rgba(17,25,45,0.72);
+        color: {subtitle_color};
         font-family: {BBVA_FONT_SANS};
       }}
     </style>

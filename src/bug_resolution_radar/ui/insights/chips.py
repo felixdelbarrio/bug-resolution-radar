@@ -7,6 +7,7 @@ from typing import Optional
 
 import streamlit as st
 
+from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     priority_color,
@@ -18,6 +19,7 @@ _NEUTRAL_CHIP_STYLE = (
     "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
     "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
 )
+_NEUTRAL_TOKEN = BBVA_NEUTRAL_SOFT.upper()
 
 
 def inject_insights_chip_css() -> None:
@@ -91,7 +93,7 @@ def _safe_text(value: object, *, fallback: str) -> str:
 
 def _chip_style(value: str, *, is_priority: bool) -> str:
     color = priority_color(value) if is_priority else status_color(value)
-    if color.upper() == "#E2E6EE":
+    if color.upper() == _NEUTRAL_TOKEN:
         return _NEUTRAL_CHIP_STYLE
     return chip_style_from_color(color)
 

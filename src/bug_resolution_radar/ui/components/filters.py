@@ -73,17 +73,10 @@ def _hex_with_alpha(hex_color: str, alpha: int) -> str:
 
 
 def _inject_filters_panel_css() -> None:
-    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
-    if is_dark:
-        chip_border = "#9A7A3A"
-        chip_bg = "rgba(201, 173, 98, 0.20)"
-        chip_text = "#F1C66D"
-        chip_lbl = "#E8D7AE"
-    else:
-        chip_border = "color-mix(in srgb, #8F5C00 34%, var(--bbva-border))"
-        chip_bg = "color-mix(in srgb, #FFF5DE 56%, var(--bbva-surface))"
-        chip_text = "color-mix(in srgb, #8F5C00 86%, var(--bbva-text))"
-        chip_lbl = "currentColor"
+    chip_border = "var(--bbva-flt-action-chip-border)"
+    chip_bg = "var(--bbva-flt-action-chip-bg)"
+    chip_text = "var(--bbva-flt-action-chip-text)"
+    chip_lbl = "var(--bbva-flt-action-chip-label)"
     css = """
         <style>
           .flt-action-chip {
@@ -522,7 +515,7 @@ def _matrix_safe_token(value: str) -> str:
 
 
 def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
-    color = (hex_color or "#8EA2C4").strip()
+    color = (hex_color or status_color("")).strip()
     deployed_color = status_color("Deployed").strip().upper()
     if color.strip().upper() == deployed_color:
         border = _hex_with_alpha(color, 178 if selected else 145)

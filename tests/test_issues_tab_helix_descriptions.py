@@ -53,7 +53,7 @@ def test_inject_helix_descriptions_uses_source_scoped_key(monkeypatch: Any) -> N
     assert out.loc[0, "description"] == "Descripcion extensa del incidente"
 
 
-def test_inject_missing_jira_descriptions_from_summary() -> None:
+def test_inject_missing_jira_descriptions_from_summary_keeps_empty() -> None:
     df = pd.DataFrame(
         [
             {
@@ -67,7 +67,7 @@ def test_inject_missing_jira_descriptions_from_summary() -> None:
 
     out = issues_tab._inject_missing_jira_descriptions_from_summary(df)
 
-    assert out.loc[0, "description"] == "No se visualiza pantalla"
+    assert out.loc[0, "description"] == ""
 
 
 def test_apply_shared_sort_status_uses_canonical_order() -> None:

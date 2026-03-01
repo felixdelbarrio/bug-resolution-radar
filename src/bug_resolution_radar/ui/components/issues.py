@@ -13,6 +13,7 @@ import streamlit as st
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_browser
+from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT
 from bug_resolution_radar.ui.common import (
     chip_palette_for_color,
     chip_style_from_color,
@@ -30,6 +31,9 @@ _ISSUE_OPEN_KEY_QP = "br_open_issue_key"
 _SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
+_NEUTRAL_TOKEN = BBVA_NEUTRAL_SOFT.upper()
+_NEUTRAL_BORDER = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[1]
+_NEUTRAL_BG = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[2]
 
 
 def _normalize_source_type(value: object) -> str:
@@ -195,10 +199,20 @@ def _jira_label_from_row(row: dict[str, object] | pd.Series) -> str:
     key = _safe_cell_text(row.get("key"))
     if key != "—":
         return key
+    for alt_col in ("issue_key", "ticket", "incident", "id"):
+        alt = _safe_cell_text(row.get(alt_col))
+        if alt != "—":
+            mm_alt = _SUMMARY_KEY_RE.search(alt)
+            if mm_alt:
+                return mm_alt.group(1)
+            return alt
     url = str(row.get("jira") or row.get("url") or "").strip()
     m = _JIRA_KEY_RE.search(url)
     if m:
         return m.group(1)
+    m_url = _SUMMARY_KEY_RE.search(url)
+    if m_url:
+        return m_url.group(1)
     summary = _safe_cell_text(row.get("summary"))
     if summary != "—":
         mm = _SUMMARY_KEY_RE.search(summary)
@@ -213,7 +227,7 @@ def _chip_html(value: object, *, for_priority: bool) -> str:
     if txt == "—":
         return '<span class="issue-table-chip issue-table-chip-neutral">—</span>'
     color = priority_color(txt) if for_priority else status_color(txt)
-    if color.upper() == "#E2E6EE":
+    if color.upper() == _NEUTRAL_TOKEN:
         return f'<span class="issue-table-chip issue-table-chip-neutral">{html.escape(txt)}</span>'
     style = chip_style_from_color(color)
     return f'<span class="issue-table-chip" style="{style}">{html.escape(txt)}</span>'
@@ -223,21 +237,24 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
     txt = _safe_cell_text(value)
     if txt == "—":
         return (
-            "color: #7a869a; font-weight: 700; background-color: rgba(148, 163, 184, 0.14); "
-            "border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 999px;"
+            f"color: var(--bbva-text-muted); font-weight: 700; background-color: {_NEUTRAL_BG}; "
+            f"border: 1px solid {_NEUTRAL_BORDER}; border-radius: 999px; "
+            "padding-left: 10px; padding-right: 10px; text-align: center;"
         )
 
     color = priority_color(txt) if for_priority else status_color(txt)
-    if color.upper() == "#E2E6EE":
+    if color.upper() == _NEUTRAL_TOKEN:
         return (
-            "color: #9fb3c8; font-weight: 700; background-color: rgba(148, 163, 184, 0.14); "
-            "border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 999px;"
+            f"color: var(--bbva-text-muted); font-weight: 700; background-color: {_NEUTRAL_BG}; "
+            f"border: 1px solid {_NEUTRAL_BORDER}; border-radius: 999px; "
+            "padding-left: 10px; padding-right: 10px; text-align: center;"
         )
 
     txt_color, border, bg = chip_palette_for_color(color)
     return (
         f"color: {txt_color}; background-color: {bg}; border: 1px solid {border}; "
-        "border-radius: 999px; font-weight: 700;"
+        "border-radius: 999px; font-weight: 700; padding-left: 10px; padding-right: 10px; "
+        "text-align: center;"
     )
 
 
@@ -246,8 +263,8 @@ def _native_key_cell_style(value: object) -> str:
     if txt == "—":
         return ""
     return (
-        "color: #5EB0FF !important; text-decoration: underline !important; "
-        "font-weight: 800 !important; opacity: 1 !important;"
+        "color: var(--bbva-action-link) !important; text-decoration: underline !important; "
+        "font-weight: 800 !important; opacity: 1 !important; white-space: nowrap;"
     )
 
 
@@ -473,7 +490,7 @@ def _render_issue_table_native(
     sort_state_prefix: str | None = None,
 ) -> None:
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
-    df_show = display_df[show_cols].copy(deep=False).copy()
+    df_show = display_df[show_cols].copy(deep=False).copy().reset_index(drop=True)
     col_cfg = {}
     origin_header = _origin_link_header(display_df)
 
@@ -503,6 +520,10 @@ def _render_issue_table_native(
         col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
 
     styler = df_show.style
+    try:
+        styler = styler.hide(axis="index")
+    except Exception:
+        pass
     if "key" in df_show.columns:
         styler = styler.map(_native_key_cell_style, subset=["key"])
     if "status" in df_show.columns:
@@ -669,23 +690,23 @@ def render_issue_cards(
         """
         <style>
           .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] {
-            border: 1px solid rgba(151, 188, 255, 0.42) !important;
+            border: 1px solid var(--bbva-issue-card-border) !important;
             border-radius: var(--bbva-radius-xl) !important;
             padding: 14px 16px 12px 16px !important;
             margin: 0 0 12px 0 !important;
             background: linear-gradient(
               180deg,
-              rgba(9, 31, 66, 0.96) 0%,
-              rgba(7, 24, 52, 0.96) 100%
+              var(--bbva-issue-card-bg-start) 0%,
+              var(--bbva-issue-card-bg-end) 100%
             ) !important;
-            box-shadow: 0 10px 26px rgba(1, 8, 26, 0.42),
-                        inset 0 0 0 1px rgba(157, 192, 255, 0.15) !important;
+            box-shadow: var(--bbva-issue-card-shadow),
+                        inset 0 0 0 1px var(--bbva-issue-card-inset) !important;
             overflow: visible !important;
           }
           .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"]:hover {
-            border-color: rgba(94, 176, 255, 0.68) !important;
-            box-shadow: 0 12px 30px rgba(1, 8, 26, 0.48),
-                        inset 0 0 0 1px rgba(157, 192, 255, 0.26) !important;
+            border-color: var(--bbva-issue-card-border-hover) !important;
+            box-shadow: var(--bbva-issue-card-shadow-hover),
+                        inset 0 0 0 1px var(--bbva-issue-card-inset-hover) !important;
           }
           .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] {
             gap: 0 !important;
@@ -705,7 +726,7 @@ def render_issue_cards(
           [class*="st-key-issue_open_btn_"] button {
             border: 0 !important;
             background: transparent !important;
-            color: #3b82f6 !important;
+            color: var(--bbva-action-link) !important;
             text-decoration: underline !important;
             font-weight: 800 !important;
             padding: 0 !important;
@@ -720,7 +741,7 @@ def render_issue_cards(
             border-radius: 0 !important;
           }
           [class*="st-key-issue_open_btn_"] button:hover {
-            color: #60a5fa !important;
+            color: var(--bbva-action-link-hover) !important;
             background: transparent !important;
           }
           [class*="st-key-issue_open_btn_"] button:focus,

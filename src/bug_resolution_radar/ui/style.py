@@ -12,13 +12,21 @@ import streamlit as st
 
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_DARK,
+    BBVA_DARK_SURFACE,
     BBVA_FONT_HEADLINE,
     BBVA_FONT_SANS,
     BBVA_FONT_SANS_BOOK,
     BBVA_FONT_SANS_MEDIUM,
     BBVA_LIGHT,
+    BBVA_NEUTRAL_SOFT,
     BBVA_RADIUS_INNER_PX,
     BBVA_RADIUS_OUTER_PX,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_ORANGE_2,
+    BBVA_SIGNAL_RED_1,
+    BBVA_SIGNAL_RED_2,
+    BBVA_SIGNAL_RED_3,
+    hex_to_rgba,
 )
 from bug_resolution_radar.ui.common import flow_signal_color_map
 
@@ -125,56 +133,120 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
     """Inject global CSS tokens and components for light/dark runtime themes."""
     palette = BBVA_DARK if dark_mode else BBVA_LIGHT
     if dark_mode:
-        text_rgb = "234,240,255"
-        surface_soft = "rgba(10,46,103,0.78)"
-        surface_elevated = "rgba(10,46,103,0.90)"
-        border = "rgba(234,240,255,0.26)"
-        border_strong = "rgba(234,240,255,0.40)"
-        tab_soft_bg = "#0A2E67"
-        tab_soft_border = "rgba(133,200,255,0.44)"
-        tab_soft_text = "#D8E8FF"
-        tab_nav_active_text = "#85C8FF"
-        tab_active_bg = "#004481"
-        tab_active_border = "#53A9EF"
-        tab_active_text = "#FFFFFF"
+        surface_base = BBVA_DARK_SURFACE
+        surface_soft = hex_to_rgba(palette.core_blue, 0.78, fallback=BBVA_LIGHT.core_blue)
+        surface_elevated = hex_to_rgba(palette.core_blue, 0.90, fallback=BBVA_LIGHT.core_blue)
+        border = hex_to_rgba(palette.ink, 0.26, fallback=BBVA_LIGHT.ink)
+        border_strong = hex_to_rgba(palette.ink, 0.40, fallback=BBVA_LIGHT.ink)
+        tab_soft_bg = palette.core_blue
+        tab_soft_border = hex_to_rgba(palette.serene_blue, 0.44, fallback=BBVA_LIGHT.serene_blue)
+        tab_soft_text = hex_to_rgba(palette.ink, 0.92, fallback=BBVA_LIGHT.ink)
+        tab_nav_active_text = palette.serene_blue
+        tab_active_bg = BBVA_LIGHT.core_blue
+        tab_active_border = BBVA_LIGHT.serene_dark_blue
+        tab_active_text = palette.white
         icon_filter = "brightness(0) invert(1)"
-        action_link = "#85C8FF"
-        action_link_hover = "#8BE1E9"
-        scrollbar_track = "rgba(234,240,255,0.10)"
-        scrollbar_thumb = "rgba(133,200,255,0.44)"
-        scrollbar_thumb_hover = "rgba(133,200,255,0.62)"
+        action_link = palette.serene_blue
+        action_link_hover = palette.aqua
+        scrollbar_track = hex_to_rgba(palette.ink, 0.10, fallback=BBVA_LIGHT.ink)
+        scrollbar_thumb = hex_to_rgba(palette.serene_blue, 0.44, fallback=BBVA_LIGHT.serene_blue)
+        scrollbar_thumb_hover = hex_to_rgba(
+            palette.serene_blue, 0.62, fallback=BBVA_LIGHT.serene_blue
+        )
+        issue_card_border = hex_to_rgba(palette.serene_blue, 0.42, fallback=BBVA_LIGHT.serene_blue)
+        issue_card_border_hover = hex_to_rgba(
+            palette.electric_blue, 0.68, fallback=BBVA_LIGHT.electric_blue
+        )
+        issue_card_bg_start = hex_to_rgba(BBVA_DARK_SURFACE, 0.96, fallback=BBVA_LIGHT.core_blue)
+        issue_card_bg_end = hex_to_rgba(palette.midnight, 0.96, fallback=BBVA_LIGHT.midnight)
+        issue_card_shadow = (
+            f"0 10px 26px {hex_to_rgba(palette.midnight, 0.42, fallback=BBVA_LIGHT.midnight)}"
+        )
+        issue_card_shadow_hover = (
+            f"0 12px 30px {hex_to_rgba(palette.midnight, 0.48, fallback=BBVA_LIGHT.midnight)}"
+        )
+        issue_card_inset = hex_to_rgba(palette.serene_blue, 0.15, fallback=BBVA_LIGHT.serene_blue)
+        issue_card_inset_hover = hex_to_rgba(
+            palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
+        )
     else:
-        text_rgb = "17,25,45"
-        surface_soft = "rgba(255,255,255,0.62)"
-        surface_elevated = "rgba(255,255,255,0.82)"
-        border = "rgba(17,25,45,0.12)"
-        border_strong = "rgba(17,25,45,0.20)"
-        tab_soft_bg = "#EEF3FB"
-        tab_soft_border = "#C8D6E8"
-        tab_soft_text = "#5C6C84"
-        tab_nav_active_text = "#0051F1"
-        tab_active_bg = "#004481"
-        tab_active_border = "#53A9EF"
-        tab_active_text = "#FFFFFF"
+        surface_base = palette.white
+        surface_soft = hex_to_rgba(palette.white, 0.62, fallback=BBVA_LIGHT.white)
+        surface_elevated = hex_to_rgba(palette.white, 0.82, fallback=BBVA_LIGHT.white)
+        border = hex_to_rgba(palette.ink, 0.12, fallback=BBVA_LIGHT.ink)
+        border_strong = hex_to_rgba(palette.ink, 0.20, fallback=BBVA_LIGHT.ink)
+        tab_soft_bg = "color-mix(in srgb, var(--bbva-surface) 74%, var(--bbva-surface-2))"
+        tab_soft_border = hex_to_rgba(palette.midnight, 0.22, fallback=BBVA_LIGHT.midnight)
+        tab_soft_text = palette.ink_muted
+        tab_nav_active_text = palette.electric_blue
+        tab_active_bg = palette.core_blue
+        tab_active_border = palette.serene_dark_blue
+        tab_active_text = palette.white
         icon_filter = "brightness(0) invert(1)"
-        action_link = "#0051F1"
-        action_link_hover = "#004481"
-        scrollbar_track = "rgba(17,25,45,0.08)"
-        scrollbar_thumb = "rgba(7,33,70,0.22)"
-        scrollbar_thumb_hover = "rgba(7,33,70,0.34)"
+        action_link = palette.electric_blue
+        action_link_hover = palette.core_blue
+        scrollbar_track = hex_to_rgba(palette.ink, 0.08, fallback=BBVA_LIGHT.ink)
+        scrollbar_thumb = hex_to_rgba(palette.midnight, 0.22, fallback=BBVA_LIGHT.midnight)
+        scrollbar_thumb_hover = hex_to_rgba(palette.midnight, 0.34, fallback=BBVA_LIGHT.midnight)
+        issue_card_border = hex_to_rgba(palette.ink, 0.16, fallback=BBVA_LIGHT.ink)
+        issue_card_border_hover = hex_to_rgba(
+            palette.electric_blue, 0.36, fallback=BBVA_LIGHT.electric_blue
+        )
+        issue_card_bg_start = hex_to_rgba(palette.white, 0.98, fallback=BBVA_LIGHT.white)
+        issue_card_bg_end = hex_to_rgba(palette.bg_light, 0.98, fallback=BBVA_LIGHT.bg_light)
+        issue_card_shadow = (
+            f"0 8px 22px {hex_to_rgba(palette.midnight, 0.12, fallback=BBVA_LIGHT.midnight)}"
+        )
+        issue_card_shadow_hover = (
+            f"0 10px 26px {hex_to_rgba(palette.midnight, 0.18, fallback=BBVA_LIGHT.midnight)}"
+        )
+        issue_card_inset = hex_to_rgba(
+            palette.electric_blue, 0.08, fallback=BBVA_LIGHT.electric_blue
+        )
+        issue_card_inset_hover = hex_to_rgba(
+            palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
+        )
 
     css_vars = f"""
       :root {{
         --bbva-primary: {palette.electric_blue};
         --bbva-midnight: {palette.midnight};
         --bbva-text: {palette.ink};
-        --bbva-text-muted: rgba({text_rgb},0.74);
-        --bbva-surface: {palette.white if not dark_mode else "#0A1F45"};
+        --bbva-white: {BBVA_LIGHT.white};
+        --bbva-text-muted: {hex_to_rgba(palette.ink, 0.74, fallback=BBVA_LIGHT.ink)};
+        --bbva-surface: {surface_base};
         --bbva-surface-2: {palette.bg_light};
         --bbva-surface-soft: {surface_soft};
         --bbva-surface-elevated: {surface_elevated};
         --bbva-border: {border};
         --bbva-border-strong: {border_strong};
+        --bbva-on-primary: {palette.white};
+        --bbva-focus-border: {hex_to_rgba(palette.electric_blue, 0.65, fallback=BBVA_LIGHT.electric_blue)};
+        --bbva-focus-ring: {hex_to_rgba(palette.electric_blue, 0.18, fallback=BBVA_LIGHT.electric_blue)};
+        --bbva-accent-border-soft: {hex_to_rgba(palette.electric_blue, 0.35, fallback=BBVA_LIGHT.electric_blue)};
+        --bbva-accent-border-subtle: {hex_to_rgba(palette.electric_blue, 0.20, fallback=BBVA_LIGHT.electric_blue)};
+        --bbva-accent-bg-soft: {hex_to_rgba(palette.electric_blue, 0.10, fallback=BBVA_LIGHT.electric_blue)};
+        --bbva-accent-bg-subtle: {hex_to_rgba(palette.electric_blue, 0.06, fallback=BBVA_LIGHT.electric_blue)};
+        --bbva-status-neutral: {BBVA_NEUTRAL_SOFT};
+        --bbva-signal-red-strong: {BBVA_SIGNAL_RED_1};
+        --bbva-signal-red: {BBVA_SIGNAL_RED_2};
+        --bbva-signal-red-soft: {BBVA_SIGNAL_RED_3};
+        --bbva-signal-orange: {BBVA_SIGNAL_ORANGE_2};
+        --bbva-signal-green: {BBVA_SIGNAL_GREEN_2};
+        --bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-signal-orange) 28%);
+        --bbva-nba-banner-border: color-mix(in srgb, var(--bbva-border-strong) 38%, var(--bbva-signal-orange) 62%);
+        --bbva-nba-banner-shadow: color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent);
+        --bbva-nba-ink-primary: color-mix(in srgb, var(--bbva-text) 96%, transparent);
+        --bbva-nba-ink-muted: color-mix(in srgb, var(--bbva-text) 78%, transparent);
+        --bbva-nba-accent-a: color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight));
+        --bbva-nba-accent-b: color-mix(in srgb, var(--bbva-signal-orange) 54%, var(--bbva-signal-red-soft));
+        --bbva-nba-kicker-border: color-mix(in srgb, var(--bbva-signal-red) 74%, transparent);
+        --bbva-nba-kicker-bg: color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-signal-red-soft) 16%);
+        --bbva-nba-kicker-text: color-mix(in srgb, var(--bbva-signal-red-strong) 88%, var(--bbva-text) 12%);
+        --bbva-shadow-deep: {hex_to_rgba(palette.midnight, 0.48, fallback=BBVA_LIGHT.midnight)};
+        --bbva-shadow-strong: {hex_to_rgba(palette.midnight, 0.42, fallback=BBVA_LIGHT.midnight)};
+        --bbva-shadow-soft: {hex_to_rgba(palette.midnight, 0.22, fallback=BBVA_LIGHT.midnight)};
+        --bbva-glow-soft: {hex_to_rgba(palette.serene_blue, 0.18, fallback=BBVA_LIGHT.serene_blue)};
         --bbva-radius-s: 4px;
         --bbva-radius-m: {BBVA_RADIUS_INNER_PX}px;
         --bbva-radius-l: {BBVA_RADIUS_INNER_PX}px;
@@ -194,6 +266,14 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-scrollbar-track: {scrollbar_track};
         --bbva-scrollbar-thumb: {scrollbar_thumb};
         --bbva-scrollbar-thumb-hover: {scrollbar_thumb_hover};
+        --bbva-issue-card-border: {issue_card_border};
+        --bbva-issue-card-border-hover: {issue_card_border_hover};
+        --bbva-issue-card-bg-start: {issue_card_bg_start};
+        --bbva-issue-card-bg-end: {issue_card_bg_end};
+        --bbva-issue-card-shadow: {issue_card_shadow};
+        --bbva-issue-card-shadow-hover: {issue_card_shadow_hover};
+        --bbva-issue-card-inset: {issue_card_inset};
+        --bbva-issue-card-inset-hover: {issue_card_inset_hover};
         --primary-color: var(--bbva-primary);
         --text-color: var(--bbva-text);
         --background-color: var(--bbva-surface-2);
@@ -213,8 +293,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="digital-press.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<rect x="3" y="4" width="18" height="14" rx="2" fill="#000"/>'
-            '<rect x="7" y="19" width="10" height="2" rx="1" fill="#000"/>'
+            '<rect x="3" y="4" width="18" height="14" rx="2" fill="currentColor"/>'
+            '<rect x="7" y="19" width="10" height="2" rx="1" fill="currentColor"/>'
             "</svg>"
         ),
     )
@@ -223,9 +303,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
             '<path d="M7 17h10a4 4 0 0 0 0-8h-.3A5.5 5.5 0 0 0 6.4 10.6 3.5 3.5 0 0 0 7 17z" '
-            'fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<path d="M12 11v5" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
-            '<path d="M10 14l2 2 2-2" stroke="#000" stroke-width="2" stroke-linecap="round" '
+            'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            '<path d="M12 11v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M10 14l2 2 2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
             'stroke-linejoin="round" fill="none"/>'
             "</svg>"
         ),
@@ -234,8 +314,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-search.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<circle cx="11" cy="11" r="7" fill="none" stroke="#000" stroke-width="2"/>'
-            '<path d="M21 21l-5-5" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            '<circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/>'
+            '<path d="M21 21l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
             "</svg>"
         ),
     )
@@ -243,7 +323,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="sun.svg" if dark_mode else "moon.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<circle cx="12" cy="12" r="5" fill="#000"/>'
+            '<circle cx="12" cy="12" r="5" fill="currentColor"/>'
             "</svg>"
         ),
     )
@@ -251,8 +331,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-simulator.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<circle cx="12" cy="12" r="3" fill="#000"/>'
-            '<path d="M12 2l2 2 3-1 1 3 3 1-1 3 2 2-2 2 1 3-3 1-1 3-3-1-2 2-2-2-3 1-1-3-3-1 1-3-2-2 2-2-1-3 3-1 1-3 3 1z" fill="#000"/>'
+            '<circle cx="12" cy="12" r="3" fill="currentColor"/>'
+            '<path d="M12 2l2 2 3-1 1 3 3 1-1 3 2 2-2 2 1 3-3 1-1 3-3-1-2 2-2-2-3 1-1-3-3-1 1-3-2-2 2-2-1-3 3-1 1-3 3 1z" fill="currentColor"/>'
             "</svg>"
         ),
     )
@@ -260,7 +340,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-checkmark.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<path d="M6 12l4 4 8-8" fill="none" stroke="#000" stroke-width="2.4" '
+            '<path d="M6 12l4 4 8-8" fill="none" stroke="currentColor" stroke-width="2.4" '
             'stroke-linecap="round" stroke-linejoin="round"/>'
             "</svg>"
         ),
@@ -269,8 +349,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-no-draw.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<circle cx="12" cy="12" r="8" fill="none" stroke="#000" stroke-width="2"/>'
-            '<path d="M8 8l8 8" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            '<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/>'
+            '<path d="M8 8l8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
             "</svg>"
         ),
     )
@@ -278,9 +358,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-save-for-later.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<path d="M12 4v10" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
-            '<path d="M8 10l4 4 4-4" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
-            '<path d="M5 19h14" stroke="#000" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M12 4v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M8 10l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
             "</svg>"
         ),
     )
@@ -288,9 +368,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-recycle.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<path d="M8 6h6l-2-2" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
-            '<path d="M16 10l2 3-2 3" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
-            '<path d="M6 14l-2-3 2-3" stroke="#000" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M8 6h6l-2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M16 10l2 3-2 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>'
+            '<path d="M6 14l-2-3 2-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>'
             "</svg>"
         ),
     )
@@ -298,9 +378,9 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         file_name="spherica-xml.svg",
         fallback_svg=(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            '<path d="M7 8l-3 4 3 4" stroke="#000" stroke-width="2" fill="none" stroke-linecap="round"/>'
-            '<path d="M17 8l3 4-3 4" stroke="#000" stroke-width="2" fill="none" stroke-linecap="round"/>'
-            '<path d="M13 6l-2 12" stroke="#000" stroke-width="2" fill="none" stroke-linecap="round"/>'
+            '<path d="M7 8l-3 4 3 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>'
+            '<path d="M17 8l3 4-3 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>'
+            '<path d="M13 6l-2 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>'
             "</svg>"
         ),
     )
@@ -425,15 +505,15 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             border-radius: var(--bbva-radius-xl);
             padding: 14px 18px;
             margin: 4px 0 8px 0;
-            color: #ffffff;
-            border: 1px solid rgba(255,255,255,0.08);
+            color: var(--bbva-on-primary);
+            border: 1px solid color-mix(in srgb, var(--bbva-on-primary) 8%, transparent);
           }
           .bbva-hero-title {
             margin: 0;
             font-size: 34px;
             line-height: 1.02;
             font-weight: 700;
-            color: #ffffff;
+            color: var(--bbva-on-primary);
           }
           .bbva-hero-sub {
             margin-top: 4px;
@@ -533,17 +613,17 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           .st-key-overview_summary_shell [data-testid="stVerticalBlockBorderWrapper"],
           .st-key-trend_chart_shell [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 92%, #8EB4FF 8%) !important;
-            background: color-mix(in srgb, var(--bbva-surface-elevated) 90%, #0E234C 10%) !important;
-            box-shadow: 0 12px 28px color-mix(in srgb, #02091D 48%, transparent),
-                        inset 0 0 0 1px color-mix(in srgb, #9DC0FF 18%, transparent) !important;
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 92%, var(--bbva-glow-soft) 8%) !important;
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 90%, var(--bbva-midnight) 10%) !important;
+            box-shadow: 0 12px 28px color-mix(in srgb, var(--bbva-shadow-deep) 100%, transparent),
+                        inset 0 0 0 1px color-mix(in srgb, var(--bbva-glow-soft) 18%, transparent) !important;
           }
           [class*="st-key-overview_summary_chart_"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-trins_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 88%, #97BCFF 12%) !important;
-            background: color-mix(in srgb, var(--bbva-surface) 80%, #0F244B 20%) !important;
-            box-shadow: 0 8px 22px color-mix(in srgb, #02091D 42%, transparent),
-                        inset 0 0 0 1px color-mix(in srgb, #9DC0FF 16%, transparent) !important;
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 88%, var(--bbva-glow-soft) 12%) !important;
+            background: color-mix(in srgb, var(--bbva-surface) 80%, var(--bbva-midnight) 20%) !important;
+            box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-shadow-deep) 88%, transparent),
+                        inset 0 0 0 1px color-mix(in srgb, var(--bbva-glow-soft) 16%, transparent) !important;
           }
 
           /* Sidebar */
@@ -660,8 +740,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i]) {
             padding-left: 1.70rem !important;
-            --bbva-opt-dot: #D24756;
-            border-left: 2px solid rgba(210,71,86,0.72);
+            --bbva-opt-dot: var(--bbva-signal-red-soft);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-red-soft) 72%, transparent);
           }
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i]),
@@ -670,8 +750,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i]) {
             padding-left: 1.70rem !important;
-            --bbva-opt-dot: #E08A00;
-            border-left: 2px solid rgba(224,138,0,0.72);
+            --bbva-opt-dot: var(--bbva-signal-orange);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-orange) 72%, transparent);
           }
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i]) {
             padding-left: 1.70rem !important;
@@ -682,26 +762,26 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i]) {
             padding-left: 1.70rem !important;
-            --bbva-opt-dot: #1E9E53;
-            border-left: 2px solid rgba(30,158,83,0.72);
+            --bbva-opt-dot: var(--bbva-signal-green);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-green) 72%, transparent);
           }
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i]) {
             padding-left: 1.70rem !important;
-            --bbva-opt-dot: #B4232A;
-            border-left: 2px solid rgba(180,35,42,0.72);
+            --bbva-opt-dot: var(--bbva-signal-red-strong);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-red-strong) 72%, transparent);
           }
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i]) {
             padding-left: 1.70rem !important;
-            --bbva-opt-dot: #E08A00;
-            border-left: 2px solid rgba(224,138,0,0.72);
+            --bbva-opt-dot: var(--bbva-signal-orange);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-orange) 72%, transparent);
           }
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i]),
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i]) {
             padding-left: 1.70rem !important;
-            --bbva-opt-dot: #1E9E53;
-            border-left: 2px solid rgba(30,158,83,0.72);
+            --bbva-opt-dot: var(--bbva-signal-green);
+            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-green) 72%, transparent);
           }
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i])::before,
           div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i])::before,
@@ -732,15 +812,15 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .stTextInput input:focus,
           .stTextArea textarea:focus,
           .stNumberInput input:focus {
-            border-color: rgba(0,81,241,0.65) !important;
-            box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
+            border-color: var(--bbva-focus-border) !important;
+            box-shadow: 0 0 0 3px var(--bbva-focus-ring) !important;
             outline: none !important;
           }
 
           .stButton > button[kind="primary"] {
             background: var(--bbva-primary) !important;
             border-color: var(--bbva-primary) !important;
-            color: #ffffff !important;
+            color: var(--bbva-on-primary) !important;
             font-weight: 700 !important;
           }
 
@@ -751,7 +831,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             font-weight: 700 !important;
           }
           .stButton > button[kind="secondary"]:hover {
-            border-color: rgba(0,81,241,0.35) !important;
+            border-color: var(--bbva-accent-border-soft) !important;
             background: color-mix(in srgb, var(--bbva-primary) 12%, transparent) !important;
           }
           .stButton > button:disabled {
@@ -1190,7 +1270,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           .st-key-workspace_report_saved_path_link [data-testid^="baseButton-"] > button:hover {
             background: transparent !important;
             background-color: transparent !important;
-            color: color-mix(in srgb, var(--bbva-primary) 72%, white) !important;
+            color: color-mix(in srgb, var(--bbva-primary) 72%, var(--bbva-white)) !important;
           }
           .st-key-workspace_report_saved_path_link button:focus,
           .st-key-workspace_report_saved_path_link button:focus-visible,
@@ -1216,12 +1296,12 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           div[data-testid="stPills"] button[aria-pressed="true"],
           div[data-testid="stPills"] button[kind="primary"] {
-            background: rgba(0,81,241,0.10) !important;
-            border-color: rgba(0,81,241,0.30) !important;
+            background: var(--bbva-accent-bg-soft) !important;
+            border-color: color-mix(in srgb, var(--bbva-primary) 30%, transparent) !important;
           }
           div[data-testid="stPills"] button:focus-visible {
             outline: none !important;
-            box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
+            box-shadow: 0 0 0 3px var(--bbva-focus-ring) !important;
           }
 
           /* Action labels: denser, executive tone without altering status/priority chips */
@@ -1292,7 +1372,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
           [role="tablist"] button[role="tab"]:focus-visible {
             outline: none !important;
-            box-shadow: 0 0 0 3px rgba(0,81,241,0.18) !important;
+            box-shadow: 0 0 0 3px var(--bbva-focus-ring) !important;
             border-radius: var(--bbva-radius-m) !important;
           }
           /* Hide all horizontal dividers and tab borders */
@@ -1384,16 +1464,16 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             white-space: nowrap;
           }
           .badge-priority {
-            border-color: rgba(0,81,241,0.35);
-            background: rgba(0,81,241,0.10);
+            border-color: var(--bbva-accent-border-soft);
+            background: var(--bbva-accent-bg-soft);
           }
           .badge-status {
-            border-color: rgba(7,14,70,0.25);
-            background: rgba(7,14,70,0.06);
+            border-color: color-mix(in srgb, var(--bbva-midnight) 25%, transparent);
+            background: color-mix(in srgb, var(--bbva-midnight) 6%, transparent);
           }
           .badge-age {
-            border-color: rgba(0,81,241,0.20);
-            background: rgba(0,81,241,0.06);
+            border-color: var(--bbva-accent-border-subtle);
+            background: var(--bbva-accent-bg-subtle);
           }
 
           [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
@@ -1402,7 +1482,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             overflow: hidden !important;
             background: var(--bbva-surface-elevated) !important;
             --gdg-accent-color: var(--bbva-primary) !important;
-            --gdg-accent-fg: #ffffff !important;
+            --gdg-accent-fg: var(--bbva-on-primary) !important;
             --gdg-accent-light: color-mix(in srgb, var(--bbva-primary) 22%, transparent) !important;
             --gdg-text-dark: var(--bbva-text) !important;
             --gdg-text-medium: color-mix(in srgb, var(--bbva-text) 78%, transparent) !important;
@@ -1422,7 +1502,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           [data-testid="stDataFrame"] *,
           [data-testid="stDataEditor"] * {
             --gdg-accent-color: var(--bbva-primary) !important;
-            --gdg-accent-fg: #ffffff !important;
+            --gdg-accent-fg: var(--bbva-on-primary) !important;
             --gdg-accent-light: color-mix(in srgb, var(--bbva-primary) 22%, transparent) !important;
             --gdg-text-dark: var(--bbva-text) !important;
             --gdg-text-medium: color-mix(in srgb, var(--bbva-text) 78%, transparent) !important;
@@ -1571,9 +1651,22 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     palette = BBVA_DARK if dark_mode else BBVA_LIGHT
     text_color = palette.ink
-    grid_color = "rgba(234,240,255,0.14)" if dark_mode else "rgba(17,25,45,0.10)"
-    legend_bg = "rgba(21,30,53,0.72)" if dark_mode else "rgba(255,255,255,0.65)"
-    legend_border = "rgba(234,240,255,0.20)" if dark_mode else "rgba(17,25,45,0.12)"
+    grid_color = hex_to_rgba(
+        palette.ink,
+        0.14 if dark_mode else 0.10,
+        fallback=BBVA_LIGHT.ink,
+    )
+    legend_bg = hex_to_rgba(
+        palette.midnight if dark_mode else palette.white,
+        0.72 if dark_mode else 0.65,
+        fallback=BBVA_LIGHT.midnight,
+    )
+    legend_border = hex_to_rgba(
+        palette.ink,
+        0.20 if dark_mode else 0.12,
+        fallback=BBVA_LIGHT.ink,
+    )
+    transparent_bg = hex_to_rgba(palette.ink, 0.0, fallback=BBVA_LIGHT.ink)
     legend_bottom_space = 92 if showlegend else 16
     undefined_tokens = {"undefined", "none", "nan", "null"}
     es_label_map = {
@@ -1601,8 +1694,8 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
 
     fig.update_layout(
         template="plotly_dark" if dark_mode else "plotly_white",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor=transparent_bg,
+        plot_bgcolor=transparent_bg,
         font=dict(
             family=BBVA_FONT_SANS,
             color=text_color,

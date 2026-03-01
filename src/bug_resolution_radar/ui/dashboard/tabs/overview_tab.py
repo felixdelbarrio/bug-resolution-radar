@@ -453,11 +453,11 @@ def render_overview_kpis(
 
     def _focus_tone_color(focus: FocusCard) -> str:
         return {
-            "risk": "#D24756",
-            "warning": "#D07D10",
-            "flow": "#0F7A58",
-            "quality": "#2E67C7",
-            "opportunity": "#1A8A5E",
+            "risk": "var(--bbva-focus-tone-risk)",
+            "warning": "var(--bbva-focus-tone-warning)",
+            "flow": "var(--bbva-focus-tone-flow)",
+            "quality": "var(--bbva-focus-tone-quality)",
+            "opportunity": "var(--bbva-focus-tone-opportunity)",
         }.get(str(focus.tone or "").strip().lower(), "var(--bbva-primary)")
 
     focus_candidates: list[FocusCard] = []

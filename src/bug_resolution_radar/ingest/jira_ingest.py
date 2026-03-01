@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from html import unescape
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -83,7 +84,10 @@ def _jira_description_to_text(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value.strip()
+        txt = value.strip()
+        if "<" in txt and ">" in txt:
+            return _jira_html_to_text(txt)
+        return txt
 
     parts: list[str] = []
 
@@ -126,6 +130,27 @@ def _jira_description_to_text(value: object) -> str:
     text = re.sub(r"\n[ \t]+", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _jira_html_to_text(value: str) -> str:
+    txt = str(value or "").strip()
+    if not txt:
+        return ""
+    txt = re.sub(r"(?i)<br\s*/?>", "\n", txt)
+    txt = re.sub(r"(?i)</p\s*>", "\n", txt)
+    txt = re.sub(r"(?i)</h[1-6]\s*>", "\n", txt)
+    txt = re.sub(r"(?i)</div\s*>", "\n", txt)
+    txt = re.sub(r"(?i)<li[^>]*>", "- ", txt)
+    txt = re.sub(r"(?i)</li\s*>", "\n", txt)
+    txt = re.sub(r"(?is)<style.*?>.*?</style>", " ", txt)
+    txt = re.sub(r"(?is)<script.*?>.*?</script>", " ", txt)
+    txt = re.sub(r"(?s)<[^>]+>", " ", txt)
+    txt = unescape(txt)
+    txt = txt.replace("\r", "")
+    txt = re.sub(r"[ \t\f\v]+", " ", txt)
+    txt = re.sub(r"\n[ \t]+", "\n", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip()
 
 
 def _bootstrap_jira_cookie_from_browser(
@@ -300,6 +325,7 @@ def ingest_jira(
             "jql": jql,
             "startAt": start_at,
             "maxResults": max_results,
+            "expand": "renderedFields",
             "fields": [
                 "summary",
                 "description",
@@ -341,6 +367,7 @@ def ingest_jira(
 
         for it in data.get("issues", []):
             fields = it.get("fields") or {}
+            rendered_fields = it.get("renderedFields") or {}
             priority = (
                 (fields.get("priority") or {}).get("name", "") if fields.get("priority") else ""
             ).strip()
@@ -350,12 +377,15 @@ def ingest_jira(
                 (fields.get("resolution") or {}).get("name", "") if fields.get("resolution") else ""
             )
             res_type = resolution
+            desc_text = _jira_description_to_text(fields.get("description"))
+            if not desc_text:
+                desc_text = _jira_description_to_text(rendered_fields.get("description"))
 
             issues.append(
                 NormalizedIssue(
                     key=it.get("key", ""),
                     summary=fields.get("summary", ""),
-                    description=_jira_description_to_text(fields.get("description")),
+                    description=desc_text,
                     status=((fields.get("status") or {}).get("name", "") or "").strip(),
                     type=((fields.get("issuetype") or {}).get("name", "") or "").strip(),
                     priority=priority,

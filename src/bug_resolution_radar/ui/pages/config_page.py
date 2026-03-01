@@ -214,10 +214,10 @@ def _inject_delete_zone_css() -> None:
           [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-cfg_prefs_restore_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, #95BAFF 14%) !important;
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, var(--bbva-glow-soft) 14%) !important;
             background:
               radial-gradient(1200px 280px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 55%),
-              linear-gradient(155deg, color-mix(in srgb, var(--bbva-surface) 92%, #0E234C 8%), var(--bbva-surface));
+              linear-gradient(155deg, color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-midnight) 8%), var(--bbva-surface));
             box-shadow: 0 12px 28px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
             border-radius: var(--bbva-radius-xl) !important;
           }
@@ -233,8 +233,8 @@ def _inject_delete_zone_css() -> None:
             gap: .4rem;
             padding: .28rem .78rem;
             border-radius: 999px;
-            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 74%, #8EB4FF 26%);
-            background: color-mix(in srgb, var(--bbva-surface-elevated) 84%, #0D224A 16%);
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 74%, var(--bbva-glow-soft) 26%);
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 84%, var(--bbva-midnight) 16%);
             color: color-mix(in srgb, var(--bbva-text) 95%, transparent);
             font-size: .91rem;
             line-height: 1.15rem;
@@ -244,7 +244,7 @@ def _inject_delete_zone_css() -> None:
             width: .46rem;
             height: .46rem;
             border-radius: 50%;
-            background: color-mix(in srgb, var(--bbva-primary) 76%, #7EA8FF 24%);
+            background: color-mix(in srgb, var(--bbva-primary) 76%, var(--bbva-glow-soft) 24%);
             box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 20%, transparent);
           }
           .cfg-delete-ghost {
@@ -277,10 +277,10 @@ def _inject_preferences_zone_css() -> None:
             border-radius: 14px;
             background:
               linear-gradient(180deg,
-                color-mix(in srgb, var(--bbva-surface-elevated) 92%, #0E234C 8%),
+                color-mix(in srgb, var(--bbva-surface-elevated) 92%, var(--bbva-midnight) 8%),
                 color-mix(in srgb, var(--bbva-surface) 97%, transparent)
               );
-            border: 1px solid color-mix(in srgb, var(--bbva-border) 78%, #9BBBFF 22%);
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 78%, var(--bbva-glow-soft) 22%);
             box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 8%, transparent);
             width: fit-content;
           }
@@ -291,7 +291,7 @@ def _inject_preferences_zone_css() -> None:
             transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
           }
           [class*="st-key-cfg_tabs_shell"] button[role="tab"][aria-selected="true"] {
-            border-color: color-mix(in srgb, var(--bbva-primary) 52%, #8FB7FF 48%) !important;
+            border-color: color-mix(in srgb, var(--bbva-primary) 52%, var(--bbva-glow-soft) 48%) !important;
             box-shadow: 0 0 0 1px color-mix(in srgb, var(--bbva-primary) 10%, transparent) inset;
             background:
               linear-gradient(180deg,
@@ -300,12 +300,12 @@ def _inject_preferences_zone_css() -> None:
               ) !important;
           }
           [class*="st-key-cfg_prefs_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid color-mix(in srgb, var(--bbva-border) 82%, #A2C1FF 18%) !important;
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 82%, var(--bbva-glow-soft) 18%) !important;
             border-radius: 16px !important;
             padding: .35rem .55rem .5rem !important;
             background:
               radial-gradient(900px 220px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 60%),
-              linear-gradient(165deg, color-mix(in srgb, var(--bbva-surface) 97%, #0E234C 3%), var(--bbva-surface));
+              linear-gradient(165deg, color-mix(in srgb, var(--bbva-surface) 97%, var(--bbva-midnight) 3%), var(--bbva-surface));
             box-shadow: 0 10px 26px color-mix(in srgb, var(--bbva-text) 6%, transparent) !important;
             margin-bottom: .7rem;
           }

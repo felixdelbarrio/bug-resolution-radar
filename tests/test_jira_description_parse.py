@@ -22,3 +22,12 @@ def test_jira_description_to_text_supports_adf_content_tree() -> None:
 
     assert "Linea 1" in out
     assert "Linea 2" in out
+
+
+def test_jira_description_to_text_supports_rendered_html() -> None:
+    html = "<p>SO: Android</p><p>Path:</p><ol><li>Paso 1</li><li>Paso 2</li></ol>"
+    out = jira_ingest._jira_description_to_text(html)
+    assert "SO: Android" in out
+    assert "Path:" in out
+    assert "Paso 1" in out
+    assert "Paso 2" in out

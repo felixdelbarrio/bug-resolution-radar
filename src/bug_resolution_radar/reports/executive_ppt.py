@@ -48,6 +48,37 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_SANS_MEDIUM_PPT,
     BBVA_FONT_SANS_PPT,
     BBVA_LIGHT,
+    BBVA_REPORT_AMBER,
+    BBVA_REPORT_AMBER_BG,
+    BBVA_REPORT_AMBER_BORDER,
+    BBVA_REPORT_AMBER_TEXT,
+    BBVA_REPORT_BLUE_BG,
+    BBVA_REPORT_BLUE_BORDER,
+    BBVA_REPORT_BLUE_TEXT,
+    BBVA_REPORT_DARK_ACCENT_LINE,
+    BBVA_REPORT_DARK_BG_1,
+    BBVA_REPORT_DARK_BG_2,
+    BBVA_REPORT_DARK_TEXT_MID,
+    BBVA_REPORT_DARK_TEXT_SOFT,
+    BBVA_REPORT_DARK_TEXT_SUBTLE,
+    BBVA_REPORT_GREEN,
+    BBVA_REPORT_GREEN_BG,
+    BBVA_REPORT_GREEN_BORDER,
+    BBVA_REPORT_GREEN_TEXT,
+    BBVA_REPORT_LINE,
+    BBVA_REPORT_MIST,
+    BBVA_REPORT_NEUTRAL_BORDER,
+    BBVA_REPORT_RED,
+    BBVA_REPORT_RED_BG,
+    BBVA_REPORT_RED_BORDER,
+    BBVA_REPORT_RED_TEXT,
+    BBVA_REPORT_SKY_BG,
+    BBVA_REPORT_SKY_BORDER,
+    BBVA_REPORT_SKY_TEXT,
+    BBVA_REPORT_TEAL_BG,
+    BBVA_REPORT_TEAL_BORDER,
+    BBVA_REPORT_TEAL_TEXT,
+    hex_to_rgba,
 )
 from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
@@ -83,15 +114,40 @@ PALETTE: Dict[str, str] = {
     "blue": BBVA_LIGHT.core_blue.lstrip("#"),
     "sky": BBVA_LIGHT.serene_dark_blue.lstrip("#"),
     "teal": BBVA_LIGHT.aqua.lstrip("#"),
-    "green": "38761D",
-    "amber": "F5B942",
-    "red": "D64550",
+    "green": BBVA_REPORT_GREEN.lstrip("#"),
+    "amber": BBVA_REPORT_AMBER.lstrip("#"),
+    "red": BBVA_REPORT_RED.lstrip("#"),
     "ink": BBVA_LIGHT.ink.lstrip("#"),
     "muted": BBVA_LIGHT.ink_muted.lstrip("#"),
     "panel": BBVA_LIGHT.white.lstrip("#"),
     "bg": BBVA_LIGHT.bg_light.lstrip("#"),
-    "line": "D3D8E1",
-    "mist": "EEF3FB",
+    "line": BBVA_REPORT_LINE.lstrip("#"),
+    "mist": BBVA_REPORT_MIST.lstrip("#"),
+    "tone_blue_bg": BBVA_REPORT_BLUE_BG.lstrip("#"),
+    "tone_blue_border": BBVA_REPORT_BLUE_BORDER.lstrip("#"),
+    "tone_blue_text": BBVA_REPORT_BLUE_TEXT.lstrip("#"),
+    "tone_sky_bg": BBVA_REPORT_SKY_BG.lstrip("#"),
+    "tone_sky_border": BBVA_REPORT_SKY_BORDER.lstrip("#"),
+    "tone_sky_text": BBVA_REPORT_SKY_TEXT.lstrip("#"),
+    "tone_teal_bg": BBVA_REPORT_TEAL_BG.lstrip("#"),
+    "tone_teal_border": BBVA_REPORT_TEAL_BORDER.lstrip("#"),
+    "tone_teal_text": BBVA_REPORT_TEAL_TEXT.lstrip("#"),
+    "tone_amber_bg": BBVA_REPORT_AMBER_BG.lstrip("#"),
+    "tone_amber_border": BBVA_REPORT_AMBER_BORDER.lstrip("#"),
+    "tone_amber_text": BBVA_REPORT_AMBER_TEXT.lstrip("#"),
+    "tone_green_bg": BBVA_REPORT_GREEN_BG.lstrip("#"),
+    "tone_green_border": BBVA_REPORT_GREEN_BORDER.lstrip("#"),
+    "tone_green_text": BBVA_REPORT_GREEN_TEXT.lstrip("#"),
+    "tone_red_bg": BBVA_REPORT_RED_BG.lstrip("#"),
+    "tone_red_border": BBVA_REPORT_RED_BORDER.lstrip("#"),
+    "tone_red_text": BBVA_REPORT_RED_TEXT.lstrip("#"),
+    "tone_neutral_border": BBVA_REPORT_NEUTRAL_BORDER.lstrip("#"),
+    "dark_bg_1": BBVA_REPORT_DARK_BG_1.lstrip("#"),
+    "dark_bg_2": BBVA_REPORT_DARK_BG_2.lstrip("#"),
+    "dark_line": BBVA_REPORT_DARK_ACCENT_LINE.lstrip("#"),
+    "dark_text_soft": BBVA_REPORT_DARK_TEXT_SOFT.lstrip("#"),
+    "dark_text_subtle": BBVA_REPORT_DARK_TEXT_SUBTLE.lstrip("#"),
+    "dark_text_mid": BBVA_REPORT_DARK_TEXT_MID.lstrip("#"),
 }
 
 ORTHO_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
@@ -261,7 +317,7 @@ class _ScopeContext:
 def _rgb(hex_code: str) -> RGBColor:
     code = str(hex_code or "").strip().lstrip("#")
     if len(code) != 6:
-        code = "000000"
+        code = PALETTE["ink"]
     return RGBColor(int(code[0:2], 16), int(code[2:4], 16), int(code[4:6], 16))
 
 
@@ -494,17 +550,37 @@ def _set_rich_text(
 def _tone_style(tone: str) -> Tuple[str, str, str]:
     key = str(tone or "").strip().lower()
     styles: Dict[str, Tuple[str, str, str]] = {
-        "blue": ("EAF2FF", "B8CCE8", "0B3A75"),
-        "sky": ("E8F7FF", "9DDCFB", "0B4A6F"),
-        "teal": ("E6F9F7", "9EDFD9", "0E5C5C"),
-        "amber": ("FFF4DE", "F3D89B", "7A5A12"),
-        "green": ("EAF6EC", "B8DDBF", "1F5B2E"),
-        "red": ("FDEBEC", "E3A5AA", "8B1D26"),
-        "urgency_must": ("FDEBEC", "E3A5AA", "8B1D26"),
-        "urgency_should": ("FFF4DE", "F3D89B", "7A5A12"),
-        "urgency_nice": ("EAF6EC", "B8DDBF", "1F5B2E"),
+        "blue": (PALETTE["tone_blue_bg"], PALETTE["tone_blue_border"], PALETTE["tone_blue_text"]),
+        "sky": (PALETTE["tone_sky_bg"], PALETTE["tone_sky_border"], PALETTE["tone_sky_text"]),
+        "teal": (PALETTE["tone_teal_bg"], PALETTE["tone_teal_border"], PALETTE["tone_teal_text"]),
+        "amber": (
+            PALETTE["tone_amber_bg"],
+            PALETTE["tone_amber_border"],
+            PALETTE["tone_amber_text"],
+        ),
+        "green": (
+            PALETTE["tone_green_bg"],
+            PALETTE["tone_green_border"],
+            PALETTE["tone_green_text"],
+        ),
+        "red": (PALETTE["tone_red_bg"], PALETTE["tone_red_border"], PALETTE["tone_red_text"]),
+        "urgency_must": (
+            PALETTE["tone_red_bg"],
+            PALETTE["tone_red_border"],
+            PALETTE["tone_red_text"],
+        ),
+        "urgency_should": (
+            PALETTE["tone_amber_bg"],
+            PALETTE["tone_amber_border"],
+            PALETTE["tone_amber_text"],
+        ),
+        "urgency_nice": (
+            PALETTE["tone_green_bg"],
+            PALETTE["tone_green_border"],
+            PALETTE["tone_green_text"],
+        ),
     }
-    return styles.get(key, ("EEF3FB", "C8D6E8", PALETTE["navy"]))
+    return styles.get(key, (PALETTE["mist"], PALETTE["tone_neutral_border"], PALETTE["navy"]))
 
 
 def _urgency_from_score(score: float) -> Tuple[str, str]:
@@ -709,7 +785,7 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
                 hole=0.55,
                 sort=False,
                 direction="clockwise",
-                marker=dict(colors=colors, line=dict(color="#FFFFFF", width=2)),
+                marker=dict(colors=colors, line=dict(color=f"#{PALETTE['panel']}", width=2)),
                 hovertemplate="Tema: %{label}<br>Abiertas: %{value}<br>%{percent}<extra></extra>",
                 showlegend=True,
             ),
@@ -1441,8 +1517,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 size=18,
                 color=f"#{PALETTE['ink']}",
             ),
-            paper_bgcolor="#FFFFFF",
-            plot_bgcolor="#FFFFFF",
+            paper_bgcolor=f"#{PALETTE['panel']}",
+            plot_bgcolor=f"#{PALETTE['panel']}",
             legend=dict(
                 orientation="h",
                 yanchor="top",
@@ -1454,7 +1530,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     size=legend_render_font,
                     color=f"#{PALETTE['ink']}",
                 ),
-                bgcolor="rgba(255,255,255,0.98)",
+                bgcolor=hex_to_rgba(BBVA_LIGHT.white, 0.98, fallback=BBVA_LIGHT.white),
                 bordercolor=f"#{PALETTE['line']}",
                 borderwidth=1,
                 title=dict(text=""),
@@ -1591,8 +1667,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             color=f"#{PALETTE['ink']}",
             showline=True,
             linecolor=f"#{PALETTE['line']}",
-            gridcolor="#E8EDF4",
-            zerolinecolor="#E8EDF4",
+            gridcolor=f"#{PALETTE['mist']}",
+            zerolinecolor=f"#{PALETTE['mist']}",
         )
         export_fig.update_yaxes(
             tickfont=dict(family=FONT_BODY_BOOK, size=axis_tick_size, color=f"#{PALETTE['ink']}"),
@@ -1602,8 +1678,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             color=f"#{PALETTE['ink']}",
             showline=True,
             linecolor=f"#{PALETTE['line']}",
-            gridcolor="#E8EDF4",
-            zerolinecolor="#E8EDF4",
+            gridcolor=f"#{PALETTE['mist']}",
+            zerolinecolor=f"#{PALETTE['mist']}",
         )
         for trace in traces:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
@@ -1735,7 +1811,7 @@ def _add_header(slide: Any, *, title: str, subtitle: str, dark: bool = False) ->
     run.font.name = FONT_HEAD
     run.font.bold = True
     run.font.size = Pt(23 if dark else 20)
-    run.font.color.rgb = _rgb("FFFFFF" if dark else PALETTE["navy"])
+    run.font.color.rgb = _rgb(PALETTE["panel"] if dark else PALETTE["navy"])
 
     subtitle_box = slide.shapes.add_textbox(Inches(0.52), Inches(0.50), Inches(11.9), Inches(0.20))
     tf2 = subtitle_box.text_frame
@@ -1745,7 +1821,7 @@ def _add_header(slide: Any, *, title: str, subtitle: str, dark: bool = False) ->
     run2.text = subtitle
     run2.font.name = FONT_BODY_BOOK
     run2.font.size = Pt(11.2)
-    run2.font.color.rgb = _rgb("CFE2FF" if dark else PALETTE["muted"])
+    run2.font.color.rgb = _rgb(PALETTE["dark_text_subtle"] if dark else PALETTE["muted"])
 
 
 def _add_footer(slide: Any, *, context: _ScopeContext) -> None:
@@ -1818,7 +1894,7 @@ def _metric_card(
 
 def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, "001B4A")
+    _add_bg(slide, PALETTE["dark_bg_1"])
     _add_header(
         slide,
         title="Radar de Resolución de Incidencias",
@@ -1835,7 +1911,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     dr.text = context.generated_at.strftime("%B %Y").capitalize()
     dr.font.name = FONT_BODY_BOOK
     dr.font.size = Pt(11)
-    dr.font.color.rgb = _rgb("CFE2FF")
+    dr.font.color.rgb = _rgb(PALETTE["dark_text_subtle"])
 
     line = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
@@ -1857,7 +1933,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     run.font.name = FONT_HEAD
     run.font.bold = True
     run.font.size = Pt(36)
-    run.font.color.rgb = _rgb("FFFFFF")
+    run.font.color.rgb = _rgb(PALETTE["panel"])
 
     _metric_card(
         slide,
@@ -1898,8 +1974,8 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
         Inches(1.26),
     )
     scope_box.fill.solid()
-    scope_box.fill.fore_color.rgb = _rgb("0A2E67")
-    scope_box.line.color.rgb = _rgb("2A66B8")
+    scope_box.fill.fore_color.rgb = _rgb(PALETTE["blue"])
+    scope_box.line.color.rgb = _rgb(PALETTE["dark_line"])
     tf2 = scope_box.text_frame
     tf2.clear()
     tf2.word_wrap = True
@@ -1909,7 +1985,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     run2.text = f"Scope: {context.country} · {context.source_label}"
     run2.font.name = FONT_BODY_MEDIUM
     run2.font.size = Pt(12.5)
-    run2.font.color.rgb = _rgb("FFFFFF")
+    run2.font.color.rgb = _rgb(PALETTE["panel"])
 
     p3 = tf2.add_paragraph()
     p3.alignment = PP_ALIGN.LEFT
@@ -1917,7 +1993,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     run3.text = f"Filtros aplicados: {context.filters.summary()}"
     run3.font.name = FONT_BODY_BOOK
     run3.font.size = Pt(11.2)
-    run3.font.color.rgb = _rgb("DDEBFF")
+    run3.font.color.rgb = _rgb(PALETTE["dark_text_mid"])
 
     foot = slide.shapes.add_textbox(Inches(0.62), Inches(6.97), Inches(12.0), Inches(0.20))
     ftf = foot.text_frame
@@ -1927,7 +2003,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     fr.text = "Objetivo del informe: concentrar esfuerzos donde el impacto en servicio y productividad es mayor."
     fr.font.name = FONT_BODY_BOOK
     fr.font.size = Pt(10)
-    fr.font.color.rgb = _rgb("BDD8FF")
+    fr.font.color.rgb = _rgb(PALETTE["dark_text_soft"])
 
 
 def _group_sections_by_theme(
@@ -2228,8 +2304,8 @@ def _add_chart_insight_slide(
         Inches(0.30),
     )
     chip.fill.solid()
-    chip.fill.fore_color.rgb = _rgb("EAF2FF")
-    chip.line.color.rgb = _rgb("B8CCE8")
+    chip.fill.fore_color.rgb = _rgb(PALETTE["tone_blue_bg"])
+    chip.line.color.rgb = _rgb(PALETTE["tone_blue_border"])
     ctf = chip.text_frame
     ctf.clear()
     cp = ctf.paragraphs[0]
@@ -2669,7 +2745,7 @@ def _select_actions_for_final_slide(actions: Sequence[ActionInsight]) -> List[Ac
 
 def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, "001C4A")
+    _add_bg(slide, PALETTE["dark_bg_2"])
     _add_header(
         slide,
         title="Plan de acción",
@@ -2684,8 +2760,8 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
         Inches(5.64),
     )
     actions_panel.fill.solid()
-    actions_panel.fill.fore_color.rgb = _rgb("FFFFFF")
-    actions_panel.line.color.rgb = _rgb("D3D8E1")
+    actions_panel.fill.fore_color.rgb = _rgb(PALETTE["panel"])
+    actions_panel.line.color.rgb = _rgb(PALETTE["line"])
 
     atf = actions_panel.text_frame
     atf.clear()
@@ -2748,7 +2824,7 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
     frun.text = f"{context.country} · {context.source_label} · {context.generated_at.strftime('%Y-%m-%d %H:%M UTC')}"
     frun.font.name = FONT_BODY_BOOK
     frun.font.size = Pt(10)
-    frun.font.color.rgb = _rgb("BDD8FF")
+    frun.font.color.rgb = _rgb(PALETTE["dark_text_soft"])
 
 
 def _compose_presentation(context: _ScopeContext) -> Any:

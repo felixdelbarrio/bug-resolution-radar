@@ -16,6 +16,7 @@ from bug_resolution_radar.config import (
     load_settings,
     save_settings,
 )
+from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.state import (
     bootstrap_filters_from_env,
@@ -236,19 +237,19 @@ def _sync_streamlit_theme_from_workspace() -> bool:
     desired = (
         {
             "theme.base": "dark",
-            "theme.primaryColor": "#5F9FFF",
-            "theme.backgroundColor": "#0A1228",
-            "theme.secondaryBackgroundColor": "#1A2B47",
-            "theme.textColor": "#EAF0FF",
+            "theme.primaryColor": BBVA_DARK.royal_blue,
+            "theme.backgroundColor": BBVA_DARK.bg_light,
+            "theme.secondaryBackgroundColor": BBVA_DARK.core_blue,
+            "theme.textColor": BBVA_DARK.ink,
             "theme.font": "sans serif",
         }
         if is_dark
         else {
             "theme.base": "light",
-            "theme.primaryColor": "#0051F1",
-            "theme.backgroundColor": "#F4F6F9",
-            "theme.secondaryBackgroundColor": "#FFFFFF",
-            "theme.textColor": "#11192D",
+            "theme.primaryColor": BBVA_LIGHT.electric_blue,
+            "theme.backgroundColor": BBVA_LIGHT.bg_light,
+            "theme.secondaryBackgroundColor": BBVA_LIGHT.white,
+            "theme.textColor": BBVA_LIGHT.ink,
             "theme.font": "sans serif",
         }
     )

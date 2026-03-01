@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 import streamlit as st
@@ -14,11 +13,13 @@ from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
+from bug_resolution_radar.ui.common import priority_rank
 from bug_resolution_radar.ui.components.issues import (
     prepare_issue_cards_df,
     render_issue_cards,
     render_issue_table,
 )
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     CsvDownloadSpec,
     build_download_filename,
@@ -29,22 +30,8 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
 from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
     build_helix_official_export_frames,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
-from bug_resolution_radar.ui.common import priority_rank
 
 MAX_CARDS_RENDER = 250
-_SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
-_ISSUES_SORTABLE_PREFS: Sequence[str] = (
-    "status",
-    "priority",
-    "updated",
-    "created",
-    "resolved",
-    "assignee",
-    "type",
-    "key",
-    "summary",
-)
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -257,37 +244,20 @@ def _inject_helix_descriptions(
 
 
 def _inject_missing_jira_descriptions_from_summary(dff: pd.DataFrame) -> pd.DataFrame:
+    """Do not synthesize Jira descriptions from summary text.
+
+    Earlier fallback logic split summary by separators and copied the tail into
+    `description`, which caused duplicated/incorrect descriptions. We now keep
+    description empty when Jira did not provide it.
+    """
     if dff is None or dff.empty:
         return pd.DataFrame() if dff is None else dff
-    if "source_type" not in dff.columns or "summary" not in dff.columns:
-        return dff
-
-    stype = dff["source_type"].astype(str).str.strip().str.lower()
-    jira_mask = stype.eq("jira")
-    if not bool(jira_mask.any()):
+    if "source_type" not in dff.columns:
         return dff
 
     out = dff.copy(deep=False).copy()
     if "description" not in out.columns:
         out["description"] = ""
-
-    for idx in out.index[jira_mask]:
-        current = str(out.at[idx, "description"] or "").strip()
-        if current and current != "—":
-            continue
-        summary = str(out.at[idx, "summary"] or "").strip()
-        if not summary:
-            continue
-        derived = ""
-        for token in _SUMMARY_SPLIT_TOKENS:
-            if token not in summary:
-                continue
-            head, tail = summary.split(token, 1)
-            if head.strip() and tail.strip():
-                derived = tail.strip()
-                break
-        if derived:
-            out.at[idx, "description"] = derived
     return out
 
 
