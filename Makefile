@@ -80,7 +80,7 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup CI all-github-actions test run clean build build-local make.build \
+.PHONY: help setup CI all-github-actions test run clean build \
 	_ensure-build-tools _ensure-desktop-runtime-deps _sync-build-env \
 	_test-ppt-regression _build-macos _build-linux _verify-macos-app _clean-build
 
@@ -93,8 +93,6 @@ help:
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
 	@echo "  make test        Ejecuta tests del repo (pytest)"
 	@echo "  make build       Flujo único de build: limpia + sync entorno + regresión PPT + build OS (macOS incluye verify)"
-	@echo "  make make.build  Alias explícito del target de build"
-	@echo "  make build-local Alias legado (compatibilidad)"
 	@echo "  make clean       Borra venv y cachés"
 	@echo ""
 	@echo "Variables útiles:"
@@ -191,9 +189,7 @@ _test-ppt-regression: _ensure-build-tools
 	$(PYTEST) -q tests/test_run_streamlit_entrypoint.py
 	$(PYTEST) -q tests/test_executive_report_ppt.py
 
-build: make.build
-
-make.build: _clean-build _sync-build-env _test-ppt-regression
+build: _clean-build _sync-build-env _test-ppt-regression
 	@case "$(HOST_UNAME)" in \
 		Darwin) \
 			$(MAKE) _build-macos; \
@@ -208,16 +204,12 @@ make.build: _clean-build _sync-build-env _test-ppt-regression
 			;; \
 	esac
 
-build-local:
-	@echo "Target 'build-local' deprecado; usa 'make build'."
-	@$(MAKE) make.build
-
 _build-macos:
 	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
 		echo "El target build-macos requiere ejecutarse en macOS."; \
 		exit 1; \
 	fi
-	@$(call rm_rf_retry,dist_app build_app build_bundle/bug-resolution-radar-macos build_bundle/bug-resolution-radar-macos.zip bug-resolution-radar-macos.zip)
+	@$(call rm_rf_retry,dist_app build_app build_bundle/bug-resolution-radar-macos build_bundle/bug-resolution-radar-macos.zip bug-resolution-radar-macos.zip bug-resolution-radar-macos.zip)
 	ROOT_DIR="$$(pwd)"; \
 	EXTRA_ARGS=(); \
 	if [ -d src/bug_resolution_radar/ui/assets ]; then \
