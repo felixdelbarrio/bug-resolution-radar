@@ -277,7 +277,10 @@ def test_jira_ingest_falls_back_to_latest_api(monkeypatch: Any) -> None:
         method = str(args[1]).upper()
         url = str(args[2])
         requested_urls.append(url)
-        if method == "POST" and url == "https://jira.globaldevtools.bbva.com/rest/api/latest/search":
+        if (
+            method == "POST"
+            and url == "https://jira.globaldevtools.bbva.com/rest/api/latest/search"
+        ):
             return _FakeResponse(200, payload={"issues": [], "total": 0})
         return _FakeResponse(404, text="<html><title>Oops, you've found a dead link</title></html>")
 
@@ -310,7 +313,9 @@ def test_jira_ingest_falls_back_to_latest_api(monkeypatch: Any) -> None:
 
 def test_jira_search_404_html_adds_base_url_hint(monkeypatch: Any) -> None:
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
-        return _FakeResponse(404, text="<!DOCTYPE html><html><title>Oops, you've found a dead link</title>")
+        return _FakeResponse(
+            404, text="<!DOCTYPE html><html><title>Oops, you've found a dead link</title>"
+        )
 
     monkeypatch.setattr(jira_mod, "_request", fake_request)
     monkeypatch.setattr(

@@ -222,17 +222,6 @@ def _jira_label_from_row(row: dict[str, object] | pd.Series) -> str:
     return _SOURCE_TYPE_TOKENS.get(source, "Issue")
 
 
-def _chip_html(value: object, *, for_priority: bool) -> str:
-    txt = _safe_cell_text(value)
-    if txt == "—":
-        return '<span class="issue-table-chip issue-table-chip-neutral">—</span>'
-    color = priority_color(txt) if for_priority else status_color(txt)
-    if color.upper() == _NEUTRAL_TOKEN:
-        return f'<span class="issue-table-chip issue-table-chip-neutral">{html.escape(txt)}</span>'
-    style = chip_style_from_color(color)
-    return f'<span class="issue-table-chip" style="{style}">{html.escape(txt)}</span>'
-
-
 def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
     txt = _safe_cell_text(value)
     if txt == "—":
@@ -268,156 +257,13 @@ def _native_key_cell_style(value: object) -> str:
     )
 
 
-def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> None:
-    origin_header = _origin_link_header(display_df)
-    title_by_col = {
-        "key": origin_header,
-        "summary": "summary",
-        "status": "status",
-        "type": "type",
-        "priority": "priority",
-        "created": "created",
-        "updated": "updated",
-        "resolved": "resolved",
-        "assignee": "assignee",
-        "components": "components",
-        "labels": "labels",
-    }
-
-    header_cells = ['<th class="issue-table-index"></th>']
-    header_cells.extend([f"<th>{html.escape(title_by_col.get(c, c))}</th>" for c in show_cols])
-
-    rows_html: List[str] = []
-    records = display_df.to_dict(orient="records")
-    for idx, row in zip(display_df.index.tolist(), records):
-        row_cells = [f'<td class="issue-table-index">{html.escape(str(idx))}</td>']
-        for col in show_cols:
-            if col == "key":
-                url = str(row.get("url") or "").strip()
-                source_type = _normalize_source_type(row.get("source_type"))
-                label = _safe_cell_text(row.get("key"))
-                if label == "—":
-                    label = _jira_label_from_row(row)
-                if url:
-                    href = html.escape(build_issue_open_href(url, source_type))
-                    row_cells.append(
-                        "<td>"
-                        f'<a class="issue-table-origin" href="{href}" '
-                        'target="_self" '
-                        f'rel="noopener noreferrer">{html.escape(label)}</a>'
-                        "</td>"
-                    )
-                else:
-                    row_cells.append(f"<td>{html.escape(label)}</td>")
-                continue
-
-            if col == "status":
-                row_cells.append(f"<td>{_chip_html(row.get(col), for_priority=False)}</td>")
-                continue
-
-            if col == "priority":
-                row_cells.append(f"<td>{_chip_html(row.get(col), for_priority=True)}</td>")
-                continue
-
-            text = _safe_cell_text(row.get(col))
-            css_class = "issue-table-summary" if col == "summary" else ""
-            row_cells.append(f'<td class="{css_class}">{html.escape(text)}</td>')
-
-        rows_html.append(f"<tr>{''.join(row_cells)}</tr>")
-
-    st.markdown(
-        f"""
-        <style>
-          .issue-table-shell {{
-            border: 1px solid var(--bbva-border);
-            border-radius: 14px;
-            overflow: hidden;
-            background: var(--bbva-surface);
-          }}
-          .issue-table-scroll {{
-            max-height: 600px;
-            overflow: auto;
-          }}
-          .issue-table {{
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 0.96rem;
-            line-height: 1.35;
-          }}
-          .issue-table thead th {{
-            position: sticky;
-            top: 0;
-            z-index: 2;
-            text-align: left;
-            font-weight: 700;
-            color: var(--bbva-text-muted);
-            background: color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2));
-            border-bottom: 1px solid var(--bbva-border);
-            padding: 0.60rem 0.72rem;
-            white-space: nowrap;
-          }}
-          .issue-table td {{
-            border-top: 1px solid var(--bbva-border);
-            padding: 0.50rem 0.72rem;
-            vertical-align: middle;
-            color: var(--bbva-text);
-            white-space: nowrap;
-          }}
-          .issue-table-index {{
-            width: 54px;
-            text-align: right !important;
-            color: var(--bbva-text-muted) !important;
-            font-variant-numeric: tabular-nums;
-            background: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-surface-2));
-          }}
-          .issue-table-summary {{
-            min-width: 480px;
-            max-width: 680px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }}
-          .issue-table-jira {{
-            color: var(--bbva-primary) !important;
-            font-weight: 700;
-            text-decoration: none;
-          }}
-          .issue-table-jira:hover,
-          .issue-table-origin:hover {{
-            text-decoration: underline;
-          }}
-          .issue-table-origin {{
-            color: var(--bbva-primary) !important;
-            font-weight: 800;
-            text-decoration: none;
-          }}
-          .issue-table-chip {{
-            display: inline-flex;
-            align-items: center;
-            max-width: 100%;
-          }}
-          .issue-table-chip-neutral {{
-            color: var(--bbva-text-muted);
-            border: 1px solid var(--bbva-border-strong);
-            background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2));
-            border-radius: 999px;
-            padding: 2px 10px;
-            font-weight: 700;
-            font-size: 0.80rem;
-          }}
-        </style>
-        <div class="issue-table-shell">
-          <div class="issue-table-scroll">
-            <table class="issue-table">
-              <thead><tr>{"".join(header_cells)}</tr></thead>
-              <tbody>{"".join(rows_html)}</tbody>
-            </table>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def _coerce_record_dict(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    out: dict[str, object] = {}
+    for key, item in value.items():
+        out[str(key)] = item
+    return out
 
 
 def _selection_payload(event: object) -> dict[str, object]:
@@ -474,8 +320,8 @@ def _row_record_from_selection(
             if isinstance(maybe, pd.DataFrame):
                 if maybe.empty:
                     return None
-                return maybe.iloc[0].to_dict()
-            return maybe.to_dict()
+                return _coerce_record_dict(maybe.iloc[0].to_dict())
+            return _coerce_record_dict(maybe.to_dict())
     except Exception:
         return None
     return None

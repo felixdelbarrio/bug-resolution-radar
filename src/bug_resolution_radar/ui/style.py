@@ -233,6 +233,11 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-signal-red-soft: {BBVA_SIGNAL_RED_3};
         --bbva-signal-orange: {BBVA_SIGNAL_ORANGE_2};
         --bbva-signal-green: {BBVA_SIGNAL_GREEN_2};
+        --bbva-focus-tone-risk: var(--bbva-signal-red);
+        --bbva-focus-tone-warning: color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight) 18%);
+        --bbva-focus-tone-flow: color-mix(in srgb, var(--bbva-signal-green) 78%, var(--bbva-midnight) 22%);
+        --bbva-focus-tone-quality: color-mix(in srgb, var(--bbva-primary) 84%, var(--bbva-midnight) 16%);
+        --bbva-focus-tone-opportunity: var(--bbva-signal-green);
         --bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-signal-orange) 28%);
         --bbva-nba-banner-border: color-mix(in srgb, var(--bbva-border-strong) 38%, var(--bbva-signal-orange) 62%);
         --bbva-nba-banner-shadow: color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent);

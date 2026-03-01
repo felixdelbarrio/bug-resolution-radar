@@ -329,7 +329,9 @@ def ingest_jira(
 
     base_candidates = _build_jira_base_candidates(base)
     api_candidates = _jira_api_bases(base_candidates)
-    login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or _default_jira_login_url(base)
+    login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or _default_jira_login_url(
+        base
+    )
     wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
     poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
     try:
@@ -365,14 +367,14 @@ def ingest_jira(
 
     if dry_run:
         attempts: List[str] = []
-        for api_base in api_candidates:
-            url = f"{api_base}/myself"
+        for trial_api_base in api_candidates:
+            url = f"{trial_api_base}/myself"
             r = _request(session, "GET", url)
             if r.status_code == 200:
                 me = r.json()
                 who = me.get("displayName") or me.get("name") or "(unknown)"
                 return True, f"{source_label}: OK Jira autenticado como {who}", None
-            attempts.append(f"{api_base} => {r.status_code}")
+            attempts.append(f"{trial_api_base} => {r.status_code}")
             # 404 often means wrong API version or missing context path; keep trying.
             if r.status_code == 404:
                 continue
@@ -431,9 +433,7 @@ def ingest_jira(
         if r.status_code != 200:
             hint = ""
             if r.status_code == 404 and _looks_like_html(r.text):
-                hint = (
-                    " Revisa JIRA_BASE_URL: usa la URL base de Jira (sin rutas como /browse/INC-123)."
-                )
+                hint = " Revisa JIRA_BASE_URL: usa la URL base de Jira (sin rutas como /browse/INC-123)."
             return (
                 False,
                 f"{source_label}: error Jira search ({r.status_code}): {r.text[:200]}{hint}",
