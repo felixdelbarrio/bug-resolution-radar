@@ -110,3 +110,17 @@ def test_render_issue_table_native_opens_issue_when_alias_key_cell_is_selected(
     )
 
     assert opened == [("https://jira.local/browse/MEX-1", "chrome", False)]
+
+
+def test_native_link_cell_style_marks_issue_key_as_clickable() -> None:
+    style = issues._native_link_cell_style("INCG-123")
+
+    assert f"color: {issues.BBVA_LIGHT.electric_blue};" in style
+    assert "text-decoration: underline;" in style
+    assert "font-weight: 800;" in style
+
+
+def test_native_link_cell_style_uses_dark_token_in_dark_mode() -> None:
+    style = issues._native_link_cell_style("INCG-123", dark_mode=True)
+
+    assert f"color: {issues.BBVA_DARK.serene_blue};" in style
