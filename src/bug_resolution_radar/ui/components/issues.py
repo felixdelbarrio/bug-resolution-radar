@@ -213,32 +213,21 @@ def _chip_html(value: object, *, for_priority: bool) -> str:
 def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
     txt = _safe_cell_text(value)
     if txt == "—":
-        return (
-            "color: #5f6b7a !important; "
-            "font-weight: 700 !important; "
-            "background: #edf2f7 !important; "
-            "border: 1px solid #d8e0ea !important; "
-            "border-radius: 999px !important;"
-        )
+        return "color: #7a869a; font-weight: 600; background-color: rgba(148, 163, 184, 0.14);"
 
     color = priority_color(txt) if for_priority else status_color(txt)
     if color.upper() == "#E2E6EE":
-        return (
-            "color: #102a43 !important; "
-            "font-weight: 700 !important; "
-            "background: #edf2f7 !important; "
-            "border: 1px solid #d8e0ea !important; "
-            "border-radius: 999px !important;"
-        )
+        return "color: #9fb3c8; font-weight: 700; background-color: rgba(148, 163, 184, 0.14);"
 
-    txt_color, border, bg = chip_palette_for_color(color)
-    return (
-        f"color: {txt_color} !important; "
-        f"background: {bg} !important; "
-        f"border: 1px solid {border} !important; "
-        "border-radius: 999px !important; "
-        "font-weight: 700 !important;"
-    )
+    txt_color, _, bg = chip_palette_for_color(color)
+    return f"color: {txt_color}; background-color: {bg}; font-weight: 700;"
+
+
+def _native_key_cell_style(value: object) -> str:
+    txt = _safe_cell_text(value)
+    if txt == "—":
+        return ""
+    return "color: #3b82f6 !important; text-decoration: underline !important; font-weight: 700;"
 
 
 def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> None:
@@ -393,7 +382,74 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
     )
 
 
-def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -> None:
+def _selection_payload(event: object) -> dict[str, object]:
+    if event is None:
+        return {}
+    sel = getattr(event, "selection", None)
+    if sel is None and isinstance(event, dict):
+        sel = event.get("selection")
+    if sel is None:
+        return {}
+    if isinstance(sel, dict):
+        return sel
+    rows = getattr(sel, "rows", None)
+    cols = getattr(sel, "columns", None)
+    cells = getattr(sel, "cells", None)
+    out: dict[str, object] = {}
+    if rows is not None:
+        out["rows"] = rows
+    if cols is not None:
+        out["columns"] = cols
+    if cells is not None:
+        out["cells"] = cells
+    return out
+
+
+def _selected_cell_from_event(event: object) -> Tuple[object | None, str | None]:
+    payload = _selection_payload(event)
+    cells = payload.get("cells")
+    if isinstance(cells, list) and cells:
+        cell = cells[0]
+        if isinstance(cell, dict):
+            return cell.get("row"), str(cell.get("column") or "")
+        if isinstance(cell, (list, tuple)) and len(cell) >= 2:
+            return cell[0], str(cell[1] or "")
+
+    rows = payload.get("rows")
+    cols = payload.get("columns")
+    row_value = rows[0] if isinstance(rows, list) and rows else None
+    col_value = str(cols[0] or "") if isinstance(cols, list) and cols else None
+    return row_value, col_value
+
+
+def _row_record_from_selection(
+    display_df: pd.DataFrame,
+    records: List[dict[str, object]],
+    row_value: object,
+) -> dict[str, object] | None:
+    if isinstance(row_value, int):
+        if 0 <= row_value < len(records):
+            return records[row_value]
+    try:
+        if row_value in display_df.index:
+            maybe = display_df.loc[row_value]
+            if isinstance(maybe, pd.DataFrame):
+                if maybe.empty:
+                    return None
+                return maybe.iloc[0].to_dict()
+            return maybe.to_dict()
+    except Exception:
+        return None
+    return None
+
+
+def _render_issue_table_native(
+    display_df: pd.DataFrame,
+    show_cols: List[str],
+    *,
+    settings: Settings | None,
+    table_key: str,
+) -> None:
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
     df_show = display_df[show_cols].copy(deep=False).copy()
     col_cfg = {}
@@ -401,21 +457,15 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
 
     records = display_df.to_dict(orient="records")
     if "key" in df_show.columns:
-        href_values: List[str] = []
+        key_values: List[str] = []
         for row in records:
             label = _safe_cell_text(row.get("key"))
             if label == "—":
                 label = _jira_label_from_row(row)
-            url = str(row.get("url") or "").strip()
-            if not url:
-                href_values.append("")
-                continue
-            source_type = _normalize_source_type(row.get("source_type"))
-            href_values.append(build_issue_open_href(url, source_type, key_label=label))
-        df_show["key"] = href_values
-        col_cfg["key"] = st.column_config.LinkColumn(
+            key_values.append(label)
+        df_show["key"] = key_values
+        col_cfg["key"] = st.column_config.TextColumn(
             origin_header,
-            display_text=r".*[?&]br_open_issue_key=([^&]+).*",
             width="small",
         )
     if "status" in df_show.columns:
@@ -433,6 +483,8 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
         col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
 
     styler = df_show.style
+    if "key" in df_show.columns:
+        styler = styler.map(_native_key_cell_style, subset=["key"])
     if "status" in df_show.columns:
         styler = styler.map(
             lambda x: _native_signal_cell_style(x, for_priority=False),
@@ -444,12 +496,51 @@ def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -
             subset=["priority"],
         )
 
-    st.dataframe(
+    event = st.dataframe(
         styler,
         width="stretch",
         hide_index=False,
         column_config=col_cfg or None,
+        on_select="rerun",
+        selection_mode="single-cell",
+        key=table_key,
     )
+
+    row_value, col_value = _selected_cell_from_event(event)
+    last_open_key = f"{table_key}::last_open_token"
+    col_token = str(col_value or "").strip().lower()
+    if col_token not in {"key", str(origin_header or "").strip().lower()} or row_value is None:
+        st.session_state[last_open_key] = ""
+        return
+
+    selected = _row_record_from_selection(display_df, records, row_value)
+    if not selected:
+        return
+    target_url = str(selected.get("url") or "").strip()
+    if not target_url:
+        return
+    source_type = _normalize_source_type(selected.get("source_type"))
+    browser = _browser_for_source_type(settings, source_type)
+    open_token = (
+        f"{str(selected.get('source_id') or '').strip().lower()}::"
+        f"{str(selected.get('key') or '').strip().upper()}::"
+        f"{target_url}"
+    )
+    if str(st.session_state.get(last_open_key) or "") == open_token:
+        return
+
+    opened = open_url_in_configured_browser(
+        target_url,
+        browser,
+        allow_system_default_fallback=False,
+    )
+    if not opened:
+        st.warning(
+            f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
+            "Revisa la configuración de navegador."
+        )
+    st.session_state[last_open_key] = open_token
+    st.rerun()
 
 
 def prepare_issue_cards_df(dff: pd.DataFrame, *, max_cards: int) -> pd.DataFrame:
@@ -514,8 +605,6 @@ def render_issue_cards(
     prepared_df: pd.DataFrame | None = None,
 ) -> None:
     """Render issues as BBVA-styled cards over the full filtered set (open first)."""
-    handle_issue_link_open_request(settings=settings)
-
     if title:
         st.markdown(f"### {title}")
 
@@ -529,72 +618,123 @@ def render_issue_cards(
         else prepare_issue_cards_df(dff, max_cards=max_cards)
     )
 
-    cards: List[str] = []
-    for row in cards_df.to_dict(orient="records"):
-        key_txt = _safe_cell_text(row.get("key"))
-        key = html.escape(key_txt if key_txt != "—" else _jira_label_from_row(row))
-        url_raw = str(row.get("url") or "").strip()
-        source_type = _normalize_source_type(row.get("source_type"))
-        url_href = html.escape(build_issue_open_href(url_raw, source_type))
-        title_txt, desc_txt = _title_and_description_from_row(row)
-        issue_title = html.escape(title_txt)
-        issue_desc = html.escape(desc_txt)
-        issue_desc_html = f'<div class="issue-description">{issue_desc}</div>' if issue_desc else ""
-        status_txt = _safe_cell_text(row.get("status"))
-        prio_txt = _safe_cell_text(row.get("priority"))
-        assignee_txt = _safe_cell_text(row.get("assignee"))
-        is_open = bool(row.get("__is_open", True))
-        open_age = float(row.get("__open_age_days", 0.0) or 0.0)
-        cycle_days = float(row.get("__cycle_days", 0.0) or 0.0)
-
-        badges: List[str] = []
-        if prio_txt != "—":
-            p_style = chip_style_from_color(priority_color(prio_txt))
-            badges.append(
-                f'<span class="badge badge-priority" style="{p_style}">Priority: {html.escape(prio_txt)}</span>'
-            )
-        if status_txt != "—":
-            s_style = chip_style_from_color(status_color(status_txt))
-            badges.append(
-                f'<span class="badge badge-status" style="{s_style}">Status: {html.escape(status_txt)}</span>'
-            )
-        if assignee_txt != "—":
-            badges.append(f'<span class="badge">Assignee: {html.escape(assignee_txt)}</span>')
-        if is_open:
-            badges.append(f'<span class="badge badge-age">Open age: {open_age:.0f}d</span>')
-        else:
-            badges.append(f'<span class="badge badge-age">Resolved in: {cycle_days:.0f}d</span>')
-
-        cards.append(
-            (
-                '<article class="issue-card">'
-                '<div class="issue-top">'
-                '<div class="issue-headline">'
-                f'<div class="issue-key"><a href="{url_href}" target="_self" rel="noopener noreferrer">{key}</a></div>'
-                f'<div class="issue-title">{issue_title}</div>'
-                "</div>"
-                "</div>"
-                f"{issue_desc_html}"
-                f'<div class="badges">{"".join(badges)}</div>'
-                "</article>"
-            )
-        )
     st.markdown(
-        f"""
+        """
         <style>
-          .issue-cards-stack {{
-            display: grid;
-            grid-template-columns: minmax(0, 1fr);
-            gap: 12px;
-          }}
+          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] {
+            margin: 0 !important;
+          }
+          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button {
+            border: 0 !important;
+            background: transparent !important;
+            color: #3b82f6 !important;
+            text-decoration: underline !important;
+            font-weight: 800 !important;
+            padding: 0 !important;
+            min-height: auto !important;
+            height: auto !important;
+            line-height: 1.08 !important;
+            white-space: nowrap !important;
+            box-shadow: none !important;
+          }
+          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button:hover {
+            color: #60a5fa !important;
+            background: transparent !important;
+          }
+          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button:focus,
+          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+          }
+          .issue-title-inline {
+            font-weight: 700;
+            color: color-mix(in srgb, var(--bbva-text) 96%, transparent);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 1px;
+          }
         </style>
-        <div class="issue-cards-stack">{"".join(cards)}</div>
         """,
         unsafe_allow_html=True,
     )
 
+    with st.container():
+        for idx_card, row in enumerate(cards_df.to_dict(orient="records")):
+            key_txt = _safe_cell_text(row.get("key"))
+            key_label = key_txt if key_txt != "—" else _jira_label_from_row(row)
+            url_raw = str(row.get("url") or "").strip()
+            source_type = _normalize_source_type(row.get("source_type"))
+            title_txt, desc_txt = _title_and_description_from_row(row)
+            issue_title = html.escape(title_txt)
+            issue_desc = html.escape(desc_txt)
+            issue_desc_html = (
+                f'<div class="issue-description">{issue_desc}</div>' if issue_desc else ""
+            )
+            status_txt = _safe_cell_text(row.get("status"))
+            prio_txt = _safe_cell_text(row.get("priority"))
+            assignee_txt = _safe_cell_text(row.get("assignee"))
+            is_open = bool(row.get("__is_open", True))
+            open_age = float(row.get("__open_age_days", 0.0) or 0.0)
+            cycle_days = float(row.get("__cycle_days", 0.0) or 0.0)
 
-def render_issue_table(dff: pd.DataFrame) -> None:
+            badges: List[str] = []
+            if prio_txt != "—":
+                p_style = chip_style_from_color(priority_color(prio_txt))
+                badges.append(
+                    f'<span class="badge badge-priority" style="{p_style}">Priority: {html.escape(prio_txt)}</span>'
+                )
+            if status_txt != "—":
+                s_style = chip_style_from_color(status_color(status_txt))
+                badges.append(
+                    f'<span class="badge badge-status" style="{s_style}">Status: {html.escape(status_txt)}</span>'
+                )
+            if assignee_txt != "—":
+                badges.append(f'<span class="badge">Assignee: {html.escape(assignee_txt)}</span>')
+            if is_open:
+                badges.append(f'<span class="badge badge-age">Open age: {open_age:.0f}d</span>')
+            else:
+                badges.append(
+                    f'<span class="badge badge-age">Resolved in: {cycle_days:.0f}d</span>'
+                )
+
+            st.markdown('<article class="issue-card">', unsafe_allow_html=True)
+            c_key, c_title = st.columns([2.4, 9.6], gap="small")
+            with c_key:
+                if st.button(
+                    key_label,
+                    key=f"issue_open_btn_{idx_card}",
+                    type="tertiary",
+                    width="content",
+                ):
+                    browser = _browser_for_source_type(settings, source_type)
+                    opened = open_url_in_configured_browser(
+                        url_raw,
+                        browser,
+                        allow_system_default_fallback=False,
+                    )
+                    if not opened:
+                        st.warning(
+                            f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
+                            "Revisa la configuración de navegador."
+                        )
+            with c_title:
+                st.markdown(
+                    f'<div class="issue-title-inline">{issue_title}</div>',
+                    unsafe_allow_html=True,
+                )
+            if issue_desc_html:
+                st.markdown(issue_desc_html, unsafe_allow_html=True)
+            st.markdown(f'<div class="badges">{"".join(badges)}</div>', unsafe_allow_html=True)
+            st.markdown("</article>", unsafe_allow_html=True)
+
+
+def render_issue_table(
+    dff: pd.DataFrame,
+    *,
+    settings: Settings | None = None,
+    table_key: str = "issues_table_grid",
+) -> None:
     """Render issues in an interactive table with sortable headers."""
     if dff is None or dff.empty:
         st.info("No hay issues para mostrar con los filtros actuales.")
@@ -629,4 +769,9 @@ def render_issue_table(dff: pd.DataFrame) -> None:
         )
         display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
 
-    _render_issue_table_native(display_df, list(show_cols))
+    _render_issue_table_native(
+        display_df,
+        list(show_cols),
+        settings=settings,
+        table_key=table_key,
+    )

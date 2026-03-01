@@ -51,3 +51,20 @@ def test_inject_helix_descriptions_uses_source_scoped_key(monkeypatch: Any) -> N
     out = issues_tab._inject_helix_descriptions(df, settings=None)
 
     assert out.loc[0, "description"] == "Descripcion extensa del incidente"
+
+
+def test_inject_missing_jira_descriptions_from_summary() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "MEXBMI1-1",
+                "source_type": "jira",
+                "summary": "(IOS) [MX] SOFTOKENBNC - No se visualiza pantalla",
+                "description": "",
+            }
+        ]
+    )
+
+    out = issues_tab._inject_missing_jira_descriptions_from_summary(df)
+
+    assert out.loc[0, "description"] == "No se visualiza pantalla"

@@ -440,6 +440,7 @@ def download_button_for_df(
 DEFAULT_TABLE_COLS = [
     "key",
     "summary",
+    "description",
     "status",
     "type",
     "priority",

@@ -14,7 +14,6 @@ from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
 from bug_resolution_radar.ui.components.issues import (
-    handle_issue_link_open_request,
     prepare_issue_cards_df,
     render_issue_cards,
     render_issue_table,
@@ -31,6 +30,7 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 )
 
 MAX_CARDS_RENDER = 250
+_SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -173,6 +173,41 @@ def _inject_helix_descriptions(
         if curr and curr != "—" and curr.lower() != summary.lower():
             continue
         out.at[idx, "description"] = desc
+    return out
+
+
+def _inject_missing_jira_descriptions_from_summary(dff: pd.DataFrame) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    if "source_type" not in dff.columns or "summary" not in dff.columns:
+        return dff
+
+    stype = dff["source_type"].astype(str).str.strip().str.lower()
+    jira_mask = stype.eq("jira")
+    if not bool(jira_mask.any()):
+        return dff
+
+    out = dff.copy(deep=False).copy()
+    if "description" not in out.columns:
+        out["description"] = ""
+
+    for idx in out.index[jira_mask]:
+        current = str(out.at[idx, "description"] or "").strip()
+        if current and current != "—":
+            continue
+        summary = str(out.at[idx, "summary"] or "").strip()
+        if not summary:
+            continue
+        derived = ""
+        for token in _SUMMARY_SPLIT_TOKENS:
+            if token not in summary:
+                continue
+            head, tail = summary.split(token, 1)
+            if head.strip() and tail.strip():
+                derived = tail.strip()
+                break
+        if derived:
+            out.at[idx, "description"] = derived
     return out
 
 
@@ -398,8 +433,8 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
-        handle_issue_link_open_request(settings=settings)
         dff_show = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
+        dff_show = _inject_missing_jira_descriptions_from_summary(dff_show)
 
         # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
         table_pref_cols = [
@@ -417,10 +452,7 @@ def render_issues_section(
             "url",
         ]
         table_df = make_table_export_df(dff_show, preferred_cols=table_pref_cols)
-        export_df = table_df.drop(
-            columns=["description", "details", "detailed_description", "detailed_decription"],
-            errors="ignore",
-        )
+        export_df = table_df.copy(deep=False)
 
         # Compact toolbar: CSV + count + view mode (same visual language as top tabs)
         view_key = f"{key_prefix}::view_mode"
@@ -491,7 +523,11 @@ def render_issues_section(
             )
             return
 
-        render_issue_table(table_df)
+        render_issue_table(
+            table_df,
+            settings=settings,
+            table_key=f"{key_prefix}::issues_table_grid",
+        )
 
 
 def render_issues_tab(

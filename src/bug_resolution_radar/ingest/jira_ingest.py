@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -76,6 +77,55 @@ def _has_jira_auth_cookie(cookie_names: List[str]) -> bool:
     if any(name.startswith("atlassian.") for name in got):
         return True
     return True
+
+
+def _jira_description_to_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+
+    parts: list[str] = []
+
+    def _walk(node: object) -> None:
+        if node is None:
+            return
+        if isinstance(node, str):
+            if node:
+                parts.append(node)
+            return
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+            return
+        if isinstance(node, dict):
+            txt = node.get("text")
+            if isinstance(txt, str) and txt:
+                parts.append(txt)
+            _walk(node.get("content"))
+            t = str(node.get("type") or "").strip().lower()
+            if t in {
+                "paragraph",
+                "heading",
+                "listitem",
+                "bulletlist",
+                "orderedlist",
+                "blockquote",
+                "codeblock",
+                "tablecell",
+                "tablerow",
+                "hardbreak",
+            }:
+                parts.append("\n")
+
+    _walk(value)
+    if not parts:
+        return ""
+    text = "".join(parts)
+    text = re.sub(r"[ \t\f\v]+", " ", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _bootstrap_jira_cookie_from_browser(
@@ -252,6 +302,7 @@ def ingest_jira(
             "maxResults": max_results,
             "fields": [
                 "summary",
+                "description",
                 "status",
                 "issuetype",
                 "priority",
@@ -304,6 +355,7 @@ def ingest_jira(
                 NormalizedIssue(
                     key=it.get("key", ""),
                     summary=fields.get("summary", ""),
+                    description=_jira_description_to_text(fields.get("description")),
                     status=((fields.get("status") or {}).get("name", "") or "").strip(),
                     type=((fields.get("issuetype") or {}).get("name", "") or "").strip(),
                     priority=priority,

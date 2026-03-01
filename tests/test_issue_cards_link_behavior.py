@@ -59,3 +59,12 @@ def test_title_and_description_from_row_without_description_avoids_duplication()
 
     assert title == "BBVA Senda"
     assert description == ""
+
+
+def test_selected_cell_from_event_supports_dict_shape() -> None:
+    row, col = issues._selected_cell_from_event(
+        {"selection": {"cells": [{"row": 3, "column": "key"}]}}
+    )
+
+    assert row == 3
+    assert col == "key"
