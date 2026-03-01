@@ -28,7 +28,7 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_SIGNAL_RED_3,
     hex_to_rgba,
 )
-from bug_resolution_radar.ui.common import flow_signal_color_map
+from bug_resolution_radar.ui.common import flow_signal_color_map, semantic_popover_css_rules
 
 
 @lru_cache(maxsize=64)
@@ -764,77 +764,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
             color: var(--bbva-text) !important;
           }
-          /* Option semáforo en listados (status/priority); el chip seleccionado mantiene solo fondo/borde */
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-red-soft);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-red-soft) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="test" i], [title*="test" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-orange);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-orange) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-goal-green);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-goal-green) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-green);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-green) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-red-strong);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-red-strong) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-orange);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-orange) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-green);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-green) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="test" i], [title*="test" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i])::before {
-            content: "";
-          }
+          /* Option semáforo en listados (status/priority) desde token map central. */
+          __SEMANTIC_POPOVER_CSS__
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
             color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
@@ -1649,6 +1580,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
     st.markdown(
         css_template.replace("__CSS_VARS__", css_vars)
         .replace("__FONT_FACE_CSS__", _font_face_css())
+        .replace("__SEMANTIC_POPOVER_CSS__", semantic_popover_css_rules())
         .replace("__ICON_REPORT__", icon_report)
         .replace("__ICON_INGEST__", icon_ingest)
         .replace("__ICON_THEME__", icon_theme)

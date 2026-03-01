@@ -18,7 +18,6 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_SIGNAL_GREEN_1,
     BBVA_SIGNAL_GREEN_2,
     BBVA_SIGNAL_GREEN_3,
-    BBVA_SIGNAL_ORANGE_1,
     BBVA_SIGNAL_ORANGE_2,
     BBVA_SIGNAL_RED_1,
     BBVA_SIGNAL_RED_2,
@@ -168,7 +167,6 @@ def _normalize_token(value: Optional[str]) -> str:
 _RED_1 = BBVA_SIGNAL_RED_1
 _RED_2 = BBVA_SIGNAL_RED_2
 _RED_3 = BBVA_SIGNAL_RED_3
-_ORANGE_1 = BBVA_SIGNAL_ORANGE_1
 _ORANGE_2 = BBVA_SIGNAL_ORANGE_2
 _YELLOW_1 = BBVA_SIGNAL_YELLOW_1
 _GREEN_1 = BBVA_SIGNAL_GREEN_1
@@ -182,16 +180,16 @@ _NEUTRAL = BBVA_NEUTRAL_SOFT
 _STATUS_COLOR_BY_KEY: Dict[str, str] = {
     "new": _RED_3,
     "ready": _RED_3,
-    "analysing": _RED_2,
-    "blocked": _RED_1,
+    "analysing": _RED_3,
+    "blocked": _RED_3,
     "en progreso": _ORANGE_2,
     "in progress": _ORANGE_2,
-    "to rework": _ORANGE_1,
-    "rework": _ORANGE_1,
-    "test": _YELLOW_1,
+    "to rework": _ORANGE_2,
+    "rework": _ORANGE_2,
+    "test": _ORANGE_2,
     "ready to verify": _ORANGE_2,
     "accepted": _GREEN_3,
-    "ready to deploy": _GREEN_2,
+    "ready to deploy": _GREEN_3,
     # Deployed is a goal state and uses a dedicated purple scale (7/8) for clear differentiation.
     "deployed": _GOAL_ACCENT_7,
     "closed": _GREEN_1,
@@ -234,6 +232,63 @@ def flow_signal_color_map() -> Dict[str, str]:
         "open": _YELLOW_1,
         "open_backlog_proxy": _YELLOW_1,
     }
+
+
+def _css_attr_value(txt: str) -> str:
+    return str(txt or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _group_tokens_by_color(token_color_map: Dict[str, str]) -> Dict[str, List[str]]:
+    grouped: Dict[str, List[str]] = {}
+    for raw_token, raw_color in token_color_map.items():
+        token = _normalize_token(raw_token)
+        color = str(raw_color or "").strip()
+        if not token or not color:
+            continue
+        bucket = grouped.setdefault(color, [])
+        if token not in bucket:
+            bucket.append(token)
+    return grouped
+
+
+def _semantic_option_css_block(*, tokens: List[str], color: str) -> str:
+    selectors: List[str] = []
+    for token in list(tokens or []):
+        txt = _css_attr_value(token)
+        selectors.append(
+            (
+                'div[data-baseweb="popover"].bbva-semantic-popover '
+                f'[role="option"]:is([aria-label*="{txt}" i], [title*="{txt}" i])'
+            )
+        )
+    if not selectors:
+        return ""
+    selector_group = ",\n".join(selectors)
+    return (
+        f"{selector_group} {{\n"
+        "  padding-left: 1.70rem !important;\n"
+        f"  --bbva-opt-dot: {color};\n"
+        f"  border-left: 2px solid color-mix(in srgb, {color} 72%, transparent);\n"
+        "}\n"
+        f"{selector_group}::before {{\n"
+        '  content: "";\n'
+        "}\n"
+    )
+
+
+@lru_cache(maxsize=1)
+def semantic_popover_css_rules() -> str:
+    """Build semantic option CSS from central status/priority token maps."""
+    blocks: List[str] = []
+    for color, tokens in _group_tokens_by_color(_STATUS_COLOR_BY_KEY).items():
+        block = _semantic_option_css_block(tokens=tokens, color=color)
+        if block:
+            blocks.append(block)
+    for color, tokens in _group_tokens_by_color(_PRIORITY_COLOR_BY_KEY).items():
+        block = _semantic_option_css_block(tokens=tokens, color=color)
+        if block:
+            blocks.append(block)
+    return "\n".join(blocks)
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:

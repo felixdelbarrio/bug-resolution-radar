@@ -16,6 +16,7 @@ from bug_resolution_radar.ui.common import (
     open_issues_only,
     priority_color,
     priority_color_map,
+    semantic_popover_css_rules,
     status_color,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
@@ -213,8 +214,14 @@ def test_normalize_analysis_lookback_months_defaults_for_non_positive_values() -
 def test_semantic_status_and_priority_colors() -> None:
     assert status_color("New") == "#E85D63"
     assert status_color("Ready") == "#E85D63"
-    assert status_color("Analysing") == "#D64550"
-    assert status_color("Blocked") == "#B4232A"
+    assert status_color("Analysing") == "#E85D63"
+    assert status_color("Blocked") == "#E85D63"
+    assert status_color("In Progress") == "#F59E0B"
+    assert status_color("To Rework") == "#F59E0B"
+    assert status_color("Test") == "#F59E0B"
+    assert status_color("Ready To Verify") == "#F59E0B"
+    assert status_color("Accepted") == "#4CAF50"
+    assert status_color("Ready to Deploy") == "#4CAF50"
     assert status_color("Open") == "#FBBF24"
     assert status_color("Closed") == "#15803D"
     assert status_color("Deployed") == "#5B3FD0"
@@ -248,9 +255,26 @@ def test_semantic_color_maps_include_flow_signals() -> None:
 def test_goal_state_chip_uses_stronger_fill() -> None:
     deployed_style = chip_style_from_color(status_color("Deployed"))
     accepted_style = chip_style_from_color(status_color("Accepted"))
+    ready_deploy_style = chip_style_from_color(status_color("Ready to Deploy"))
     assert "background:#ECE6FF" in deployed_style
     assert "color:#5B3FD0" in deployed_style
     assert "rgba(76,175,80,0.160)" in accepted_style
+    assert accepted_style == ready_deploy_style
+
+
+def test_semantic_popover_rules_are_built_from_shared_color_tokens() -> None:
+    css = semantic_popover_css_rules()
+    assert '[aria-label*="new" i]' in css
+    assert '[aria-label*="analysing" i]' in css
+    assert '[aria-label*="blocked" i]' in css
+    assert "--bbva-opt-dot: #E85D63;" in css
+    assert '[aria-label*="to rework" i]' in css
+    assert '[aria-label*="test" i]' in css
+    assert '[aria-label*="ready to verify" i]' in css
+    assert "--bbva-opt-dot: #F59E0B;" in css
+    assert '[aria-label*="accepted" i]' in css
+    assert '[aria-label*="ready to deploy" i]' in css
+    assert "--bbva-opt-dot: #4CAF50;" in css
 
 
 def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:
