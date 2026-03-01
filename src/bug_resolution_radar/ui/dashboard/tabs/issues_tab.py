@@ -588,14 +588,16 @@ def _inject_issues_sort_export_css(*, scope_key: str) -> None:
             width: 100% !important;
             display: flex;
             justify-content: flex-end;
-            padding-right: 0.55rem;
+            padding-right: 0.28rem;
             box-sizing: border-box;
           }}
           .st-key-{scope_key} .stDownloadButton > button {{
             margin-left: auto !important;
           }}
           .st-key-{scope_key} [class*="st-key-"] [data-testid="stToggle"] {{
-            margin-right: 0.32rem;
+            display: flex;
+            justify-content: flex-end;
+            margin-right: 0.12rem;
           }}
         </style>
         """,
@@ -680,16 +682,18 @@ def render_issues_section(
             with left:
                 _render_shared_sort_controls(dff_show_raw, key_prefix=key_prefix)
             with right:
-                _, toggle_col, btn_col = st.columns([0.62, 1.0, 1.0], gap="small")
-                with toggle_col:
-                    _render_sort_direction_control(key_prefix=key_prefix)
-                with btn_col:
-                    _render_issues_download_button(
-                        export_df,
-                        key_prefix=key_prefix,
-                        settings=settings,
-                        helix_only=_is_helix_only_scope(dff_show),
-                    )
+                _, controls_col = st.columns([0.55, 1.45], gap="small")
+                with controls_col:
+                    toggle_col, btn_col = st.columns([0.92, 1.0], gap="small")
+                    with toggle_col:
+                        _render_sort_direction_control(key_prefix=key_prefix)
+                    with btn_col:
+                        _render_issues_download_button(
+                            export_df,
+                            key_prefix=key_prefix,
+                            settings=settings,
+                            helix_only=_is_helix_only_scope(dff_show),
+                        )
 
         if dff_show.empty:
             st.info("No hay issues para mostrar con los filtros actuales.")

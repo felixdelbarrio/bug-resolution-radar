@@ -125,11 +125,33 @@ def _inject_filters_panel_css() -> None:
           }
           [data-testid="stMultiSelect"] [role="option"] {
             color: var(--bbva-text) !important;
+          }
+          /* Popover lives outside widget DOM; force compact rows there to avoid visual gaps. */
+          div[data-baseweb="popover"] [role="listbox"],
+          div[data-baseweb="popover"] [role="menu"],
+          div[data-baseweb="popover"] ul {
+            gap: 0 !important;
+            row-gap: 0 !important;
+            column-gap: 0 !important;
+          }
+          div[data-baseweb="popover"] li {
             margin: 0 !important;
-            min-height: auto !important;
-            line-height: 1.22 !important;
-            padding-top: 0.36rem !important;
-            padding-bottom: 0.36rem !important;
+            padding: 0 !important;
+          }
+          div[data-baseweb="popover"] [role="option"] {
+            margin: 0 !important;
+            min-height: 0 !important;
+            height: auto !important;
+            line-height: 1.2 !important;
+            padding-top: 0.32rem !important;
+            padding-bottom: 0.32rem !important;
+            box-sizing: border-box !important;
+            display: block !important;
+          }
+          div[data-baseweb="popover"] [role="option"] * {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            line-height: 1.2 !important;
           }
           /* Semantic marker (status/priority) driven by centralized token map. */
           div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"] {
