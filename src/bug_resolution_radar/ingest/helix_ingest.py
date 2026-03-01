@@ -1963,7 +1963,7 @@ def ingest_helix(
             return (
                 False,
                 f"{source_label}: Helix no autenticado (redirección a SSO en {preflight_name}). "
-                f"cookies_cargadas={cookie_names} | "
+                f"Abre SmartIT en '{browser}', autentícate y reintenta. "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -1973,7 +1973,6 @@ def ingest_helix(
                 False,
                 f"{source_label}: Helix dry-run rápido falló en {preflight_name} "
                 f"({preflight.status_code}): {_short_text(preflight.text)} | "
-                f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )

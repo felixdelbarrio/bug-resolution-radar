@@ -160,35 +160,68 @@ def _render_progress_status(
     *,
     connector: str,
     title: str,
+    slot: Any | None = None,
 ) -> bool:
     snapshot = _progress_snapshot(connector)
     state = str(snapshot.get("state") or "idle").strip().lower()
     if state == "idle":
+        if slot is not None:
+            slot.empty()
         return False
 
     total = int(snapshot.get("total_sources") or 0)
     completed = int(snapshot.get("completed_sources") or 0)
     success_count = int(snapshot.get("success_count") or 0)
+    run_id = int(snapshot.get("run_id") or 0)
     messages = cast(List[Tuple[bool, str]], snapshot.get("messages") or [])
 
     if state == "running":
-        with st.status(f"{title}: ingesta en curso", state="running", expanded=True):
-            st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
-            for ok, msg in messages:
-                (st.success if ok else st.error)(msg)
+        if slot is not None:
+            slot.empty()
+            with slot.container():
+                with st.status(
+                    f"{title}: ingesta en curso · ejecución {run_id}",
+                    state="running",
+                    expanded=True,
+                ):
+                    st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
+                    for ok, msg in messages:
+                        (st.success if ok else st.error)(msg)
+        else:
+            with st.status(
+                f"{title}: ingesta en curso · ejecución {run_id}",
+                state="running",
+                expanded=True,
+            ):
+                st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
+                for ok, msg in messages:
+                    (st.success if ok else st.error)(msg)
         return True
 
     ui_state: Literal["complete", "error"] = (
         "complete" if state in {"success", "partial"} else "error"
     )
     headline = str(snapshot.get("summary") or f"{title}: ingesta finalizada.")
-    with st.status(headline, state=ui_state, expanded=False):
-        st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
-        finished_at = str(snapshot.get("finished_at") or "").strip()
-        if finished_at:
-            st.caption(f"Finalizada: {finished_at}")
-        for ok, msg in messages:
-            (st.success if ok else st.error)(msg)
+    if slot is not None:
+        slot.empty()
+        with slot.container():
+            with st.status(headline, state=ui_state, expanded=False):
+                st.caption(f"Ejecución: {run_id}")
+                st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
+                finished_at = str(snapshot.get("finished_at") or "").strip()
+                if finished_at:
+                    st.caption(f"Finalizada: {finished_at}")
+                for ok, msg in messages:
+                    (st.success if ok else st.error)(msg)
+    else:
+        with st.status(headline, state=ui_state, expanded=False):
+            st.caption(f"Ejecución: {run_id}")
+            st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
+            finished_at = str(snapshot.get("finished_at") or "").strip()
+            if finished_at:
+                st.caption(f"Finalizada: {finished_at}")
+            for ok, msg in messages:
+                (st.success if ok else st.error)(msg)
     return False
 
 
@@ -793,7 +826,12 @@ def render(settings: Settings) -> None:
                 else:
                     st.warning("Ya hay una ingesta Jira en curso.")
 
-        jira_running = _render_progress_status(connector="jira", title="Jira")
+        jira_progress_slot = st.empty()
+        jira_running = _render_progress_status(
+            connector="jira",
+            title="Jira",
+            slot=jira_progress_slot,
+        )
         running_any = running_any or jira_running
 
         st.markdown("### Última ingesta (Jira)")
@@ -971,7 +1009,12 @@ def render(settings: Settings) -> None:
                 else:
                     st.warning("Ya hay una ingesta Helix en curso.")
 
-        helix_running = _render_progress_status(connector="helix", title="Helix")
+        helix_progress_slot = st.empty()
+        helix_running = _render_progress_status(
+            connector="helix",
+            title="Helix",
+            slot=helix_progress_slot,
+        )
         running_any = running_any or helix_running
 
         st.markdown("### Última ingesta (Helix)")
