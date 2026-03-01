@@ -844,7 +844,7 @@ def render(settings: Settings) -> None:
         jira_editor = st.data_editor(
             jira_df,
             hide_index=True,
-            num_rows="fixed",
+            num_rows="dynamic",
             width="stretch",
             key="cfg_jira_sources_editor",
             column_order=["__delete__", "country", "alias", "jql"],
@@ -1000,7 +1000,7 @@ def render(settings: Settings) -> None:
         helix_editor = st.data_editor(
             helix_df,
             hide_index=True,
-            num_rows="fixed",
+            num_rows="dynamic",
             width="stretch",
             key="cfg_helix_sources_editor",
             column_order=[
