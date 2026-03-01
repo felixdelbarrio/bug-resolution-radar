@@ -182,21 +182,9 @@ def _cookie_names_from_header(cookie_header: str) -> List[str]:
 
 
 def _has_jira_auth_cookie(cookie_names: List[str]) -> bool:
-    got = {str(x).strip().lower() for x in cookie_names}
-    if not got:
-        return False
-    wanted = {
-        "jsessionid",
-        "atlassian.xsrf.token",
-        "atlassian.account.id",
-        "cloud.session.token",
-        "seraph.rememberme.cookie",
-    }
-    if any(x in got for x in wanted):
-        return True
-    if any(name.startswith("atlassian.") for name in got):
-        return True
-    return True
+    # Atlassian cookie names vary across Cloud/DC and tenant security layers.
+    # Presence of at least one cookie from the browser session is enough to proceed.
+    return bool({str(x).strip().lower() for x in cookie_names})
 
 
 def _normalize_multiline_text(text: str) -> str:
