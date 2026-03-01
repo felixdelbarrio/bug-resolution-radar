@@ -12,6 +12,7 @@ import streamlit as st
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
+from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
 from bug_resolution_radar.ui.components.issues import (
     prepare_issue_cards_df,
     render_issue_cards,
@@ -138,7 +139,11 @@ def _helix_data_path_and_mtime(settings: Settings | None) -> tuple[str, int]:
         return str(p), -1
 
 
-@st.cache_data(show_spinner=False, max_entries=24)
+@st.cache_data(
+    show_spinner=False,
+    max_entries=24,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _cached_helix_issues_export_xlsx(
     export_df: pd.DataFrame,
     *,

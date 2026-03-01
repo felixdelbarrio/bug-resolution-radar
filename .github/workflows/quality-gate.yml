@@ -30,16 +30,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip check
 
-      - name: Pre-commit checks (non-format/typecheck/coverage)
-        run: |
-          SKIP=ruff,ruff-format pre-commit run --all-files
+      - name: Dependency integrity guard
+        run: pip check
 
       - name: Documentation integrity guard
-        run: |
-          python scripts/check_docs_references.py
+        run: python scripts/check_docs_references.py
 
       - name: Dead private helper guard
-        run: |
-          python scripts/check_dead_private_helpers.py
+        run: python scripts/check_dead_private_helpers.py

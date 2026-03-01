@@ -13,6 +13,7 @@ import streamlit as st
 from openpyxl.utils import get_column_letter
 
 from bug_resolution_radar.theme.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
 
 EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
 EXCEL_DEFAULT_DATA_ROW_HEIGHT = 18.0
@@ -290,7 +291,11 @@ def _write_excel_sheet(
             cell.style = "Hyperlink"
 
 
-@st.cache_data(show_spinner=False, max_entries=64)
+@st.cache_data(
+    show_spinner=False,
+    max_entries=64,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _dfs_to_excel_bytes_cached(
     sheets: Sequence[tuple[str, pd.DataFrame]],
     *,
