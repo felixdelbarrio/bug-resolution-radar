@@ -525,6 +525,30 @@ def _inject_issues_view_toggle_css(*, scope_key: str) -> None:
     )
 
 
+def _inject_issues_sort_export_css(*, scope_key: str) -> None:
+    """Scoped style for sort/export container alignment."""
+    st.markdown(
+        f"""
+        <style>
+          .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
+            gap: 0.72rem !important;
+          }}
+          .st-key-{scope_key} .stDownloadButton {{
+            width: 100% !important;
+            display: flex;
+            justify-content: flex-end;
+            padding-right: 0.55rem;
+            box-sizing: border-box;
+          }}
+          .st-key-{scope_key} .stDownloadButton > button {{
+            margin-left: auto !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_issues_section(
     dff: pd.DataFrame,
     *,
@@ -565,7 +589,7 @@ def render_issues_section(
         table_df = make_table_export_df(dff_show, preferred_cols=table_pref_cols)
         export_df = table_df.copy(deep=False)
 
-        # Compact toolbar: CSV + sort + count + view mode (same visual language as top tabs)
+        # Compact toolbar: top row for view toggle + count.
         view_key = f"{key_prefix}::view_mode"
         if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
             st.session_state[view_key] = "Cards"
@@ -579,22 +603,13 @@ def render_issues_section(
         )
         shown_in_cards = int(len(cards_df)) if view == "Cards" else total_filtered
 
-        left, sort_box, center, right = st.columns([1.15, 1.95, 0.9, 1.0], gap="small")
-        with left:
-            _render_issues_download_button(
-                export_df,
-                key_prefix=key_prefix,
-                settings=settings,
-                helix_only=_is_helix_only_scope(dff_show),
-            )
-        with sort_box:
-            _render_shared_sort_controls(dff_show_raw, key_prefix=key_prefix)
-        with center:
+        top_left, top_right = st.columns([2.2, 1.0], gap="small")
+        with top_left:
             if view == "Cards" and shown_in_cards != total_filtered:
                 st.caption(f"{shown_in_cards:,}/{total_filtered:,} issues filtradas")
             else:
                 st.caption(f"{shown_in_cards:,} issues filtradas")
-        with right:
+        with top_right:
             toggle_scope = f"{key_prefix}_view_toggle"
             _inject_issues_view_toggle_css(scope_key=toggle_scope)
             with st.container(key=toggle_scope):
@@ -615,6 +630,23 @@ def render_issues_section(
                     on_click=_set_issues_view,
                     args=(view_key, "Tabla"),
                 )
+
+        # Independent bar below Cards/Tabla: sort controls (left) + Excel (right), aligned.
+        sort_export_scope = f"{key_prefix}_sort_export"
+        _inject_issues_sort_export_css(scope_key=sort_export_scope)
+        with st.container(border=True, key=sort_export_scope):
+            left, right = st.columns([2.35, 1.0], gap="small")
+            with left:
+                _render_shared_sort_controls(dff_show_raw, key_prefix=key_prefix)
+            with right:
+                _, btn_slot = st.columns([1.0, 0.001], gap="small")
+                with btn_slot:
+                    _render_issues_download_button(
+                        export_df,
+                        key_prefix=key_prefix,
+                        settings=settings,
+                        helix_only=_is_helix_only_scope(dff_show),
+                    )
 
         if dff_show.empty:
             st.info("No hay issues para mostrar con los filtros actuales.")
