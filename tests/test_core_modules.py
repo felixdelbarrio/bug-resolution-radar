@@ -201,7 +201,7 @@ def test_config_restore_env_from_example_raises_when_example_missing(
     try:
         cfg.restore_env_from_example()
     except FileNotFoundError as exc:
-        assert "No se encontró `.env.example`" in str(exc)
+        assert "No se encontró la plantilla de configuración" in str(exc)
     else:
         raise AssertionError("Expected FileNotFoundError when .env.example does not exist")
 

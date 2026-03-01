@@ -714,7 +714,7 @@ def render(settings: Settings) -> None:
             )
             st.markdown("### Fuentes Jira a ingestar")
             st.caption(
-                "Por defecto todas marcadas. Este selector se guarda automáticamente en el .env."
+                "Por defecto todas marcadas. Este selector se guarda automáticamente en la configuración."
             )
             jira_selector = st.data_editor(
                 jira_selector_df,
@@ -852,7 +852,7 @@ def render(settings: Settings) -> None:
             )
             st.markdown("### Fuentes Helix a ingestar")
             st.caption(
-                "Por defecto todas marcadas. Este selector se guarda automáticamente en el .env."
+                "Por defecto todas marcadas. Este selector se guarda automáticamente en la configuración."
             )
             helix_selector = st.data_editor(
                 selector_df,

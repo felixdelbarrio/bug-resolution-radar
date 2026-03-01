@@ -29,10 +29,10 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 def _sync_settings_to_process_env(settings: Settings) -> None:
     """
-    Keep runtime `os.environ` aligned with `.env` values already parsed into Settings.
+    Keep runtime `os.environ` aligned with values already parsed into Settings.
 
     Some ingestion modules read configuration via `os.getenv(...)` directly. In the
-    Streamlit app we load `.env` through `load_settings()` (without exporting vars),
+    Streamlit app we load settings through `load_settings()` (without exporting vars),
     so this bridge avoids mismatches between what the UI shows and what backend
     ingestion code reads.
     """
