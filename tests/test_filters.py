@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
-from bug_resolution_radar.ui.components.filters import _active_context_label, apply_filters
+from bug_resolution_radar.ui.common import status_color
+from bug_resolution_radar.ui.components.filters import (
+    _active_context_label,
+    _matrix_header_button_css,
+    apply_filters,
+)
 from bug_resolution_radar.ui.dashboard.state import FilterState
 
 
@@ -48,3 +55,24 @@ def test_active_context_label_returns_none_if_filters_changed() -> None:
         assignee=[],
     )
     assert label is None
+
+
+def _css_prop(style: str, prop: str) -> str:
+    m = re.search(rf"{re.escape(prop)}:([^;]+);", str(style))
+    return str(m.group(1)).strip() if m else ""
+
+
+def test_matrix_header_css_uses_same_tone_for_in_progress_family() -> None:
+    base = _matrix_header_button_css(status_color("In Progress"), selected=False)
+    for name in ["To Rework", "Test", "Ready To Verify"]:
+        got = _matrix_header_button_css(status_color(name), selected=False)
+        assert _css_prop(got, "background") == _css_prop(base, "background")
+        assert _css_prop(got, "border") == _css_prop(base, "border")
+        assert _css_prop(got, "color") == _css_prop(base, "color")
+
+
+def test_matrix_header_css_selection_keeps_same_base_color() -> None:
+    base = _matrix_header_button_css(status_color("Blocked"), selected=False)
+    selected = _matrix_header_button_css(status_color("Blocked"), selected=True)
+    assert _css_prop(selected, "background") == _css_prop(base, "background")
+    assert _css_prop(selected, "border") == _css_prop(base, "border")

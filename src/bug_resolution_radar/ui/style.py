@@ -169,10 +169,10 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
         )
-        # Keep dark NBA banner in cool BBVA surfaces; warm tones are accents only.
-        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 90%, var(--bbva-midnight) 10%)"
+        # Keep banner surfaces cool (BBVA blues) in dark mode; warm tones stay as accents only.
+        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-primary) 16%)"
         nba_banner_border = (
-            "color-mix(in srgb, var(--bbva-signal-orange) 34%, var(--bbva-border-strong) 66%)"
+            "color-mix(in srgb, var(--bbva-primary) 44%, var(--bbva-border-strong) 56%)"
         )
         nba_banner_shadow = "color-mix(in srgb, var(--bbva-shadow-deep) 90%, transparent)"
         nba_ink_primary = "color-mix(in srgb, var(--bbva-text) 98%, transparent)"
@@ -219,9 +219,10 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
         )
-        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-signal-orange) 28%)"
+        # Keep banner surfaces cool in light mode too; avoid warm muddy fills.
+        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-primary) 12%)"
         nba_banner_border = (
-            "color-mix(in srgb, var(--bbva-border-strong) 38%, var(--bbva-signal-orange) 62%)"
+            "color-mix(in srgb, var(--bbva-primary) 34%, var(--bbva-border-strong) 66%)"
         )
         nba_banner_shadow = "color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent)"
         nba_ink_primary = "color-mix(in srgb, var(--bbva-text) 96%, transparent)"

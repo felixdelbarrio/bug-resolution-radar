@@ -518,15 +518,9 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
     color = (hex_color or status_color("")).strip()
     deployed_color = status_color("Deployed").strip().upper()
     if color.strip().upper() == deployed_color:
-        border = _hex_with_alpha(color, 178 if selected else 145)
-        bg = (
-            "color-mix(in srgb, var(--bbva-goal-green-bg) 84%, var(--bbva-goal-green) 16%)"
-            if selected
-            else "var(--bbva-goal-green-bg)"
-        )
+        border = _hex_with_alpha(color, 145)
+        bg = "var(--bbva-goal-green-bg)"
         hover_bg = "color-mix(in srgb, var(--bbva-goal-green-bg) 78%, var(--bbva-goal-green) 22%)"
-        ring = _hex_with_alpha(color, 86)
-        glow = _hex_with_alpha(color, 66)
         fw = "800" if selected else "700"
         return (
             f"border:1px solid {border} !important;"
@@ -539,15 +533,13 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
             "line-height:1.16 !important;"
             "white-space:normal !important;"
             "word-break:break-word !important;"
-            f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+            f"box-shadow:{'0 0 0 2px var(--bbva-focus-ring)' if selected else 'none'} !important;"
             f"--mx-hover-bg:{hover_bg};"
-            f"--mx-focus-ring:{ring};"
+            "--mx-focus-ring:var(--bbva-focus-ring);"
         )
-    border = _hex_with_alpha(color, 170 if selected else 125)
-    bg = _hex_with_alpha(color, 64 if selected else 28)
-    hover_bg = _hex_with_alpha(color, 76 if selected else 42)
-    ring = _hex_with_alpha(color, 86)
-    glow = _hex_with_alpha(color, 62)
+    border = _hex_with_alpha(color, 125)
+    bg = _hex_with_alpha(color, 28)
+    hover_bg = _hex_with_alpha(color, 42)
     fw = "800" if selected else "700"
     return (
         f"border:1px solid {border} !important;"
@@ -560,9 +552,9 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
         "line-height:1.16 !important;"
         "white-space:normal !important;"
         "word-break:break-word !important;"
-        f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+        f"box-shadow:{'0 0 0 2px var(--bbva-focus-ring)' if selected else 'none'} !important;"
         f"--mx-hover-bg:{hover_bg};"
-        f"--mx-focus-ring:{ring};"
+        "--mx-focus-ring:var(--bbva-focus-ring);"
     )
 
 
