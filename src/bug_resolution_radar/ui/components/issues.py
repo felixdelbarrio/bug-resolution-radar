@@ -261,12 +261,7 @@ def _native_link_cell_style(value: object, *, dark_mode: bool = False) -> str:
         muted = BBVA_DARK.ink_muted if dark_mode else BBVA_LIGHT.ink_muted
         return f"color: {muted};"
     link_color = BBVA_DARK.serene_blue if dark_mode else BBVA_LIGHT.electric_blue
-    return (
-        f"color: {link_color}; "
-        "text-decoration: underline; "
-        "font-weight: 800; "
-        "cursor: pointer;"
-    )
+    return f"color: {link_color}; text-decoration: underline; font-weight: 800; cursor: pointer;"
 
 
 def _coerce_record_dict(value: object) -> dict[str, object] | None:
