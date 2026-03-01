@@ -179,7 +179,7 @@ def _render_sources_excel_download(
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=key,
         disabled=disabled,
-        width="content",
+        width="stretch",
     )
 
 
@@ -912,7 +912,7 @@ def render(settings: Settings) -> None:
         jira_rows_state_key = "cfg_jira_sources_rows_state"
         if jira_rows_state_key not in st.session_state:
             st.session_state[jira_rows_state_key] = jira_rows or [jira_default_row]
-        if st.button("Añadir fila", key="cfg_jira_add_row_btn", width="content"):
+        if st.button("Añadir fila", key="cfg_jira_add_row_btn", width="stretch"):
             raw_rows = st.session_state.get(jira_rows_state_key, [])
             rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
             rows_state.append(dict(jira_default_row))
@@ -1082,7 +1082,7 @@ def render(settings: Settings) -> None:
         helix_rows_state_key = "cfg_helix_sources_rows_state"
         if helix_rows_state_key not in st.session_state:
             st.session_state[helix_rows_state_key] = helix_rows or [helix_default_row]
-        if st.button("Añadir fila", key="cfg_helix_add_row_btn", width="content"):
+        if st.button("Añadir fila", key="cfg_helix_add_row_btn", width="stretch"):
             raw_rows = st.session_state.get(helix_rows_state_key, [])
             rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
             rows_state.append(dict(helix_default_row))

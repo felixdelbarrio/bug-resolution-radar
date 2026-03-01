@@ -33,8 +33,7 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 )
 
 MAX_CARDS_RENDER = 120
-CARDS_PAGE_SIZE_OPTIONS: tuple[int, ...] = (30, 60, 90, 120)
-CARDS_PAGE_SIZE_DEFAULT = 60
+CARDS_PAGE_SIZE = 30
 ISSUES_TABLE_PREFERRED_COLS: list[str] = [
     "key",
     "summary",
@@ -156,7 +155,7 @@ def _render_shared_sort_controls(df: pd.DataFrame, *, key_prefix: str) -> None:
 
 def _render_sort_direction_control(*, key_prefix: str) -> None:
     sort_asc_key = f"{key_prefix}::sort_asc"
-    st.toggle("Ascendente", key=sort_asc_key, width="content")
+    st.toggle("Ascendente", key=sort_asc_key, width="stretch")
 
 
 def _cards_pagination_window(*, total_rows: int, page_size: int, page: int) -> tuple[int, int, int, int]:
@@ -171,6 +170,48 @@ def _cards_pagination_window(*, total_rows: int, page_size: int, page: int) -> t
 
 def _set_cards_page(page_key: str, value: int) -> None:
     st.session_state[page_key] = max(1, int(value))
+
+
+def _render_pager_shell(
+    *,
+    shell_key: str,
+    page_key: str,
+    page: int,
+    total_pages: int,
+    start_idx: int,
+    end_idx: int,
+    total_rows: int,
+    prev_button_key: str,
+    next_button_key: str,
+) -> None:
+    with st.container(border=True, key=shell_key):
+        nav_prev, nav_info, nav_next = st.columns([0.85, 1.3, 0.85], gap="small")
+        nav_prev.button(
+            "◀ Anterior",
+            key=prev_button_key,
+            width="stretch",
+            disabled=(page <= 1),
+            on_click=_set_cards_page,
+            args=(page_key, page - 1),
+        )
+        nav_info.markdown(
+            (
+                "<div style='text-align:center; opacity:0.92; "
+                "line-height:1.25; padding-top:0.18rem;'>"
+                f"<strong>Página {page} de {total_pages}</strong><br/>"
+                f"Mostrando {start_idx + 1:,}-{end_idx:,} de {total_rows:,}"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        nav_next.button(
+            "Siguiente ▶",
+            key=next_button_key,
+            width="stretch",
+            disabled=(page >= total_pages),
+            on_click=_set_cards_page,
+            args=(page_key, page + 1),
+        )
 
 
 def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
@@ -458,7 +499,7 @@ def _render_issues_download_button(
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
             disabled=True,
-            width="content",
+            width="stretch",
         )
         return
 
@@ -470,7 +511,7 @@ def _render_issues_download_button(
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
             disabled=False,
-            width="content",
+            width="stretch",
         )
         return
 
@@ -490,7 +531,7 @@ def _render_issues_download_button(
             "Preparar Excel",
             key=f"{key_prefix}::prepare_excel",
             type="secondary",
-            width="content",
+            width="stretch",
             help="Genera el Excel oficial Helix bajo demanda para acelerar la carga de la pantalla.",
         ):
             xlsx_probe = _cached_helix_issues_export_xlsx(
@@ -519,7 +560,7 @@ def _render_issues_download_button(
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
             disabled=False,
-            width="content",
+            width="stretch",
         )
         return
 
@@ -530,7 +571,7 @@ def _render_issues_download_button(
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"{key_prefix}::download_csv",
         disabled=False,
-        width="content",
+        width="stretch",
         help="Incluye hoja oficial (columnas estilo Excel de referencia) y hoja raw Helix.",
     )
 
@@ -670,39 +711,53 @@ def render_issues_section(
             st.session_state[view_key] = "Cards"
         view = str(st.session_state.get(view_key) or "Cards")
         total_filtered = 0 if table_df is None else int(len(table_df))
-        page_key = f"{key_prefix}::cards_page"
-        page_size_key = f"{key_prefix}::cards_page_size"
-        if int(st.session_state.get(page_size_key, CARDS_PAGE_SIZE_DEFAULT) or CARDS_PAGE_SIZE_DEFAULT) not in list(
-            CARDS_PAGE_SIZE_OPTIONS
-        ):
-            st.session_state[page_size_key] = CARDS_PAGE_SIZE_DEFAULT
-        page_size = min(
-            int(st.session_state.get(page_size_key, CARDS_PAGE_SIZE_DEFAULT) or CARDS_PAGE_SIZE_DEFAULT),
-            MAX_CARDS_RENDER,
-        )
-        page = int(st.session_state.get(page_key, 1) or 1)
-        page, start_idx, end_idx, total_pages = _cards_pagination_window(
+        page_size = min(CARDS_PAGE_SIZE, MAX_CARDS_RENDER)
+
+        cards_page_key = f"{key_prefix}::cards_page"
+        cards_page = int(st.session_state.get(cards_page_key, 1) or 1)
+        cards_page, cards_start_idx, cards_end_idx, cards_total_pages = _cards_pagination_window(
             total_rows=int(len(dff_show)),
             page_size=page_size,
-            page=page,
+            page=cards_page,
         )
-        st.session_state[page_key] = page
-        cards_slice = dff_show.iloc[start_idx:end_idx].copy(deep=False) if view == "Cards" else pd.DataFrame()
+        st.session_state[cards_page_key] = cards_page
+        cards_slice = (
+            dff_show.iloc[cards_start_idx:cards_end_idx].copy(deep=False)
+            if view == "Cards"
+            else pd.DataFrame()
+        )
         cards_df = (
             _cached_prepare_cards_df(cards_slice, max_cards=page_size, preserve_order=True)
             if view == "Cards"
             else pd.DataFrame()
         )
-        shown_in_cards = int(len(cards_df)) if view == "Cards" else total_filtered
+
+        table_page_key = f"{key_prefix}::table_page"
+        table_page = int(st.session_state.get(table_page_key, 1) or 1)
+        table_page, table_start_idx, table_end_idx, table_total_pages = _cards_pagination_window(
+            total_rows=total_filtered,
+            page_size=page_size,
+            page=table_page,
+        )
+        st.session_state[table_page_key] = table_page
+        table_slice = (
+            table_df.iloc[table_start_idx:table_end_idx].copy(deep=False)
+            if view == "Tabla"
+            else pd.DataFrame()
+        )
 
         top_left, top_right = st.columns([2.2, 1.0], gap="small")
         with top_left:
             if view == "Cards" and total_filtered > 0:
                 st.caption(
-                    f"Mostrando {start_idx + 1:,}-{end_idx:,} de {total_filtered:,} issues filtradas"
+                    f"Mostrando {cards_start_idx + 1:,}-{cards_end_idx:,} de {total_filtered:,} issues filtradas"
+                )
+            elif view == "Tabla" and total_filtered > 0:
+                st.caption(
+                    f"Mostrando {table_start_idx + 1:,}-{table_end_idx:,} de {total_filtered:,} issues filtradas"
                 )
             else:
-                st.caption(f"{shown_in_cards:,} issues filtradas")
+                st.caption(f"{total_filtered:,} issues filtradas")
         with top_right:
             toggle_scope = f"{key_prefix}_view_toggle"
             _inject_issues_view_toggle_css(scope_key=toggle_scope)
@@ -723,35 +778,6 @@ def render_issues_section(
                     width="stretch",
                     on_click=_set_issues_view,
                     args=(view_key, "Tabla"),
-                )
-
-        if view == "Cards":
-            pager_left, pager_right = st.columns([1.8, 1.4], gap="small")
-            with pager_left:
-                st.selectbox(
-                    "Cards por página",
-                    options=list(CARDS_PAGE_SIZE_OPTIONS),
-                    key=page_size_key,
-                    width="content",
-                )
-            with pager_right:
-                nav_prev, nav_info, nav_next = st.columns([0.55, 1.0, 0.55], gap="small")
-                nav_prev.button(
-                    "◀",
-                    key=f"{key_prefix}::cards_prev",
-                    width="stretch",
-                    disabled=(page <= 1),
-                    on_click=_set_cards_page,
-                    args=(page_key, page - 1),
-                )
-                nav_info.caption(f"Página {page}/{total_pages}")
-                nav_next.button(
-                    "▶",
-                    key=f"{key_prefix}::cards_next",
-                    width="stretch",
-                    disabled=(page >= total_pages),
-                    on_click=_set_cards_page,
-                    args=(page_key, page + 1),
                 )
 
         # Independent bar below Cards/Tabla: sort controls (left) + Asc/Excel (right), aligned.
@@ -787,14 +813,36 @@ def render_issues_section(
                 settings=settings,
                 prepared_df=cards_df,
             )
+            _render_pager_shell(
+                shell_key=f"{key_prefix}_cards_pager_shell",
+                page_key=cards_page_key,
+                page=cards_page,
+                total_pages=cards_total_pages,
+                start_idx=cards_start_idx,
+                end_idx=cards_end_idx,
+                total_rows=total_filtered,
+                prev_button_key=f"{key_prefix}::cards_prev",
+                next_button_key=f"{key_prefix}::cards_next",
+            )
             return
 
         render_issue_table(
-            table_df,
+            table_slice,
             settings=settings,
             table_key=f"{key_prefix}::issues_table_grid",
             preserve_order=True,
             sort_state_prefix=key_prefix,
+        )
+        _render_pager_shell(
+            shell_key=f"{key_prefix}_table_pager_shell",
+            page_key=table_page_key,
+            page=table_page,
+            total_pages=table_total_pages,
+            start_idx=table_start_idx,
+            end_idx=table_end_idx,
+            total_rows=total_filtered,
+            prev_button_key=f"{key_prefix}::table_prev",
+            next_button_key=f"{key_prefix}::table_next",
         )
 
 

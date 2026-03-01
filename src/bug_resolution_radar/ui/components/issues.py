@@ -29,9 +29,15 @@ _ISSUE_OPEN_URL_QP = "br_open_issue_url"
 _ISSUE_OPEN_SOURCE_QP = "br_open_issue_source"
 _ISSUE_OPEN_KEY_QP = "br_open_issue_key"
 _SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_MD_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
-MAX_TABLE_STYLED_ROWS = 800
+# Keep styled rendering for the full native table range shown to users.
+# Fast path remains only as an emergency fallback for oversized direct calls.
+MAX_TABLE_STYLED_ROWS = MAX_TABLE_NATIVE_ROWS
 _NEUTRAL_TOKEN = BBVA_NEUTRAL_SOFT.upper()
 _NEUTRAL_BORDER = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[1]
 _NEUTRAL_BG = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[2]
@@ -107,7 +113,7 @@ def handle_issue_link_open_request(*, settings: Settings | None) -> None:
 def _title_and_description_from_row(
     row: dict[str, object] | pd.Series,
 ) -> Tuple[str, str]:
-    summary = _safe_cell_text(row.get("summary"))
+    summary = _normalize_issue_card_text(_safe_cell_text(row.get("summary")))
     description = ""
     for col in (
         "description",
@@ -115,7 +121,7 @@ def _title_and_description_from_row(
         "detailed_description",
         "detailed_decription",
     ):
-        txt = _safe_cell_text(row.get(col))
+        txt = _normalize_issue_card_text(_safe_cell_text(row.get(col)))
         if txt != "—":
             description = txt
             break
@@ -138,6 +144,37 @@ def _title_and_description_from_row(
         if head.strip() and tail:
             return head.strip(), tail
     return txt, ""
+
+
+def _normalize_issue_card_text(value: str) -> str:
+    txt = str(value or "").strip()
+    if not txt or txt == "—":
+        return txt or "—"
+
+    txt = html.unescape(txt)
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = _MD_CODE_FENCE_RE.sub(" ", txt)
+    txt = _MD_IMAGE_RE.sub(r"\1", txt)
+    txt = _MD_LINK_RE.sub(r"\1", txt)
+    txt = _HTML_TAG_RE.sub(" ", txt)
+
+    clean_lines: List[str] = []
+    for raw in txt.split("\n"):
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
+        line = re.sub(r"^\s*>\s*", "", line)
+        line = re.sub(r"^\s*[-*+]\s+", "", line)
+        line = re.sub(r"^\s*\d+[.)]\s+", "", line)
+        line = re.sub(r"[*_~`]+", "", line)
+        line = line.strip()
+        if line:
+            clean_lines.append(line)
+
+    normalized = " ".join(clean_lines) if clean_lines else txt
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized or "—"
 
 
 def _safe_cell_text(value: object) -> str:
@@ -534,94 +571,6 @@ def render_issue_cards(
         else prepare_issue_cards_df(dff, max_cards=max_cards)
     )
 
-    st.markdown(
-        """
-        <style>
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] {
-            border: 1px solid var(--bbva-issue-card-border) !important;
-            border-radius: var(--bbva-radius-xl) !important;
-            padding: 14px 16px 12px 16px !important;
-            margin: 0 0 12px 0 !important;
-            background: linear-gradient(
-              180deg,
-              var(--bbva-issue-card-bg-start) 0%,
-              var(--bbva-issue-card-bg-end) 100%
-            ) !important;
-            box-shadow: var(--bbva-issue-card-shadow),
-                        inset 0 0 0 1px var(--bbva-issue-card-inset) !important;
-            overflow: visible !important;
-          }
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"]:hover {
-            border-color: var(--bbva-issue-card-border-hover) !important;
-            box-shadow: var(--bbva-issue-card-shadow-hover),
-                        inset 0 0 0 1px var(--bbva-issue-card-inset-hover) !important;
-          }
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] {
-            gap: 0 !important;
-          }
-          [class*="st-key-issue_card_shell_"] [data-testid="stHorizontalBlock"] {
-            align-items: baseline !important;
-          }
-          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
-            margin-bottom: 0.22rem !important;
-          }
-          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"]:last-child {
-            margin-bottom: 0 !important;
-          }
-          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] {
-            margin: 0 !important;
-          }
-          [class*="st-key-issue_open_btn_"] button {
-            border: 0 !important;
-            background: transparent !important;
-            color: var(--bbva-action-link) !important;
-            text-decoration: underline !important;
-            font-weight: 800 !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            min-height: auto !important;
-            height: auto !important;
-            line-height: 1.08 !important;
-            white-space: nowrap !important;
-            box-shadow: none !important;
-            width: auto !important;
-            min-width: 0 !important;
-            border-radius: 0 !important;
-          }
-          [class*="st-key-issue_open_btn_"] button:hover {
-            color: var(--bbva-action-link-hover) !important;
-            background: transparent !important;
-          }
-          [class*="st-key-issue_open_btn_"] button:focus,
-          [class*="st-key-issue_open_btn_"] button:focus-visible {
-            outline: none !important;
-            box-shadow: none !important;
-          }
-          [class*="st-key-issue_open_btn_"] button > div,
-          [class*="st-key-issue_open_btn_"] button > div > p {
-            margin: 0 !important;
-            padding: 0 !important;
-            line-height: 1.08 !important;
-          }
-          .issue-title-inline {
-            font-weight: 700;
-            color: var(--bbva-text);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-top: 1px;
-          }
-          .issue-card-badges {
-            margin-top: 11px !important;
-            margin-bottom: 2px !important;
-            padding-bottom: 8px !important;
-            row-gap: 8px !important;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     with st.container():
         for idx_card, row in enumerate(cards_df.to_dict(orient="records")):
             key_txt = _safe_cell_text(row.get("key"))
@@ -668,7 +617,7 @@ def render_issue_cards(
                         key_label,
                         key=f"issue_open_btn_{idx_card}",
                         type="tertiary",
-                        width="content",
+                        width="stretch",
                     ):
                         browser = _browser_for_source_type(settings, source_type)
                         opened = open_url_in_configured_browser(

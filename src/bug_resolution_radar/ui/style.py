@@ -1428,6 +1428,74 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 12px 14px;
             background: var(--bbva-surface);
           }
+          [class*="st-key-issue_card_shell_"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            border-radius: var(--bbva-radius-xl) !important;
+            padding: 12px 14px 10px 14px !important;
+            margin: 0 0 10px 0 !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+          }
+          [class*="st-key-issue_card_shell_"]:hover {
+            border-color: var(--bbva-accent-border-soft) !important;
+            box-shadow: none !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] {
+            gap: 0 !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stHorizontalBlock"] {
+            align-items: baseline !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
+            margin-bottom: 0.22rem !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"]:last-child {
+            margin-bottom: 0 !important;
+          }
+          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] {
+            margin: 0 !important;
+          }
+          [class*="st-key-issue_open_btn_"] button {
+            border: 0 !important;
+            background: transparent !important;
+            color: var(--bbva-action-link) !important;
+            text-decoration: underline !important;
+            font-weight: 800 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            min-height: auto !important;
+            height: auto !important;
+            line-height: 1.08 !important;
+            white-space: nowrap !important;
+            box-shadow: none !important;
+            width: auto !important;
+            min-width: 0 !important;
+            border-radius: 0 !important;
+          }
+          [class*="st-key-issue_open_btn_"] button:hover {
+            color: var(--bbva-action-link-hover) !important;
+            background: transparent !important;
+          }
+          [class*="st-key-issue_open_btn_"] button:focus,
+          [class*="st-key-issue_open_btn_"] button:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+          }
+          [class*="st-key-issue_open_btn_"] button > div,
+          [class*="st-key-issue_open_btn_"] button > div > p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1.08 !important;
+          }
+          .issue-title-inline {
+            font-weight: 700;
+            color: var(--bbva-text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 1px;
+          }
           .issue-top {
             display: flex;
             gap: 10px;
@@ -1467,11 +1535,40 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             text-overflow: ellipsis;
             word-break: break-word;
           }
+          .issue-description h1,
+          .issue-description h2,
+          .issue-description h3,
+          .issue-description h4,
+          .issue-description p,
+          .issue-description li,
+          .issue-description div,
+          .issue-description span,
+          .issue-description strong,
+          .issue-description em {
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: inherit !important;
+            line-height: inherit !important;
+            font-family: inherit !important;
+            font-weight: inherit !important;
+            letter-spacing: normal !important;
+            text-transform: none !important;
+            display: inline !important;
+          }
+          .issue-description li::marker {
+            content: "" !important;
+          }
           .badges {
             margin-top: 8px;
             display: flex;
             gap: 6px;
             flex-wrap: wrap;
+          }
+          .issue-card-badges {
+            margin-top: 11px !important;
+            margin-bottom: 2px !important;
+            padding-bottom: 8px !important;
+            row-gap: 8px !important;
           }
           .badge {
             display: inline-block;
