@@ -312,9 +312,7 @@ def load_settings() -> Settings:
 
 def save_settings(settings: Settings, *, drop_keys: Set[str] | List[str] | None = None) -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    normalized_drop_keys = {
-        str(key).strip() for key in (drop_keys or set()) if str(key).strip()
-    }
+    normalized_drop_keys = {str(key).strip() for key in (drop_keys or set()) if str(key).strip()}
     existing = {k: v for k, v in dotenv_values(ENV_PATH).items() if k}
     data = settings.model_dump()
     serialized_data: Dict[str, str] = {}

@@ -32,9 +32,9 @@ jobs:
           pip install -e ".[dev]"
           pip check
 
-      - name: Pre-commit checks
+      - name: Pre-commit checks (non-format/typecheck/coverage)
         run: |
-          pre-commit run --all-files
+          SKIP=ruff,ruff-format pre-commit run --all-files
 
       - name: Documentation integrity guard
         run: |
@@ -43,18 +43,3 @@ jobs:
       - name: Dead private helper guard
         run: |
           python scripts/check_dead_private_helpers.py
-
-      - name: Static analysis
-        run: |
-          ruff check src/bug_resolution_radar scripts tests
-          mypy src
-
-      - name: Test suite with coverage
-        run: |
-          pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml

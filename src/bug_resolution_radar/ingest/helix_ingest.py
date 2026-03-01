@@ -1347,9 +1347,8 @@ def ingest_helix(
     arsql_base_candidates: List[str] = []
     # SmartIT ticket console is the right "safe landing" URL for work items.
     # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
-    ticket_console_url = (
-        (f"{base}/app/#/ticket-console" if base else "")
-        or (f"{base_scheme}://{base_host}/smartit/app/#/ticket-console" if base_host else "")
+    ticket_console_url = (f"{base}/app/#/ticket-console" if base else "") or (
+        f"{base_scheme}://{base_host}/smartit/app/#/ticket-console" if base_host else ""
     )
     login_bootstrap_url = ""
     arsql_dashboard_path_default = "/dashboards/"

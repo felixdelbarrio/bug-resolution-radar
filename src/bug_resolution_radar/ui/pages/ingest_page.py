@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Tuple, cast
+from typing import Any, Dict, List, Tuple, cast
 
 import pandas as pd
 import streamlit as st
@@ -174,55 +174,32 @@ def _render_progress_status(
     success_count = int(snapshot.get("success_count") or 0)
     run_id = int(snapshot.get("run_id") or 0)
     messages = cast(List[Tuple[bool, str]], snapshot.get("messages") or [])
-
-    if state == "running":
-        if slot is not None:
-            slot.empty()
-            with slot.container():
-                with st.status(
-                    f"{title}: ingesta en curso · ejecución {run_id}",
-                    state="running",
-                    expanded=True,
-                ):
-                    st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
-                    for ok, msg in messages:
-                        (st.success if ok else st.error)(msg)
-        else:
-            with st.status(
-                f"{title}: ingesta en curso · ejecución {run_id}",
-                state="running",
-                expanded=True,
-            ):
-                st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
-                for ok, msg in messages:
-                    (st.success if ok else st.error)(msg)
-        return True
-
-    ui_state: Literal["complete", "error"] = (
-        "complete" if state in {"success", "partial"} else "error"
-    )
+    finished_at = str(snapshot.get("finished_at") or "").strip()
     headline = str(snapshot.get("summary") or f"{title}: ingesta finalizada.")
+    ui_key = f"ingest_progress_{connector}_{run_id}_{state}"
+
     if slot is not None:
         slot.empty()
-        with slot.container():
-            with st.status(headline, state=ui_state, expanded=False):
+        host = slot.container()
+    else:
+        host = st.container()
+
+    with host:
+        with st.container(border=True, key=ui_key):
+            if state == "running":
+                st.markdown(f"**{title}: ingesta en curso · ejecución {run_id}**")
+                st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
+            else:
+                st.markdown(f"**{headline}**")
                 st.caption(f"Ejecución: {run_id}")
                 st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
-                finished_at = str(snapshot.get("finished_at") or "").strip()
                 if finished_at:
                     st.caption(f"Finalizada: {finished_at}")
-                for ok, msg in messages:
-                    (st.success if ok else st.error)(msg)
-    else:
-        with st.status(headline, state=ui_state, expanded=False):
-            st.caption(f"Ejecución: {run_id}")
-            st.caption(f"Resultado: {success_count}/{total} fuentes OK.")
-            finished_at = str(snapshot.get("finished_at") or "").strip()
-            if finished_at:
-                st.caption(f"Finalizada: {finished_at}")
+
             for ok, msg in messages:
                 (st.success if ok else st.error)(msg)
-    return False
+
+    return state == "running"
 
 
 def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> bool:

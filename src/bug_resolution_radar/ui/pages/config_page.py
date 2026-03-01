@@ -1160,9 +1160,10 @@ def render(settings: Settings) -> None:
                 st.markdown("#### Descargas del informe PPT")
                 st.markdown("**Carpeta de guardado**")
                 default_download_dir = str((Path.home() / "Downloads").expanduser())
-                report_ppt_download_dir_default = str(
-                    getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
-                ).strip() or default_download_dir
+                report_ppt_download_dir_default = (
+                    str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+                    or default_download_dir
+                )
                 report_ppt_download_dir = st.text_input(
                     "Carpeta de guardado del informe PPT",
                     value=report_ppt_download_dir_default,

@@ -182,7 +182,9 @@ def test_jira_does_not_open_browser_when_target_page_is_already_open(monkeypatch
     assert opened == []
 
 
-def test_jira_bootstrap_opens_single_login_url_when_target_status_is_unknown(monkeypatch: Any) -> None:
+def test_jira_bootstrap_opens_single_login_url_when_target_status_is_unknown(
+    monkeypatch: Any,
+) -> None:
     opened: list[str] = []
     cookie_values = [None, None, None, "JSESSIONID=abc; atlassian.xsrf.token=xyz"]
 
