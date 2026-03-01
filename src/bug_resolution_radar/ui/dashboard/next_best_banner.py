@@ -638,10 +638,14 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
     )
 
     with st.container(key=f"next_best_banner_shell_{section_norm}"):
+        kicker_html = html.escape(str(kicker or ""))
+        title_html = html.escape(str(action.title or ""))
+        tone_html = html.escape(str(tone or ""))
+        impact_html = html.escape(str(resolved_impact or ""))
         top_l, top_r = st.columns([0.66, 0.34], gap="small")
         with top_l:
             st.markdown(
-                f'<div class="nba-topline"><span class="nba-kicker">{kicker}</span></div>',
+                f'<div class="nba-topline"><span class="nba-kicker">{kicker_html}</span></div>',
                 unsafe_allow_html=True,
             )
         with top_r:
@@ -653,9 +657,9 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
                     on_click=_advance_pending_preview,
                     args=(scope_key,),
                 )
-        st.markdown(f'<div class="nba-title">{action.title}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="nba-title">{title_html}</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<div class="nba-sub">{tone} · {resolved_impact}</div>',
+            f'<div class="nba-sub">{tone_html} · {impact_html}</div>',
             unsafe_allow_html=True,
         )
         st.markdown('<div class="nba-inline-actions-row"></div>', unsafe_allow_html=True)

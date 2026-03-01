@@ -126,7 +126,7 @@ LEGACY_ENV_KEYS_TO_PRUNE = {
 
 
 def _decode_env_multiline(v: str) -> str:
-    # Persistimos multilínea en .env como una sola línea usando "\n"
+    # Persistimos multilínea en el archivo de configuración como una sola línea usando "\n"
     return v.replace("\\n", "\n")
 
 
@@ -301,11 +301,11 @@ def ensure_env() -> None:
 
 
 def restore_env_from_example() -> Path:
-    """Overwrite `.env` with the first available `.env.example` candidate."""
+    """Overwrite the active config file with the first available example candidate."""
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
     if example_path is None:
-        raise FileNotFoundError("No se encontró `.env.example` para restaurar configuración.")
+        raise FileNotFoundError("No se encontró la plantilla de configuración para restaurar.")
     ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
     return example_path
 

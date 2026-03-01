@@ -18,6 +18,7 @@ from bug_resolution_radar.config import (
 )
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.components.issues import handle_issue_link_open_request
 from bug_resolution_radar.ui.dashboard.state import (
     bootstrap_filters_from_env,
     clear_all_filters,
@@ -29,10 +30,10 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 def _sync_settings_to_process_env(settings: Settings) -> None:
     """
-    Keep runtime `os.environ` aligned with `.env` values already parsed into Settings.
+    Keep runtime `os.environ` aligned with values already parsed into Settings.
 
     Some ingestion modules read configuration via `os.getenv(...)` directly. In the
-    Streamlit app we load `.env` through `load_settings()` (without exporting vars),
+    Streamlit app we load settings through `load_settings()` (without exporting vars),
     so this bridge avoids mismatches between what the UI shows and what backend
     ingestion code reads.
     """
@@ -445,6 +446,9 @@ def main() -> None:
         hero_title = "Cuadro de mando de incidencias"
 
     st.set_page_config(page_title=hero_title, page_icon=_page_favicon(), layout="wide")
+    # Handle lightweight issue-link actions early to avoid rendering the full page
+    # when the request only needs to open an external issue URL.
+    handle_issue_link_open_request(settings=settings)
 
     theme_changed = _sync_streamlit_theme_from_workspace()
     theme_rerun_key = "__theme_config_sync_rerun"

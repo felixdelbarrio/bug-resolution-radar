@@ -10,13 +10,14 @@ import pandas as pd
 import streamlit as st
 from streamlit.components.v1 import html as components_html
 
+from bug_resolution_radar.theme.design_tokens import hex_with_alpha
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color,
     priority_rank,
     status_color,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.constants import order_statuses_canonical
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -25,18 +26,6 @@ from bug_resolution_radar.ui.dashboard.state import (
 )
 
 FILTER_ACTION_CONTEXT_KEY = "__filters_action_context"
-
-
-def _order_statuses_canonical(statuses: List[str]) -> List[str]:
-    """Order statuses by canonical flow. Unknown ones keep stable order and go last."""
-    idx = canonical_status_rank_map()
-
-    def key_fn(pair: tuple[int, str]) -> tuple[int, int]:
-        orig_i, s = pair
-        k = (s or "").strip().lower()
-        return (idx.get(k, 10_000), orig_i)
-
-    return [s for _, s in sorted(list(enumerate(statuses)), key=key_fn)]
 
 
 # ---------------------------------------------------------------------
@@ -62,16 +51,14 @@ def _priority_combo_label(priority: str) -> str:
     return priority
 
 
-def _hex_with_alpha(hex_color: str, alpha: int) -> str:
-    h = (hex_color or "").strip()
+def _theme_alpha(alpha: int) -> int:
+    alpha_i = int(alpha)
     if bool(st.session_state.get("workspace_dark_mode", False)):
-        if alpha <= 40:
-            alpha = 52
-        elif alpha <= 130:
-            alpha = 178
-    if len(h) == 7 and h.startswith("#"):
-        return f"{h}{alpha:02X}"
-    return h
+        if alpha_i <= 40:
+            return 52
+        if alpha_i <= 130:
+            return 178
+    return alpha_i
 
 
 def _inject_filters_panel_css() -> None:
@@ -126,51 +113,6 @@ def _inject_filters_panel_css() -> None:
           [data-testid="stMultiSelect"] [role="option"] {
             color: var(--bbva-text) !important;
           }
-          /* Popover lives outside widget DOM; force compact rows there to avoid visual gaps. */
-          div[data-baseweb="popover"] [role="listbox"],
-          div[data-baseweb="popover"] [role="menu"],
-          div[data-baseweb="popover"] ul {
-            gap: 0 !important;
-            row-gap: 0 !important;
-            column-gap: 0 !important;
-          }
-          div[data-baseweb="popover"] li {
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          div[data-baseweb="popover"] [role="option"] {
-            margin: 0 !important;
-            min-height: 0 !important;
-            height: auto !important;
-            line-height: 1.2 !important;
-            padding-top: 0.32rem !important;
-            padding-bottom: 0.32rem !important;
-            box-sizing: border-box !important;
-            display: block !important;
-          }
-          div[data-baseweb="popover"] [role="option"] * {
-            margin-top: 0 !important;
-            margin-bottom: 0 !important;
-            line-height: 1.2 !important;
-          }
-          /* Semantic marker (status/priority) driven by centralized token map. */
-          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"] {
-            position: relative !important;
-            padding-left: 1.42rem !important;
-            border-left: 0 !important;
-            background: transparent !important;
-          }
-          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"]::before {
-            content: "" !important;
-            width: 0.56rem !important;
-            height: 0.56rem !important;
-            border-radius: 999px !important;
-            background: var(--bbva-opt-dot) !important;
-            position: absolute !important;
-            left: 0.50rem !important;
-            top: 50% !important;
-            transform: translateY(-50%) !important;
-          }
         </style>
     """
     css = (
@@ -198,15 +140,15 @@ def _semantic_label_tone_map(
         color = status_color(label)
         tones[_normalize_semantic_label(label)] = {
             "color": color,
-            "bg": _hex_with_alpha(color, 24),
-            "border": _hex_with_alpha(color, 120),
+            "bg": hex_with_alpha(color, _theme_alpha(24), fallback=status_color("")),
+            "border": hex_with_alpha(color, _theme_alpha(120), fallback=status_color("")),
         }
     for label in list(priority_labels or []):
         color = priority_color(label)
         tones[_normalize_semantic_label(label)] = {
             "color": color,
-            "bg": _hex_with_alpha(color, 24),
-            "border": _hex_with_alpha(color, 120),
+            "bg": hex_with_alpha(color, _theme_alpha(24), fallback=priority_color("")),
+            "border": hex_with_alpha(color, _theme_alpha(120), fallback=priority_color("")),
         }
     return tones
 
@@ -445,7 +387,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         st.session_state.pop(FILTER_ACTION_CONTEXT_KEY, None)
 
     status_opts_raw = status_col.astype(str).unique().tolist()
-    status_opts_raw = _order_statuses_canonical(status_opts_raw)
+    status_opts_raw = order_statuses_canonical(status_opts_raw)
     status_opts_ui = [_status_combo_label(s) for s in status_opts_raw]
 
     prio_opts_ui: List[str] = []
@@ -458,11 +400,6 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
 
     # Tags use stable aria-label selectors (color only, no dot) from centralized token map.
     _inject_semantic_tag_css(
-        status_labels=status_opts_ui,
-        priority_labels=prio_opts_ui,
-    )
-    # Popover options use runtime bridge because BaseWeb does not expose semantic attrs.
-    _inject_semantic_option_runtime_bridge(
         status_labels=status_opts_ui,
         priority_labels=prio_opts_ui,
     )
@@ -647,7 +584,7 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
     color = (hex_color or status_color("")).strip()
     deployed_color = status_color("Deployed").strip().upper()
     if color.strip().upper() == deployed_color:
-        border = _hex_with_alpha(color, 145)
+        border = hex_with_alpha(color, _theme_alpha(145), fallback=status_color(""))
         bg = "var(--bbva-goal-green-bg)"
         hover_bg = "color-mix(in srgb, var(--bbva-goal-green-bg) 78%, var(--bbva-goal-green) 22%)"
         fw = "800" if selected else "700"
@@ -666,9 +603,9 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
             f"--mx-hover-bg:{hover_bg};"
             "--mx-focus-ring:var(--bbva-focus-ring);"
         )
-    border = _hex_with_alpha(color, 125)
-    bg = _hex_with_alpha(color, 28)
-    hover_bg = _hex_with_alpha(color, 42)
+    border = hex_with_alpha(color, _theme_alpha(125), fallback=status_color(""))
+    bg = hex_with_alpha(color, _theme_alpha(28), fallback=status_color(""))
+    hover_bg = hex_with_alpha(color, _theme_alpha(42), fallback=status_color(""))
     fw = "800" if selected else "700"
     return (
         f"border:1px solid {border} !important;"
@@ -771,7 +708,7 @@ def render_status_priority_matrix(
     )
 
     # Orden filas: CANÓNICO
-    statuses = _order_statuses_canonical(mx["status"].value_counts().index.tolist())
+    statuses = order_statuses_canonical(mx["status"].value_counts().index.tolist())
 
     # Orden columnas: impedimento primero + resto por rank
     priorities = sorted(

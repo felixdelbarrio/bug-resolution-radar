@@ -13,6 +13,26 @@ class _FakeStreamlitState:
         self.session_state = session_state
 
 
+class _FakeDownloadStreamlit:
+    def __init__(self, session_state: dict[str, object] | None = None) -> None:
+        self.session_state = dict(session_state or {})
+        self.button_calls: list[dict[str, object]] = []
+        self.download_calls: list[dict[str, object]] = []
+
+    def button(self, label: str, **kwargs: object) -> bool:
+        self.button_calls.append({"label": label, **kwargs})
+        return False
+
+    def download_button(self, **kwargs: object) -> None:
+        self.download_calls.append(dict(kwargs))
+
+    def rerun(self) -> None:
+        return None
+
+    def caption(self, _text: str) -> None:
+        return None
+
+
 def test_extract_helix_item_description_prefers_detailed_text() -> None:
     item = HelixWorkItem(
         id="INC123",
@@ -56,6 +76,37 @@ def test_inject_helix_descriptions_uses_source_scoped_key(monkeypatch: Any) -> N
     out = issues_tab._inject_helix_descriptions(df, settings=None)
 
     assert out.loc[0, "description"] == "Descripcion extensa del incidente"
+
+
+def test_inject_helix_descriptions_keeps_existing_non_summary_description(monkeypatch: Any) -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "INC000104250722",
+                "summary": "BBVA Senda",
+                "description": "Descripcion curada manual",
+                "source_type": "helix",
+                "source_id": "helix:mexico:helix-enterprise-web",
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        issues_tab,
+        "_helix_data_path_and_mtime",
+        lambda settings: ("/tmp/helix_dump.json", 123),
+    )
+    monkeypatch.setattr(
+        issues_tab,
+        "_load_helix_descriptions_cached",
+        lambda path, mtime: {
+            "helix:mexico:helix-enterprise-web::INC000104250722": "Descripcion externa"
+        },
+    )
+
+    out = issues_tab._inject_helix_descriptions(df, settings=None)
+
+    assert out.loc[0, "description"] == "Descripcion curada manual"
 
 
 def test_inject_missing_jira_descriptions_from_summary_keeps_empty() -> None:
@@ -178,3 +229,93 @@ def test_apply_shared_like_filter_uses_literal_like_not_regex(monkeypatch: Any) 
     out = issues_tab._apply_shared_like_filter(df, sort_col="summary", key_prefix="issues")
 
     assert out["summary"].tolist() == ["A.B issue"]
+
+
+def test_cards_pagination_window_clamps_and_returns_bounds() -> None:
+    page, start, end, total_pages = issues_tab._cards_pagination_window(
+        total_rows=125,
+        page_size=30,
+        page=99,
+    )
+    assert total_pages == 5
+    assert page == 5
+    assert start == 120
+    assert end == 125
+
+
+def test_cards_pagination_window_handles_empty_dataset() -> None:
+    page, start, end, total_pages = issues_tab._cards_pagination_window(
+        total_rows=0,
+        page_size=60,
+        page=3,
+    )
+    assert total_pages == 1
+    assert page == 1
+    assert start == 0
+    assert end == 0
+
+
+def test_issues_perf_budget_overruns_detects_exceeded_blocks() -> None:
+    overruns = issues_tab._issues_perf_budget_overruns(
+        view="Cards",
+        metrics_ms={
+            "filters": 40.0,
+            "cards": 500.0,
+            "exports": 10.0,
+            "total": 520.0,
+        },
+    )
+    assert overruns == ["cards", "total"]
+
+
+def test_cached_standard_issues_export_xlsx_returns_none_for_empty_df() -> None:
+    out = issues_tab._cached_standard_issues_export_xlsx(pd.DataFrame())
+    assert out is None
+
+
+def test_render_issues_download_button_jira_lazy_mode_shows_prepare_first(
+    monkeypatch: Any,
+) -> None:
+    fake_st = _FakeDownloadStreamlit()
+    monkeypatch.setattr(issues_tab, "st", fake_st)
+    monkeypatch.setattr(
+        issues_tab,
+        "_cached_standard_issues_export_xlsx",
+        lambda _df: (_ for _ in ()).throw(AssertionError("No debe generar Excel sin preparar.")),
+    )
+
+    df = pd.DataFrame([{"key": "A-1", "url": "https://jira.local/browse/A-1"}])
+    issues_tab._render_issues_download_button(
+        df,
+        key_prefix="issues",
+        settings=None,
+        helix_only=False,
+    )
+
+    assert [c.get("label") for c in fake_st.button_calls] == ["Preparar Excel"]
+    assert fake_st.download_calls == []
+
+
+def test_render_issues_download_button_jira_downloads_after_prepared_state(
+    monkeypatch: Any,
+) -> None:
+    df = pd.DataFrame([{"key": "A-1", "url": "https://jira.local/browse/A-1"}])
+    sig = issues_tab._issues_export_signature(df, helix_path="", helix_mtime_ns=-1)
+    fake_st = _FakeDownloadStreamlit(
+        {
+            "issues::jira_export_sig": sig,
+            "issues::jira_export_prepared": True,
+        }
+    )
+    monkeypatch.setattr(issues_tab, "st", fake_st)
+    monkeypatch.setattr(issues_tab, "_cached_standard_issues_export_xlsx", lambda _df: b"xlsx")
+
+    issues_tab._render_issues_download_button(
+        df,
+        key_prefix="issues",
+        settings=None,
+        helix_only=False,
+    )
+
+    assert fake_st.download_calls
+    assert fake_st.download_calls[0]["label"] == "Excel"

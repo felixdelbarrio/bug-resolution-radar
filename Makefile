@@ -81,7 +81,7 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup all-github-actions test run clean build-local \
+.PHONY: help setup CI all-github-actions test run clean build-local \
 	_ensure-build-tools _ensure-desktop-runtime-deps _sync-build-env \
 	_test-ppt-regression _build-macos _build-linux _verify-macos-app _clean-build
 
@@ -90,7 +90,7 @@ help:
 	@echo "Bug Resolution Radar - comandos"
 	@echo ""
 	@echo "  make setup       Prepara/actualiza el entorno completo (venv + deps dev)"
-	@echo "  make all-github-actions  Ejecuta la cadena CI (ruff+black/lint/typecheck/tests/docs/deadcode)"
+	@echo "  make CI          Ejecuta la cadena CI (ruff+black/lint/typecheck/tests/docs/deadcode)"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
 	@echo "  make test        Ejecuta tests del repo (pytest)"
 	@echo "  make build-local Flujo único de build: limpia + sync entorno + regresión PPT + build OS (macOS incluye verify)"
@@ -120,7 +120,7 @@ test:
 	fi
 	@$(PYTEST) -q
 
-all-github-actions:
+CI:
 	@if [ ! -x "$(PYTHON)" ]; then \
 		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
 		exit 1; \
@@ -155,7 +155,11 @@ all-github-actions:
 	@$(PYTHON) scripts/check_docs_references.py
 	@echo "[7/7] pytest --cov"
 	@$(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml
-	@echo "all-github-actions completado."
+	@echo "CI completado."
+
+all-github-actions:
+	@echo "Target 'all-github-actions' deprecado; usa 'make CI'."
+	@$(MAKE) CI
 
 _ensure-build-tools:
 	@if [ ! -x "$(PYTHON)" ]; then \

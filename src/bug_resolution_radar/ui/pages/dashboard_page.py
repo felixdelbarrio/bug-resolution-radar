@@ -115,7 +115,6 @@ def _dashboard_data_cache_signature(
             data_rev,
             selected_country,
             selected_source,
-            str(section),
             "kpis=1" if include_kpis else "kpis=0",
             "ts=1" if include_timeseries_chart else "ts=0",
             f"lookback_m={getattr(settings, 'ANALYSIS_LOOKBACK_MONTHS', 0)}",

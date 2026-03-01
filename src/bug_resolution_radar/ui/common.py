@@ -23,6 +23,7 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_SIGNAL_RED_2,
     BBVA_SIGNAL_RED_3,
     BBVA_SIGNAL_YELLOW_1,
+    hex_to_rgba,
 )
 
 # ----------------------------
@@ -257,7 +258,7 @@ def _semantic_option_css_block(*, tokens: List[str], color: str) -> str:
         txt = _css_attr_value(token)
         selectors.append(
             (
-                'div[data-baseweb="popover"].bbva-semantic-popover '
+                'div[data-baseweb="popover"] '
                 f'[role="option"]:is([aria-label*="{txt}" i], [title*="{txt}" i])'
             )
         )
@@ -266,12 +267,15 @@ def _semantic_option_css_block(*, tokens: List[str], color: str) -> str:
     selector_group = ",\n".join(selectors)
     return (
         f"{selector_group} {{\n"
-        "  padding-left: 1.70rem !important;\n"
+        "  padding-left: 1.62rem !important;\n"
         f"  --bbva-opt-dot: {color};\n"
         f"  border-left: 2px solid color-mix(in srgb, {color} 72%, transparent);\n"
-        "}\n"
-        f"{selector_group}::before {{\n"
-        '  content: "";\n'
+        "  background-image: radial-gradient(\n"
+        "    circle at 0.80rem center,\n"
+        "    var(--bbva-opt-dot) 0.24rem,\n"
+        "    transparent 0.25rem\n"
+        "  ) !important;\n"
+        "  background-repeat: no-repeat !important;\n"
         "}\n"
     )
 
@@ -291,16 +295,6 @@ def semantic_popover_css_rules() -> str:
     return "\n".join(blocks)
 
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = hex_color.lstrip("#")
-    if len(h) != 6:
-        h = _NEUTRAL.lstrip("#")
-    r = int(h[0:2], 16)
-    g = int(h[2:4], 16)
-    b = int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha:.3f})"
-
-
 def chip_tone_for_color(hex_color: str) -> Tuple[float, float]:
     """Return border/bg alpha tuple for chip rendering by semantic color."""
     normalized = (hex_color or "").strip().upper()
@@ -316,9 +310,17 @@ def chip_palette_for_color(hex_color: str) -> Tuple[str, str, str]:
     normalized = txt.upper()
     if normalized == _GOAL_ACCENT_7:
         # Explicit BBVA-like 7/8 pairing: text 7 over background 8.
-        return (_GOAL_ACCENT_7, _hex_to_rgba(_GOAL_ACCENT_7, 0.64), _GOAL_SURFACE_8)
+        return (
+            _GOAL_ACCENT_7,
+            hex_to_rgba(_GOAL_ACCENT_7, 0.64, fallback=_NEUTRAL),
+            _GOAL_SURFACE_8,
+        )
     border_alpha, bg_alpha = chip_tone_for_color(txt)
-    return (txt, _hex_to_rgba(txt, border_alpha), _hex_to_rgba(txt, bg_alpha))
+    return (
+        txt,
+        hex_to_rgba(txt, border_alpha, fallback=_NEUTRAL),
+        hex_to_rgba(txt, bg_alpha, fallback=_NEUTRAL),
+    )
 
 
 def chip_style_from_color(hex_color: str) -> str:
@@ -326,6 +328,15 @@ def chip_style_from_color(hex_color: str) -> str:
     return (
         f"color:{txt}; border:1px solid {border}; background:{bg}; "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
+    )
+
+
+def neutral_chip_style(*, font_size: str = "0.80rem") -> str:
+    """Neutral chip style token used in non-semantic labels (owner/age/count)."""
+    return (
+        "color:var(--bbva-text-muted); border:1px solid var(--bbva-border-strong); "
+        "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
+        f"border-radius:999px; padding:2px 10px; font-weight:700; font-size:{font_size};"
     )
 
 

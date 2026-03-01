@@ -727,7 +727,7 @@ def render_minimal_export_actions(
                     file_name=btn["file_name"],
                     mime=btn["mime"],
                     key=btn["key"],
-                    width="content",
+                    width="stretch",
                     disabled=bool(btn.get("disabled", False)),
                     help=btn.get("help"),
                 )

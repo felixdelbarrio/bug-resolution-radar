@@ -179,7 +179,7 @@ def _render_sources_excel_download(
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=key,
         disabled=disabled,
-        width="content",
+        width="stretch",
     )
 
 
@@ -786,7 +786,7 @@ def _apply_queued_widget_state_clear() -> None:
 
 
 def _clear_runtime_state_after_restore() -> None:
-    # Theme + scope + filters are hydrated once; clear them so next run reflects restored `.env`.
+    # Theme + scope + filters are hydrated once; clear them so next run reflects restored settings.
     for key in [
         "workspace_dark_mode",
         "workspace_country",
@@ -912,7 +912,7 @@ def render(settings: Settings) -> None:
         jira_rows_state_key = "cfg_jira_sources_rows_state"
         if jira_rows_state_key not in st.session_state:
             st.session_state[jira_rows_state_key] = jira_rows or [jira_default_row]
-        if st.button("Añadir fila", key="cfg_jira_add_row_btn", width="content"):
+        if st.button("Añadir fila", key="cfg_jira_add_row_btn", width="stretch"):
             raw_rows = st.session_state.get(jira_rows_state_key, [])
             rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
             rows_state.append(dict(jira_default_row))
@@ -1082,7 +1082,7 @@ def render(settings: Settings) -> None:
         helix_rows_state_key = "cfg_helix_sources_rows_state"
         if helix_rows_state_key not in st.session_state:
             st.session_state[helix_rows_state_key] = helix_rows or [helix_default_row]
-        if st.button("Añadir fila", key="cfg_helix_add_row_btn", width="content"):
+        if st.button("Añadir fila", key="cfg_helix_add_row_btn", width="stretch"):
             raw_rows = st.session_state.get(helix_rows_state_key, [])
             rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
             rows_state.append(dict(helix_default_row))
@@ -1226,7 +1226,7 @@ def render(settings: Settings) -> None:
                     horizontal=True,
                     key="cfg_workspace_theme_mode",
                 )
-                st.caption("Se guarda en el .env como preferencia del usuario.")
+                st.caption("Se guarda como preferencia del usuario.")
 
             with st.container(border=True, key="cfg_prefs_card_analysis"):
                 st.markdown("#### Profundidad del análisis")
@@ -1354,7 +1354,7 @@ def render(settings: Settings) -> None:
                         _queue_all_config_widget_state_clear()
                         _clear_runtime_state_after_restore()
                         st.session_state["__cfg_flash_success"] = (
-                            "Configuración restaurada desde `.env.example`."
+                            "Configuración restaurada desde la plantilla base."
                         )
                         st.session_state["__cfg_active_tab"] = "Preferencias"
                         st.rerun()
