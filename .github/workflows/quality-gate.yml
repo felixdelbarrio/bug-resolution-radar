@@ -39,3 +39,8 @@ jobs:
 
       - name: Dead private helper guard
         run: python scripts/check_dead_private_helpers.py
+
+      - name: Critical PPT runtime regression guard
+        run: |
+          pytest -q tests/test_run_streamlit_entrypoint.py -k "choreographer_wrapper_passthrough"
+          pytest -q tests/test_executive_report_ppt.py -k "kaleido_png_bytes_uses_cache or prerender_section_images_populates_payload"

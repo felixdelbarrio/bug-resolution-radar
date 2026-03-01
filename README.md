@@ -106,7 +106,7 @@ python3 scripts/ingest_profile_report.py --connector helix
 Para empaquetado local robusto:
 
 ```bash
-make build-local
+make build
 ```
 
 Firma/notarización (opcional, macOS):

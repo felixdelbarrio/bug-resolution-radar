@@ -12,7 +12,6 @@ PLAYWRIGHT=$(VENV)/bin/playwright
 PLAYWRIGHT_BROWSERS ?= chromium
 
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
-PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
 APPLE_CODESIGN_IDENTITY ?=
 APPLE_NOTARY_PROFILE ?=
 PYINSTALLER_RETRIES ?= 4
@@ -81,7 +80,7 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup CI all-github-actions test run clean build-local \
+.PHONY: help setup CI all-github-actions test run clean build build-local make.build \
 	_ensure-build-tools _ensure-desktop-runtime-deps _sync-build-env \
 	_test-ppt-regression _build-macos _build-linux _verify-macos-app _clean-build
 
@@ -93,11 +92,14 @@ help:
 	@echo "  make CI          Ejecuta la cadena CI (ruff+black/lint/typecheck/tests/docs/deadcode)"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
 	@echo "  make test        Ejecuta tests del repo (pytest)"
-	@echo "  make build-local Flujo único de build: limpia + sync entorno + regresión PPT + build OS (macOS incluye verify)"
+	@echo "  make build       Flujo único de build: limpia + sync entorno + regresión PPT + build OS (macOS incluye verify)"
+	@echo "  make make.build  Alias explícito del target de build"
+	@echo "  make build-local Alias legado (compatibilidad)"
 	@echo "  make clean       Borra venv y cachés"
 	@echo ""
 	@echo "Variables útiles:"
 	@echo "  PY=python3       (puedes cambiarlo al invocar: make setup PY=python3.11)"
+	@echo "  INSTALL_PLAYWRIGHT=1 (opcional; instala navegador Chromium de Playwright en setup)"
 	@echo "  APPLE_CODESIGN_IDENTITY='Developer ID Application: ...' (opcional)"
 	@echo "  APPLE_NOTARY_PROFILE='perfil-notarytool' (opcional; requiere Apple Developer)"
 	@echo ""
@@ -106,8 +108,10 @@ setup:
 	@if [ ! -d $(VENV) ]; then $(PY) -m venv $(VENV); fi
 	$(PIP) install -U pip
 	$(PIP) install -r requirements-dev.txt
-	@if [ -x "$(PLAYWRIGHT)" ]; then \
+	@if [ "$(INSTALL_PLAYWRIGHT)" = "1" ] && [ -x "$(PLAYWRIGHT)" ]; then \
 		$(PLAYWRIGHT) install $(PLAYWRIGHT_BROWSERS); \
+	else \
+		echo "Playwright browsers omitidos (usa INSTALL_PLAYWRIGHT=1 para instalarlos)."; \
 	fi
 	@echo ""
 	@echo "Entorno listo."
@@ -176,7 +180,7 @@ _ensure-build-tools:
 	fi
 
 _ensure-desktop-runtime-deps:
-	@$(PYTHON) -c "import importlib.util,sys;missing=[m for m in ('streamlit','webview') if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias de runtime desktop: '+', '.join(missing)+'. Ejecuta: make build-local\\n') or sys.exit(2)) if missing else print('Runtime desktop OK (streamlit + webview).')"
+	@$(PYTHON) -c "import importlib.util,sys;mods=('streamlit','webview','plotly','kaleido','choreographer','pptx');missing=[m for m in mods if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias críticas de runtime/reporting: '+', '.join(missing)+'. Ejecuta: make setup\\n') or sys.exit(2)) if missing else print('Runtime/reporting OK ('+', '.join(mods)+').')"
 
 _sync-build-env: _ensure-build-tools
 	$(PIP) install -U pip
@@ -184,11 +188,12 @@ _sync-build-env: _ensure-build-tools
 	$(MAKE) _ensure-desktop-runtime-deps
 
 _test-ppt-regression: _ensure-build-tools
-	$(PYTEST) -q tests/test_executive_report_ppt.py -k "$(PPT_REGRESSION_TEST_EXPR)"
 	$(PYTEST) -q tests/test_run_streamlit_entrypoint.py
-	$(PYTEST) -q tests/test_executive_report_ppt.py::test_generate_scope_executive_ppt_is_scoped_and_valid_ppt
+	$(PYTEST) -q tests/test_executive_report_ppt.py
 
-build-local: _clean-build _sync-build-env _test-ppt-regression
+build: make.build
+
+make.build: _clean-build _sync-build-env _test-ppt-regression
 	@case "$(HOST_UNAME)" in \
 		Darwin) \
 			$(MAKE) _build-macos; \
@@ -198,10 +203,14 @@ build-local: _clean-build _sync-build-env _test-ppt-regression
 			$(MAKE) _build-linux; \
 			;; \
 		*) \
-			echo "OS no soportado para build-local: $(HOST_UNAME)"; \
+			echo "OS no soportado para build: $(HOST_UNAME)"; \
 			exit 1; \
 			;; \
 	esac
+
+build-local:
+	@echo "Target 'build-local' deprecado; usa 'make build'."
+	@$(MAKE) make.build
 
 _build-macos:
 	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
@@ -360,7 +369,7 @@ _verify-macos-app:
 	fi
 	@APP_PATH="dist_app/bug-resolution-radar.app"; \
 	if [ ! -d "$$APP_PATH" ]; then \
-		echo "No existe $$APP_PATH. Ejecuta primero: make build-local"; \
+		echo "No existe $$APP_PATH. Ejecuta primero: make build"; \
 		exit 1; \
 	fi; \
 	echo "== codesign entitlements =="; \

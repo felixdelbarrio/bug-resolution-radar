@@ -24,113 +24,15 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - name: Setup local toolchain (venv + deps)
+        run: make setup PY=python3
 
-      - name: Verify desktop runtime dependencies
-        run: |
-          python - <<'PY'
-          import importlib.util
-          import sys
-
-          missing = [
-              mod for mod in ("streamlit", "webview") if importlib.util.find_spec(mod) is None
-          ]
-          if missing:
-              raise SystemExit(f"Missing desktop runtime modules: {', '.join(missing)}")
-
-          import webview  # noqa: F401
-          print("Desktop runtime dependencies OK")
-          PY
-
-      - name: Run macOS PPT binary regression tests
-        run: |
-          pytest -q tests/test_executive_report_ppt.py -k "subprocess_with_timeout"
-          pytest -q tests/test_run_streamlit_entrypoint.py
-          pytest -q tests/test_executive_report_ppt.py::test_generate_scope_executive_ppt_is_scoped_and_valid_ppt
-
-      - name: Build macOS .app bundle (icon-friendly)
-        run: |
-          ROOT_DIR="$PWD"
-          EXTRA_ARGS=()
-          if [ -d src/bug_resolution_radar/ui/assets ]; then
-            EXTRA_ARGS+=(--add-data "$ROOT_DIR/src/bug_resolution_radar/ui/assets:bug_resolution_radar/ui/assets")
-          else
-            echo "src/bug_resolution_radar/ui/assets no existe; se omite --add-data de assets UI."
-          fi
-          if [ -f .env.example ]; then
-            EXTRA_ARGS+=(--add-data "$ROOT_DIR/.env.example:.")
-          fi
-          if [ -f .streamlit/config.toml ]; then
-            EXTRA_ARGS+=(--add-data "$ROOT_DIR/.streamlit/config.toml:.streamlit")
-          fi
-          pyinstaller --noconfirm --clean --windowed --name bug-resolution-radar --icon "$ROOT_DIR/assets/app_icon/bug-resolution-radar.png" --distpath dist_app --workpath build_app --specpath build_app --add-data "$ROOT_DIR/app.py:." "${EXTRA_ARGS[@]}" --collect-all streamlit --collect-all webview --collect-all watchdog --collect-all plotly --collect-all pptx --collect-all lxml --collect-all PIL --collect-all kaleido --collect-all choreographer --collect-all logistro --collect-all simplejson --collect-all orjson --collect-all openpyxl --collect-all xlsxwriter --collect-all numpy --collect-all browser_cookie3 --collect-all bug_resolution_radar "$ROOT_DIR/run_streamlit.py"
-          APP_INFO_PLIST="dist_app/bug-resolution-radar.app/Contents/Info.plist"
-          if [ -f "$APP_INFO_PLIST" ]; then
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$APP_INFO_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" "$APP_INFO_PLIST"
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$APP_INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent true" "$APP_INFO_PLIST"
-          fi
-
-      - name: Prepare distributable bundle
-        run: |
-          BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"
-          mkdir -p "$BUNDLE_DIR/dist"
-          if [ -d dist_app/bug-resolution-radar.app ]; then
-            cp -R dist_app/bug-resolution-radar.app "$BUNDLE_DIR/dist/bug-resolution-radar.app"
-          fi
-          cp README.md "$BUNDLE_DIR/README.md"
-          if [ -f assets/app_icon/bug-resolution-radar.png ]; then
-            mkdir -p "$BUNDLE_DIR/assets/app_icon"
-            cp assets/app_icon/bug-resolution-radar.png "$BUNDLE_DIR/assets/app_icon/bug-resolution-radar.png"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-database.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-database.svg"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-no-draw.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-no-draw.svg"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-simulator.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-simulator.svg"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-save-for-later.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-save-for-later.svg"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-recycle.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-recycle.svg"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-search.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-search.svg"
-          fi
-          if [ -f src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg ]; then
-            mkdir -p "$BUNDLE_DIR/assets/icons/bbva"
-            cp src/bug_resolution_radar/ui/assets/icons/bbva/spherica-xml.svg "$BUNDLE_DIR/assets/icons/bbva/spherica-xml.svg"
-          fi
-          if [ -f .env.example ]; then
-            cp .env.example "$BUNDLE_DIR/.env.example"
-          fi
-          if [ -f .streamlit/config.toml ]; then
-            mkdir -p "$BUNDLE_DIR/.streamlit"
-            cp .streamlit/config.toml "$BUNDLE_DIR/.streamlit/config.toml"
-          fi
-
-      - name: Archive macOS bundle (preserve .app metadata/permissions)
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            "build_bundle/bug-resolution-radar-macos" \
-            "bug-resolution-radar-macos.zip"
+      - name: Build .app bundle (with PPT regression guard)
+        run: make build
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: bug-resolution-radar-macos
-          path: bug-resolution-radar-macos.zip
+          path: build_bundle/bug-resolution-radar-macos.zip
           if-no-files-found: error

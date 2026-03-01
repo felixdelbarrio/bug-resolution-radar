@@ -18,6 +18,7 @@ Targets públicos disponibles:
 - `make CI`: cadena completa de calidad usada en local/CI.
 - `make test`: ejecución rápida de tests.
 - `make run`: arranque local de la app.
+- `make build`: build oficial con regresión PPT previa y empaquetado por OS.
 
 Detalle de la cadena `make CI`:
 - `ruff format --check .`
