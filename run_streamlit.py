@@ -81,6 +81,54 @@ def _resolve_app_script() -> Path:
     raise FileNotFoundError(f"Could not find bundled Streamlit entrypoint: {script}")
 
 
+def _runtime_app_icon_candidates() -> list[Path]:
+    out: list[Path] = []
+    # Local/dev repository icon.
+    out.append(Path(__file__).resolve().parent / "assets" / "app_icon" / "bug-resolution-radar.png")
+
+    if getattr(sys, "frozen", False):
+        try:
+            exe = Path(sys.executable).resolve()
+            exe_dir = exe.parent
+            contents_dir = exe_dir.parent
+            out.append(contents_dir / "Resources" / "bug-resolution-radar.icns")
+            out.append(contents_dir / "Resources" / "bug-resolution-radar.png")
+        except Exception:
+            pass
+
+    # De-dup preserving order.
+    seen: set[str] = set()
+    uniq: list[Path] = []
+    for path in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(path)
+    return uniq
+
+
+def _set_macos_runtime_dock_icon() -> None:
+    """Best-effort Dock icon override for local pywebview runs on macOS."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplication, NSImage  # type: ignore
+    except Exception:
+        return
+
+    icon_path = next((p for p in _runtime_app_icon_candidates() if p.exists()), None)
+    if icon_path is None:
+        return
+    try:
+        image = NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+        if image is None:
+            return
+        NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        return
+
+
 def _candidate_streamlit_config_paths() -> list[Path]:
     out: list[Path] = []
 
@@ -607,6 +655,7 @@ def _run_desktop_container() -> int:
         min_width = max(800, _int_env("BUG_RESOLUTION_RADAR_WINDOW_MIN_WIDTH", 1024))
         min_height = max(600, _int_env("BUG_RESOLUTION_RADAR_WINDOW_MIN_HEIGHT", 700))
 
+        _set_macos_runtime_dock_icon()
         webview.create_window(
             title=title,
             url=_streamlit_base_url(chosen_port),

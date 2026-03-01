@@ -112,6 +112,14 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _analysis_lookback_months_from_env() -> int:
+    """Read analysis lookback months from env with business default of 12."""
+    value = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 12)
+    if value <= 0:
+        return 12
+    return int(value)
+
+
 def _csv_list(value: Any, default: str = "") -> List[str]:
     raw = default if value is None else value
     if isinstance(raw, (list, tuple, set)):
@@ -1741,7 +1749,7 @@ def ingest_helix(
                 None,
             )
 
-    analysis_lookback_months = max(1, _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 12))
+    analysis_lookback_months = _analysis_lookback_months_from_env()
     cache_reference_doc = cache_doc if cache_doc is not None else existing_doc
     source_cached_items = _cached_items_for_source(
         cache_reference_doc,

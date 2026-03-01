@@ -8,7 +8,7 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 from dotenv import dotenv_values
 from pydantic import BaseModel
@@ -113,6 +113,16 @@ _PATH_SETTING_KEYS = {
     "HELIX_CA_BUNDLE",
     "REPORT_PPT_DOWNLOAD_DIR",
 }
+LEGACY_ENV_KEYS_TO_PRUNE = {
+    "ANALYSIS_LOOKBACK_DAYS",
+    "BUG_RESOLUTION_RADAR_CORPORATE_MODE",
+    "BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL",
+    "BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY",
+    "BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS",
+    "BUG_RESOLUTION_RADAR_CHROME_BINARY",
+    "BUG_RESOLUTION_RADAR_EDGE_BINARY",
+    "BUG_RESOLUTION_RADAR_ALLOW_PROTECTED_EXPORT_DIRS",
+}
 
 
 def _decode_env_multiline(v: str) -> str:
@@ -127,6 +137,16 @@ def _encode_env_multiline(v: str) -> str:
 
 def _coerce_str(value: Any) -> str:
     return str(value or "").strip()
+
+
+def normalize_analysis_lookback_months(value: Any, *, default: int = 12) -> int:
+    try:
+        months = int(str(value).strip())
+    except Exception:
+        return int(default)
+    if months <= 0:
+        return int(default)
+    return int(months)
 
 
 def config_home() -> Path:
@@ -300,8 +320,11 @@ def load_settings() -> Settings:
     return Settings.model_validate(payload)
 
 
-def save_settings(settings: Settings) -> None:
+def save_settings(settings: Settings, *, drop_keys: Set[str] | List[str] | None = None) -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    normalized_drop_keys = {
+        str(key).strip() for key in (drop_keys or set()) if str(key).strip()
+    }
     existing = {k: v for k, v in dotenv_values(ENV_PATH).items() if k}
     data = settings.model_dump()
     serialized_data: Dict[str, str] = {}
@@ -323,6 +346,8 @@ def save_settings(settings: Settings) -> None:
 
     lines: List[str] = []
     for key in ordered_keys:
+        if key in normalized_drop_keys:
+            continue
         if key in serialized_data:
             lines.append(f"{key}={serialized_data[key]}")
             continue

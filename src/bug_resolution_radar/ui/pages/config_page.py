@@ -13,11 +13,13 @@ from bug_resolution_radar.analytics.analysis_window import (
     parse_analysis_lookback_months,
 )
 from bug_resolution_radar.config import (
+    LEGACY_ENV_KEYS_TO_PRUNE,
     Settings,
     build_source_id,
     config_home,
     helix_sources,
     jira_sources,
+    normalize_analysis_lookback_months,
     restore_env_from_example,
     save_settings,
     supported_countries,
@@ -65,6 +67,19 @@ def _safe_update_settings(settings: Settings, update: Dict[str, Any]) -> Setting
     allowed = set(getattr(settings.__class__, "model_fields", {}).keys())
     clean = {k: v for k, v in update.items() if k in allowed}
     return settings.model_copy(update=clean)
+
+
+def _save_settings_with_migrations(settings: Settings) -> None:
+    migrated = _safe_update_settings(
+        settings,
+        {
+            "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
+                getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 12),
+                default=12,
+            ),
+        },
+    )
+    save_settings(migrated, drop_keys=LEGACY_ENV_KEYS_TO_PRUNE)
 
 
 def _parse_csv_ids(raw: object, valid_ids: List[str]) -> List[str]:
@@ -795,20 +810,27 @@ def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _analysis_window_defaults(settings: Settings) -> Tuple[int, int]:
+    configured_months = normalize_analysis_lookback_months(
+        getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 12),
+        default=12,
+    )
     try:
         df_all = load_issues_df(settings.DATA_PATH)
     except Exception:
-        return 1, 1
+        max_months = max(12, configured_months)
+        return max_months, configured_months
 
     if df_all.empty:
-        return 1, 1
+        max_months = max(12, configured_months)
+        return max_months, configured_months
 
     scoped_df = _apply_workspace_scope(df_all)
     base_df = scoped_df if not scoped_df.empty else df_all
     available_months = int(max_available_backlog_months(base_df))
-    configured_months = int(parse_analysis_lookback_months(settings))
-    current_months = max(1, min(configured_months, available_months))
-    return max(1, available_months), max(1, min(current_months, available_months))
+    parsed_months = int(parse_analysis_lookback_months(settings))
+    current_months = max(1, parsed_months)
+    max_months = max(12, available_months, current_months)
+    return max_months, current_months
 
 
 def _analysis_month_steps(max_months: int) -> List[int]:
@@ -942,7 +964,7 @@ def render(settings: Settings) -> None:
                     "JIRA_SOURCES_JSON": to_env_json(jira_clean),
                 },
             )
-            save_settings(new_settings)
+            _save_settings_with_migrations(new_settings)
 
             any_deletion = False
             if bool(jira_delete_cfg.get("armed", False)):
@@ -1101,7 +1123,7 @@ def render(settings: Settings) -> None:
                     "HELIX_DASHBOARD_URL": str(helix_dashboard_url).strip(),
                 },
             )
-            save_settings(new_settings)
+            _save_settings_with_migrations(new_settings)
 
             any_deletion = False
             if bool(helix_delete_cfg.get("armed", False)):
@@ -1318,10 +1340,13 @@ def render(settings: Settings) -> None:
                         "DASHBOARD_SUMMARY_CHARTS": summary_csv,
                         "TREND_SELECTED_CHARTS": summary_csv,
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
-                        "ANALYSIS_LOOKBACK_MONTHS": int(analysis_selected_months),
+                        "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
+                            analysis_selected_months,
+                            default=12,
+                        ),
                     },
                 )
-                save_settings(new_settings)
+                _save_settings_with_migrations(new_settings)
                 target_dark_mode = str(theme_mode).strip().lower() == "dark"
                 theme_mode_changed = (
                     bool(st.session_state.get("workspace_dark_mode", False)) != target_dark_mode

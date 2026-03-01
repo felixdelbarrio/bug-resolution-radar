@@ -142,6 +142,41 @@ def test_config_save_settings_preserves_unknown_env_keys(monkeypatch: Any, tmp_p
     assert "CUSTOM_CORP_FLAG=keep-me" in saved
 
 
+def test_config_save_settings_can_prune_legacy_keys(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        (
+            "APP_TITLE=Radar\n"
+            "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true\n"
+            "ANALYSIS_LOOKBACK_DAYS=365\n"
+            "BUG_RESOLUTION_RADAR_CORPORATE_MODE=true\n"
+            "CUSTOM_CORP_FLAG=keep-me\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    settings.APP_TITLE = "Radar Pro"
+    cfg.save_settings(settings, drop_keys=cfg.LEGACY_ENV_KEYS_TO_PRUNE)
+
+    saved = env_path.read_text(encoding="utf-8")
+    assert "APP_TITLE=Radar Pro" in saved
+    assert "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true" in saved
+    assert "CUSTOM_CORP_FLAG=keep-me" in saved
+    assert "ANALYSIS_LOOKBACK_DAYS=" not in saved
+    assert "BUG_RESOLUTION_RADAR_CORPORATE_MODE=" not in saved
+
+
+def test_normalize_analysis_lookback_months_defaults_for_non_positive_values() -> None:
+    assert cfg.normalize_analysis_lookback_months("0") == 12
+    assert cfg.normalize_analysis_lookback_months("-8") == 12
+    assert cfg.normalize_analysis_lookback_months("abc") == 12
+    assert cfg.normalize_analysis_lookback_months("6") == 6
+
+
 def test_config_restore_env_from_example(monkeypatch: Any, tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_example = tmp_path / ".env.example"

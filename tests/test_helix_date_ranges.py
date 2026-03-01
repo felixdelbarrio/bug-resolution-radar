@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from bug_resolution_radar.ingest.helix_ingest import (
+    _analysis_lookback_months_from_env,
     _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
     _cache_pending_refresh_ids,
@@ -62,6 +63,23 @@ def test_resolve_create_date_range_ms_uses_analysis_lookback_plus_one_month() ->
     assert end_ms == expected_end
     assert "analysis_lookback_months=12" in rule
     assert "effective=13m" in rule
+
+
+def test_analysis_lookback_months_from_env_defaults_to_12(monkeypatch) -> None:
+    monkeypatch.delenv("ANALYSIS_LOOKBACK_MONTHS", raising=False)
+    assert _analysis_lookback_months_from_env() == 12
+
+
+def test_analysis_lookback_months_from_env_uses_12_when_non_positive(monkeypatch) -> None:
+    monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "0")
+    assert _analysis_lookback_months_from_env() == 12
+    monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "-4")
+    assert _analysis_lookback_months_from_env() == 12
+
+
+def test_analysis_lookback_months_from_env_uses_configured_positive(monkeypatch) -> None:
+    monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "6")
+    assert _analysis_lookback_months_from_env() == 6
 
 
 def test_optimize_create_start_from_cache_uses_recent_tail_even_with_non_final_items() -> None:
