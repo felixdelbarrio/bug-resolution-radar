@@ -6,8 +6,10 @@ PIP=$(VENV)/bin/pip
 PYTHON=$(VENV)/bin/python
 RUN=$(VENV)/bin/streamlit
 PYTEST=$(VENV)/bin/pytest
+BLACK=$(VENV)/bin/black
 PYINSTALLER=$(VENV)/bin/pyinstaller
-PRECOMMIT=$(VENV)/bin/pre-commit
+PLAYWRIGHT=$(VENV)/bin/playwright
+PLAYWRIGHT_BROWSERS ?= chromium
 
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
@@ -79,34 +81,19 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup format lint typecheck test test-cov deadcode-private docs-check precommit quality quality-core install-hooks run clean clean-build \
-	ensure-build-tools ensure-desktop-runtime-deps sync-build-env \
-	test-ppt-regression build-local build-macos build-linux verify-macos-app
+.PHONY: help setup all-github-actions test run clean build-local \
+	_ensure-build-tools _ensure-desktop-runtime-deps _sync-build-env \
+	_test-ppt-regression _build-macos _build-linux _verify-macos-app _clean-build
 
 help:
 	@echo ""
 	@echo "Bug Resolution Radar - comandos"
 	@echo ""
 	@echo "  make setup       Prepara/actualiza el entorno completo (venv + deps dev)"
+	@echo "  make all-github-actions  Ejecuta la cadena CI (ruff+black/lint/typecheck/tests/docs/deadcode)"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
-	@echo "  make format      Formatea el código (ruff format)"
-	@echo "  make lint        Lint (ruff, si está instalado)"
-	@echo "  make typecheck   Typecheck (mypy, si está instalado)"
-	@echo "  make test        Tests (pytest, si está instalado)"
-	@echo "  make test-cov    Tests con cobertura (fail-under según pyproject.toml)"
-	@echo "  make deadcode-private  Detecta helpers privados huérfanos en src"
-	@echo "  make docs-check  Valida integridad de documentación y referencias"
-	@echo "  make precommit   Ejecuta hooks de pre-commit sobre todo el repo"
-	@echo "  make quality     Cadena completa local (precommit + deadcode + docs + mypy + tests)"
-	@echo "  make quality-core Alias de make quality"
-	@echo "  make install-hooks Instala pre-commit hooks locales"
-	@echo "  make test-ppt-regression  Regresión PPT/Kaleido (igual que en workflows POSIX)"
-	@echo "  make sync-build-env Sincroniza deps de build/runtime desktop antes de empaquetar"
-	@echo "  make build-local Auto-detecta OS (macOS/Linux) y construye binario local"
-	@echo "  make build-macos Construye .app + zip local (igual a .github/workflows/build-macos.yml)"
-	@echo "  make verify-macos-app Verifica firma/assessment del .app generado"
-	@echo "  make build-linux Construye binario Linux + bundle local (igual a .github/workflows/build-linux.yml)"
-	@echo "  make clean-build Borra artefactos de build de binarios"
+	@echo "  make test        Ejecuta tests del repo (pytest)"
+	@echo "  make build-local Flujo único de build: limpia + sync entorno + regresión PPT + build OS (macOS incluye verify)"
 	@echo "  make clean       Borra venv y cachés"
 	@echo ""
 	@echo "Variables útiles:"
@@ -118,97 +105,59 @@ help:
 setup:
 	@if [ ! -d $(VENV) ]; then $(PY) -m venv $(VENV); fi
 	$(PIP) install -U pip
-	$(PIP) install -e ".[dev]"
+	$(PIP) install -r requirements-dev.txt
+	@if [ -x "$(PLAYWRIGHT)" ]; then \
+		$(PLAYWRIGHT) install $(PLAYWRIGHT_BROWSERS); \
+	fi
 	@echo ""
 	@echo "Entorno listo."
 	@echo "Activa con: source .venv/bin/activate"
 
-format:
-	@if [ -f $(VENV)/bin/ruff ]; then \
-		$(VENV)/bin/ruff format . ; \
-	else \
-		echo "ruff no está instalado en el venv."; \
-	fi
-
-lint:
-	@if [ -f $(VENV)/bin/ruff ]; then \
-		$(VENV)/bin/ruff check . ; \
-	else \
-		echo "ruff no está instalado en el venv."; \
-	fi
-
-typecheck:
-	@if [ -f $(VENV)/bin/mypy ]; then \
-		$(VENV)/bin/mypy src ; \
-	else \
-		echo "mypy no está instalado en el venv."; \
-	fi
-
 test:
-	@if [ -f $(VENV)/bin/pytest ]; then \
-		$(VENV)/bin/pytest -q ; \
-	else \
-		echo "pytest no está instalado en el venv."; \
-	fi
-
-test-cov:
-	@if [ -f "$(PYTEST)" ]; then \
-		$(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml ; \
-	else \
-		echo "pytest no está instalado en el venv."; \
+	@if [ ! -x "$(PYTEST)" ]; then \
+		echo "pytest no está instalado en el venv. Ejecuta: make setup"; \
 		exit 1; \
 	fi
+	@$(PYTEST) -q
 
-deadcode-private:
-	@if [ -x "$(PYTHON)" ]; then \
-		$(PYTHON) scripts/check_dead_private_helpers.py ; \
-	else \
+all-github-actions:
+	@if [ ! -x "$(PYTHON)" ]; then \
 		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
 		exit 1; \
 	fi
-
-docs-check:
-	@if [ -x "$(PYTHON)" ]; then \
-		$(PYTHON) scripts/check_docs_references.py ; \
-	else \
-		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
+	@if [ ! -x "$(BLACK)" ]; then \
+		echo "black no está instalado en el venv. Ejecuta: make setup"; \
 		exit 1; \
 	fi
-
-precommit:
-	@if [ -x "$(PRECOMMIT)" ]; then \
-		$(PRECOMMIT) run --all-files ; \
-	else \
-		echo "pre-commit no está instalado en el venv. Ejecuta: make setup"; \
+	@if [ ! -x "$(VENV)/bin/ruff" ]; then \
+		echo "ruff no está instalado en el venv. Ejecuta: make setup"; \
 		exit 1; \
 	fi
-
-quality: precommit deadcode-private docs-check
-	@if [ -x "$(VENV)/bin/mypy" ]; then \
-		$(VENV)/bin/mypy src ; \
-	else \
-		echo "mypy no está instalado en el venv."; \
+	@if [ ! -x "$(VENV)/bin/mypy" ]; then \
+		echo "mypy no está instalado en el venv. Ejecuta: make setup"; \
 		exit 1; \
 	fi
-	@if [ -x "$(PYTEST)" ]; then \
-		$(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml ; \
-	else \
-		echo "pytest no está instalado en el venv."; \
+	@if [ ! -x "$(PYTEST)" ]; then \
+		echo "pytest no está instalado en el venv. Ejecuta: make setup"; \
 		exit 1; \
 	fi
+	@echo "[1/7] ruff format --check ."
+	@$(VENV)/bin/ruff format --check .
+	@echo "[2/7] black --check ."
+	@$(BLACK) --check .
+	@echo "[3/7] ruff check ."
+	@$(VENV)/bin/ruff check .
+	@echo "[4/7] mypy src"
+	@$(VENV)/bin/mypy src
+	@echo "[5/7] dead private helper guard"
+	@$(PYTHON) scripts/check_dead_private_helpers.py
+	@echo "[6/7] docs references guard"
+	@$(PYTHON) scripts/check_docs_references.py
+	@echo "[7/7] pytest --cov"
+	@$(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml
+	@echo "all-github-actions completado."
 
-quality-core: quality
-
-install-hooks:
-	@if [ -x "$(VENV)/bin/pre-commit" ]; then \
-		$(VENV)/bin/pre-commit install ; \
-		echo "pre-commit hooks instalados."; \
-	else \
-		echo "pre-commit no está instalado en el venv. Ejecuta: make setup"; \
-		exit 1; \
-	fi
-
-ensure-build-tools:
+_ensure-build-tools:
 	@if [ ! -x "$(PYTHON)" ]; then \
 		echo "No se encontró $(PYTHON). Ejecuta: make setup"; \
 		exit 1; \
@@ -222,27 +171,35 @@ ensure-build-tools:
 		exit 1; \
 	fi
 
-ensure-desktop-runtime-deps:
-	@$(PYTHON) -c "import importlib.util,sys;missing=[m for m in ('streamlit','webview') if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias de runtime desktop: '+', '.join(missing)+'. Ejecuta: make sync-build-env\\n') or sys.exit(2)) if missing else print('Runtime desktop OK (streamlit + webview).')"
+_ensure-desktop-runtime-deps:
+	@$(PYTHON) -c "import importlib.util,sys;missing=[m for m in ('streamlit','webview') if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias de runtime desktop: '+', '.join(missing)+'. Ejecuta: make build-local\\n') or sys.exit(2)) if missing else print('Runtime desktop OK (streamlit + webview).')"
 
-sync-build-env: ensure-build-tools
+_sync-build-env: _ensure-build-tools
 	$(PIP) install -U pip
 	$(PIP) install -e ".[dev]"
-	$(MAKE) ensure-desktop-runtime-deps
+	$(MAKE) _ensure-desktop-runtime-deps
 
-test-ppt-regression: ensure-build-tools
+_test-ppt-regression: _ensure-build-tools
 	$(PYTEST) -q tests/test_executive_report_ppt.py -k "$(PPT_REGRESSION_TEST_EXPR)"
 	$(PYTEST) -q tests/test_run_streamlit_entrypoint.py
 	$(PYTEST) -q tests/test_executive_report_ppt.py::test_generate_scope_executive_ppt_is_scoped_and_valid_ppt
 
-build-local:
+build-local: _clean-build _sync-build-env _test-ppt-regression
 	@case "$(HOST_UNAME)" in \
-		Darwin) $(MAKE) build-macos ;; \
-		Linux) $(MAKE) build-linux ;; \
-		*) echo "OS no soportado para build-local: $(HOST_UNAME)"; exit 1 ;; \
+		Darwin) \
+			$(MAKE) _build-macos; \
+			$(MAKE) _verify-macos-app; \
+			;; \
+		Linux) \
+			$(MAKE) _build-linux; \
+			;; \
+		*) \
+			echo "OS no soportado para build-local: $(HOST_UNAME)"; \
+			exit 1; \
+			;; \
 	esac
 
-build-macos: sync-build-env test-ppt-regression
+_build-macos:
 	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
 		echo "El target build-macos requiere ejecutarse en macOS."; \
 		exit 1; \
@@ -342,7 +299,7 @@ build-macos: sync-build-env test-ppt-regression
 	@echo "  - dist_app/bug-resolution-radar.app"
 	@echo "  - bug-resolution-radar-macos.zip"
 
-build-linux: sync-build-env test-ppt-regression
+_build-linux:
 	@if [ "$(HOST_UNAME)" != "Linux" ]; then \
 		echo "El target build-linux requiere ejecutarse en Linux."; \
 		exit 1; \
@@ -390,14 +347,14 @@ build-linux: sync-build-env test-ppt-regression
 	@echo "  - dist/bug-resolution-radar"
 	@echo "  - build_bundle/bug-resolution-radar-linux"
 
-verify-macos-app:
+_verify-macos-app:
 	@if [ "$(HOST_UNAME)" != "Darwin" ]; then \
 		echo "verify-macos-app requiere ejecutarse en macOS."; \
 		exit 1; \
 	fi
 	@APP_PATH="dist_app/bug-resolution-radar.app"; \
 	if [ ! -d "$$APP_PATH" ]; then \
-		echo "No existe $$APP_PATH. Ejecuta primero: make build-macos"; \
+		echo "No existe $$APP_PATH. Ejecuta primero: make build-local"; \
 		exit 1; \
 	fi; \
 	echo "== codesign entitlements =="; \
@@ -412,7 +369,7 @@ verify-macos-app:
 run:
 	$(PYTHON) run_streamlit.py
 
-clean-build:
+_clean-build:
 	@$(call rm_rf_retry,dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip bug-resolution-radar.pkg)
 
 clean:

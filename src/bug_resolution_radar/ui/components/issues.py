@@ -180,6 +180,14 @@ def _safe_cell_text(value: object) -> str:
     return txt
 
 
+def _safe_display_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series([], dtype=str)
+    values = [_safe_cell_text(v) for v in series.tolist()]
+    out = pd.Series(values, index=series.index, dtype=object)
+    return out.fillna("—").astype(str)
+
+
 def _origin_link_header(df: pd.DataFrame) -> str:
     if df is None or df.empty or "source_type" not in df.columns:
         return "Origen"
@@ -244,16 +252,6 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
         f"color: {txt_color}; background-color: {bg}; border: 1px solid {border}; "
         "border-radius: 999px; font-weight: 700; padding-left: 10px; padding-right: 10px; "
         "text-align: center;"
-    )
-
-
-def _native_key_cell_style(value: object) -> str:
-    txt = _safe_cell_text(value)
-    if txt == "—":
-        return ""
-    return (
-        "color: var(--bbva-action-link) !important; text-decoration: underline !important; "
-        "font-weight: 800 !important; opacity: 1 !important; white-space: nowrap;"
     )
 
 
@@ -339,6 +337,7 @@ def _render_issue_table_native(
     df_show = display_df[show_cols].copy(deep=False).copy().reset_index(drop=True)
     col_cfg = {}
     origin_header = _origin_link_header(display_df)
+    key_display_col = "__jira_key_display__"
 
     records = display_df.to_dict(orient="records")
     if "key" in df_show.columns:
@@ -346,19 +345,19 @@ def _render_issue_table_native(
         for row in records:
             label = _jira_label_from_row(row)
             key_values.append(label)
-        df_show["key"] = key_values
-        col_cfg["key"] = st.column_config.TextColumn(
-            origin_header,
-            width="medium",
-        )
+        # Avoid using a visible column literally named "key" in the canvas grid.
+        # Streamlit/Glide can treat it specially and end up hiding its text.
+        df_show.insert(0, key_display_col, key_values)
+        df_show = df_show.drop(columns=["key"], errors="ignore")
+        col_cfg[key_display_col] = st.column_config.TextColumn(origin_header, width="medium")
     if "status" in df_show.columns:
-        df_show["status"] = display_df["status"].map(_safe_cell_text)
+        df_show["status"] = _safe_display_series(df_show["status"])
     if "priority" in df_show.columns:
-        df_show["priority"] = display_df["priority"].map(_safe_cell_text)
+        df_show["priority"] = _safe_display_series(df_show["priority"])
     if "summary" in df_show.columns:
         col_cfg["summary"] = st.column_config.TextColumn("summary", width="large")
     if "description" in df_show.columns:
-        df_show["description"] = display_df["description"].map(_safe_cell_text)
+        df_show["description"] = _safe_display_series(df_show["description"])
         col_cfg["description"] = st.column_config.TextColumn("description", width="large")
     if "status" in df_show.columns:
         col_cfg["status"] = st.column_config.TextColumn("status", width="small")
@@ -370,8 +369,6 @@ def _render_issue_table_native(
         styler = styler.hide(axis="index")
     except Exception:
         pass
-    if "key" in df_show.columns:
-        styler = styler.map(_native_key_cell_style, subset=["key"])
     if "status" in df_show.columns:
         styler = styler.map(
             lambda x: _native_signal_cell_style(x, for_priority=False),
@@ -389,36 +386,20 @@ def _render_issue_table_native(
         hide_index=True,
         column_config=col_cfg or None,
         on_select="rerun",
-        selection_mode=("single-cell", "single-column"),
+        selection_mode="single-cell",
         key=table_key,
     )
 
     row_value, col_value = _selected_cell_from_event(event)
-    if row_value is None and col_value:
-        col_token = str(col_value or "").strip()
-        col_token_lower = col_token.lower()
-        origin_lower = str(origin_header or "").strip().lower()
-        sortable_map = {str(c).strip().lower(): str(c) for c in df_show.columns}
-        if col_token_lower == origin_lower:
-            col_token_lower = "key"
-        selected_sort_col = sortable_map.get(col_token_lower)
-        if selected_sort_col and sort_state_prefix:
-            sort_col_key = f"{sort_state_prefix}::sort_col"
-            sort_asc_key = f"{sort_state_prefix}::sort_asc"
-            current_col = str(st.session_state.get(sort_col_key) or "")
-            current_asc = bool(st.session_state.get(sort_asc_key, False))
-            default_asc = selected_sort_col not in {"updated", "created", "resolved"}
-            if current_col == selected_sort_col:
-                st.session_state[sort_asc_key] = not current_asc
-            else:
-                st.session_state[sort_col_key] = selected_sort_col
-                st.session_state[sort_asc_key] = default_asc
-            st.rerun()
+    if row_value is None:
         return
 
     last_open_key = f"{table_key}::last_open_token"
     col_token = str(col_value or "").strip().lower()
-    if col_token not in {"key", str(origin_header or "").strip().lower()} or row_value is None:
+    if col_token not in {key_display_col.lower(), str(origin_header or "").strip().lower()}:
+        st.session_state[last_open_key] = ""
+        return
+    if row_value is None:
         st.session_state[last_open_key] = ""
         return
 

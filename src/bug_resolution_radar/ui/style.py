@@ -22,13 +22,15 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_RADIUS_INNER_PX,
     BBVA_RADIUS_OUTER_PX,
     BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_ORANGE_1,
     BBVA_SIGNAL_ORANGE_2,
     BBVA_SIGNAL_RED_1,
     BBVA_SIGNAL_RED_2,
     BBVA_SIGNAL_RED_3,
+    BBVA_SIGNAL_YELLOW_1,
     hex_to_rgba,
 )
-from bug_resolution_radar.ui.common import flow_signal_color_map
+from bug_resolution_radar.ui.common import flow_signal_color_map, semantic_popover_css_rules
 
 
 @lru_cache(maxsize=64)
@@ -169,6 +171,21 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
         )
+        # Next Best Action is an alert container: orange in dark mode for semantic separation from cards.
+        nba_banner_bg = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 20%, var(--bbva-surface-elevated) 80%)"
+        )
+        nba_banner_border = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 70%, var(--bbva-border) 30%)"
+        )
+        nba_banner_shadow = "var(--bbva-shadow-strong)"
+        nba_ink_primary = "var(--bbva-text)"
+        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 78%, var(--bbva-midnight) 22%)"
+        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.98, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.90, fallback=BBVA_SIGNAL_ORANGE_1)
+        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.74, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.24, fallback=BBVA_SIGNAL_ORANGE_1)
+        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.98, fallback=BBVA_SIGNAL_ORANGE_2)
     else:
         surface_base = palette.white
         surface_soft = hex_to_rgba(palette.white, 0.62, fallback=BBVA_LIGHT.white)
@@ -206,6 +223,21 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
         )
+        # Next Best Action is an alert container: yellow in light mode for semantic separation from cards.
+        nba_banner_bg = (
+            "color-mix(in srgb, var(--bbva-signal-yellow) 22%, var(--bbva-surface-elevated) 78%)"
+        )
+        nba_banner_border = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 58%, var(--bbva-border) 42%)"
+        )
+        nba_banner_shadow = "var(--bbva-shadow-soft)"
+        nba_ink_primary = "var(--bbva-text)"
+        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 74%, transparent)"
+        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_YELLOW_1, 0.98, fallback=BBVA_SIGNAL_YELLOW_1)
+        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.90, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.76, fallback=BBVA_SIGNAL_ORANGE_1)
+        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_YELLOW_1, 0.24, fallback=BBVA_SIGNAL_YELLOW_1)
+        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.96, fallback=BBVA_SIGNAL_ORANGE_1)
 
     css_vars = f"""
       :root {{
@@ -232,22 +264,23 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-signal-red: {BBVA_SIGNAL_RED_2};
         --bbva-signal-red-soft: {BBVA_SIGNAL_RED_3};
         --bbva-signal-orange: {BBVA_SIGNAL_ORANGE_2};
+        --bbva-signal-yellow: {BBVA_SIGNAL_YELLOW_1};
         --bbva-signal-green: {BBVA_SIGNAL_GREEN_2};
         --bbva-focus-tone-risk: var(--bbva-signal-red);
         --bbva-focus-tone-warning: color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight) 18%);
         --bbva-focus-tone-flow: color-mix(in srgb, var(--bbva-signal-green) 78%, var(--bbva-midnight) 22%);
         --bbva-focus-tone-quality: color-mix(in srgb, var(--bbva-primary) 84%, var(--bbva-midnight) 16%);
         --bbva-focus-tone-opportunity: var(--bbva-signal-green);
-        --bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-signal-orange) 28%);
-        --bbva-nba-banner-border: color-mix(in srgb, var(--bbva-border-strong) 38%, var(--bbva-signal-orange) 62%);
-        --bbva-nba-banner-shadow: color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent);
-        --bbva-nba-ink-primary: color-mix(in srgb, var(--bbva-text) 96%, transparent);
-        --bbva-nba-ink-muted: color-mix(in srgb, var(--bbva-text) 78%, transparent);
-        --bbva-nba-accent-a: color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight));
-        --bbva-nba-accent-b: color-mix(in srgb, var(--bbva-signal-orange) 54%, var(--bbva-signal-red-soft));
-        --bbva-nba-kicker-border: color-mix(in srgb, var(--bbva-signal-red) 74%, transparent);
-        --bbva-nba-kicker-bg: color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-signal-red-soft) 16%);
-        --bbva-nba-kicker-text: color-mix(in srgb, var(--bbva-signal-red-strong) 88%, var(--bbva-text) 12%);
+        --bbva-nba-banner-bg: {nba_banner_bg};
+        --bbva-nba-banner-border: {nba_banner_border};
+        --bbva-nba-banner-shadow: {nba_banner_shadow};
+        --bbva-nba-ink-primary: {nba_ink_primary};
+        --bbva-nba-ink-muted: {nba_ink_muted};
+        --bbva-nba-accent-a: {nba_accent_a};
+        --bbva-nba-accent-b: {nba_accent_b};
+        --bbva-nba-kicker-border: {nba_kicker_border};
+        --bbva-nba-kicker-bg: {nba_kicker_bg};
+        --bbva-nba-kicker-text: {nba_kicker_text};
         --bbva-shadow-deep: {hex_to_rgba(palette.midnight, 0.48, fallback=BBVA_LIGHT.midnight)};
         --bbva-shadow-strong: {hex_to_rgba(palette.midnight, 0.42, fallback=BBVA_LIGHT.midnight)};
         --bbva-shadow-soft: {hex_to_rgba(palette.midnight, 0.22, fallback=BBVA_LIGHT.midnight)};
@@ -739,77 +772,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
             color: var(--bbva-text) !important;
           }
-          /* Option semáforo en listados (status/priority); el chip seleccionado mantiene solo fondo/borde */
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-red-soft);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-red-soft) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="test" i], [title*="test" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-orange);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-orange) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-goal-green);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-goal-green) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-green);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-green) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-red-strong);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-red-strong) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-orange);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-orange) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i]),
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i]) {
-            padding-left: 1.70rem !important;
-            --bbva-opt-dot: var(--bbva-signal-green);
-            border-left: 2px solid color-mix(in srgb, var(--bbva-signal-green) 72%, transparent);
-          }
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="new" i], [title*="new" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="analysing" i], [title*="analysing" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="blocked" i], [title*="blocked" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="created" i], [title*="created" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="en progreso" i], [title*="en progreso" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="in progress" i], [title*="in progress" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="to rework" i], [title*="to rework" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="test" i], [title*="test" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to verify" i], [title*="ready to verify" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="open" i], [title*="open" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="deployed" i], [title*="deployed" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="accepted" i], [title*="accepted" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="ready to deploy" i], [title*="ready to deploy" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="closed" i], [title*="closed" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="supone un impedimento" i], [title*="supone un impedimento" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="highest" i], [title*="highest" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="high" i], [title*="high" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="medium" i], [title*="medium" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="low" i], [title*="low" i])::before,
-          div[data-baseweb="popover"].bbva-semantic-popover [role="option"]:is([aria-label*="lowest" i], [title*="lowest" i])::before {
-            content: "";
-          }
+          /* Option semáforo en listados (status/priority) desde token map central. */
+          __SEMANTIC_POPOVER_CSS__
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
             color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
@@ -1502,7 +1466,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
             --gdg-border-color: var(--bbva-border) !important;
             --gdg-horizontal-border-color: var(--bbva-border) !important;
-            --gdg-link-color: var(--bbva-primary) !important;
+            --gdg-link-color: {action_link} !important;
           }
           [data-testid="stDataFrame"] *,
           [data-testid="stDataEditor"] * {
@@ -1522,7 +1486,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
             --gdg-border-color: var(--bbva-border) !important;
             --gdg-horizontal-border-color: var(--bbva-border) !important;
-            --gdg-link-color: var(--bbva-primary) !important;
+            --gdg-link-color: {action_link} !important;
           }
           [data-testid="stDataFrame"] [role="grid"],
           [data-testid="stDataEditor"] [role="grid"] {
@@ -1624,6 +1588,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
     st.markdown(
         css_template.replace("__CSS_VARS__", css_vars)
         .replace("__FONT_FACE_CSS__", _font_face_css())
+        .replace("__SEMANTIC_POPOVER_CSS__", semantic_popover_css_rules())
         .replace("__ICON_REPORT__", icon_report)
         .replace("__ICON_INGEST__", icon_ingest)
         .replace("__ICON_THEME__", icon_theme)

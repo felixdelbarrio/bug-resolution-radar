@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -124,6 +126,24 @@ def _inject_filters_panel_css() -> None:
           [data-testid="stMultiSelect"] [role="option"] {
             color: var(--bbva-text) !important;
           }
+          /* Semantic marker (status/priority) driven by centralized token map. */
+          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"] {
+            position: relative !important;
+            padding-left: 1.86rem !important;
+            border-left: 3px solid var(--bbva-opt-border) !important;
+            background: var(--bbva-opt-bg) !important;
+          }
+          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"]::before {
+            content: "" !important;
+            width: 0.64rem !important;
+            height: 0.64rem !important;
+            border-radius: 999px !important;
+            background: var(--bbva-opt-dot) !important;
+            position: absolute !important;
+            left: 0.64rem !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+          }
         </style>
     """
     css = (
@@ -135,109 +155,187 @@ def _inject_filters_panel_css() -> None:
     st.markdown(css, unsafe_allow_html=True)
 
 
-def _css_attr_value(txt: str) -> str:
-    return (txt or "").replace("\\", "\\\\").replace('"', '\\"')
+def _normalize_semantic_label(label: str) -> str:
+    return re.sub(r"\s+", " ", str(label or "").strip().lower()).strip()
 
 
-def _inject_colored_multiselect_css(
+def _css_attr_value(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _semantic_label_tone_map(
+    *, status_labels: List[str], priority_labels: List[str]
+) -> dict[str, dict[str, str]]:
+    tones: dict[str, dict[str, str]] = {}
+    for label in list(status_labels or []):
+        color = status_color(label)
+        tones[_normalize_semantic_label(label)] = {
+            "color": color,
+            "bg": _hex_with_alpha(color, 24),
+            "border": _hex_with_alpha(color, 120),
+        }
+    for label in list(priority_labels or []):
+        color = priority_color(label)
+        tones[_normalize_semantic_label(label)] = {
+            "color": color,
+            "bg": _hex_with_alpha(color, 24),
+            "border": _hex_with_alpha(color, 120),
+        }
+    return tones
+
+
+def _semantic_tag_css_rules(*, status_labels: List[str], priority_labels: List[str]) -> str:
+    tones = _semantic_label_tone_map(status_labels=status_labels, priority_labels=priority_labels)
+    if not tones:
+        return ""
+
+    rules: List[str] = []
+    seen_labels: set[str] = set()
+    for label in [*list(status_labels or []), *list(priority_labels or [])]:
+        raw = str(label or "").strip()
+        if not raw:
+            continue
+        norm = _normalize_semantic_label(raw)
+        if norm in seen_labels:
+            continue
+        seen_labels.add(norm)
+        tone = tones.get(norm)
+        if not tone:
+            continue
+        escaped = _css_attr_value(raw)
+        selector = f'[data-baseweb="tag"][aria-label^="{escaped}" i]'
+        rules.append(
+            (
+                f"{selector} {{"
+                f" background: {tone['bg']} !important;"
+                f" border: 1px solid {tone['border']} !important;"
+                f" color: {tone['color']} !important;"
+                "}"
+                f"{selector} * {{ color: {tone['color']} !important; }}"
+            )
+        )
+    return "".join(rules)
+
+
+def _inject_semantic_tag_css(*, status_labels: List[str], priority_labels: List[str]) -> None:
+    rules = _semantic_tag_css_rules(status_labels=status_labels, priority_labels=priority_labels)
+    if not rules:
+        return
+    st.markdown(f"<style>{rules}</style>", unsafe_allow_html=True)
+
+
+def _inject_semantic_option_runtime_bridge(
     *, status_labels: List[str], priority_labels: List[str]
 ) -> None:
-    rules: List[str] = []
+    tones = _semantic_label_tone_map(status_labels=status_labels, priority_labels=priority_labels)
+    if not tones:
+        return
+    payload = json.dumps(tones, ensure_ascii=False)
+    components_html(
+        f"""
+        <script>
+          (function () {{
+            const toneMap = {payload};
+            const parentWin = window.parent || window;
+            let parentDoc = document;
+            try {{
+              if (parentWin && parentWin.document) {{
+                parentDoc = parentWin.document;
+              }}
+            }} catch (e) {{
+              parentDoc = document;
+            }}
 
-    def _opt_sel(v: str) -> str:
-        return (
-            f'[role="option"][aria-label*="{v}" i], '
-            f'[role="option"][title*="{v}" i], '
-            f'[role="option"]:has([title*="{v}" i])'
-        )
+            const normalize = (txt) =>
+              String(txt || "")
+                .toLowerCase()
+                .replace(/[\\u00d7\\u2715\\u2716]/g, "")
+                .replace(/[_-]+/g, " ")
+                .replace(/\\s+/g, " ")
+                .trim();
 
-    def _tag_sel(v: str) -> str:
-        return f'[data-baseweb="tag"][title*="{v}" i], [data-baseweb="tag"]:has([title*="{v}" i])'
+            const optionLabel = (opt) => {{
+              const aria = String(opt.getAttribute("aria-label") || "").trim();
+              if (aria) return aria;
+              const titled = opt.querySelector("[title]");
+              if (titled && titled.getAttribute("title")) return titled.getAttribute("title");
+              return String(opt.textContent || "");
+            }};
 
-    for label in status_labels:
-        raw = (label or "").strip()
-        c = status_color(raw)
-        bg = _hex_with_alpha(c, 24)
-        border = _hex_with_alpha(c, 120)
-        v = _css_attr_value(label)
-        option_selector = _opt_sel(v)
-        tag_selector = _tag_sel(v)
-        rules.append(
-            f"""
-            {option_selector} {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            {option_selector}::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            {tag_selector} {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            {tag_selector} * {{
-              color: {c} !important;
-            }}
-            """
-        )
+            const applyTones = () => {{
+              const tones = parentWin.__bbvaSemanticTones || toneMap;
+              parentDoc.querySelectorAll('div[data-baseweb="popover"] [role="option"]').forEach((opt) => {{
+                const toneKey = normalize(optionLabel(opt));
+                const tone = tones[toneKey];
+                if (!tone) {{
+                  opt.removeAttribute("data-bbva-semantic");
+                  opt.removeAttribute("data-bbva-semantic-key");
+                  opt.style.removeProperty("--bbva-opt-dot");
+                  opt.style.removeProperty("--bbva-opt-border");
+                  opt.style.removeProperty("--bbva-opt-bg");
+                  return;
+                }}
+                opt.setAttribute("data-bbva-semantic", "1");
+                opt.setAttribute("data-bbva-semantic-key", toneKey);
+                opt.style.setProperty("--bbva-opt-dot", tone.color);
+                opt.style.setProperty("--bbva-opt-border", tone.border);
+                opt.style.setProperty("--bbva-opt-bg", tone.bg);
+              }});
+            }};
 
-    for label in priority_labels:
-        raw = (label or "").strip()
-        c = priority_color(raw)
-        bg = _hex_with_alpha(c, 24)
-        border = _hex_with_alpha(c, 120)
-        v = _css_attr_value(label)
-        option_selector = _opt_sel(v)
-        tag_selector = _tag_sel(v)
-        rules.append(
-            f"""
-            {option_selector} {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            {option_selector}::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            {tag_selector} {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            {tag_selector} * {{
-              color: {c} !important;
-            }}
-            """
-        )
+            const scheduleApply = () => {{
+              if (parentWin.__bbvaSemanticToneRAF) return;
+              const run = () => {{
+                parentWin.__bbvaSemanticToneRAF = 0;
+                applyTones();
+              }};
+              try {{
+                parentWin.__bbvaSemanticToneRAF = parentWin.requestAnimationFrame(run);
+              }} catch (e) {{
+                setTimeout(run, 30);
+              }}
+            }};
 
-    if rules:
-        st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
+            parentWin.__bbvaSemanticTones = toneMap;
+            applyTones();
+            setTimeout(() => applyTones(), 40);
+
+            const shouldRescan = (node) => {{
+              if (!node || node.nodeType !== 1) return false;
+              if (node.matches && node.matches('div[data-baseweb="popover"], [role="option"]')) {{
+                return true;
+              }}
+              try {{
+                return Boolean(
+                  node.querySelector &&
+                  node.querySelector('div[data-baseweb="popover"], [role="option"]')
+                );
+              }} catch (e) {{
+                return false;
+              }};
+            }};
+
+            if (!parentWin.__bbvaSemanticToneObserver && parentDoc && parentDoc.body) {{
+              const observer = new MutationObserver((mutations) => {{
+                for (const mutation of mutations) {{
+                  if (mutation.type !== "childList") continue;
+                  for (const node of mutation.addedNodes || []) {{
+                    if (shouldRescan(node)) {{
+                      scheduleApply();
+                      return;
+                    }}
+                  }}
+                }}
+              }});
+              observer.observe(parentDoc.body, {{ childList: true, subtree: true }});
+              parentWin.__bbvaSemanticToneObserver = observer;
+            }}
+          }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
@@ -335,8 +433,16 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         )
         prio_opts_ui = [_priority_combo_label(p) for p in prio_opts]
 
-    # Inject option/tag color styles once to avoid per-column layout jitter.
-    _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
+    # Tags use stable aria-label selectors (color only, no dot) from centralized token map.
+    _inject_semantic_tag_css(
+        status_labels=status_opts_ui,
+        priority_labels=prio_opts_ui,
+    )
+    # Popover options use runtime bridge because BaseWeb does not expose semantic attrs.
+    _inject_semantic_option_runtime_bridge(
+        status_labels=status_opts_ui,
+        priority_labels=prio_opts_ui,
+    )
 
     with st.container(border=True, key=f"{(key_prefix or 'dashboard')}_filters_panel"):
         if ctx_label:
@@ -518,15 +624,9 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
     color = (hex_color or status_color("")).strip()
     deployed_color = status_color("Deployed").strip().upper()
     if color.strip().upper() == deployed_color:
-        border = _hex_with_alpha(color, 178 if selected else 145)
-        bg = (
-            "color-mix(in srgb, var(--bbva-goal-green-bg) 84%, var(--bbva-goal-green) 16%)"
-            if selected
-            else "var(--bbva-goal-green-bg)"
-        )
+        border = _hex_with_alpha(color, 145)
+        bg = "var(--bbva-goal-green-bg)"
         hover_bg = "color-mix(in srgb, var(--bbva-goal-green-bg) 78%, var(--bbva-goal-green) 22%)"
-        ring = _hex_with_alpha(color, 86)
-        glow = _hex_with_alpha(color, 66)
         fw = "800" if selected else "700"
         return (
             f"border:1px solid {border} !important;"
@@ -539,15 +639,13 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
             "line-height:1.16 !important;"
             "white-space:normal !important;"
             "word-break:break-word !important;"
-            f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+            f"box-shadow:{'0 0 0 2px var(--bbva-focus-ring)' if selected else 'none'} !important;"
             f"--mx-hover-bg:{hover_bg};"
-            f"--mx-focus-ring:{ring};"
+            "--mx-focus-ring:var(--bbva-focus-ring);"
         )
-    border = _hex_with_alpha(color, 170 if selected else 125)
-    bg = _hex_with_alpha(color, 64 if selected else 28)
-    hover_bg = _hex_with_alpha(color, 76 if selected else 42)
-    ring = _hex_with_alpha(color, 86)
-    glow = _hex_with_alpha(color, 62)
+    border = _hex_with_alpha(color, 125)
+    bg = _hex_with_alpha(color, 28)
+    hover_bg = _hex_with_alpha(color, 42)
     fw = "800" if selected else "700"
     return (
         f"border:1px solid {border} !important;"
@@ -560,9 +658,9 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
         "line-height:1.16 !important;"
         "white-space:normal !important;"
         "word-break:break-word !important;"
-        f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+        f"box-shadow:{'0 0 0 2px var(--bbva-focus-ring)' if selected else 'none'} !important;"
         f"--mx-hover-bg:{hover_bg};"
-        f"--mx-focus-ring:{ring};"
+        "--mx-focus-ring:var(--bbva-focus-ring);"
     )
 
 
