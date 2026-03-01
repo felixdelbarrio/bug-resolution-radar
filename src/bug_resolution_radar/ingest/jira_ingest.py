@@ -20,9 +20,6 @@ from .browser_runtime import (
 from .browser_runtime import (
     open_url_in_configured_browser as _open_url_in_browser,
 )
-from .browser_runtime import (
-    open_urls_in_configured_browser as _open_urls_in_browser,
-)
 from .jira_session import get_jira_session_cookie
 
 
@@ -42,22 +39,6 @@ def _is_target_page_open_in_configured_browser(url: str, browser: str) -> Option
     return _is_target_page_open_in_browser(url=url, browser=browser)
 
 
-def _root_from_url(url: str) -> str:
-    txt = str(url or "").strip()
-    if not txt:
-        return ""
-    parsed = urlparse(txt)
-    scheme = str(parsed.scheme or "").strip()
-    host = str(parsed.hostname or "").strip()
-    if not scheme or not host:
-        return ""
-    return f"{scheme}://{host}"
-
-
-def _open_urls_in_configured_browser(urls: List[str], browser: str) -> int:
-    return int(_open_urls_in_browser(urls=urls, browser=browser))
-
-
 def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bool:
     is_open = _is_target_page_open_in_configured_browser(url, browser)
     if is_open is True:
@@ -65,18 +46,6 @@ def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bo
     if is_open is False:
         return _open_url_in_configured_browser(url, browser)
     return False
-
-
-def _jira_cookie_bootstrap_urls(login_url: str) -> List[str]:
-    out: List[str] = []
-    seen: set[str] = set()
-    for candidate in [str(login_url or "").strip(), _root_from_url(login_url)]:
-        txt = str(candidate or "").strip()
-        if not txt or txt in seen:
-            continue
-        seen.add(txt)
-        out.append(txt)
-    return out
 
 
 def _cookie_names_from_header(cookie_header: str) -> List[str]:
@@ -118,11 +87,6 @@ def _bootstrap_jira_cookie_from_browser(
     poll_seconds: float,
     page_already_ensured: bool = False,
 ) -> Optional[str]:
-    if not page_already_ensured:
-        page_already_ensured = _ensure_target_page_open_in_configured_browser(login_url, browser)
-    if not page_already_ensured:
-        _open_urls_in_configured_browser(_jira_cookie_bootstrap_urls(login_url), browser)
-
     try:
         existing = get_jira_session_cookie(browser=browser, host=host)
     except Exception:
@@ -130,6 +94,11 @@ def _bootstrap_jira_cookie_from_browser(
     existing = sanitize_cookie_header(existing)
     if existing and _has_jira_auth_cookie(_cookie_names_from_header(existing)):
         return existing
+
+    if not page_already_ensured:
+        page_already_ensured = _ensure_target_page_open_in_configured_browser(login_url, browser)
+        if not page_already_ensured:
+            _open_url_in_configured_browser(login_url, browser)
 
     deadline = time.monotonic() + float(wait_seconds)
     while time.monotonic() < deadline:
@@ -215,10 +184,6 @@ def ingest_jira(
     )
     wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
     poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
-    pre_cookie_page_ready = _ensure_target_page_open_in_configured_browser(
-        login_url, settings.JIRA_BROWSER
-    )
-
     try:
         host = urlparse(base).hostname or ""
         cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
@@ -235,7 +200,7 @@ def ingest_jira(
             login_url=login_url,
             wait_seconds=wait_seconds,
             poll_seconds=poll_seconds,
-            page_already_ensured=pre_cookie_page_ready,
+            page_already_ensured=False,
         )
         if bootstrapped_cookie:
             cookie = bootstrapped_cookie

@@ -30,6 +30,7 @@ from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
 @dataclass
 class _IngestProgress:
     connector: str
+    run_id: int = 0
     state: str = "idle"  # idle | running | success | partial | error
     started_at: str = ""
     finished_at: str = ""
@@ -54,12 +55,13 @@ def _progress_entry(connector: str) -> _IngestProgress:
     return fresh
 
 
-def _progress_start(connector: str, *, total_sources: int) -> bool:
+def _progress_start(connector: str, *, total_sources: int) -> int | None:
     key = str(connector or "").strip().lower()
     with _INGEST_PROGRESS_LOCK:
         entry = _progress_entry(key)
         if entry.state == "running":
-            return False
+            return None
+        entry.run_id = max(0, int(entry.run_id)) + 1
         entry.state = "running"
         entry.started_at = now_iso()
         entry.finished_at = ""
@@ -68,7 +70,7 @@ def _progress_start(connector: str, *, total_sources: int) -> bool:
         entry.success_count = 0
         entry.messages = []
         entry.summary = ""
-        return True
+        return int(entry.run_id)
 
 
 def _progress_append_message(
@@ -77,10 +79,13 @@ def _progress_append_message(
     ok: bool,
     msg: str,
     count_source: bool = True,
+    run_id: int | None = None,
 ) -> None:
     key = str(connector or "").strip().lower()
     with _INGEST_PROGRESS_LOCK:
         entry = _progress_entry(key)
+        if run_id is not None and int(entry.run_id) != int(run_id):
+            return
         entry.messages.append((bool(ok), str(msg or "").strip()))
         if count_source:
             entry.completed_sources = max(0, int(entry.completed_sources) + 1)
@@ -88,10 +93,14 @@ def _progress_append_message(
             entry.success_count = max(0, int(entry.success_count) + 1)
 
 
-def _progress_finish(connector: str, *, state: str, summary: str) -> None:
+def _progress_finish(
+    connector: str, *, state: str, summary: str, run_id: int | None = None
+) -> None:
     key = str(connector or "").strip().lower()
     with _INGEST_PROGRESS_LOCK:
         entry = _progress_entry(key)
+        if run_id is not None and int(entry.run_id) != int(run_id):
+            return
         entry.state = str(state or "error").strip().lower()
         entry.finished_at = now_iso()
         entry.summary = str(summary or "").strip()
@@ -105,6 +114,7 @@ def _progress_snapshot(connector: str) -> Dict[str, Any]:
         entry = _progress_entry(key)
         return {
             "connector": entry.connector,
+            "run_id": int(entry.run_id),
             "state": entry.state,
             "started_at": entry.started_at,
             "finished_at": entry.finished_at,
@@ -184,7 +194,8 @@ def _render_progress_status(
 
 def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> bool:
     sources = [dict(src) for src in selected_sources]
-    if not _progress_start("jira", total_sources=len(sources)):
+    run_id = _progress_start("jira", total_sources=len(sources))
+    if run_id is None:
         return False
     settings_snapshot = settings.model_copy(deep=True)
 
@@ -209,7 +220,7 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                     new_doc = None
                 if ok and new_doc is not None:
                     work_doc = new_doc
-                _progress_append_message("jira", ok=ok, msg=msg, count_source=True)
+                _progress_append_message("jira", ok=ok, msg=msg, count_source=True, run_id=run_id)
 
             snap = _progress_snapshot("jira")
             success_count = int(snap.get("success_count") or 0)
@@ -219,6 +230,7 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                     "jira",
                     state="error",
                     summary="No se pudo ingestar ninguna fuente Jira.",
+                    run_id=run_id,
                 )
                 return
 
@@ -230,11 +242,13 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                     ok=False,
                     msg=(f"Error guardando resultados Jira: {type(e).__name__}: {e}"),
                     count_source=False,
+                    run_id=run_id,
                 )
                 _progress_finish(
                     "jira",
                     state="error" if success_count == 0 else "partial",
                     summary="Reingesta Jira finalizada con error al guardar resultados.",
+                    run_id=run_id,
                 )
                 return
 
@@ -245,6 +259,7 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                     f"Reingesta Jira finalizada: {success_count}/{total_sources} fuentes OK. "
                     f"Guardado en {settings_snapshot.DATA_PATH}."
                 ),
+                run_id=run_id,
             )
         except Exception as e:
             _progress_append_message(
@@ -252,11 +267,13 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                 ok=False,
                 msg=f"Error inesperado de orquestación Jira ({type(e).__name__}): {e}",
                 count_source=False,
+                run_id=run_id,
             )
             _progress_finish(
                 "jira",
                 state="error",
                 summary="La ingesta Jira terminó con error.",
+                run_id=run_id,
             )
 
     threading.Thread(target=_worker, name="jira-ingest-worker", daemon=True).start()
@@ -265,7 +282,8 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
 
 def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> bool:
     sources = [dict(src) for src in selected_sources]
-    if not _progress_start("helix", total_sources=len(sources)):
+    run_id = _progress_start("helix", total_sources=len(sources))
+    if run_id is None:
         return False
     settings_snapshot = settings.model_copy(deep=True)
 
@@ -345,11 +363,14 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                                 f"({attempt + 1}/{_HELIX_AUTO_RESUME_MAX_ATTEMPTS})."
                             ),
                             count_source=False,
+                            run_id=run_id,
                         )
                         continue
                     break
 
-                _progress_append_message("helix", ok=final_ok, msg=final_msg, count_source=True)
+                _progress_append_message(
+                    "helix", ok=final_ok, msg=final_msg, count_source=True, run_id=run_id
+                )
 
             snap = _progress_snapshot("helix")
             success_count = int(snap.get("success_count") or 0)
@@ -368,6 +389,7 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                                 "continuar automáticamente en la siguiente ingesta."
                             ),
                             count_source=False,
+                            run_id=run_id,
                         )
                     except Exception as e:
                         _progress_append_message(
@@ -378,11 +400,13 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                                 f"{type(e).__name__}: {e}"
                             ),
                             count_source=False,
+                            run_id=run_id,
                         )
                 _progress_finish(
                     "helix",
                     state="error",
                     summary="No se pudo ingestar ninguna fuente Helix.",
+                    run_id=run_id,
                 )
                 return
 
@@ -396,11 +420,13 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                     ok=False,
                     msg=(f"Error guardando resultados Helix: {type(e).__name__}: {e}"),
                     count_source=False,
+                    run_id=run_id,
                 )
                 _progress_finish(
                     "helix",
                     state="error" if success_count == 0 else "partial",
                     summary="Reingesta Helix finalizada con error al guardar resultados.",
+                    run_id=run_id,
                 )
                 return
 
@@ -411,6 +437,7 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                     f"Reingesta Helix finalizada: {success_count}/{total_sources} fuentes OK. "
                     f"Guardado en {helix_path} y {settings_snapshot.DATA_PATH}."
                 ),
+                run_id=run_id,
             )
         except Exception as e:
             _progress_append_message(
@@ -418,11 +445,13 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                 ok=False,
                 msg=f"Error inesperado de orquestación Helix ({type(e).__name__}): {e}",
                 count_source=False,
+                run_id=run_id,
             )
             _progress_finish(
                 "helix",
                 state="error",
                 summary="La ingesta Helix terminó con error.",
+                run_id=run_id,
             )
 
     threading.Thread(target=_worker, name="helix-ingest-worker", daemon=True).start()

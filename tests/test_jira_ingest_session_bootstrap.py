@@ -63,6 +63,44 @@ def test_jira_does_not_open_browser_when_cookie_already_exists(monkeypatch: Any)
     assert opened == []
 
 
+def test_jira_does_not_open_browser_when_cookie_exists_even_if_target_is_not_open(
+    monkeypatch: Any,
+) -> None:
+    opened: list[str] = []
+
+    def fake_open(url: str, browser: str) -> bool:
+        opened.append(f"{browser}:{url}")
+        return True
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        return _FakeResponse(200, payload={"displayName": "Tester"})
+
+    monkeypatch.setattr(jira_mod, "_open_url_in_configured_browser", fake_open)
+    monkeypatch.setattr(
+        jira_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: False,
+    )
+    monkeypatch.setattr(jira_mod, "_request", fake_request)
+    monkeypatch.setattr(
+        jira_mod,
+        "get_jira_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; atlassian.xsrf.token=xyz",
+    )
+
+    ok, msg, _ = jira_mod.ingest_jira(
+        settings=Settings(
+            JIRA_BASE_URL="https://jira.globaldevtools.bbva.com", JIRA_BROWSER="chrome"
+        ),
+        dry_run=True,
+        source=_source(),
+    )
+
+    assert ok is True
+    assert "OK Jira autenticado" in msg
+    assert opened == []
+
+
 def test_jira_opens_browser_only_when_cookie_missing(monkeypatch: Any) -> None:
     opened: list[str] = []
     cookie_values = [None, None, "JSESSIONID=abc; atlassian.xsrf.token=xyz"]
@@ -144,16 +182,13 @@ def test_jira_does_not_open_browser_when_target_page_is_already_open(monkeypatch
     assert opened == []
 
 
-def test_jira_bootstrap_opens_multiple_urls_when_target_status_is_unknown(
-    monkeypatch: Any,
-) -> None:
+def test_jira_bootstrap_opens_single_login_url_when_target_status_is_unknown(monkeypatch: Any) -> None:
     opened: list[str] = []
     cookie_values = [None, None, None, "JSESSIONID=abc; atlassian.xsrf.token=xyz"]
 
-    def fake_open_many(urls: list[str], browser: str) -> int:
-        for url in urls:
-            opened.append(f"{browser}:{url}")
-        return len(urls)
+    def fake_open(url: str, browser: str) -> bool:
+        opened.append(f"{browser}:{url}")
+        return True
 
     def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
         return _FakeResponse(200, payload={"displayName": "Tester"})
@@ -162,7 +197,7 @@ def test_jira_bootstrap_opens_multiple_urls_when_target_status_is_unknown(
         value = cookie_values.pop(0) if cookie_values else "JSESSIONID=abc"
         return str(value or "")
 
-    monkeypatch.setattr(jira_mod, "_open_urls_in_configured_browser", fake_open_many)
+    monkeypatch.setattr(jira_mod, "_open_url_in_configured_browser", fake_open)
     monkeypatch.setattr(
         jira_mod,
         "_is_target_page_open_in_configured_browser",
@@ -183,5 +218,4 @@ def test_jira_bootstrap_opens_multiple_urls_when_target_status_is_unknown(
 
     assert ok is True
     assert "OK Jira autenticado" in msg
-    assert "chrome:https://jira.globaldevtools.bbva.com/jira/secure/Dashboard.jspa" in opened
-    assert "chrome:https://jira.globaldevtools.bbva.com" in opened
+    assert opened == ["chrome:https://jira.globaldevtools.bbva.com/jira/secure/Dashboard.jspa"]
