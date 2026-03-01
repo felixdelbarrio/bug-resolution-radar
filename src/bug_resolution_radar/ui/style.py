@@ -735,6 +735,27 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             overflow-x: hidden !important;
             overscroll-behavior: contain !important;
           }
+          /* Keep wrapper selectors present but avoid overriding virtualization heights. */
+          div[data-baseweb="popover"] [role="listbox"] > *,
+          div[data-baseweb="popover"] [role="menu"] > *,
+          div[data-baseweb="popover"] ul > li,
+          div[data-baseweb="popover"] ul > * {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+          }
+          /* Extra virtualized wrapper level used by BaseWeb in some Streamlit versions. */
+          div[data-baseweb="popover"] [role="listbox"] > div > *,
+          div[data-baseweb="popover"] [role="menu"] > div > * {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+          }
+          div[data-baseweb="popover"] ul > li {
+            height: auto !important;
+          }
           div[data-baseweb="popover"] li {
             list-style: none !important;
             margin: 0 !important;

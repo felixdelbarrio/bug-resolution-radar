@@ -37,6 +37,17 @@ Criterios:
 - `ui/app.py` sincroniza la preferencia en estado y runtime.
 - `config_page.py` persiste el modo visual en `.env`.
 
+## Select/Popover Rules
+
+- Los dropdowns de `selectbox` y `multiselect` de BaseWeb se estilizan en:
+  - `src/bug_resolution_radar/ui/style.py`
+- Reglas operativas:
+  - altura de opción compacta y consistente (`1.92rem`)
+  - truncado de texto en una sola línea (`overflow + ellipsis`)
+  - popover con altura acotada y scroll (`max-height` + `overflow-y:auto`) para evitar paneles gigantes con hueco vacío
+- Cualquier cambio de selectors en popovers debe validar:
+  - `tests/test_core_modules.py` (test `test_select_popover_rows_keep_compact_single_line_layout`)
+
 ## Safe Customization Checklist
 
 Antes de mergear cambios visuales:

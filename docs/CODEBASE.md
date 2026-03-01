@@ -53,6 +53,9 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/ingest/browser_runtime.py`
   - Apertura de navegador, control de permisos y bootstrap multi-URL.
 
+- `src/bug_resolution_radar/ingest/cookie_utils.py`
+  - Utilidades compartidas para extracción de cookies Chromium y armado de header `Cookie`.
+
 - `src/bug_resolution_radar/ingest/jira_session.py`
   - Extracción de cookies Jira desde navegador.
 

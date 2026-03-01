@@ -10,15 +10,23 @@ Comandos recomendados (en este orden):
 
 ```bash
 make setup
-make quality
+make CI
 ```
 
-Desglose de targets:
-- `make precommit`: ejecuta hooks sobre todos los ficheros.
-- `make deadcode-private`: detecta helpers privados huérfanos en `src/`.
-- `make docs-check`: valida documentación y referencias locales.
-- `make typecheck`: `mypy src`.
-- `make test-cov`: tests con cobertura.
+Targets públicos disponibles:
+- `make setup`: prepara venv + dependencias de desarrollo.
+- `make CI`: cadena completa de calidad usada en local/CI.
+- `make test`: ejecución rápida de tests.
+- `make run`: arranque local de la app.
+
+Detalle de la cadena `make CI`:
+- `ruff format --check .`
+- `black --check .`
+- `ruff check .`
+- `mypy src`
+- `python scripts/check_dead_private_helpers.py`
+- `python scripts/check_docs_references.py`
+- `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
 
 Comando operativo adicional (observabilidad de ingesta):
 - `python scripts/ingest_profile_report.py --connector jira`
@@ -31,12 +39,13 @@ Workflow principal:
 
 Valida:
 1. instalación de dependencias y `pip check`
-2. `pre-commit run --all-files`
-3. `python scripts/check_docs_references.py`
-4. `python scripts/check_dead_private_helpers.py`
-5. `ruff check src scripts tests`
-6. `mypy src`
-7. `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
+2. `ruff format --check .`
+3. `black --check .`
+4. `ruff check .`
+5. `mypy src`
+6. `python scripts/check_dead_private_helpers.py`
+7. `python scripts/check_docs_references.py`
+8. `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
 
 ## Dead Code Policy
 
