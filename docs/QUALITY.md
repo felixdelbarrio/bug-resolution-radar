@@ -20,6 +20,10 @@ Desglose de targets:
 - `make typecheck`: `mypy src`.
 - `make test-cov`: tests con cobertura.
 
+Comando operativo adicional (observabilidad de ingesta):
+- `python scripts/ingest_profile_report.py --connector jira`
+- `python scripts/ingest_profile_report.py --connector helix`
+
 ## CI Pipeline
 
 Workflow principal:
@@ -52,3 +56,14 @@ Además de `quality-gate`:
 - builds por plataforma (`build-linux`, `build-macos`, `build-windows`)
 - análisis estático de seguridad (`codeql`)
 - empaquetado/release (`release-binaries`)
+
+## Ingestion Hardening
+
+Variables de entorno (opcional):
+- `INGEST_PROFILE_ENABLED` (`true/false`, default `true`)
+- `INGEST_PROFILE_JSONL_PATH` (default `data/observability/ingest_profiles.jsonl`)
+- `INGEST_CIRCUIT_ENABLED` (`true/false`, default `true`)
+- `INGEST_CIRCUIT_STATE_PATH` (default `data/observability/ingest_circuit_state.json`)
+- `INGEST_CIRCUIT_FAILURE_THRESHOLD` (default `3`)
+- `INGEST_CIRCUIT_WINDOW_SECONDS` (default `1800`)
+- `INGEST_CIRCUIT_COOLDOWN_SECONDS` (default `900`)

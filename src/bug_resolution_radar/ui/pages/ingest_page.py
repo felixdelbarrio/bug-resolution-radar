@@ -15,6 +15,7 @@ import streamlit as st
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
+    build_source_id,
     helix_sources,
     jira_sources,
     save_settings,
@@ -24,6 +25,11 @@ from bug_resolution_radar.ingest.jira_ingest import ingest_jira
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
+from bug_resolution_radar.services.ingest_circuit_breaker import (
+    CircuitDecision,
+    IngestCircuitBreaker,
+)
+from bug_resolution_radar.services.ingest_profiler import IngestRunProfiler
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
 
 
@@ -136,6 +142,49 @@ def _source_label(source: Dict[str, str], *, fallback: str) -> str:
     return fallback
 
 
+def _source_id(source: Dict[str, str], *, connector: str, fallback_label: str) -> str:
+    sid = str(source.get("source_id", "")).strip()
+    if sid:
+        return sid
+    country = str(source.get("country", "")).strip() or "default"
+    alias = str(source.get("alias", "")).strip() or fallback_label
+    return build_source_id(connector, country, alias)
+
+
+def _circuit_skip_message(source_label: str, decision: CircuitDecision) -> str:
+    until = str(decision.open_until_iso or "").strip()
+    if until:
+        return (
+            f"{source_label}: omitida por circuit breaker (cooldown activo hasta {until}; "
+            f"fallos consecutivos={decision.consecutive_failures}; "
+            f"fallos_en_ventana={decision.recent_failures})."
+        )
+    return (
+        f"{source_label}: omitida por circuit breaker "
+        f"(fallos consecutivos={decision.consecutive_failures})."
+    )
+
+
+def _persist_ingest_profile(
+    *,
+    profiler: IngestRunProfiler,
+    connector: str,
+    summary_fallback: str,
+) -> None:
+    snap = _progress_snapshot(connector)
+    try:
+        record = profiler.build_record(
+            state=str(snap.get("state") or "unknown"),
+            summary=str(snap.get("summary") or summary_fallback),
+            total_sources=int(snap.get("total_sources") or 0),
+            success_count=int(snap.get("success_count") or 0),
+        )
+        profiler.persist(record)
+    except Exception:
+        # Profiling never blocks critical ingestion path.
+        return
+
+
 def _pick_test_source(selected_sources: List[Dict[str, str]]) -> Dict[str, str] | None:
     if not selected_sources:
         return None
@@ -208,28 +257,61 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
     if run_id is None:
         return False
     settings_snapshot = settings.model_copy(deep=True)
+    profiler = IngestRunProfiler(connector="jira", run_id=run_id)
+    circuit = IngestCircuitBreaker()
 
     def _worker() -> None:
         try:
-            issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
+            with profiler.phase(phase="load_cached_docs"):
+                issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
             work_doc = issues_doc
             for src in sources:
-                try:
-                    ok, msg, new_doc = ingest_jira(
-                        settings=settings_snapshot,
-                        dry_run=False,
-                        existing_doc=work_doc,
-                        source=src,
+                source_label = _source_label(src, fallback="Jira")
+                source_id = _source_id(src, connector="jira", fallback_label="Jira principal")
+                decision = circuit.allow(connector="jira", source_id=source_id)
+                if not decision.allowed:
+                    profiler.increment("circuit_skipped_sources")
+                    _progress_append_message(
+                        "jira",
+                        ok=False,
+                        msg=_circuit_skip_message(source_label, decision),
+                        count_source=True,
+                        run_id=run_id,
                     )
+                    continue
+
+                try:
+                    with profiler.phase(
+                        phase="source_ingest",
+                        source_id=source_id,
+                        source_label=source_label,
+                    ):
+                        ok, msg, new_doc = ingest_jira(
+                            settings=settings_snapshot,
+                            dry_run=False,
+                            existing_doc=work_doc,
+                            source=src,
+                        )
                 except Exception as e:
                     ok = False
                     msg = (
-                        f"{_source_label(src, fallback='Jira')}: error inesperado en ingesta Jira "
+                        f"{source_label}: error inesperado en ingesta Jira "
                         f"({type(e).__name__}): {e}"
                     )
                     new_doc = None
                 if ok and new_doc is not None:
                     work_doc = new_doc
+                    profiler.increment("sources_ok")
+                    circuit.record_success(connector="jira", source_id=source_id)
+                else:
+                    profiler.increment("sources_failed")
+                    post_failure = circuit.record_failure(
+                        connector="jira",
+                        source_id=source_id,
+                        message=msg,
+                    )
+                    if not post_failure.allowed:
+                        profiler.increment("circuit_open_events")
                 _progress_append_message("jira", ok=ok, msg=msg, count_source=True, run_id=run_id)
 
             snap = _progress_snapshot("jira")
@@ -245,7 +327,8 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                 return
 
             try:
-                save_issues_doc(settings_snapshot.DATA_PATH, work_doc)
+                with profiler.phase(phase="persist_results"):
+                    save_issues_doc(settings_snapshot.DATA_PATH, work_doc)
             except Exception as e:
                 _progress_append_message(
                     "jira",
@@ -285,6 +368,12 @@ def _start_jira_ingest_job(settings: Settings, *, selected_sources: List[Dict[st
                 summary="La ingesta Jira terminó con error.",
                 run_id=run_id,
             )
+        finally:
+            _persist_ingest_profile(
+                profiler=profiler,
+                connector="jira",
+                summary_fallback="Ingesta Jira finalizada.",
+            )
 
     threading.Thread(target=_worker, name="jira-ingest-worker", daemon=True).start()
     return True
@@ -296,14 +385,17 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
     if run_id is None:
         return False
     settings_snapshot = settings.model_copy(deep=True)
+    profiler = IngestRunProfiler(connector="helix", run_id=run_id)
+    circuit = IngestCircuitBreaker()
 
     def _worker() -> None:
         try:
-            helix_path = _get_helix_path(settings_snapshot)
-            helix_repo = HelixRepo(Path(helix_path))
-            stored_helix_doc = helix_repo.load() or HelixDocument.empty()
-            merged_helix = stored_helix_doc
-            issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
+            with profiler.phase(phase="load_cached_docs"):
+                helix_path = _get_helix_path(settings_snapshot)
+                helix_repo = HelixRepo(Path(helix_path))
+                stored_helix_doc = helix_repo.load() or HelixDocument.empty()
+                merged_helix = stored_helix_doc
+                issues_doc = load_issues_doc(settings_snapshot.DATA_PATH)
             has_partial_updates = False
             helix_browser = (
                 str(getattr(settings_snapshot, "HELIX_BROWSER", "chrome") or "chrome").strip()
@@ -314,6 +406,19 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
 
             for src in sources:
                 source_label = _source_label(src, fallback="Helix")
+                source_id = _source_id(src, connector="helix", fallback_label="Helix principal")
+                decision = circuit.allow(connector="helix", source_id=source_id)
+                if not decision.allowed:
+                    profiler.increment("circuit_skipped_sources")
+                    _progress_append_message(
+                        "helix",
+                        ok=False,
+                        msg=_circuit_skip_message(source_label, decision),
+                        count_source=True,
+                        run_id=run_id,
+                    )
+                    continue
+
                 attempt = 0
                 final_ok = False
                 final_msg = f"{source_label}: no se pudo completar la ingesta."
@@ -321,20 +426,26 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                 while attempt < _HELIX_AUTO_RESUME_MAX_ATTEMPTS:
                     attempt += 1
                     try:
-                        ok, msg, new_helix_doc = ingest_helix(
-                            browser=helix_browser,
-                            country=str(src.get("country", "")).strip(),
-                            source_alias=str(src.get("alias", "")).strip(),
-                            source_id=str(src.get("source_id", "")).strip(),
-                            proxy=helix_proxy,
-                            ssl_verify=helix_ssl_verify,
-                            service_origin_buug=src.get("service_origin_buug"),
-                            service_origin_n1=src.get("service_origin_n1"),
-                            service_origin_n2=src.get("service_origin_n2"),
-                            dry_run=False,
-                            existing_doc=HelixDocument.empty(),
-                            cache_doc=merged_helix,
-                        )
+                        with profiler.phase(
+                            phase="source_ingest",
+                            source_id=source_id,
+                            source_label=source_label,
+                            attempt=attempt,
+                        ):
+                            ok, msg, new_helix_doc = ingest_helix(
+                                browser=helix_browser,
+                                country=str(src.get("country", "")).strip(),
+                                source_alias=str(src.get("alias", "")).strip(),
+                                source_id=str(src.get("source_id", "")).strip(),
+                                proxy=helix_proxy,
+                                ssl_verify=helix_ssl_verify,
+                                service_origin_buug=src.get("service_origin_buug"),
+                                service_origin_n1=src.get("service_origin_n1"),
+                                service_origin_n2=src.get("service_origin_n2"),
+                                dry_run=False,
+                                existing_doc=HelixDocument.empty(),
+                                cache_doc=merged_helix,
+                            )
                     except Exception as e:
                         ok = False
                         msg = (
@@ -344,13 +455,19 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                         new_helix_doc = None
 
                     if new_helix_doc is not None and new_helix_doc.items:
-                        has_partial_updates = True
-                        merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
-                        merged_helix.ingested_at = new_helix_doc.ingested_at
-                        merged_helix.helix_base_url = new_helix_doc.helix_base_url
-                        merged_helix.query = "multi-source"
-                        mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
-                        issues_doc = _merge_issues(issues_doc, mapped)
+                        with profiler.phase(
+                            phase="source_merge",
+                            source_id=source_id,
+                            source_label=source_label,
+                            attempt=attempt,
+                        ):
+                            has_partial_updates = True
+                            merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
+                            merged_helix.ingested_at = new_helix_doc.ingested_at
+                            merged_helix.helix_base_url = new_helix_doc.helix_base_url
+                            merged_helix.query = "multi-source"
+                            mapped = [_helix_item_to_issue(it) for it in new_helix_doc.items]
+                            issues_doc = _merge_issues(issues_doc, mapped)
 
                     if ok:
                         final_ok = True
@@ -375,9 +492,22 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                             count_source=False,
                             run_id=run_id,
                         )
+                        profiler.increment("source_retry_attempts")
                         continue
                     break
 
+                if final_ok:
+                    profiler.increment("sources_ok")
+                    circuit.record_success(connector="helix", source_id=source_id)
+                else:
+                    profiler.increment("sources_failed")
+                    post_failure = circuit.record_failure(
+                        connector="helix",
+                        source_id=source_id,
+                        message=final_msg,
+                    )
+                    if not post_failure.allowed:
+                        profiler.increment("circuit_open_events")
                 _progress_append_message(
                     "helix", ok=final_ok, msg=final_msg, count_source=True, run_id=run_id
                 )
@@ -388,9 +518,11 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
             if success_count <= 0:
                 if has_partial_updates:
                     try:
-                        issues_doc.ingested_at = now_iso()
-                        helix_repo.save(merged_helix)
-                        save_issues_doc(settings_snapshot.DATA_PATH, issues_doc)
+                        with profiler.phase(phase="persist_partial"):
+                            issues_doc.ingested_at = now_iso()
+                            helix_repo.save(merged_helix)
+                            save_issues_doc(settings_snapshot.DATA_PATH, issues_doc)
+                        profiler.increment("partial_persist_ok")
                         _progress_append_message(
                             "helix",
                             ok=False,
@@ -412,6 +544,7 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                             count_source=False,
                             run_id=run_id,
                         )
+                        profiler.increment("partial_persist_failed")
                 _progress_finish(
                     "helix",
                     state="error",
@@ -421,9 +554,10 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                 return
 
             try:
-                issues_doc.ingested_at = now_iso()
-                helix_repo.save(merged_helix)
-                save_issues_doc(settings_snapshot.DATA_PATH, issues_doc)
+                with profiler.phase(phase="persist_results"):
+                    issues_doc.ingested_at = now_iso()
+                    helix_repo.save(merged_helix)
+                    save_issues_doc(settings_snapshot.DATA_PATH, issues_doc)
             except Exception as e:
                 _progress_append_message(
                     "helix",
@@ -462,6 +596,12 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
                 state="error",
                 summary="La ingesta Helix terminó con error.",
                 run_id=run_id,
+            )
+        finally:
+            _persist_ingest_profile(
+                profiler=profiler,
+                connector="helix",
+                summary_fallback="Ingesta Helix finalizada.",
             )
 
     threading.Thread(target=_worker, name="helix-ingest-worker", daemon=True).start()
