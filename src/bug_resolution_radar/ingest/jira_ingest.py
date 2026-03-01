@@ -28,8 +28,8 @@ from .jira_session import get_jira_session_cookie
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
 def _request(session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
     r = session.request(method, url, timeout=30, **kwargs)
-    if r.status_code in (429, 503):
-        raise RuntimeError("rate limited")
+    if r.status_code in (429, 502, 503, 504):
+        raise RuntimeError(f"transient jira status {r.status_code}")
     return r
 
 
@@ -48,6 +48,84 @@ def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bo
     if is_open is False:
         return _open_url_in_configured_browser(url, browser)
     return False
+
+
+def _dedupe_keep_order(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        candidate = str(value or "").strip().rstrip("/")
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        out.append(candidate)
+    return out
+
+
+def _build_jira_base_candidates(base: str) -> List[str]:
+    normalized = str(base or "").strip().rstrip("/")
+    if not normalized:
+        return []
+
+    parsed = urlparse(normalized)
+    origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    path = str(parsed.path or "").strip()
+    path_lower = path.rstrip("/").lower()
+
+    candidates: List[str] = [normalized]
+    # If a full issue/page URL was pasted as base (e.g. /browse/ABC-123),
+    # include origin first because API endpoints hang from the Jira root.
+    if path_lower and path_lower != "/jira":
+        candidates.append(origin)
+    if not normalized.endswith("/jira"):
+        candidates.append(normalized + "/jira")
+    if origin:
+        candidates.append(origin + "/jira")
+        if path_lower == "/jira":
+            candidates.append(origin)
+    return _dedupe_keep_order(candidates)
+
+
+def _default_jira_login_url(base: str) -> str:
+    normalized = str(base or "").strip().rstrip("/")
+    parsed = urlparse(normalized)
+    origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    path = str(parsed.path or "").strip().rstrip("/")
+    if path and path.lower() != "/jira" and origin:
+        return f"{origin}/jira/secure/Dashboard.jspa"
+    jira_web_base = normalized if normalized.endswith("/jira") else f"{normalized}/jira"
+    return f"{jira_web_base}/secure/Dashboard.jspa"
+
+
+def _jira_api_bases(base_candidates: List[str]) -> List[str]:
+    api_versions = ("3", "2", "latest")
+    out: List[str] = []
+    for b in base_candidates:
+        for api_ver in api_versions:
+            out.append(f"{b}/rest/api/{api_ver}")
+    return _dedupe_keep_order(out)
+
+
+def _jira_search_request(
+    session: requests.Session, api_base: str, payload: Dict[str, Any]
+) -> requests.Response:
+    endpoints = ("search", "search/jql")
+    last: Optional[requests.Response] = None
+    for endpoint in endpoints:
+        rr = _request(session, "POST", f"{api_base}/{endpoint}", json=payload)
+        last = rr
+        if rr.status_code == 404:
+            continue
+        return rr
+    assert last is not None
+    return last
+
+
+def _looks_like_html(text: str) -> bool:
+    probe = str(text or "").strip().lower()
+    if not probe:
+        return False
+    return ("<html" in probe) or ("<!doctype html" in probe)
 
 
 def _cookie_names_from_header(cookie_header: str) -> List[str]:
@@ -249,14 +327,9 @@ def ingest_jira(
     session = requests.Session()
     session.headers.update({"Accept": "application/json"})
 
-    base_candidates: List[str] = [base]
-    if not base.endswith("/jira"):
-        base_candidates.append(base + "/jira")
-
-    jira_web_base = base if base.endswith("/jira") else f"{base}/jira"
-    login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or (
-        f"{jira_web_base}/secure/Dashboard.jspa"
-    )
+    base_candidates = _build_jira_base_candidates(base)
+    api_candidates = _jira_api_bases(base_candidates)
+    login_url = str(os.getenv("JIRA_BROWSER_LOGIN_URL", "")).strip() or _default_jira_login_url(base)
     wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
     poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
     try:
@@ -292,18 +365,17 @@ def ingest_jira(
 
     if dry_run:
         attempts: List[str] = []
-        for b in base_candidates:
-            for api_ver in ("3", "2"):
-                url = f"{b}/rest/api/{api_ver}/myself"
-                r = _request(session, "GET", url)
-                if r.status_code == 200:
-                    me = r.json()
-                    who = me.get("displayName") or me.get("name") or "(unknown)"
-                    return True, f"{source_label}: OK Jira autenticado como {who}", None
-                attempts.append(f"{api_ver}@{b} => {r.status_code}")
-                # 404 often means wrong API version or missing context path; keep trying.
-                if r.status_code == 404:
-                    continue
+        for api_base in api_candidates:
+            url = f"{api_base}/myself"
+            r = _request(session, "GET", url)
+            if r.status_code == 200:
+                me = r.json()
+                who = me.get("displayName") or me.get("name") or "(unknown)"
+                return True, f"{source_label}: OK Jira autenticado como {who}", None
+            attempts.append(f"{api_base} => {r.status_code}")
+            # 404 often means wrong API version or missing context path; keep trying.
+            if r.status_code == 404:
+                continue
         return (
             False,
             f"{source_label}: error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. "
@@ -319,13 +391,14 @@ def ingest_jira(
     while True:
         if api_base is None:
             # Autodetect the working API base on first request.
-            api_base = f"{base}/rest/api/3"
+            api_base = api_candidates[0] if api_candidates else f"{base}/rest/api/3"
 
         payload = {
             "jql": jql,
             "startAt": start_at,
             "maxResults": max_results,
-            "expand": "renderedFields",
+            # Jira DC/Server REST v2 expects expand as array in POST payload.
+            "expand": ["renderedFields"],
             "fields": [
                 "summary",
                 "description",
@@ -342,25 +415,28 @@ def ingest_jira(
                 "resolution",
             ],
         }
-        r = _request(session, "POST", f"{api_base}/search", json=payload)
+        r = _jira_search_request(session, api_base, payload)
         if r.status_code == 404:
             # Try alternate API versions and/or /jira context path.
             found = False
-            for b in base_candidates:
-                for api_ver in ("3", "2"):
-                    trial = f"{b}/rest/api/{api_ver}"
-                    rr = _request(session, "POST", f"{trial}/search", json=payload)
-                    if rr.status_code == 200:
-                        api_base = trial
-                        r = rr
-                        found = True
-                        break
-                if found:
+            for trial in api_candidates:
+                if trial == api_base:
+                    continue
+                rr = _jira_search_request(session, trial, payload)
+                if rr.status_code == 200:
+                    api_base = trial
+                    r = rr
+                    found = True
                     break
         if r.status_code != 200:
+            hint = ""
+            if r.status_code == 404 and _looks_like_html(r.text):
+                hint = (
+                    " Revisa JIRA_BASE_URL: usa la URL base de Jira (sin rutas como /browse/INC-123)."
+                )
             return (
                 False,
-                f"{source_label}: error Jira search ({r.status_code}): {r.text[:200]}",
+                f"{source_label}: error Jira search ({r.status_code}): {r.text[:200]}{hint}",
                 None,
             )
         data = r.json()
