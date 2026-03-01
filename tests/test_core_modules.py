@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.common.security import mask_secret, safe_log_text
@@ -124,7 +125,7 @@ def test_config_resolves_relative_data_paths_against_env_location(
 def test_config_save_settings_preserves_unknown_env_keys(monkeypatch: Any, tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
-        ("APP_TITLE=Radar\nBUG_RESOLUTION_RADAR_CORPORATE_MODE=true\nCUSTOM_CORP_FLAG=keep-me\n"),
+        ("APP_TITLE=Radar\nBUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true\nCUSTOM_CORP_FLAG=keep-me\n"),
         encoding="utf-8",
     )
 
@@ -137,8 +138,38 @@ def test_config_save_settings_preserves_unknown_env_keys(monkeypatch: Any, tmp_p
 
     saved = env_path.read_text(encoding="utf-8")
     assert "APP_TITLE=Radar Pro" in saved
-    assert "BUG_RESOLUTION_RADAR_CORPORATE_MODE=true" in saved
+    assert "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true" in saved
     assert "CUSTOM_CORP_FLAG=keep-me" in saved
+
+
+def test_config_restore_env_from_example(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_example = tmp_path / ".env.example"
+    env_path.write_text("APP_TITLE=Anterior\n", encoding="utf-8")
+    env_example.write_text("APP_TITLE=Desde plantilla\nTHEME=light\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
+
+    restored_from = cfg.restore_env_from_example()
+    assert restored_from == env_example
+    assert env_path.read_text(encoding="utf-8") == env_example.read_text(encoding="utf-8")
+
+
+def test_config_restore_env_from_example_missing_template(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_example = tmp_path / ".env.example"
+    env_path.write_text("APP_TITLE=Anterior\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
+
+    with pytest.raises(FileNotFoundError):
+        cfg.restore_env_from_example()
 
 
 def test_semantic_status_and_priority_colors() -> None:

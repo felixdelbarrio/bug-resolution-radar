@@ -410,7 +410,7 @@ verify-macos-app:
 	fi
 
 run:
-	$(RUN) run app.py
+	$(PYTHON) run_streamlit.py
 
 clean-build:
 	@$(call rm_rf_retry,dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip bug-resolution-radar.pkg)

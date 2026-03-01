@@ -172,7 +172,6 @@ def test_jira_bootstrap_opens_multiple_urls_when_target_status_is_unknown(
     monkeypatch.setattr(jira_mod, "get_jira_session_cookie", fake_cookie)
     monkeypatch.setenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "5")
     monkeypatch.setenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "0.5")
-    monkeypatch.setenv("BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS", "3")
 
     ok, msg, _ = jira_mod.ingest_jira(
         settings=Settings(

@@ -31,21 +31,6 @@ def _escape_applescript_text(value: str) -> str:
     return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _bool_env(name: str, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _corporate_mode_enabled() -> bool:
-    return _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False)
-
-
 def _browser_app_control_enabled(platform: str) -> bool:
     """
     Whether to use browser-app control primitives (AppleScript/open -a).
@@ -53,10 +38,7 @@ def _browser_app_control_enabled(platform: str) -> bool:
     On macOS this is disabled by default to avoid automation-style permission
     prompts when a simple URL open is enough.
     """
-    if _corporate_mode_enabled():
-        return False
-    default = platform != "darwin"
-    return _bool_env("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", default)
+    return platform != "darwin"
 
 
 def _prefer_selected_browser_binary(platform: str) -> bool:
@@ -64,22 +46,13 @@ def _prefer_selected_browser_binary(platform: str) -> bool:
     Prefer launching browser executables directly instead of app automation.
 
     This keeps automatic login bootstrap tabs working while avoiding AppleScript
-    flows on restricted corporate macOS environments.
+    flows on macOS by default.
     """
-    if _corporate_mode_enabled():
-        return True
-    default = platform in {"darwin", "linux"}
-    return _bool_env("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", default)
+    return platform in {"darwin", "linux"}
 
 
 def _browser_binary_candidates(platform: str, *, use_chrome: bool) -> List[List[str]]:
-    env_key = (
-        "BUG_RESOLUTION_RADAR_CHROME_BINARY" if use_chrome else "BUG_RESOLUTION_RADAR_EDGE_BINARY"
-    )
-    explicit = str(os.environ.get(env_key) or "").strip()
     out: List[List[str]] = []
-    if explicit:
-        out.append([explicit])
 
     if platform == "darwin":
         if use_chrome:
@@ -247,18 +220,7 @@ def open_urls_in_configured_browser(
     Returns the number of successful launches. URLs are de-duplicated while
     preserving order.
     """
-    cap = max_urls
-    if cap is None:
-        cap_raw = str(
-            os.environ.get("BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS") or ""
-        ).strip()
-        if cap_raw:
-            try:
-                cap = int(cap_raw)
-            except Exception:
-                cap = 3
-        else:
-            cap = 3
+    cap = 3 if max_urls is None else max_urls
     cap = max(1, int(cap or 1))
 
     normalized: List[str] = []

@@ -32,17 +32,6 @@ _REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
 _REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
 
 
-def _bool_env(name: str, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
 def _is_macos_protected_user_folder(path: Path) -> bool:
     if sys.platform != "darwin":
         return False
@@ -54,10 +43,6 @@ def _is_macos_protected_user_folder(path: Path) -> bool:
         if candidate == root_resolved or root_resolved in candidate.parents:
             return True
     return False
-
-
-def _allow_protected_export_dirs() -> bool:
-    return _bool_env("BUG_RESOLUTION_RADAR_ALLOW_PROTECTED_EXPORT_DIRS", False)
 
 
 def _configured_export_path(settings: Settings) -> Path | None:
@@ -75,7 +60,7 @@ def _default_report_export_dir(settings: Settings) -> Path:
     default because they may trigger consent prompts on managed endpoints.
     """
     configured = _configured_export_path(settings)
-    skip_protected = sys.platform == "darwin" and not _allow_protected_export_dirs()
+    skip_protected = sys.platform == "darwin"
     candidates: list[Path] = []
     if configured is not None and not (
         skip_protected and _is_macos_protected_user_folder(configured)
@@ -373,7 +358,6 @@ def render(settings: Settings) -> None:
     if (
         configured_export_path is not None
         and sys.platform == "darwin"
-        and not _allow_protected_export_dirs()
         and _is_macos_protected_user_folder(configured_export_path)
     ):
         st.caption(

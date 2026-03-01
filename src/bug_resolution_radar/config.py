@@ -207,13 +207,7 @@ class Settings(BaseModel):
     NOTES_PATH: str = "data/notes.json"
     INSIGHTS_LEARNING_PATH: str = "data/insights_learning.json"
     LOG_LEVEL: str = "INFO"
-    BUG_RESOLUTION_RADAR_CORPORATE_MODE: str = "false"
-    BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW: str = ""
-    BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL: str = "false"
-    BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY: str = "true"
-    BUG_RESOLUTION_RADAR_CHROME_BINARY: str = ""
-    BUG_RESOLUTION_RADAR_EDGE_BINARY: str = ""
-    BUG_RESOLUTION_RADAR_BROWSER_BOOTSTRAP_MAX_TABS: int = 3
+    BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW: str = "true"
 
     # -------------------------
     # JIRA
@@ -284,6 +278,16 @@ def ensure_env() -> None:
             ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
             return
         ENV_PATH.write_text("", encoding="utf-8")
+
+
+def restore_env_from_example() -> Path:
+    """Overwrite `.env` with the first available `.env.example` candidate."""
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
+    if example_path is None:
+        raise FileNotFoundError("No se encontró `.env.example` para restaurar configuración.")
+    ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return example_path
 
 
 def load_settings() -> Settings:

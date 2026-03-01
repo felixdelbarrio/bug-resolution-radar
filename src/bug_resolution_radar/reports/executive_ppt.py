@@ -1131,8 +1131,6 @@ def _clear_ppt_png_cache() -> None:
 
 
 def _default_ppt_render_workers() -> int:
-    if _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False):
-        return 1
     cpu_count = int(os.cpu_count() or 2)
     if cpu_count >= 8:
         return 3

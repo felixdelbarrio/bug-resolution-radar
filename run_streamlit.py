@@ -241,10 +241,6 @@ def _bool_env(name: str, default: bool) -> bool:
     return bool(default)
 
 
-def _corporate_mode_enabled() -> bool:
-    return _bool_env("BUG_RESOLUTION_RADAR_CORPORATE_MODE", False)
-
-
 def _float_env(name: str, default: float) -> float:
     raw = str(os.environ.get(name) or "").strip()
     if not raw:
@@ -523,9 +519,9 @@ def _desktop_webview_enabled_for_frozen_binary() -> bool:
     """
     Return whether packaged binaries should use embedded pywebview.
 
-    Business desktop binaries always run in embedded container mode.
+    Default is embedded container mode unless explicitly disabled.
     """
-    return True
+    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", True)
 
 
 def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
@@ -536,7 +532,11 @@ def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
     for key in ("NO_PROXY", "no_proxy"):
         env[key] = str(os.environ.get(key) or "localhost,127.0.0.1,::1")
     _launcher_log(f"Iniciando servidor interno de Streamlit en puerto {port}.")
-    return subprocess.Popen([sys.executable], env=env, cwd=os.getcwd())
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable]
+    else:
+        cmd = [sys.executable, str(Path(__file__).resolve())]
+    return subprocess.Popen(cmd, env=env, cwd=os.getcwd())
 
 
 def _stop_internal_streamlit_subprocess(proc: subprocess.Popen[bytes]) -> None:
@@ -639,29 +639,24 @@ def _prepare_frozen_runtime() -> None:
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
     _load_dotenv_if_present(runtime_home / ".env")
-    # Desktop app UX requirement: always open inside embedded container.
-    os.environ["BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW"] = "true"
-    if _corporate_mode_enabled():
-        # Conservative defaults for locked-down corporate endpoints.
-        os.environ.setdefault("BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL", "false")
-        os.environ.setdefault("BUG_RESOLUTION_RADAR_PREFER_SELECTED_BROWSER_BINARY", "true")
-        _launcher_log(
-            "Corporate mode activo: contenedor embebido + mínimos permisos + browser bootstrap sin AppleScript."
-        )
+    # Keep embedded container as the default launch mode for packaged binaries.
+    os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
     _ensure_localhost_no_proxy_env()
     _configure_streamlit_runtime_stability_for_binary()
 
 
 def main() -> int:
     script = _resolve_app_script()
+    is_frozen = bool(getattr(sys, "frozen", False))
 
-    if not getattr(sys, "frozen", False):
-        return _run_streamlit_cli(script, port=None, headless=False)
-
-    _prepare_frozen_runtime()
+    if is_frozen:
+        _prepare_frozen_runtime()
+    else:
+        _load_dotenv_if_present(Path.cwd() / ".env")
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+        _ensure_localhost_no_proxy_env()
 
     if _is_internal_server_mode():
-        _start_binary_auto_shutdown_monitor()
         port = max(1, _int_env(_INTERNAL_SERVER_PORT_ENV, 8501))
         return _run_streamlit_cli(script, port=port, headless=True)
 
@@ -669,12 +664,21 @@ def main() -> int:
         _launcher_log(
             "Modo desktop sin pywebview activado: usando navegador del sistema para minimizar permisos."
         )
-        _start_binary_auto_shutdown_monitor()
+        if is_frozen:
+            _start_binary_auto_shutdown_monitor()
         return _run_streamlit_cli(script, port=None, headless=False)
 
     try:
         return _run_desktop_container()
     except Exception as exc:
+        if not is_frozen:
+            # In local/dev mode, fall back to the system browser if pywebview
+            # or the embedded container cannot start.
+            print(
+                f"Contenedor desktop no disponible ({exc}). Continuando en navegador.",
+                file=sys.stderr,
+            )
+            return _run_streamlit_cli(script, port=None, headless=False)
         _launcher_log("Error fatal iniciando contenedor desktop.\n" + format_exc())
         log_hint = f" Revisa: {_LAUNCHER_LOG_FILE}" if _LAUNCHER_LOG_FILE is not None else ""
         print(f"Error iniciando contenedor de escritorio: {exc}.{log_hint}", file=sys.stderr)

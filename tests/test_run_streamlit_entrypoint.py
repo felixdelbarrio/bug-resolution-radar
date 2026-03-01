@@ -206,15 +206,14 @@ def test_desktop_webview_default_is_enabled_on_macos(monkeypatch) -> None:
     assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
 
 
-def test_desktop_webview_cannot_be_force_disabled_on_macos(monkeypatch) -> None:
+def test_desktop_webview_can_be_disabled_by_user_env(monkeypatch) -> None:
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "false")
     monkeypatch.setattr(run_streamlit.sys, "platform", "darwin", raising=False)
-    assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
+    assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is False
 
 
-def test_desktop_webview_is_not_forced_off_by_corporate_mode(monkeypatch) -> None:
-    monkeypatch.setenv("BUG_RESOLUTION_RADAR_CORPORATE_MODE", "true")
-    monkeypatch.delenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", raising=False)
+def test_desktop_webview_can_be_explicitly_enabled_by_user_env(monkeypatch) -> None:
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
     monkeypatch.setattr(run_streamlit.sys, "platform", "linux", raising=False)
     assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
 
@@ -234,15 +233,111 @@ def test_start_internal_streamlit_subprocess_passes_internal_env(monkeypatch) ->
 
     monkeypatch.setattr(run_streamlit.subprocess, "Popen", _fake_popen)
     monkeypatch.setattr(run_streamlit.sys, "executable", "/tmp/brr-bin")
+    monkeypatch.delattr(run_streamlit.sys, "frozen", raising=False)
     monkeypatch.setenv("EXISTING_ENV", "keep-me")
 
     proc = run_streamlit._start_internal_streamlit_subprocess(9123)
 
     assert isinstance(proc, _FakeProcess)
-    assert captured["cmd"] == ["/tmp/brr-bin"]
+    assert captured["cmd"][0] == "/tmp/brr-bin"
+    assert str(captured["cmd"][1]).endswith("run_streamlit.py")
     env = captured["env"]
     assert isinstance(env, dict)
     assert env["BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_SERVER"] == "1"
     assert env["BUG_RESOLUTION_RADAR_INTERNAL_STREAMLIT_PORT"] == "9123"
     assert env["BROWSER"] == "none"
     assert env["EXISTING_ENV"] == "keep-me"
+
+
+def test_start_internal_streamlit_subprocess_uses_binary_cmd_when_frozen(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeProcess:
+        def poll(self) -> None:
+            return None
+
+    def _fake_popen(cmd, *, env, cwd):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["cwd"] = cwd
+        return _FakeProcess()
+
+    monkeypatch.setattr(run_streamlit.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(run_streamlit.sys, "executable", "/tmp/brr-bin")
+    monkeypatch.setattr(run_streamlit.sys, "frozen", True, raising=False)
+
+    proc = run_streamlit._start_internal_streamlit_subprocess(9123)
+
+    assert isinstance(proc, _FakeProcess)
+    assert captured["cmd"] == ["/tmp/brr-bin"]
+
+
+def test_main_non_frozen_uses_browser_when_desktop_disabled(monkeypatch) -> None:
+    monkeypatch.delattr(run_streamlit.sys, "frozen", raising=False)
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "false")
+    monkeypatch.setattr(run_streamlit, "_resolve_app_script", lambda: Path("/tmp/app.py"))
+    monkeypatch.setattr(run_streamlit, "_load_dotenv_if_present", lambda _path: None)
+    monkeypatch.setattr(run_streamlit, "_ensure_localhost_no_proxy_env", lambda: None)
+    monkeypatch.setattr(run_streamlit, "_is_internal_server_mode", lambda: False)
+    monkeypatch.setattr(
+        run_streamlit,
+        "_run_desktop_container",
+        lambda: (_ for _ in ()).throw(AssertionError("Container should not start")),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_streamlit_cli(script: Path, *, port: int | None, headless: bool) -> int:
+        captured["script"] = script
+        captured["port"] = port
+        captured["headless"] = headless
+        return 17
+
+    monkeypatch.setattr(run_streamlit, "_run_streamlit_cli", _fake_run_streamlit_cli)
+
+    assert run_streamlit.main() == 17
+    assert captured["script"] == Path("/tmp/app.py")
+    assert captured["port"] is None
+    assert captured["headless"] is False
+
+
+def test_main_non_frozen_uses_container_when_desktop_enabled(monkeypatch) -> None:
+    monkeypatch.delattr(run_streamlit.sys, "frozen", raising=False)
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+    monkeypatch.setattr(run_streamlit, "_resolve_app_script", lambda: Path("/tmp/app.py"))
+    monkeypatch.setattr(run_streamlit, "_load_dotenv_if_present", lambda _path: None)
+    monkeypatch.setattr(run_streamlit, "_ensure_localhost_no_proxy_env", lambda: None)
+    monkeypatch.setattr(run_streamlit, "_is_internal_server_mode", lambda: False)
+    monkeypatch.setattr(run_streamlit, "_run_streamlit_cli", lambda *args, **kwargs: 99)
+    monkeypatch.setattr(run_streamlit, "_run_desktop_container", lambda: 23)
+
+    assert run_streamlit.main() == 23
+
+
+def test_main_non_frozen_falls_back_to_browser_when_container_fails(monkeypatch) -> None:
+    monkeypatch.delattr(run_streamlit.sys, "frozen", raising=False)
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+    monkeypatch.setattr(run_streamlit, "_resolve_app_script", lambda: Path("/tmp/app.py"))
+    monkeypatch.setattr(run_streamlit, "_load_dotenv_if_present", lambda _path: None)
+    monkeypatch.setattr(run_streamlit, "_ensure_localhost_no_proxy_env", lambda: None)
+    monkeypatch.setattr(run_streamlit, "_is_internal_server_mode", lambda: False)
+    monkeypatch.setattr(
+        run_streamlit,
+        "_run_desktop_container",
+        lambda: (_ for _ in ()).throw(RuntimeError("webview missing")),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_streamlit_cli(script: Path, *, port: int | None, headless: bool) -> int:
+        captured["script"] = script
+        captured["port"] = port
+        captured["headless"] = headless
+        return 11
+
+    monkeypatch.setattr(run_streamlit, "_run_streamlit_cli", _fake_run_streamlit_cli)
+
+    assert run_streamlit.main() == 11
+    assert captured["script"] == Path("/tmp/app.py")
+    assert captured["port"] is None
+    assert captured["headless"] is False
