@@ -24,6 +24,31 @@ from .browser_runtime import (
 )
 from .jira_session import get_jira_session_cookie
 
+_ADF_BLOCK_TYPES_WITH_BREAK: set[str] = {
+    "paragraph",
+    "heading",
+    "listitem",
+    "bulletlist",
+    "orderedlist",
+    "blockquote",
+    "codeblock",
+    "tablecell",
+    "tablerow",
+    "hardbreak",
+}
+_RE_INLINE_WHITESPACE = re.compile(r"[ \t\f\v]+")
+_RE_NEWLINE_PADDING = re.compile(r"\n[ \t]+")
+_RE_NEWLINE_CLUSTER = re.compile(r"\n{3,}")
+_RE_HTML_BR = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
+_RE_HTML_P_CLOSE = re.compile(r"</p\s*>", flags=re.IGNORECASE)
+_RE_HTML_H_CLOSE = re.compile(r"</h[1-6]\s*>", flags=re.IGNORECASE)
+_RE_HTML_DIV_CLOSE = re.compile(r"</div\s*>", flags=re.IGNORECASE)
+_RE_HTML_LI_OPEN = re.compile(r"<li[^>]*>", flags=re.IGNORECASE)
+_RE_HTML_LI_CLOSE = re.compile(r"</li\s*>", flags=re.IGNORECASE)
+_RE_HTML_STYLE_BLOCK = re.compile(r"<style.*?>.*?</style>", flags=re.IGNORECASE | re.DOTALL)
+_RE_HTML_SCRIPT_BLOCK = re.compile(r"<script.*?>.*?</script>", flags=re.IGNORECASE | re.DOTALL)
+_RE_HTML_TAG = re.compile(r"<[^>]+>", flags=re.DOTALL)
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
 def _request(session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -158,6 +183,13 @@ def _has_jira_auth_cookie(cookie_names: List[str]) -> bool:
     return True
 
 
+def _normalize_multiline_text(text: str) -> str:
+    normalized = _RE_INLINE_WHITESPACE.sub(" ", str(text or ""))
+    normalized = _RE_NEWLINE_PADDING.sub("\n", normalized)
+    normalized = _RE_NEWLINE_CLUSTER.sub("\n\n", normalized)
+    return normalized.strip()
+
+
 def _jira_description_to_text(value: object) -> str:
     if value is None:
         return ""
@@ -186,49 +218,31 @@ def _jira_description_to_text(value: object) -> str:
                 parts.append(txt)
             _walk(node.get("content"))
             t = str(node.get("type") or "").strip().lower()
-            if t in {
-                "paragraph",
-                "heading",
-                "listitem",
-                "bulletlist",
-                "orderedlist",
-                "blockquote",
-                "codeblock",
-                "tablecell",
-                "tablerow",
-                "hardbreak",
-            }:
+            if t in _ADF_BLOCK_TYPES_WITH_BREAK:
                 parts.append("\n")
 
     _walk(value)
     if not parts:
         return ""
-    text = "".join(parts)
-    text = re.sub(r"[ \t\f\v]+", " ", text)
-    text = re.sub(r"\n[ \t]+", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return _normalize_multiline_text("".join(parts))
 
 
 def _jira_html_to_text(value: str) -> str:
     txt = str(value or "").strip()
     if not txt:
         return ""
-    txt = re.sub(r"(?i)<br\s*/?>", "\n", txt)
-    txt = re.sub(r"(?i)</p\s*>", "\n", txt)
-    txt = re.sub(r"(?i)</h[1-6]\s*>", "\n", txt)
-    txt = re.sub(r"(?i)</div\s*>", "\n", txt)
-    txt = re.sub(r"(?i)<li[^>]*>", "- ", txt)
-    txt = re.sub(r"(?i)</li\s*>", "\n", txt)
-    txt = re.sub(r"(?is)<style.*?>.*?</style>", " ", txt)
-    txt = re.sub(r"(?is)<script.*?>.*?</script>", " ", txt)
-    txt = re.sub(r"(?s)<[^>]+>", " ", txt)
+    txt = _RE_HTML_BR.sub("\n", txt)
+    txt = _RE_HTML_P_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_H_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_DIV_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_LI_OPEN.sub("- ", txt)
+    txt = _RE_HTML_LI_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_STYLE_BLOCK.sub(" ", txt)
+    txt = _RE_HTML_SCRIPT_BLOCK.sub(" ", txt)
+    txt = _RE_HTML_TAG.sub(" ", txt)
     txt = unescape(txt)
     txt = txt.replace("\r", "")
-    txt = re.sub(r"[ \t\f\v]+", " ", txt)
-    txt = re.sub(r"\n[ \t]+", "\n", txt)
-    txt = re.sub(r"\n{3,}", "\n\n", txt)
-    return txt.strip()
+    return _normalize_multiline_text(txt)
 
 
 def _bootstrap_jira_cookie_from_browser(

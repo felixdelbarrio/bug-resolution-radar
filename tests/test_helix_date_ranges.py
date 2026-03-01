@@ -5,8 +5,10 @@ from bug_resolution_radar.ingest.helix_ingest import (
     _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
     _cache_pending_refresh_ids,
+    _frame_to_rows,
     _optimize_create_start_from_cache,
     _resolve_create_date_range_ms,
+    _rows_to_dicts,
     _smartit_base_from_dashboard_url,
     _utc_year_create_date_range_ms,
 )
@@ -328,3 +330,23 @@ def test_arsql_missing_field_name_from_payload_extracts_field_name() -> None:
         }
     ]
     assert _arsql_missing_field_name_from_payload(payload) == "BBVA_SourceServiceBUUG"
+
+
+def test_rows_to_dicts_uses_alias_fallback_for_extra_values() -> None:
+    rows = [["A", "B", "C"]]
+    out = _rows_to_dicts(rows, columns=["first", "second"])
+
+    assert out == [{"first": "A", "second": "B", "summary": "C"}]
+
+
+def test_frame_to_rows_handles_ragged_column_lengths() -> None:
+    frame = {
+        "schema": {"fields": ["id", "priority"]},
+        "data": {"values": [["INC-1", "INC-2"], ["High"]]},
+    }
+    out = _frame_to_rows(frame)
+
+    assert out == [
+        {"id": "INC-1", "priority": "High"},
+        {"id": "INC-2", "priority": None},
+    ]
