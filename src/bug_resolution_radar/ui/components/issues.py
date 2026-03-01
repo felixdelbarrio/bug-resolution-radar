@@ -87,7 +87,9 @@ def build_issue_open_href(url: str, source_type: str, *, key_label: str = "") ->
 
 
 def handle_issue_link_open_request(*, settings: Settings | None) -> None:
-    qp = st.query_params
+    qp = getattr(st, "query_params", None)
+    if qp is None:
+        return
     raw_url = _extract_query_text(qp.get(_ISSUE_OPEN_URL_QP))
     if not raw_url:
         return
@@ -147,6 +149,18 @@ def _title_and_description_from_row(
         if head.strip() and tail:
             return head.strip(), tail
     return txt, ""
+
+
+def _issue_key_link_html(*, url: str, source_type: str, key_label: str) -> str:
+    label = html.escape(str(key_label or "").strip() or "—")
+    target_url = str(url or "").strip()
+    if not target_url:
+        return f'<span class="issue-key-anchor issue-key-anchor-disabled">{label}</span>'
+    href = html.escape(
+        build_issue_open_href(target_url, source_type, key_label=key_label),
+        quote=True,
+    )
+    return f'<a class="issue-key-anchor" href="{href}">{label}</a>'
 
 
 def _truncate_issue_card_text(value: str, *, max_chars: int) -> str:
@@ -631,23 +645,14 @@ def render_issue_cards(
             with st.container(key=f"issue_card_shell_{idx_card}"):
                 c_key, c_title = st.columns([1.8, 10.2], gap="small")
                 with c_key:
-                    if st.button(
-                        key_label,
-                        key=f"issue_open_btn_{idx_card}",
-                        type="tertiary",
-                        width="stretch",
-                    ):
-                        browser = _browser_for_source_type(settings, source_type)
-                        opened = open_url_in_configured_browser(
-                            url_raw,
-                            browser,
-                            allow_system_default_fallback=False,
-                        )
-                        if not opened:
-                            st.warning(
-                                f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
-                                "Revisa la configuración de navegador."
-                            )
+                    st.markdown(
+                        _issue_key_link_html(
+                            url=url_raw,
+                            source_type=source_type,
+                            key_label=key_label,
+                        ),
+                        unsafe_allow_html=True,
+                    )
                 with c_title:
                     st.markdown(
                         f'<div class="issue-title-inline">{issue_title}</div>',
