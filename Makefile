@@ -8,6 +8,8 @@ RUN=$(VENV)/bin/streamlit
 PYTEST=$(VENV)/bin/pytest
 PYINSTALLER=$(VENV)/bin/pyinstaller
 PRECOMMIT=$(VENV)/bin/pre-commit
+PLAYWRIGHT=$(VENV)/bin/playwright
+PLAYWRIGHT_BROWSERS ?= chromium
 
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 PPT_REGRESSION_TEST_EXPR = subprocess_with_timeout
@@ -118,7 +120,10 @@ help:
 setup:
 	@if [ ! -d $(VENV) ]; then $(PY) -m venv $(VENV); fi
 	$(PIP) install -U pip
-	$(PIP) install -e ".[dev]"
+	$(PIP) install -r requirements-dev.txt
+	@if [ -x "$(PLAYWRIGHT)" ]; then \
+		$(PLAYWRIGHT) install $(PLAYWRIGHT_BROWSERS); \
+	fi
 	@echo ""
 	@echo "Entorno listo."
 	@echo "Activa con: source .venv/bin/activate"

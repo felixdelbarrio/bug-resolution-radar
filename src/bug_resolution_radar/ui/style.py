@@ -172,8 +172,12 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
         )
         # Next Best Action is an alert container: orange in dark mode for semantic separation from cards.
-        nba_banner_bg = "color-mix(in srgb, var(--bbva-signal-orange) 20%, var(--bbva-surface-elevated) 80%)"
-        nba_banner_border = "color-mix(in srgb, var(--bbva-signal-orange) 70%, var(--bbva-border) 30%)"
+        nba_banner_bg = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 20%, var(--bbva-surface-elevated) 80%)"
+        )
+        nba_banner_border = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 70%, var(--bbva-border) 30%)"
+        )
         nba_banner_shadow = "var(--bbva-shadow-strong)"
         nba_ink_primary = "var(--bbva-text)"
         nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 78%, var(--bbva-midnight) 22%)"
@@ -220,8 +224,12 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
         )
         # Next Best Action is an alert container: yellow in light mode for semantic separation from cards.
-        nba_banner_bg = "color-mix(in srgb, var(--bbva-signal-yellow) 22%, var(--bbva-surface-elevated) 78%)"
-        nba_banner_border = "color-mix(in srgb, var(--bbva-signal-orange) 58%, var(--bbva-border) 42%)"
+        nba_banner_bg = (
+            "color-mix(in srgb, var(--bbva-signal-yellow) 22%, var(--bbva-surface-elevated) 78%)"
+        )
+        nba_banner_border = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 58%, var(--bbva-border) 42%)"
+        )
         nba_banner_shadow = "var(--bbva-shadow-soft)"
         nba_ink_primary = "var(--bbva-text)"
         nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 74%, transparent)"
@@ -1458,7 +1466,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
             --gdg-border-color: var(--bbva-border) !important;
             --gdg-horizontal-border-color: var(--bbva-border) !important;
-            --gdg-link-color: var(--bbva-primary) !important;
+            --gdg-link-color: {action_link} !important;
           }
           [data-testid="stDataFrame"] *,
           [data-testid="stDataEditor"] * {
@@ -1478,7 +1486,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
             --gdg-border-color: var(--bbva-border) !important;
             --gdg-horizontal-border-color: var(--bbva-border) !important;
-            --gdg-link-color: var(--bbva-primary) !important;
+            --gdg-link-color: {action_link} !important;
           }
           [data-testid="stDataFrame"] [role="grid"],
           [data-testid="stDataEditor"] [role="grid"] {

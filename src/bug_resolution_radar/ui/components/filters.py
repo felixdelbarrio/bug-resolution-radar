@@ -129,42 +129,20 @@ def _inject_filters_panel_css() -> None:
           /* Semantic marker (status/priority) driven by centralized token map. */
           div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"] {
             position: relative !important;
-            padding-left: 1.72rem !important;
-            border-left: 2px solid var(--bbva-opt-border) !important;
+            padding-left: 1.86rem !important;
+            border-left: 3px solid var(--bbva-opt-border) !important;
             background: var(--bbva-opt-bg) !important;
           }
           div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"]::before {
             content: "" !important;
-            width: 0.56rem !important;
-            height: 0.56rem !important;
+            width: 0.64rem !important;
+            height: 0.64rem !important;
             border-radius: 999px !important;
             background: var(--bbva-opt-dot) !important;
             position: absolute !important;
-            left: 0.60rem !important;
+            left: 0.64rem !important;
             top: 50% !important;
             transform: translateY(-50%) !important;
-          }
-          [data-baseweb="tag"][data-bbva-semantic="1"] {
-            position: relative !important;
-            padding-left: 1.42rem !important;
-            background: var(--bbva-opt-bg) !important;
-            border: 1px solid var(--bbva-opt-border) !important;
-            color: var(--bbva-opt-dot) !important;
-          }
-          [data-baseweb="tag"][data-bbva-semantic="1"]::before {
-            content: "" !important;
-            width: 0.48rem !important;
-            height: 0.48rem !important;
-            border-radius: 999px !important;
-            background: var(--bbva-opt-dot) !important;
-            position: absolute !important;
-            left: 0.56rem !important;
-            top: 50% !important;
-            transform: translateY(-50%) !important;
-            pointer-events: none !important;
-          }
-          [data-baseweb="tag"][data-bbva-semantic="1"] * {
-            color: var(--bbva-opt-dot) !important;
           }
         </style>
     """
@@ -179,6 +157,10 @@ def _inject_filters_panel_css() -> None:
 
 def _normalize_semantic_label(label: str) -> str:
     return re.sub(r"\s+", " ", str(label or "").strip().lower()).strip()
+
+
+def _css_attr_value(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _semantic_label_tone_map(
@@ -200,6 +182,46 @@ def _semantic_label_tone_map(
             "border": _hex_with_alpha(color, 120),
         }
     return tones
+
+
+def _semantic_tag_css_rules(*, status_labels: List[str], priority_labels: List[str]) -> str:
+    tones = _semantic_label_tone_map(status_labels=status_labels, priority_labels=priority_labels)
+    if not tones:
+        return ""
+
+    rules: List[str] = []
+    seen_labels: set[str] = set()
+    for label in [*list(status_labels or []), *list(priority_labels or [])]:
+        raw = str(label or "").strip()
+        if not raw:
+            continue
+        norm = _normalize_semantic_label(raw)
+        if norm in seen_labels:
+            continue
+        seen_labels.add(norm)
+        tone = tones.get(norm)
+        if not tone:
+            continue
+        escaped = _css_attr_value(raw)
+        selector = f'[data-baseweb="tag"][aria-label^="{escaped}" i]'
+        rules.append(
+            (
+                f"{selector} {{"
+                f" background: {tone['bg']} !important;"
+                f" border: 1px solid {tone['border']} !important;"
+                f" color: {tone['color']} !important;"
+                "}"
+                f"{selector} * {{ color: {tone['color']} !important; }}"
+            )
+        )
+    return "".join(rules)
+
+
+def _inject_semantic_tag_css(*, status_labels: List[str], priority_labels: List[str]) -> None:
+    rules = _semantic_tag_css_rules(status_labels=status_labels, priority_labels=priority_labels)
+    if not rules:
+        return
+    st.markdown(f"<style>{rules}</style>", unsafe_allow_html=True)
 
 
 def _inject_semantic_option_runtime_bridge(
@@ -232,38 +254,79 @@ def _inject_semantic_option_runtime_bridge(
                 .replace(/\\s+/g, " ")
                 .trim();
 
+            const optionLabel = (opt) => {{
+              const aria = String(opt.getAttribute("aria-label") || "").trim();
+              if (aria) return aria;
+              const titled = opt.querySelector("[title]");
+              if (titled && titled.getAttribute("title")) return titled.getAttribute("title");
+              return String(opt.textContent || "");
+            }};
+
             const applyTones = () => {{
               const tones = parentWin.__bbvaSemanticTones || toneMap;
               parentDoc.querySelectorAll('div[data-baseweb="popover"] [role="option"]').forEach((opt) => {{
-                const tone = tones[normalize(opt.textContent)];
+                const toneKey = normalize(optionLabel(opt));
+                const tone = tones[toneKey];
                 if (!tone) {{
                   opt.removeAttribute("data-bbva-semantic");
+                  opt.removeAttribute("data-bbva-semantic-key");
+                  opt.style.removeProperty("--bbva-opt-dot");
+                  opt.style.removeProperty("--bbva-opt-border");
+                  opt.style.removeProperty("--bbva-opt-bg");
                   return;
                 }}
                 opt.setAttribute("data-bbva-semantic", "1");
+                opt.setAttribute("data-bbva-semantic-key", toneKey);
                 opt.style.setProperty("--bbva-opt-dot", tone.color);
                 opt.style.setProperty("--bbva-opt-border", tone.border);
                 opt.style.setProperty("--bbva-opt-bg", tone.bg);
               }});
+            }};
 
-              parentDoc.querySelectorAll('[data-baseweb="tag"]').forEach((tag) => {{
-                const tone = tones[normalize(tag.textContent)];
-                if (!tone) {{
-                  tag.removeAttribute("data-bbva-semantic");
-                  return;
-                }}
-                tag.setAttribute("data-bbva-semantic", "1");
-                tag.style.setProperty("--bbva-opt-dot", tone.color);
-                tag.style.setProperty("--bbva-opt-border", tone.border);
-                tag.style.setProperty("--bbva-opt-bg", tone.bg);
-              }});
+            const scheduleApply = () => {{
+              if (parentWin.__bbvaSemanticToneRAF) return;
+              const run = () => {{
+                parentWin.__bbvaSemanticToneRAF = 0;
+                applyTones();
+              }};
+              try {{
+                parentWin.__bbvaSemanticToneRAF = parentWin.requestAnimationFrame(run);
+              }} catch (e) {{
+                setTimeout(run, 30);
+              }}
             }};
 
             parentWin.__bbvaSemanticTones = toneMap;
             applyTones();
+            setTimeout(() => applyTones(), 40);
+
+            const shouldRescan = (node) => {{
+              if (!node || node.nodeType !== 1) return false;
+              if (node.matches && node.matches('div[data-baseweb="popover"], [role="option"]')) {{
+                return true;
+              }}
+              try {{
+                return Boolean(
+                  node.querySelector &&
+                  node.querySelector('div[data-baseweb="popover"], [role="option"]')
+                );
+              }} catch (e) {{
+                return false;
+              }};
+            }};
 
             if (!parentWin.__bbvaSemanticToneObserver && parentDoc && parentDoc.body) {{
-              const observer = new MutationObserver(() => applyTones());
+              const observer = new MutationObserver((mutations) => {{
+                for (const mutation of mutations) {{
+                  if (mutation.type !== "childList") continue;
+                  for (const node of mutation.addedNodes || []) {{
+                    if (shouldRescan(node)) {{
+                      scheduleApply();
+                      return;
+                    }}
+                  }}
+                }}
+              }});
               observer.observe(parentDoc.body, {{ childList: true, subtree: true }});
               parentWin.__bbvaSemanticToneObserver = observer;
             }}
@@ -370,7 +433,12 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         )
         prio_opts_ui = [_priority_combo_label(p) for p in prio_opts]
 
-    # Bridge semantic tokens to runtime popovers/tags (BaseWeb does not expose label attrs consistently).
+    # Tags use stable aria-label selectors (color only, no dot) from centralized token map.
+    _inject_semantic_tag_css(
+        status_labels=status_opts_ui,
+        priority_labels=prio_opts_ui,
+    )
+    # Popover options use runtime bridge because BaseWeb does not expose semantic attrs.
     _inject_semantic_option_runtime_bridge(
         status_labels=status_opts_ui,
         priority_labels=prio_opts_ui,

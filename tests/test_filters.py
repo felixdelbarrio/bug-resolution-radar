@@ -10,6 +10,7 @@ from bug_resolution_radar.ui.components.filters import (
     _inject_semantic_option_runtime_bridge,
     _matrix_header_button_css,
     _semantic_label_tone_map,
+    _semantic_tag_css_rules,
     apply_filters,
 )
 from bug_resolution_radar.ui.dashboard.state import FilterState
@@ -126,6 +127,11 @@ def test_semantic_runtime_bridge_injects_token_payload(monkeypatch) -> None:
     payload = str(captured.get("html", ""))
     assert "window.parent" in payload
     assert 'setAttribute("data-bbva-semantic", "1")' in payload
+    assert 'setAttribute("data-bbva-semantic-key", toneKey)' in payload
+    assert "MutationObserver" in payload
+    assert "shouldRescan" in payload
+    assert "observer.observe(parentDoc.body, { childList: true, subtree: true })" in payload
+    assert "scheduleApply()" in payload
     assert '"new"' in payload
     assert '"analysing"' in payload
     assert '"blocked"' in payload
@@ -133,3 +139,16 @@ def test_semantic_runtime_bridge_injects_token_payload(monkeypatch) -> None:
     assert '"ready to deploy"' in payload
     assert captured.get("height") == 0
     assert captured.get("width") == 0
+
+
+def test_semantic_tag_css_rules_use_tag_aria_label_without_dot() -> None:
+    css = _semantic_tag_css_rules(
+        status_labels=["New", "Analysing", "Blocked", "En progreso", "Ready to Deploy"],
+        priority_labels=["Highest", "High", "Medium", "Low"],
+    )
+    assert '[data-baseweb="tag"][aria-label^="Analysing" i]' in css
+    assert '[data-baseweb="tag"][aria-label^="Highest" i]' in css
+    assert "background: #E85D6318 !important;" in css
+    assert "border: 1px solid #E85D6378 !important;" in css
+    assert "color: #E85D63 !important;" in css
+    assert "::before" not in css

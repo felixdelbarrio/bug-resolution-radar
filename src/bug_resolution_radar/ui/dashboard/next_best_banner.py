@@ -188,15 +188,8 @@ def _apply_action(
 
 
 def _chip_style_for_banner(hex_color: str, *, dark_mode: bool) -> str:
-    tone = str(hex_color or "").strip()
-    if not dark_mode:
-        return chip_style_from_color(tone)
-    return (
-        "color:var(--bbva-nba-ink-primary); "
-        f"border:1px solid color-mix(in srgb, {tone} 66%, var(--bbva-border-strong)); "
-        f"background:color-mix(in srgb, {tone} 20%, var(--bbva-surface)); "
-        "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
-    )
+    del dark_mode  # Banner chips must use the shared design-token palette in every theme.
+    return chip_style_from_color(str(hex_color or "").strip())
 
 
 def _chips_html(values: List[str], *, color_fn: Callable[[str], str], dark_mode: bool) -> str:
