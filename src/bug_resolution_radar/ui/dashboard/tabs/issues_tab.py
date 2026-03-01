@@ -33,6 +33,12 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
 from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
     build_helix_official_export_frames,
 )
+from bug_resolution_radar.ui.dashboard.performance import (
+    detect_budget_overruns,
+    elapsed_ms,
+    render_perf_footer,
+    resolve_budget,
+)
 
 MAX_CARDS_RENDER = 120
 CARDS_PAGE_SIZE = 30
@@ -81,11 +87,15 @@ _SORT_LABELS: dict[str, str] = {
 
 
 def _issues_perf_budget(view: str) -> dict[str, float]:
-    return _ISSUES_PERF_BUDGETS_MS.get(str(view or ""), _ISSUES_PERF_BUDGETS_MS["Cards"])
+    return resolve_budget(
+        view=view,
+        budgets_by_view=_ISSUES_PERF_BUDGETS_MS,
+        default_view="Cards",
+    )
 
 
 def _elapsed_ms(start_ts: float) -> float:
-    return max(0.0, (perf_counter() - float(start_ts)) * 1000.0)
+    return elapsed_ms(start_ts)
 
 
 def _issues_perf_budget_overruns(
@@ -95,13 +105,11 @@ def _issues_perf_budget_overruns(
 ) -> list[str]:
     budgets = _issues_perf_budget(view)
     ordered = ["filters", "cards" if view == "Cards" else "table", "exports", "total"]
-    out: list[str] = []
-    for block in ordered:
-        budget = float(budgets.get(block, 0.0) or 0.0)
-        value = float(metrics_ms.get(block, 0.0) or 0.0)
-        if budget > 0.0 and value > budget:
-            out.append(block)
-    return out
+    return detect_budget_overruns(
+        ordered_blocks=ordered,
+        metrics_ms=metrics_ms,
+        budgets_ms=budgets,
+    )
 
 
 def _render_issues_perf_footer(
@@ -112,28 +120,14 @@ def _render_issues_perf_footer(
 ) -> None:
     budgets = _issues_perf_budget(view)
     ordered = ["filters", "cards" if view == "Cards" else "table", "exports", "total"]
-    parts: list[str] = []
-    for block in ordered:
-        if block not in metrics_ms:
-            continue
-        value = float(metrics_ms.get(block, 0.0) or 0.0)
-        budget = float(budgets.get(block, 0.0) or 0.0)
-        if budget > 0:
-            parts.append(f"{block} {value:.0f}/{budget:.0f}ms")
-        else:
-            parts.append(f"{block} {value:.0f}ms")
-
-    overruns = _issues_perf_budget_overruns(view=view, metrics_ms=metrics_ms)
-    st.session_state[f"{key_prefix}::perf_snapshot"] = {
-        "view": view,
-        "metrics_ms": {k: float(v) for k, v in metrics_ms.items()},
-        "budget_ms": {k: float(v) for k, v in budgets.items()},
-        "overruns": list(overruns),
-    }
-    if parts:
-        st.caption(f"Perf {view}: {' · '.join(parts)}")
-    if overruns:
-        st.caption(f"Budget excedido en: {', '.join(overruns)}")
+    render_perf_footer(
+        snapshot_key=f"{key_prefix}::perf_snapshot",
+        view=view,
+        ordered_blocks=ordered,
+        metrics_ms=metrics_ms,
+        budgets_ms=budgets,
+        caption_prefix="Perf",
+    )
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -230,7 +224,9 @@ def _render_sort_direction_control(*, key_prefix: str) -> None:
     st.toggle("Ascendente", key=sort_asc_key, width="stretch")
 
 
-def _cards_pagination_window(*, total_rows: int, page_size: int, page: int) -> tuple[int, int, int, int]:
+def _cards_pagination_window(
+    *, total_rows: int, page_size: int, page: int
+) -> tuple[int, int, int, int]:
     total = max(0, int(total_rows))
     size = max(1, int(page_size))
     total_pages = max(1, int(math.ceil(total / size)) if total else 1)
@@ -522,11 +518,15 @@ def _inject_helix_descriptions_from_desc_map(
     has_desc = resolved_desc.ne("")
 
     current_desc = out["description"].fillna("").astype(str).str.strip()
-    summary_txt = out["summary"].fillna("").astype(str).str.strip() if "summary" in out.columns else ""
+    summary_txt = (
+        out["summary"].fillna("").astype(str).str.strip() if "summary" in out.columns else ""
+    )
     keep_current = (
         current_desc.ne("")
         & current_desc.ne("—")
-        & current_desc.str.casefold().ne(summary_txt.str.casefold() if isinstance(summary_txt, pd.Series) else "")
+        & current_desc.str.casefold().ne(
+            summary_txt.str.casefold() if isinstance(summary_txt, pd.Series) else ""
+        )
     )
     replace_mask = helix_mask & has_desc & ~keep_current
     if bool(replace_mask.any()):
@@ -566,9 +566,7 @@ def _cached_prepare_issues_base_df(
     if dff is None or dff.empty:
         return pd.DataFrame() if dff is None else dff
     out = _sorted_for_display(dff)
-    desc_map = (
-        _load_helix_descriptions_cached(helix_path, helix_mtime_ns) if helix_path else {}
-    )
+    desc_map = _load_helix_descriptions_cached(helix_path, helix_mtime_ns) if helix_path else {}
     out = _inject_helix_descriptions_from_desc_map(out, desc_map=desc_map)
     return _inject_missing_jira_descriptions_from_summary(out)
 

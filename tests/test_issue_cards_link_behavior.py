@@ -37,7 +37,7 @@ def test_issue_key_link_html_renders_anchor_with_encoded_query() -> None:
     )
 
     assert 'class="issue-key-anchor"' in html
-    assert "href=\"?br_open_issue_key=ABC-123&amp;br_open_issue_url=" in html
+    assert 'href="?br_open_issue_key=ABC-123&amp;br_open_issue_url=' in html
     assert "br_open_issue_source=jira" in html
     assert ">ABC-123<" in html
 

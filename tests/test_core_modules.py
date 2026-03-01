@@ -323,7 +323,7 @@ def test_nba_banner_base_uses_alert_tokens_by_theme() -> None:
 def test_select_popover_rows_keep_compact_single_line_layout() -> None:
     css = _captured_injected_css(dark_mode=False)
     assert 'div[data-baseweb="popover"] [role="option"],' in css
-    assert "div[data-baseweb=\"popover\"] li[role=\"option\"]" in css
+    assert 'div[data-baseweb="popover"] li[role="option"]' in css
     assert 'div[data-baseweb="popover"] [role="listbox"] > *,' in css
     assert 'div[data-baseweb="popover"] ul > li,' in css
     assert 'div[data-baseweb="popover"] [role="listbox"] > div > *,' in css
@@ -336,10 +336,13 @@ def test_select_popover_rows_keep_compact_single_line_layout() -> None:
     assert "text-overflow: ellipsis !important;" in css
     assert '[role="option"]:is([aria-label*="new" i], [title*="new" i])' in css
     assert "border-left: 2px solid color-mix(in srgb, #E85D63 72%, transparent);" in css
-    assert '[role="option"][data-bbva-semantic="1"] {\n            position: relative !important;' not in css
+    assert (
+        '[role="option"][data-bbva-semantic="1"] {\n            position: relative !important;'
+        not in css
+    )
     assert "background-image: radial-gradient(" in css
     assert "background-position: 0.80rem 50% !important;" in css
-    assert "div[data-baseweb=\"popover\"] [role=\"option\"] p," in css
+    assert 'div[data-baseweb="popover"] [role="option"] p,' in css
 
 
 def test_global_css_avoids_expensive_layout_selectors() -> None:
