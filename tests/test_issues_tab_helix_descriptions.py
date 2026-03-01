@@ -58,6 +58,37 @@ def test_inject_helix_descriptions_uses_source_scoped_key(monkeypatch: Any) -> N
     assert out.loc[0, "description"] == "Descripcion extensa del incidente"
 
 
+def test_inject_helix_descriptions_keeps_existing_non_summary_description(monkeypatch: Any) -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "INC000104250722",
+                "summary": "BBVA Senda",
+                "description": "Descripcion curada manual",
+                "source_type": "helix",
+                "source_id": "helix:mexico:helix-enterprise-web",
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        issues_tab,
+        "_helix_data_path_and_mtime",
+        lambda settings: ("/tmp/helix_dump.json", 123),
+    )
+    monkeypatch.setattr(
+        issues_tab,
+        "_load_helix_descriptions_cached",
+        lambda path, mtime: {
+            "helix:mexico:helix-enterprise-web::INC000104250722": "Descripcion externa"
+        },
+    )
+
+    out = issues_tab._inject_helix_descriptions(df, settings=None)
+
+    assert out.loc[0, "description"] == "Descripcion curada manual"
+
+
 def test_inject_missing_jira_descriptions_from_summary_keeps_empty() -> None:
     df = pd.DataFrame(
         [
@@ -178,3 +209,27 @@ def test_apply_shared_like_filter_uses_literal_like_not_regex(monkeypatch: Any) 
     out = issues_tab._apply_shared_like_filter(df, sort_col="summary", key_prefix="issues")
 
     assert out["summary"].tolist() == ["A.B issue"]
+
+
+def test_cards_pagination_window_clamps_and_returns_bounds() -> None:
+    page, start, end, total_pages = issues_tab._cards_pagination_window(
+        total_rows=125,
+        page_size=30,
+        page=99,
+    )
+    assert total_pages == 5
+    assert page == 5
+    assert start == 120
+    assert end == 125
+
+
+def test_cards_pagination_window_handles_empty_dataset() -> None:
+    page, start, end, total_pages = issues_tab._cards_pagination_window(
+        total_rows=0,
+        page_size=60,
+        page=3,
+    )
+    assert total_pages == 1
+    assert page == 1
+    assert start == 0
+    assert end == 0

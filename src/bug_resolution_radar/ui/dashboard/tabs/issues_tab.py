@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -31,7 +32,9 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
     build_helix_official_export_frames,
 )
 
-MAX_CARDS_RENDER = 250
+MAX_CARDS_RENDER = 120
+CARDS_PAGE_SIZE_OPTIONS: tuple[int, ...] = (30, 60, 90, 120)
+CARDS_PAGE_SIZE_DEFAULT = 60
 ISSUES_TABLE_PREFERRED_COLS: list[str] = [
     "key",
     "summary",
@@ -156,6 +159,20 @@ def _render_sort_direction_control(*, key_prefix: str) -> None:
     st.toggle("Ascendente", key=sort_asc_key, width="content")
 
 
+def _cards_pagination_window(*, total_rows: int, page_size: int, page: int) -> tuple[int, int, int, int]:
+    total = max(0, int(total_rows))
+    size = max(1, int(page_size))
+    total_pages = max(1, int(math.ceil(total / size)) if total else 1)
+    current_page = min(max(1, int(page)), total_pages)
+    start = (current_page - 1) * size
+    end = min(total, start + size)
+    return current_page, start, end, total_pages
+
+
+def _set_cards_page(page_key: str, value: int) -> None:
+    st.session_state[page_key] = max(1, int(value))
+
+
 def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
     """Apply a lightweight literal-like filter over the selected sort column."""
     if df is None or df.empty:
@@ -219,6 +236,17 @@ def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd
 
     out = out.sort_values(by=sort_cols, ascending=asc, kind="mergesort", na_position="last")
     return out.drop(columns=[key_col, tie_col], errors="ignore")
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_prepare_cards_df(
+    dff: pd.DataFrame, *, max_cards: int, preserve_order: bool
+) -> pd.DataFrame:
+    return prepare_issue_cards_df(dff, max_cards=max_cards, preserve_order=preserve_order)
 
 
 @lru_cache(maxsize=8)
@@ -330,25 +358,29 @@ def _inject_helix_descriptions(
     out = dff.copy(deep=False).copy()
     if "description" not in out.columns:
         out["description"] = ""
+    key_upper = out["key"].fillna("").astype(str).str.strip().str.upper()
+    if "source_id" in out.columns:
+        source_id = out["source_id"].fillna("").astype(str).str.strip().str.lower()
+        merge_key = source_id + "::" + key_upper
+        merge_key = merge_key.where(source_id.ne(""), key_upper)
+    else:
+        merge_key = key_upper
 
-    for idx in out.index[helix_mask]:
-        key = str(out.at[idx, "key"] or "").strip().upper()
-        if not key:
-            continue
-        source_id = (
-            str(out.at[idx, "source_id"] or "").strip().lower()
-            if "source_id" in out.columns
-            else ""
-        )
-        merge_key = f"{source_id}::{key}" if source_id else key
-        desc = str(desc_map.get(merge_key) or desc_map.get(key) or "").strip()
-        if not desc:
-            continue
-        curr = str(out.at[idx, "description"] or "").strip()
-        summary = str(out.at[idx, "summary"] or "").strip()
-        if curr and curr != "—" and curr.lower() != summary.lower():
-            continue
-        out.at[idx, "description"] = desc
+    desc_from_merge = merge_key.map(desc_map)
+    desc_from_key = key_upper.map(desc_map)
+    resolved_desc = desc_from_merge.fillna(desc_from_key).fillna("").astype(str).str.strip()
+    has_desc = resolved_desc.ne("")
+
+    current_desc = out["description"].fillna("").astype(str).str.strip()
+    summary_txt = out["summary"].fillna("").astype(str).str.strip() if "summary" in out.columns else ""
+    keep_current = (
+        current_desc.ne("")
+        & current_desc.ne("—")
+        & current_desc.str.casefold().ne(summary_txt.str.casefold() if isinstance(summary_txt, pd.Series) else "")
+    )
+    replace_mask = helix_mask & has_desc & ~keep_current
+    if bool(replace_mask.any()):
+        out.loc[replace_mask, "description"] = resolved_desc.loc[replace_mask]
     return out
 
 
@@ -363,10 +395,10 @@ def _inject_missing_jira_descriptions_from_summary(dff: pd.DataFrame) -> pd.Data
         return pd.DataFrame() if dff is None else dff
     if "source_type" not in dff.columns:
         return dff
-
+    if "description" in dff.columns:
+        return dff
     out = dff.copy(deep=False).copy()
-    if "description" not in out.columns:
-        out["description"] = ""
+    out["description"] = ""
     return out
 
 
@@ -638,9 +670,26 @@ def render_issues_section(
             st.session_state[view_key] = "Cards"
         view = str(st.session_state.get(view_key) or "Cards")
         total_filtered = 0 if table_df is None else int(len(table_df))
-        max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
+        page_key = f"{key_prefix}::cards_page"
+        page_size_key = f"{key_prefix}::cards_page_size"
+        if int(st.session_state.get(page_size_key, CARDS_PAGE_SIZE_DEFAULT) or CARDS_PAGE_SIZE_DEFAULT) not in list(
+            CARDS_PAGE_SIZE_OPTIONS
+        ):
+            st.session_state[page_size_key] = CARDS_PAGE_SIZE_DEFAULT
+        page_size = min(
+            int(st.session_state.get(page_size_key, CARDS_PAGE_SIZE_DEFAULT) or CARDS_PAGE_SIZE_DEFAULT),
+            MAX_CARDS_RENDER,
+        )
+        page = int(st.session_state.get(page_key, 1) or 1)
+        page, start_idx, end_idx, total_pages = _cards_pagination_window(
+            total_rows=int(len(dff_show)),
+            page_size=page_size,
+            page=page,
+        )
+        st.session_state[page_key] = page
+        cards_slice = dff_show.iloc[start_idx:end_idx].copy(deep=False) if view == "Cards" else pd.DataFrame()
         cards_df = (
-            prepare_issue_cards_df(dff_show, max_cards=max_cards, preserve_order=True)
+            _cached_prepare_cards_df(cards_slice, max_cards=page_size, preserve_order=True)
             if view == "Cards"
             else pd.DataFrame()
         )
@@ -648,8 +697,10 @@ def render_issues_section(
 
         top_left, top_right = st.columns([2.2, 1.0], gap="small")
         with top_left:
-            if view == "Cards" and shown_in_cards != total_filtered:
-                st.caption(f"{shown_in_cards:,}/{total_filtered:,} issues filtradas")
+            if view == "Cards" and total_filtered > 0:
+                st.caption(
+                    f"Mostrando {start_idx + 1:,}-{end_idx:,} de {total_filtered:,} issues filtradas"
+                )
             else:
                 st.caption(f"{shown_in_cards:,} issues filtradas")
         with top_right:
@@ -672,6 +723,35 @@ def render_issues_section(
                     width="stretch",
                     on_click=_set_issues_view,
                     args=(view_key, "Tabla"),
+                )
+
+        if view == "Cards":
+            pager_left, pager_right = st.columns([1.8, 1.4], gap="small")
+            with pager_left:
+                st.selectbox(
+                    "Cards por página",
+                    options=list(CARDS_PAGE_SIZE_OPTIONS),
+                    key=page_size_key,
+                    width="content",
+                )
+            with pager_right:
+                nav_prev, nav_info, nav_next = st.columns([0.55, 1.0, 0.55], gap="small")
+                nav_prev.button(
+                    "◀",
+                    key=f"{key_prefix}::cards_prev",
+                    width="stretch",
+                    disabled=(page <= 1),
+                    on_click=_set_cards_page,
+                    args=(page_key, page - 1),
+                )
+                nav_info.caption(f"Página {page}/{total_pages}")
+                nav_next.button(
+                    "▶",
+                    key=f"{key_prefix}::cards_next",
+                    width="stretch",
+                    disabled=(page >= total_pages),
+                    on_click=_set_cards_page,
+                    args=(page_key, page + 1),
                 )
 
         # Independent bar below Cards/Tabla: sort controls (left) + Asc/Excel (right), aligned.
@@ -700,13 +780,8 @@ def render_issues_section(
             return
 
         if view == "Cards":
-            if len(dff_show) > MAX_CARDS_RENDER:
-                st.caption(
-                    f"Vista Cards mostrando {max_cards}/{len(dff_show)}. "
-                    "Usa Tabla para ver todos los resultados."
-                )
             render_issue_cards(
-                dff_show,
+                cards_slice,
                 max_cards=len(cards_df),
                 title="",
                 settings=settings,

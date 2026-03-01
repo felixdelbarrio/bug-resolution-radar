@@ -737,43 +737,93 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
             list-style: none !important;
             margin: 0 !important;
+            padding: 0.24rem 0 !important;
             padding-inline-start: 0 !important;
+            gap: 0 !important;
+            row-gap: 0 !important;
+            column-gap: 0 !important;
           }
-          div[data-baseweb="popover"] [role="option"],
+          /* BaseWeb may wrap options in virtualized row nodes; force compact rows globally. */
+          div[data-baseweb="popover"] [role="listbox"] > *,
+          div[data-baseweb="popover"] [role="menu"] > *,
+          div[data-baseweb="popover"] ul > * {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+          }
           div[data-baseweb="popover"] li {
-            color: var(--bbva-text) !important;
-            background: transparent !important;
-            position: relative;
-            padding-left: 0.66rem !important;
-            --bbva-opt-dot: transparent;
             list-style: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
           div[data-baseweb="popover"] li::marker {
             content: "" !important;
           }
-          div[data-baseweb="popover"] [role="option"]::before,
-          div[data-baseweb="popover"] li::before {
-            content: none;
-            width: 0.54rem;
-            height: 0.54rem;
-            border-radius: 999px;
-            background: var(--bbva-opt-dot);
-            position: absolute;
-            left: 0.66rem;
-            top: 50%;
-            transform: translateY(-50%);
-            pointer-events: none;
+          div[data-baseweb="popover"] [role="option"],
+          div[data-baseweb="popover"] li[role="option"] {
+            color: var(--bbva-text) !important;
+            background: transparent !important;
+            margin: 0 !important;
+            min-height: 1.92rem !important;
+            height: 1.92rem !important;
+            max-height: 1.92rem !important;
+            line-height: 1.18 !important;
+            padding: 0.34rem 0.72rem !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            align-items: center !important;
+            white-space: nowrap !important;
+            --bbva-opt-dot: transparent;
+          }
+          div[data-baseweb="popover"] [role="option"] > div,
+          div[data-baseweb="popover"] li[role="option"] > div {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+          }
+          __SEMANTIC_POPOVER_RULES__
+          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"],
+          div[data-baseweb="popover"] li[role="option"][data-bbva-semantic="1"] {
+            padding-left: 1.62rem !important;
+            background-image: radial-gradient(
+              circle at 0.80rem center,
+              var(--bbva-opt-dot) 0.24rem,
+              transparent 0.25rem
+            ) !important;
+            background-repeat: no-repeat !important;
+          }
+          div[data-baseweb="popover"] [role="option"] > *,
+          div[data-baseweb="popover"] li[role="option"] > * {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            line-height: inherit !important;
+          }
+          div[data-baseweb="popover"] [role="option"] *,
+          div[data-baseweb="popover"] li[role="option"] * {
+            margin: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            line-height: 1.18 !important;
+          }
+          div[data-baseweb="popover"] [role="option"] p,
+          div[data-baseweb="popover"] li[role="option"] p,
+          div[data-baseweb="popover"] [role="option"] [data-testid="stMarkdownContainer"] p,
+          div[data-baseweb="popover"] li[role="option"] [data-testid="stMarkdownContainer"] p {
+            margin: 0 !important;
+            padding: 0 !important;
+            display: inline !important;
+            line-height: 1.18 !important;
           }
           div[data-baseweb="popover"] [role="option"]:hover,
-          div[data-baseweb="popover"] li:hover {
-            background: color-mix(in srgb, var(--bbva-primary) 14%, transparent) !important;
+          div[data-baseweb="popover"] li[role="option"]:hover {
+            background-color: color-mix(in srgb, var(--bbva-primary) 14%, transparent) !important;
           }
           div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
-            background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
+            background-color: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
             color: var(--bbva-text) !important;
           }
-          /* Option semáforo en listados (status/priority) desde token map central. */
-          __SEMANTIC_POPOVER_CSS__
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
             color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
@@ -1587,8 +1637,8 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         """
     st.markdown(
         css_template.replace("__CSS_VARS__", css_vars)
+        .replace("__SEMANTIC_POPOVER_RULES__", semantic_popover_css_rules())
         .replace("__FONT_FACE_CSS__", _font_face_css())
-        .replace("__SEMANTIC_POPOVER_CSS__", semantic_popover_css_rules())
         .replace("__ICON_REPORT__", icon_report)
         .replace("__ICON_INGEST__", icon_ingest)
         .replace("__ICON_THEME__", icon_theme)

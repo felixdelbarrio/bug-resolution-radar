@@ -12,12 +12,13 @@ import streamlit as st
 from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT, hex_to_rgba
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
+    neutral_chip_style,
     normalize_text_col,
     priority_color,
     priority_rank,
     status_color,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.constants import order_statuses_canonical
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.state import FILTER_STATUS_KEY
 
@@ -29,18 +30,6 @@ _KANBAN_FALLBACK_COLOR = BBVA_NEUTRAL_SOFT
 def _kanban_set_status_filter(st_name: str) -> None:
     # sincroniza con filtros/matriz: status = [st_name]
     st.session_state[FILTER_STATUS_KEY] = [st_name]
-
-
-def _order_statuses_canonical(statuses: List[str]) -> List[str]:
-    """Ordena según el orden canónico. Los no contemplados van al final manteniendo su orden de entrada."""
-    idx = canonical_status_rank_map()
-
-    # estable: para los no contemplados respetamos orden original
-    def key_fn(pair: tuple[int, str]) -> tuple[int, int]:
-        i, s = pair
-        return (idx.get((s or "").strip().lower(), 10_000), i)
-
-    return [s for _, s in sorted(list(enumerate(statuses)), key=key_fn)]
 
 
 def _status_slug(status: str, i: int) -> str:
@@ -152,14 +141,6 @@ def _inject_kanban_item_css() -> None:
     )
 
 
-def _neutral_chip_style() -> str:
-    return (
-        "color:var(--bbva-text-muted); border:1px solid var(--bbva-border-strong); "
-        "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
-        "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.78rem;"
-    )
-
-
 def _chip_html(label: str, style: str) -> str:
     return '<span class="kan-chip" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
         style, html.escape(label)
@@ -168,7 +149,7 @@ def _chip_html(label: str, style: str) -> str:
 
 def _assignee_chip_html(label: str) -> str:
     return '<span class="kan-chip kan-chip-assignee" style="{}"><span class="kan-chip-text">{}</span></span>'.format(
-        _neutral_chip_style(),
+        neutral_chip_style(font_size="0.78rem"),
         html.escape(label),
     )
 
@@ -219,11 +200,11 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
 
         if selected_statuses:
             # respetar orden canónico (NO alfabético)
-            selected_statuses = _order_statuses_canonical(selected_statuses)
+            selected_statuses = order_statuses_canonical(selected_statuses)
         else:
             # sin filtro => top 6 por volumen (máx 8) + orden canónico
             selected_statuses = all_statuses[:6]
-            selected_statuses = _order_statuses_canonical(selected_statuses)
+            selected_statuses = order_statuses_canonical(selected_statuses)
 
         selected_statuses = selected_statuses[:8]
 
@@ -314,7 +295,9 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
                     if assignee:
                         chips.append(_assignee_chip_html(assignee))
                     if age_days is not None:
-                        chips.append(_chip_html(f"{age_days:.0f}d", _neutral_chip_style()))
+                        chips.append(
+                            _chip_html(f"{age_days:.0f}d", neutral_chip_style(font_size="0.78rem"))
+                        )
 
                     cards_html.append(
                         '<article class="kan-item">'

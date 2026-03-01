@@ -126,3 +126,36 @@ def test_native_link_cell_style_uses_dark_token_in_dark_mode() -> None:
     style = issues._native_link_cell_style("INCG-123", dark_mode=True)
 
     assert f"color: {issues.BBVA_DARK.serene_blue};" in style
+
+
+def test_render_issue_table_native_uses_fast_mode_without_styler_for_large_frames(
+    monkeypatch: Any,
+) -> None:
+    fake_st = _FakeStreamlit()
+    monkeypatch.setattr(issues, "st", fake_st)
+    monkeypatch.setattr(issues, "open_url_in_configured_browser", lambda *_a, **_k: True)
+
+    rows = issues.MAX_TABLE_STYLED_ROWS + 1
+    display_df = pd.DataFrame(
+        {
+            "key": [f"MEX-{i}" for i in range(rows)],
+            "summary": ["A"] * rows,
+            "description": ["detalle"] * rows,
+            "status": ["New"] * rows,
+            "priority": ["High"] * rows,
+            "url": [f"https://jira.local/browse/MEX-{i}" for i in range(rows)],
+            "source_type": ["jira"] * rows,
+            "source_id": ["jira:mx"] * rows,
+        }
+    )
+
+    issues._render_issue_table_native(
+        display_df,
+        ["key", "summary", "description", "status", "priority"],
+        settings=None,
+        table_key="issues_table_fast_mode",
+        sort_state_prefix="issues",
+    )
+
+    assert isinstance(fake_st.captured_data, pd.DataFrame)
+    assert "__jira_key_display__" in fake_st.captured_data.columns

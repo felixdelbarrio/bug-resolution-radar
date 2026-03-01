@@ -242,3 +242,10 @@ def hex_to_rgb_csv(hex_color: str, *, fallback: str = BBVA_LIGHT.ink) -> str:
 def hex_to_rgba(hex_color: str, alpha: float, *, fallback: str = BBVA_LIGHT.ink) -> str:
     r, g, b = hex_to_rgb(hex_color, fallback=fallback)
     return f"rgba({r},{g},{b},{float(alpha):.3f})"
+
+
+def hex_with_alpha(hex_color: str, alpha: int, *, fallback: str = BBVA_LIGHT.ink) -> str:
+    """Return an 8-digit hex color (#RRGGBBAA) with bounded alpha."""
+    token = _safe_hex(hex_color, fallback=fallback)
+    alpha_i = max(0, min(255, int(alpha)))
+    return f"#{token}{alpha_i:02X}"

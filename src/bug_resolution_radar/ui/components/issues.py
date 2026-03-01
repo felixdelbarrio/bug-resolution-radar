@@ -31,6 +31,7 @@ _ISSUE_OPEN_KEY_QP = "br_open_issue_key"
 _SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
+MAX_TABLE_STYLED_ROWS = 800
 _NEUTRAL_TOKEN = BBVA_NEUTRAL_SOFT.upper()
 _NEUTRAL_BORDER = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[1]
 _NEUTRAL_BG = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[2]
@@ -343,7 +344,7 @@ def _render_issue_table_native(
     sort_state_prefix: str | None = None,
 ) -> None:
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
-    df_show = display_df[show_cols].copy(deep=False).copy().reset_index(drop=True)
+    df_show = display_df[show_cols].copy(deep=False).reset_index(drop=True)
     col_cfg = {}
     origin_header = _origin_link_header(display_df)
     key_display_col = "__jira_key_display__"
@@ -373,30 +374,34 @@ def _render_issue_table_native(
     if "priority" in df_show.columns:
         col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
 
-    styler = df_show.style
-    try:
-        styler = styler.hide(axis="index")
-    except Exception:
-        pass
-    if "status" in df_show.columns:
-        styler = styler.map(
-            lambda x: _native_signal_cell_style(x, for_priority=False),
-            subset=["status"],
-        )
-    if "priority" in df_show.columns:
-        styler = styler.map(
-            lambda x: _native_signal_cell_style(x, for_priority=True),
-            subset=["priority"],
-        )
-    if key_display_col in df_show.columns:
-        dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
-        styler = styler.map(
-            lambda value: _native_link_cell_style(value, dark_mode=dark_mode),
-            subset=[key_display_col],
-        )
+    render_payload: object = df_show
+    use_styler = len(df_show) <= MAX_TABLE_STYLED_ROWS
+    if use_styler:
+        styler = df_show.style
+        try:
+            styler = styler.hide(axis="index")
+        except Exception:
+            pass
+        if "status" in df_show.columns:
+            styler = styler.map(
+                lambda x: _native_signal_cell_style(x, for_priority=False),
+                subset=["status"],
+            )
+        if "priority" in df_show.columns:
+            styler = styler.map(
+                lambda x: _native_signal_cell_style(x, for_priority=True),
+                subset=["priority"],
+            )
+        if key_display_col in df_show.columns:
+            dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+            styler = styler.map(
+                lambda value: _native_link_cell_style(value, dark_mode=dark_mode),
+                subset=[key_display_col],
+            )
+        render_payload = styler
 
     event = st.dataframe(
-        styler,
+        render_payload,
         width="stretch",
         hide_index=True,
         column_config=col_cfg or None,
