@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -16,11 +17,9 @@ from bug_resolution_radar.config import (
     LEGACY_ENV_KEYS_TO_PRUNE,
     Settings,
     build_source_id,
-    config_home,
     helix_sources,
     jira_sources,
     normalize_analysis_lookback_months,
-    restore_env_from_example,
     save_settings,
     supported_countries,
     to_env_json,
@@ -200,18 +199,13 @@ def _is_reset_phrase_valid(value: Any) -> bool:
     return str(value or "").strip().upper() == "RESETEAR"
 
 
-def _is_restore_phrase_valid(value: Any) -> bool:
-    return str(value or "").strip().upper() == "RESTAURAR"
-
-
 def _inject_delete_zone_css() -> None:
     st.markdown(
         """
         <style>
           [class*="st-key-cfg_jira_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
-          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"],
-          [class*="st-key-cfg_prefs_restore_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
+          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, #95BAFF 14%) !important;
             background:
               radial-gradient(1200px 280px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 55%),
@@ -509,46 +503,6 @@ def _render_cache_reset_container(
         return {"cache_ids": selected_cache_ids, "armed": armed, "valid": valid}
 
 
-def _render_full_restore_container(*, key_prefix: str) -> Dict[str, Any]:
-    st.markdown(
-        '<div class="bbva-icon-recycle-title">Restaurar configuración completa</div>',
-        unsafe_allow_html=True,
-    )
-
-    with st.container(border=True, key=f"{key_prefix}_restore_shell"):
-        st.markdown("#### Zona segura de restauración")
-        st.caption(
-            "La operación sobrescribe `.env` con la plantilla `.env.example` y recarga "
-            "la aplicación con valores iniciales."
-        )
-
-        confirm = st.checkbox(
-            "Confirmo que quiero restaurar toda la configuración desde cero.",
-            key=f"{key_prefix}_restore_confirm",
-        )
-        phrase = st.text_input(
-            "Escribe RESTAURAR para confirmar",
-            value="",
-            key=f"{key_prefix}_restore_phrase",
-            help="Confirmación reforzada para evitar restauraciones accidentales.",
-        )
-
-        phrase_ok = _is_restore_phrase_valid(phrase)
-        has_partial_input = bool(confirm or str(phrase).strip())
-        armed = bool(confirm and phrase_ok)
-        valid = bool((not has_partial_input) or armed)
-
-        if has_partial_input and not armed:
-            st.warning(
-                "Para restaurar la configuración debes marcar confirmación "
-                "y escribir RESTAURAR."
-            )
-        elif armed:
-            st.success("Restauración preparada. Pulsa el botón para aplicarla ahora.")
-
-        return {"armed": armed, "valid": valid}
-
-
 def _render_cache_reset_results(results: List[Dict[str, Any]]) -> None:
     if not results:
         return
@@ -740,20 +694,6 @@ def _clear_cache_reset_widget_state() -> None:
     )
 
 
-def _clear_restore_widget_state() -> None:
-    _queue_widget_state_clear(
-        [
-            "cfg_prefs_restore_confirm",
-            "cfg_prefs_restore_phrase",
-        ]
-    )
-
-
-def _queue_all_config_widget_state_clear() -> None:
-    keys = [str(k).strip() for k in st.session_state.keys() if str(k).strip().startswith("cfg_")]
-    _queue_widget_state_clear(keys)
-
-
 def _queue_widget_state_clear(keys: List[str]) -> None:
     pending = st.session_state.get("__cfg_pending_widget_clears", [])
     if not isinstance(pending, list):
@@ -774,22 +714,6 @@ def _apply_queued_widget_state_clear() -> None:
         k = str(key or "").strip()
         if k:
             st.session_state.pop(k, None)
-
-
-def _clear_runtime_state_after_restore() -> None:
-    # Theme + scope + filters are hydrated once; clear them so next run reflects restored `.env`.
-    for key in [
-        "workspace_dark_mode",
-        "workspace_country",
-        "workspace_source_id",
-        "workspace_source_id_aux",
-        "filter_status",
-        "filter_priority",
-        "filter_assignee",
-        "__filters_bootstrapped_from_env",
-        "__cfg_cache_reset_results",
-    ]:
-        st.session_state.pop(key, None)
 
 
 def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
@@ -1235,19 +1159,16 @@ def render(settings: Settings) -> None:
             with st.container(border=True, key="cfg_prefs_card_ppt"):
                 st.markdown("#### Descargas del informe PPT")
                 st.markdown("**Carpeta de guardado**")
+                default_download_dir = str((Path.home() / "Downloads").expanduser())
                 report_ppt_download_dir_default = str(
                     getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
-                ).strip() or str((config_home() / "exports").expanduser())
+                ).strip() or default_download_dir
                 report_ppt_download_dir = st.text_input(
                     "Carpeta de guardado del informe PPT",
                     value=report_ppt_download_dir_default,
                     key="cfg_report_ppt_download_dir",
                     label_visibility="collapsed",
-                    placeholder=str((config_home() / "exports").expanduser()),
-                )
-                st.caption(
-                    "Sugerencia: usa una carpeta de la app (Application Support/config) para evitar "
-                    "prompts de permisos en macOS corporativo."
+                    placeholder=default_download_dir,
                 )
 
             with st.container(border=True, key="cfg_prefs_card_favs"):
@@ -1298,35 +1219,6 @@ def render(settings: Settings) -> None:
                         format_func=lambda x: id_to_label.get(x, x),
                         key="cfg_trend_fav_3",
                     )
-
-            with st.container(border=True, key="cfg_prefs_card_restore"):
-                restore_cfg = _render_full_restore_container(key_prefix="cfg_prefs")
-                restore_disabled = not bool(restore_cfg.get("armed", False))
-                if st.button(
-                    "Restaurar configuración desde cero",
-                    key="cfg_restore_btn",
-                    disabled=restore_disabled,
-                    help=(
-                        "Marca confirmación y escribe RESTAURAR para habilitar esta acción."
-                        if restore_disabled
-                        else None
-                    ),
-                ):
-                    try:
-                        restore_env_from_example()
-                    except FileNotFoundError as exc:
-                        st.error(str(exc))
-                    except Exception as exc:
-                        st.error(f"No se pudo restaurar la configuración: {exc}")
-                    else:
-                        _clear_restore_widget_state()
-                        _queue_all_config_widget_state_clear()
-                        _clear_runtime_state_after_restore()
-                        st.session_state["__cfg_flash_success"] = (
-                            "Configuración restaurada desde `.env.example`."
-                        )
-                        st.session_state["__cfg_active_tab"] = "Preferencias"
-                        st.rerun()
 
             if st.button("Guardar configuración", key="cfg_save_prefs_btn"):
                 summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])

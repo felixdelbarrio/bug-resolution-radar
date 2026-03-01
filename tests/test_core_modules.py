@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pytest
 
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.common.security import mask_secret, safe_log_text
@@ -175,36 +174,6 @@ def test_normalize_analysis_lookback_months_defaults_for_non_positive_values() -
     assert cfg.normalize_analysis_lookback_months("-8") == 12
     assert cfg.normalize_analysis_lookback_months("abc") == 12
     assert cfg.normalize_analysis_lookback_months("6") == 6
-
-
-def test_config_restore_env_from_example(monkeypatch: Any, tmp_path: Path) -> None:
-    env_path = tmp_path / ".env"
-    env_example = tmp_path / ".env.example"
-    env_path.write_text("APP_TITLE=Anterior\n", encoding="utf-8")
-    env_example.write_text("APP_TITLE=Desde plantilla\nTHEME=light\n", encoding="utf-8")
-
-    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
-    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
-    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
-
-    restored_from = cfg.restore_env_from_example()
-    assert restored_from == env_example
-    assert env_path.read_text(encoding="utf-8") == env_example.read_text(encoding="utf-8")
-
-
-def test_config_restore_env_from_example_missing_template(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
-    env_path = tmp_path / ".env"
-    env_example = tmp_path / ".env.example"
-    env_path.write_text("APP_TITLE=Anterior\n", encoding="utf-8")
-
-    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
-    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
-    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
-
-    with pytest.raises(FileNotFoundError):
-        cfg.restore_env_from_example()
 
 
 def test_semantic_status_and_priority_colors() -> None:
