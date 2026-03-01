@@ -13,7 +13,7 @@ import streamlit as st
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_browser
-from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT
+from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT, BBVA_NEUTRAL_SOFT
 from bug_resolution_radar.ui.common import (
     chip_palette_for_color,
     chip_style_from_color,
@@ -255,6 +255,15 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
     )
 
 
+def _native_link_cell_style(value: object, *, dark_mode: bool = False) -> str:
+    txt = _safe_cell_text(value)
+    if txt == "—":
+        muted = BBVA_DARK.ink_muted if dark_mode else BBVA_LIGHT.ink_muted
+        return f"color: {muted};"
+    link_color = BBVA_DARK.serene_blue if dark_mode else BBVA_LIGHT.electric_blue
+    return f"color: {link_color}; text-decoration: underline; font-weight: 800; cursor: pointer;"
+
+
 def _coerce_record_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
@@ -379,6 +388,12 @@ def _render_issue_table_native(
             lambda x: _native_signal_cell_style(x, for_priority=True),
             subset=["priority"],
         )
+    if key_display_col in df_show.columns:
+        dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+        styler = styler.map(
+            lambda value: _native_link_cell_style(value, dark_mode=dark_mode),
+            subset=[key_display_col],
+        )
 
     event = st.dataframe(
         styler,
@@ -386,7 +401,8 @@ def _render_issue_table_native(
         hide_index=True,
         column_config=col_cfg or None,
         on_select="rerun",
-        selection_mode="single-cell",
+        # Keep sorting controlled in backend (shared with cards/export) and retain cell-click actions.
+        selection_mode=["single-cell", "single-column"],
         key=table_key,
     )
 

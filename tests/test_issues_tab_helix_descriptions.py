@@ -80,3 +80,24 @@ def test_apply_shared_sort_status_uses_canonical_order() -> None:
     )
     out = issues_tab._apply_shared_sort(df, sort_col="status", sort_asc=True)
     assert out["key"].tolist() == ["A-2", "A-1", "A-3"]
+
+
+def test_sort_columns_for_controls_prioritizes_known_columns_and_hides_url() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "summary": "A",
+                "url": "https://jira.local/browse/A-1",
+                "status": "New",
+                "priority": "High",
+                "updated": "2026-01-01",
+                "foo_custom": "x",
+            }
+        ]
+    )
+
+    out = issues_tab._sort_columns_for_controls(df)
+
+    assert out[:4] == ["updated", "status", "priority", "summary"]
+    assert "url" not in out
+    assert "foo_custom" in out

@@ -204,7 +204,7 @@ _build-macos:
 		echo "El target build-macos requiere ejecutarse en macOS."; \
 		exit 1; \
 	fi
-	@$(call rm_rf_retry,dist_app build_app build_bundle/bug-resolution-radar-macos bug-resolution-radar-macos.zip)
+	@$(call rm_rf_retry,dist_app build_app build_bundle/bug-resolution-radar-macos build_bundle/bug-resolution-radar-macos.zip bug-resolution-radar-macos.zip)
 	ROOT_DIR="$$(pwd)"; \
 	EXTRA_ARGS=(); \
 	if [ -d src/bug_resolution_radar/ui/assets ]; then \
@@ -273,6 +273,7 @@ _build-macos:
 		echo "Notarización macOS opcional omitida (APPLE_NOTARY_PROFILE vacío)."; \
 	fi
 	BUNDLE_DIR="build_bundle/bug-resolution-radar-macos"; \
+	ZIP_PATH="build_bundle/bug-resolution-radar-macos.zip"; \
 	mkdir -p "$$BUNDLE_DIR/dist"; \
 	if [ -d dist_app/bug-resolution-radar.app ]; then \
 		cp -R dist_app/bug-resolution-radar.app "$$BUNDLE_DIR/dist/bug-resolution-radar.app"; \
@@ -292,12 +293,13 @@ _build-macos:
 		mkdir -p "$$BUNDLE_DIR/.streamlit"; \
 		cp .streamlit/config.toml "$$BUNDLE_DIR/.streamlit/config.toml"; \
 	fi
+	rm -f "$$ZIP_PATH" bug-resolution-radar-macos.zip; \
 	ditto -c -k --sequesterRsrc --keepParent \
 		"build_bundle/bug-resolution-radar-macos" \
-		"bug-resolution-radar-macos.zip"
+		"$$ZIP_PATH"
 	@echo "Build macOS completado:"
 	@echo "  - dist_app/bug-resolution-radar.app"
-	@echo "  - bug-resolution-radar-macos.zip"
+	@echo "  - build_bundle/bug-resolution-radar-macos.zip"
 
 _build-linux:
 	@if [ "$(HOST_UNAME)" != "Linux" ]; then \
