@@ -36,6 +36,8 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
     df_to_excel_bytes,
 )
 
+_DELETE_ROW_TOKEN_PREFIX = "__cfg_delete_row__:"
+
 
 def _boolish(value: Any, default: bool = True) -> bool:
     if value is None:
@@ -647,7 +649,7 @@ def _selected_sources_from_editor(
     selected_ids: List[str] = []
     label_by_id: Dict[str, str] = {}
 
-    for row in df.to_dict(orient="records"):
+    for idx, row in enumerate(df.to_dict(orient="records"), start=1):
         if not _boolish(row.get("__delete__"), default=False):
             continue
         country = _as_str(row.get("country"))
@@ -655,13 +657,23 @@ def _selected_sources_from_editor(
         sid = _as_str(row.get("__source_id__"))
         if not sid and country and alias:
             sid = build_source_id(source_type, country, alias)
-        if not sid:
-            continue
-        if sid not in selected_ids:
-            selected_ids.append(sid)
-            label_by_id[sid] = f"{country or 'N/A'} · {alias or 'Sin alias'}"
+        token = sid or f"{_DELETE_ROW_TOKEN_PREFIX}{source_type}:{idx}"
+        if token not in selected_ids:
+            selected_ids.append(token)
+            label_by_id[token] = f"{country or 'N/A'} · {alias or 'Sin alias'}"
 
     return selected_ids, label_by_id
+
+
+def _source_ids_for_cache_purge(selected_ids: List[str]) -> List[str]:
+    out: List[str] = []
+    for value in selected_ids:
+        sid = _as_str(value)
+        if not sid or sid.startswith(_DELETE_ROW_TOKEN_PREFIX):
+            continue
+        if sid not in out:
+            out.append(sid)
+    return out
 
 
 def _clear_jira_delete_widget_state() -> None:
@@ -892,11 +904,12 @@ def render(settings: Settings) -> None:
 
             any_deletion = False
             if bool(jira_delete_cfg.get("armed", False)):
-                jira_delete_sids = [
+                jira_delete_tokens = [
                     str(x).strip() for x in jira_delete_cfg.get("source_ids", []) if str(x).strip()
                 ]
-                if jira_delete_sids:
+                if jira_delete_tokens:
                     any_deletion = True
+                    jira_delete_sids = _source_ids_for_cache_purge(jira_delete_tokens)
                     jira_purge_total = {
                         "issues_removed": 0,
                         "helix_items_removed": 0,
@@ -905,8 +918,14 @@ def render(settings: Settings) -> None:
                     for delete_sid in jira_delete_sids:
                         purge_stats = purge_source_cache(new_settings, delete_sid)
                         jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
-                    st.success(f"Fuentes Jira eliminadas: {len(jira_delete_sids)}. Cache saneado.")
-                    _render_purge_stats(jira_purge_total)
+                    st.success(f"Fuentes Jira eliminadas: {len(jira_delete_tokens)}.")
+                    if jira_delete_sids:
+                        _render_purge_stats(jira_purge_total)
+                    if len(jira_delete_sids) != len(jira_delete_tokens):
+                        st.info(
+                            "Algunas fuentes no tenían source_id resoluble; "
+                            "se eliminó la configuración pero no había cache asociado que sanear."
+                        )
 
             if any_deletion:
                 _clear_jira_delete_widget_state()
@@ -1051,11 +1070,12 @@ def render(settings: Settings) -> None:
 
             any_deletion = False
             if bool(helix_delete_cfg.get("armed", False)):
-                helix_delete_sids = [
+                helix_delete_tokens = [
                     str(x).strip() for x in helix_delete_cfg.get("source_ids", []) if str(x).strip()
                 ]
-                if helix_delete_sids:
+                if helix_delete_tokens:
                     any_deletion = True
+                    helix_delete_sids = _source_ids_for_cache_purge(helix_delete_tokens)
                     helix_purge_total = {
                         "issues_removed": 0,
                         "helix_items_removed": 0,
@@ -1064,10 +1084,14 @@ def render(settings: Settings) -> None:
                     for delete_sid in helix_delete_sids:
                         purge_stats = purge_source_cache(new_settings, delete_sid)
                         helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
-                    st.success(
-                        f"Fuentes Helix eliminadas: {len(helix_delete_sids)}. Cache saneado."
-                    )
-                    _render_purge_stats(helix_purge_total)
+                    st.success(f"Fuentes Helix eliminadas: {len(helix_delete_tokens)}.")
+                    if helix_delete_sids:
+                        _render_purge_stats(helix_purge_total)
+                    if len(helix_delete_sids) != len(helix_delete_tokens):
+                        st.info(
+                            "Algunas fuentes no tenían source_id resoluble; "
+                            "se eliminó la configuración pero no había cache asociado que sanear."
+                        )
 
             if any_deletion:
                 _clear_helix_delete_widget_state()
