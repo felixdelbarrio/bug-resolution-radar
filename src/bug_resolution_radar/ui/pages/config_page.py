@@ -10,14 +10,17 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.analytics.analysis_window import (
-    effective_analysis_lookback_months,
     max_available_backlog_months,
+    parse_analysis_lookback_months,
 )
 from bug_resolution_radar.config import (
+    LEGACY_ENV_KEYS_TO_PRUNE,
     Settings,
     build_source_id,
     helix_sources,
     jira_sources,
+    normalize_analysis_lookback_months,
+    restore_env_from_example,
     save_settings,
     supported_countries,
     to_env_json,
@@ -33,6 +36,8 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
     build_download_filename,
     df_to_excel_bytes,
 )
+
+_DELETE_ROW_TOKEN_PREFIX = "__cfg_delete_row__:"
 
 
 def _boolish(value: Any, default: bool = True) -> bool:
@@ -64,6 +69,19 @@ def _safe_update_settings(settings: Settings, update: Dict[str, Any]) -> Setting
     allowed = set(getattr(settings.__class__, "model_fields", {}).keys())
     clean = {k: v for k, v in update.items() if k in allowed}
     return settings.model_copy(update=clean)
+
+
+def _save_settings_with_migrations(settings: Settings) -> None:
+    migrated = _safe_update_settings(
+        settings,
+        {
+            "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
+                getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 12),
+                default=12,
+            ),
+        },
+    )
+    save_settings(migrated, drop_keys=LEGACY_ENV_KEYS_TO_PRUNE)
 
 
 def _parse_csv_ids(raw: object, valid_ids: List[str]) -> List[str]:
@@ -184,17 +202,22 @@ def _is_reset_phrase_valid(value: Any) -> bool:
     return str(value or "").strip().upper() == "RESETEAR"
 
 
+def _is_restore_phrase_valid(value: Any) -> bool:
+    return str(value or "").strip().upper() == "RESTAURAR"
+
+
 def _inject_delete_zone_css() -> None:
     st.markdown(
         """
         <style>
           [class*="st-key-cfg_jira_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
-          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, #95BAFF 14%) !important;
+          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-cfg_prefs_restore_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, var(--bbva-glow-soft) 14%) !important;
             background:
               radial-gradient(1200px 280px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 55%),
-              linear-gradient(155deg, color-mix(in srgb, var(--bbva-surface) 92%, #0E234C 8%), var(--bbva-surface));
+              linear-gradient(155deg, color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-midnight) 8%), var(--bbva-surface));
             box-shadow: 0 12px 28px color-mix(in srgb, var(--bbva-text) 10%, transparent) !important;
             border-radius: var(--bbva-radius-xl) !important;
           }
@@ -210,8 +233,8 @@ def _inject_delete_zone_css() -> None:
             gap: .4rem;
             padding: .28rem .78rem;
             border-radius: 999px;
-            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 74%, #8EB4FF 26%);
-            background: color-mix(in srgb, var(--bbva-surface-elevated) 84%, #0D224A 16%);
+            border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 74%, var(--bbva-glow-soft) 26%);
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 84%, var(--bbva-midnight) 16%);
             color: color-mix(in srgb, var(--bbva-text) 95%, transparent);
             font-size: .91rem;
             line-height: 1.15rem;
@@ -221,7 +244,7 @@ def _inject_delete_zone_css() -> None:
             width: .46rem;
             height: .46rem;
             border-radius: 50%;
-            background: color-mix(in srgb, var(--bbva-primary) 76%, #7EA8FF 24%);
+            background: color-mix(in srgb, var(--bbva-primary) 76%, var(--bbva-glow-soft) 24%);
             box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 20%, transparent);
           }
           .cfg-delete-ghost {
@@ -254,10 +277,10 @@ def _inject_preferences_zone_css() -> None:
             border-radius: 14px;
             background:
               linear-gradient(180deg,
-                color-mix(in srgb, var(--bbva-surface-elevated) 92%, #0E234C 8%),
+                color-mix(in srgb, var(--bbva-surface-elevated) 92%, var(--bbva-midnight) 8%),
                 color-mix(in srgb, var(--bbva-surface) 97%, transparent)
               );
-            border: 1px solid color-mix(in srgb, var(--bbva-border) 78%, #9BBBFF 22%);
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 78%, var(--bbva-glow-soft) 22%);
             box-shadow: 0 8px 22px color-mix(in srgb, var(--bbva-text) 8%, transparent);
             width: fit-content;
           }
@@ -268,7 +291,7 @@ def _inject_preferences_zone_css() -> None:
             transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
           }
           [class*="st-key-cfg_tabs_shell"] button[role="tab"][aria-selected="true"] {
-            border-color: color-mix(in srgb, var(--bbva-primary) 52%, #8FB7FF 48%) !important;
+            border-color: color-mix(in srgb, var(--bbva-primary) 52%, var(--bbva-glow-soft) 48%) !important;
             box-shadow: 0 0 0 1px color-mix(in srgb, var(--bbva-primary) 10%, transparent) inset;
             background:
               linear-gradient(180deg,
@@ -277,12 +300,12 @@ def _inject_preferences_zone_css() -> None:
               ) !important;
           }
           [class*="st-key-cfg_prefs_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid color-mix(in srgb, var(--bbva-border) 82%, #A2C1FF 18%) !important;
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 82%, var(--bbva-glow-soft) 18%) !important;
             border-radius: 16px !important;
             padding: .35rem .55rem .5rem !important;
             background:
               radial-gradient(900px 220px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 60%),
-              linear-gradient(165deg, color-mix(in srgb, var(--bbva-surface) 97%, #0E234C 3%), var(--bbva-surface));
+              linear-gradient(165deg, color-mix(in srgb, var(--bbva-surface) 97%, var(--bbva-midnight) 3%), var(--bbva-surface));
             box-shadow: 0 10px 26px color-mix(in srgb, var(--bbva-text) 6%, transparent) !important;
             margin-bottom: .7rem;
           }
@@ -488,6 +511,41 @@ def _render_cache_reset_container(
         return {"cache_ids": selected_cache_ids, "armed": armed, "valid": valid}
 
 
+def _render_full_restore_container(*, key_prefix: str) -> Dict[str, Any]:
+    st.markdown(
+        '<div class="bbva-icon-recycle-title">Restaurar configuración completa</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.container(border=True, key=f"{key_prefix}_restore_shell"):
+        st.markdown("#### Zona segura de restauración")
+
+        confirm = st.checkbox(
+            "Confirmo que quiero restaurar toda la configuración desde cero.",
+            key=f"{key_prefix}_restore_confirm",
+        )
+        phrase = st.text_input(
+            "Escribe RESTAURAR para confirmar",
+            value="",
+            key=f"{key_prefix}_restore_phrase",
+            help="Confirmación reforzada para evitar restauraciones accidentales.",
+        )
+
+        phrase_ok = _is_restore_phrase_valid(phrase)
+        has_partial_input = bool(confirm or str(phrase).strip())
+        armed = bool(confirm and phrase_ok)
+        valid = bool((not has_partial_input) or armed)
+
+        if has_partial_input and not armed:
+            st.warning(
+                "Para restaurar la configuración debes marcar confirmación y escribir RESTAURAR."
+            )
+        elif armed:
+            st.success("Restauración preparada. Pulsa el botón para aplicarla ahora.")
+
+        return {"armed": armed, "valid": valid}
+
+
 def _render_cache_reset_results(results: List[Dict[str, Any]]) -> None:
     if not results:
         return
@@ -632,7 +690,7 @@ def _selected_sources_from_editor(
     selected_ids: List[str] = []
     label_by_id: Dict[str, str] = {}
 
-    for row in df.to_dict(orient="records"):
+    for idx, row in enumerate(df.to_dict(orient="records"), start=1):
         if not _boolish(row.get("__delete__"), default=False):
             continue
         country = _as_str(row.get("country"))
@@ -640,24 +698,23 @@ def _selected_sources_from_editor(
         sid = _as_str(row.get("__source_id__"))
         if not sid and country and alias:
             sid = build_source_id(source_type, country, alias)
-        if not sid:
-            continue
-        if sid not in selected_ids:
-            selected_ids.append(sid)
-            label_by_id[sid] = f"{country or 'N/A'} · {alias or 'Sin alias'}"
+        token = sid or f"{_DELETE_ROW_TOKEN_PREFIX}{source_type}:{idx}"
+        if token not in selected_ids:
+            selected_ids.append(token)
+            label_by_id[token] = f"{country or 'N/A'} · {alias or 'Sin alias'}"
 
     return selected_ids, label_by_id
 
 
-def _clear_delete_confirmation_widget_state() -> None:
-    _queue_widget_state_clear(
-        [
-            "cfg_jira_delete_confirm",
-            "cfg_jira_delete_phrase",
-            "cfg_helix_delete_confirm",
-            "cfg_helix_delete_phrase",
-        ]
-    )
+def _source_ids_for_cache_purge(selected_ids: List[str]) -> List[str]:
+    out: List[str] = []
+    for value in selected_ids:
+        sid = _as_str(value)
+        if not sid or sid.startswith(_DELETE_ROW_TOKEN_PREFIX):
+            continue
+        if sid not in out:
+            out.append(sid)
+    return out
 
 
 def _clear_jira_delete_widget_state() -> None:
@@ -666,6 +723,7 @@ def _clear_jira_delete_widget_state() -> None:
             "cfg_jira_delete_confirm",
             "cfg_jira_delete_phrase",
             "cfg_jira_sources_editor",
+            "cfg_jira_sources_rows_state",
         ]
     )
 
@@ -676,6 +734,7 @@ def _clear_helix_delete_widget_state() -> None:
             "cfg_helix_delete_confirm",
             "cfg_helix_delete_phrase",
             "cfg_helix_sources_editor",
+            "cfg_helix_sources_rows_state",
         ]
     )
 
@@ -688,6 +747,20 @@ def _clear_cache_reset_widget_state() -> None:
             "cfg_cache_cache_reset_phrase",
         ]
     )
+
+
+def _clear_restore_widget_state() -> None:
+    _queue_widget_state_clear(
+        [
+            "cfg_prefs_restore_confirm",
+            "cfg_prefs_restore_phrase",
+        ]
+    )
+
+
+def _queue_all_config_widget_state_clear() -> None:
+    keys = [str(k).strip() for k in st.session_state.keys() if str(k).strip().startswith("cfg_")]
+    _queue_widget_state_clear(keys)
 
 
 def _queue_widget_state_clear(keys: List[str]) -> None:
@@ -712,10 +785,20 @@ def _apply_queued_widget_state_clear() -> None:
             st.session_state.pop(k, None)
 
 
-def _clear_config_delete_widget_state() -> None:
-    _clear_delete_confirmation_widget_state()
-    _clear_jira_delete_widget_state()
-    _clear_helix_delete_widget_state()
+def _clear_runtime_state_after_restore() -> None:
+    # Theme + scope + filters are hydrated once; clear them so next run reflects restored `.env`.
+    for key in [
+        "workspace_dark_mode",
+        "workspace_country",
+        "workspace_source_id",
+        "workspace_source_id_aux",
+        "filter_status",
+        "filter_priority",
+        "filter_assignee",
+        "__filters_bootstrapped_from_env",
+        "__cfg_cache_reset_results",
+    ]:
+        st.session_state.pop(key, None)
 
 
 def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
@@ -736,19 +819,27 @@ def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _analysis_window_defaults(settings: Settings) -> Tuple[int, int]:
+    configured_months = normalize_analysis_lookback_months(
+        getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 12),
+        default=12,
+    )
     try:
         df_all = load_issues_df(settings.DATA_PATH)
     except Exception:
-        return 1, 1
+        max_months = max(12, configured_months)
+        return max_months, configured_months
 
     if df_all.empty:
-        return 1, 1
+        max_months = max(12, configured_months)
+        return max_months, configured_months
 
     scoped_df = _apply_workspace_scope(df_all)
     base_df = scoped_df if not scoped_df.empty else df_all
     available_months = int(max_available_backlog_months(base_df))
-    current_months = int(effective_analysis_lookback_months(settings, df=base_df))
-    return max(1, available_months), max(1, min(current_months, available_months))
+    parsed_months = int(parse_analysis_lookback_months(settings))
+    current_months = max(1, parsed_months)
+    max_months = max(12, available_months, current_months)
+    return max_months, current_months
 
 
 def _analysis_month_steps(max_months: int) -> List[int]:
@@ -811,18 +902,25 @@ def render(settings: Settings) -> None:
         st.markdown("### Fuentes Jira por país")
         st.caption("Alias y JQL son obligatorios.")
         jira_rows = _rows_from_jira_settings(settings, countries)
-        jira_df = pd.DataFrame(
-            jira_rows
-            or [
-                {
-                    "__delete__": False,
-                    "__source_id__": "",
-                    "country": countries[0],
-                    "alias": "",
-                    "jql": "",
-                }
-            ]
+        jira_default_row = {
+            "__delete__": False,
+            "__source_id__": "",
+            "country": countries[0] if countries else "",
+            "alias": "",
+            "jql": "",
+        }
+        jira_rows_state_key = "cfg_jira_sources_rows_state"
+        if jira_rows_state_key not in st.session_state:
+            st.session_state[jira_rows_state_key] = jira_rows or [jira_default_row]
+        if st.button("Añadir fila", key="cfg_jira_add_row_btn", width="content"):
+            raw_rows = st.session_state.get(jira_rows_state_key, [])
+            rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
+            rows_state.append(dict(jira_default_row))
+            st.session_state[jira_rows_state_key] = rows_state
+        jira_rows_for_editor = st.session_state.get(
+            jira_rows_state_key, jira_rows or [jira_default_row]
         )
+        jira_df = pd.DataFrame(jira_rows_for_editor)
         jira_editor = st.data_editor(
             jira_df,
             hide_index=True,
@@ -837,6 +935,7 @@ def render(settings: Settings) -> None:
                 "jql": st.column_config.TextColumn("jql"),
             },
         )
+        st.session_state[jira_rows_state_key] = jira_editor.to_dict(orient="records")
         _render_sources_excel_download(
             jira_editor,
             source_type="jira",
@@ -882,15 +981,16 @@ def render(settings: Settings) -> None:
                     "JIRA_SOURCES_JSON": to_env_json(jira_clean),
                 },
             )
-            save_settings(new_settings)
+            _save_settings_with_migrations(new_settings)
 
             any_deletion = False
             if bool(jira_delete_cfg.get("armed", False)):
-                jira_delete_sids = [
+                jira_delete_tokens = [
                     str(x).strip() for x in jira_delete_cfg.get("source_ids", []) if str(x).strip()
                 ]
-                if jira_delete_sids:
+                if jira_delete_tokens:
                     any_deletion = True
+                    jira_delete_sids = _source_ids_for_cache_purge(jira_delete_tokens)
                     jira_purge_total = {
                         "issues_removed": 0,
                         "helix_items_removed": 0,
@@ -899,8 +999,14 @@ def render(settings: Settings) -> None:
                     for delete_sid in jira_delete_sids:
                         purge_stats = purge_source_cache(new_settings, delete_sid)
                         jira_purge_total = _merge_purge_stats(jira_purge_total, purge_stats)
-                    st.success(f"Fuentes Jira eliminadas: {len(jira_delete_sids)}. Cache saneado.")
-                    _render_purge_stats(jira_purge_total)
+                    st.success(f"Fuentes Jira eliminadas: {len(jira_delete_tokens)}.")
+                    if jira_delete_sids:
+                        _render_purge_stats(jira_purge_total)
+                    if len(jira_delete_sids) != len(jira_delete_tokens):
+                        st.info(
+                            "Algunas fuentes no tenían source_id resoluble; "
+                            "se eliminó la configuración pero no había cache asociado que sanear."
+                        )
 
             if any_deletion:
                 _clear_jira_delete_widget_state()
@@ -908,7 +1014,13 @@ def render(settings: Settings) -> None:
                     "Configuración Jira y eliminación aplicadas."
                 )
             else:
-                _queue_widget_state_clear(["cfg_jira_delete_confirm", "cfg_jira_delete_phrase"])
+                _queue_widget_state_clear(
+                    [
+                        "cfg_jira_delete_confirm",
+                        "cfg_jira_delete_phrase",
+                        "cfg_jira_sources_rows_state",
+                    ]
+                )
                 st.session_state["__cfg_flash_success"] = "Configuración Jira guardada."
             st.session_state["__cfg_active_tab"] = "Jira"
             st.rerun()
@@ -958,20 +1070,27 @@ def render(settings: Settings) -> None:
         st.markdown("### Fuentes Helix por país")
         st.caption("Alias y filtros de servicio por fuente. La conexión Helix se define arriba.")
         helix_rows = _rows_from_helix_settings(settings, countries)
-        helix_df = pd.DataFrame(
-            helix_rows
-            or [
-                {
-                    "__delete__": False,
-                    "__source_id__": "",
-                    "country": countries[0],
-                    "alias": "",
-                    "service_origin_buug": "BBVA México",
-                    "service_origin_n1": "ENTERPRISE WEB",
-                    "service_origin_n2": "",
-                }
-            ]
+        helix_default_row = {
+            "__delete__": False,
+            "__source_id__": "",
+            "country": countries[0] if countries else "",
+            "alias": "",
+            "service_origin_buug": "BBVA México",
+            "service_origin_n1": "ENTERPRISE WEB",
+            "service_origin_n2": "",
+        }
+        helix_rows_state_key = "cfg_helix_sources_rows_state"
+        if helix_rows_state_key not in st.session_state:
+            st.session_state[helix_rows_state_key] = helix_rows or [helix_default_row]
+        if st.button("Añadir fila", key="cfg_helix_add_row_btn", width="content"):
+            raw_rows = st.session_state.get(helix_rows_state_key, [])
+            rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
+            rows_state.append(dict(helix_default_row))
+            st.session_state[helix_rows_state_key] = rows_state
+        helix_rows_for_editor = st.session_state.get(
+            helix_rows_state_key, helix_rows or [helix_default_row]
         )
+        helix_df = pd.DataFrame(helix_rows_for_editor)
         helix_editor = st.data_editor(
             helix_df,
             hide_index=True,
@@ -995,6 +1114,7 @@ def render(settings: Settings) -> None:
                 "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
             },
         )
+        st.session_state[helix_rows_state_key] = helix_editor.to_dict(orient="records")
         _render_sources_excel_download(
             helix_editor,
             source_type="helix",
@@ -1041,15 +1161,16 @@ def render(settings: Settings) -> None:
                     "HELIX_DASHBOARD_URL": str(helix_dashboard_url).strip(),
                 },
             )
-            save_settings(new_settings)
+            _save_settings_with_migrations(new_settings)
 
             any_deletion = False
             if bool(helix_delete_cfg.get("armed", False)):
-                helix_delete_sids = [
+                helix_delete_tokens = [
                     str(x).strip() for x in helix_delete_cfg.get("source_ids", []) if str(x).strip()
                 ]
-                if helix_delete_sids:
+                if helix_delete_tokens:
                     any_deletion = True
+                    helix_delete_sids = _source_ids_for_cache_purge(helix_delete_tokens)
                     helix_purge_total = {
                         "issues_removed": 0,
                         "helix_items_removed": 0,
@@ -1058,10 +1179,14 @@ def render(settings: Settings) -> None:
                     for delete_sid in helix_delete_sids:
                         purge_stats = purge_source_cache(new_settings, delete_sid)
                         helix_purge_total = _merge_purge_stats(helix_purge_total, purge_stats)
-                    st.success(
-                        f"Fuentes Helix eliminadas: {len(helix_delete_sids)}. Cache saneado."
-                    )
-                    _render_purge_stats(helix_purge_total)
+                    st.success(f"Fuentes Helix eliminadas: {len(helix_delete_tokens)}.")
+                    if helix_delete_sids:
+                        _render_purge_stats(helix_purge_total)
+                    if len(helix_delete_sids) != len(helix_delete_tokens):
+                        st.info(
+                            "Algunas fuentes no tenían source_id resoluble; "
+                            "se eliminó la configuración pero no había cache asociado que sanear."
+                        )
 
             if any_deletion:
                 _clear_helix_delete_widget_state()
@@ -1069,14 +1194,20 @@ def render(settings: Settings) -> None:
                     "Configuración Helix y eliminación aplicadas."
                 )
             else:
-                _queue_widget_state_clear(["cfg_helix_delete_confirm", "cfg_helix_delete_phrase"])
+                _queue_widget_state_clear(
+                    [
+                        "cfg_helix_delete_confirm",
+                        "cfg_helix_delete_phrase",
+                        "cfg_helix_sources_rows_state",
+                    ]
+                )
                 st.session_state["__cfg_flash_success"] = "Configuración Helix guardada."
             st.session_state["__cfg_active_tab"] = "Helix"
             st.rerun()
 
     with t_prefs:
         with st.container(key="cfg_prefs_shell"):
-            st.markdown("### Favoritos (Tendencias)")
+            st.markdown("### Preferencias")
             stored_theme_pref = str(getattr(settings, "THEME", "auto") or "auto").strip().lower()
             if stored_theme_pref in {"dark", "light"}:
                 theme_default = stored_theme_pref
@@ -1085,7 +1216,7 @@ def render(settings: Settings) -> None:
                     "dark" if bool(st.session_state.get("workspace_dark_mode", False)) else "light"
                 )
 
-            with st.container(key="cfg_prefs_card_workspace"):
+            with st.container(border=True, key="cfg_prefs_card_workspace"):
                 st.markdown("#### Ambiente de trabajo")
                 theme_mode = st.radio(
                     "Modo visual",
@@ -1097,7 +1228,7 @@ def render(settings: Settings) -> None:
                 )
                 st.caption("Se guarda en el .env como preferencia del usuario.")
 
-            with st.container(key="cfg_prefs_card_analysis"):
+            with st.container(border=True, key="cfg_prefs_card_analysis"):
                 st.markdown("#### Profundidad del análisis")
                 analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
                 month_options = _analysis_month_steps(analysis_max_months)
@@ -1111,9 +1242,7 @@ def render(settings: Settings) -> None:
                         index=0,
                         key="cfg_analysis_depth_months_single",
                         disabled=True,
-                        format_func=lambda m: (
-                            f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses"
-                        ),
+                        format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
                         help=(
                             "Se habilita automáticamente cuando exista histórico suficiente "
                             "en la caché de incidencias."
@@ -1127,35 +1256,31 @@ def render(settings: Settings) -> None:
                         value=_nearest_option(analysis_selected_months, options=month_options),
                         key="cfg_analysis_depth_months",
                         format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
-                        help=(
-                            "Filtro global oculto aplicado de forma transversal en dashboard, insights e informe PPT. "
-                            "Si lo dejas al máximo, se usa toda la profundidad disponible."
-                        ),
+                        help="Filtro global aplicado en dashboard, insights e informe PPT.",
                     )
-                if int(analysis_selected_months) >= int(analysis_max_months):
-                    st.caption("Estado: profundidad máxima disponible (modo automático).")
-                else:
-                    st.caption(
-                        f"Estado: últimos {int(analysis_selected_months)} "
-                        f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
-                    )
+                st.caption(
+                    f"Estado: últimos {int(analysis_selected_months)} "
+                    f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
+                )
 
-            with st.container(key="cfg_prefs_card_ppt"):
+            with st.container(border=True, key="cfg_prefs_card_ppt"):
                 st.markdown("#### Descargas del informe PPT")
                 st.markdown("**Carpeta de guardado**")
-                report_ppt_download_dir_default = str(
-                    getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or ""
-                ).strip() or str((Path.home() / "Downloads").expanduser())
+                default_download_dir = str((Path.home() / "Downloads").expanduser())
+                report_ppt_download_dir_default = (
+                    str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+                    or default_download_dir
+                )
                 report_ppt_download_dir = st.text_input(
                     "Carpeta de guardado del informe PPT",
                     value=report_ppt_download_dir_default,
                     key="cfg_report_ppt_download_dir",
                     label_visibility="collapsed",
-                    placeholder=str((Path.home() / "Downloads").expanduser()),
+                    placeholder=default_download_dir,
                 )
 
-            with st.container(key="cfg_prefs_card_favs"):
-                st.markdown("**Define los 3 gráficos favoritos**")
+            with st.container(border=True, key="cfg_prefs_card_favs"):
+                st.markdown("#### Define los 3 gráficos favoritos")
 
                 catalog = _trend_chart_catalog()
                 all_ids = [cid for cid, _ in catalog]
@@ -1203,13 +1328,38 @@ def render(settings: Settings) -> None:
                         key="cfg_trend_fav_3",
                     )
 
-            if st.button("Guardar configuración", key="cfg_save_prefs_btn"):
-                summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
-                analysis_lookback_months_to_store = (
-                    0
-                    if int(analysis_selected_months) >= int(analysis_max_months)
-                    else int(analysis_selected_months)
+            with st.container(border=True, key="cfg_prefs_card_restore"):
+                restore_cfg = _render_full_restore_container(key_prefix="cfg_prefs")
+            prefs_save_help = None
+            if not bool(restore_cfg.get("valid", True)):
+                prefs_save_help = (
+                    "Completa la confirmación de restauración (checkbox + texto RESTAURAR) "
+                    "o limpia esos campos para continuar."
                 )
+            if st.button(
+                "Guardar configuración",
+                key="cfg_save_prefs_btn",
+                disabled=not bool(restore_cfg.get("valid", True)),
+                help=prefs_save_help,
+            ):
+                if bool(restore_cfg.get("armed", False)):
+                    try:
+                        restore_env_from_example()
+                    except FileNotFoundError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"No se pudo restaurar la configuración: {exc}")
+                    else:
+                        _clear_restore_widget_state()
+                        _queue_all_config_widget_state_clear()
+                        _clear_runtime_state_after_restore()
+                        st.session_state["__cfg_flash_success"] = (
+                            "Configuración restaurada desde `.env.example`."
+                        )
+                        st.session_state["__cfg_active_tab"] = "Preferencias"
+                        st.rerun()
+                    return
+                summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
                 new_settings = _safe_update_settings(
                     settings,
                     {
@@ -1217,11 +1367,13 @@ def render(settings: Settings) -> None:
                         "DASHBOARD_SUMMARY_CHARTS": summary_csv,
                         "TREND_SELECTED_CHARTS": summary_csv,
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
-                        "ANALYSIS_LOOKBACK_MONTHS": analysis_lookback_months_to_store,
-                        "ANALYSIS_LOOKBACK_DAYS": 0,
+                        "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
+                            analysis_selected_months,
+                            default=12,
+                        ),
                     },
                 )
-                save_settings(new_settings)
+                _save_settings_with_migrations(new_settings)
                 target_dark_mode = str(theme_mode).strip().lower() == "dark"
                 theme_mode_changed = (
                     bool(st.session_state.get("workspace_dark_mode", False)) != target_dark_mode

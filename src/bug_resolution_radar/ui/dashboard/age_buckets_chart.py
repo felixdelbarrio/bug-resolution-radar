@@ -7,7 +7,9 @@ from typing import Sequence
 
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 
+from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT, hex_to_rgba
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_rank,
@@ -107,6 +109,12 @@ def build_age_buckets_issue_distribution(
     fig = go.Figure()
     bucket_to_x = {bucket: float(idx + 1) for idx, bucket in enumerate(bucket_order)}
     colors = status_color_map(status_order)
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    marker_line_color = hex_to_rgba(
+        (BBVA_DARK if dark_mode else BBVA_LIGHT).ink,
+        0.55,
+        fallback=BBVA_LIGHT.ink,
+    )
     priority_order = sorted(
         issues["priority"].astype(str).unique().tolist(),
         key=_priority_sort_key,
@@ -180,7 +188,7 @@ def build_age_buckets_issue_distribution(
                     color=colors.get(str(status)),
                     opacity=0.88,
                     symbol="circle",
-                    line=dict(width=0.6, color="rgba(255,255,255,0.55)"),
+                    line=dict(width=0.6, color=marker_line_color),
                 ),
             )
         )

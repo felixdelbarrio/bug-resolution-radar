@@ -18,7 +18,7 @@ import re
 import unicodedata
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 import pandas as pd
 

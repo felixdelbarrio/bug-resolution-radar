@@ -20,7 +20,7 @@ from bug_resolution_radar.ui.insights.engine import top_non_other_theme
 
 
 def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[str]:
-    """Resolve up to three valid summary chart ids from settings and legacy keys."""
+    """Resolve up to three valid summary chart ids from canonical settings keys."""
     picked: List[str] = []
 
     def _append_csv(raw: object) -> None:
@@ -34,18 +34,6 @@ def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[s
 
     _append_csv(getattr(settings, "DASHBOARD_SUMMARY_CHARTS", ""))
     _append_csv(getattr(settings, "TREND_SELECTED_CHARTS", ""))
-
-    for name in (
-        "TREND_FAV_1",
-        "TREND_FAVORITE_1",
-        "TREND_FAV_2",
-        "TREND_FAVORITE_2",
-        "TREND_FAV_3",
-        "TREND_FAVORITE_3",
-    ):
-        v = str(getattr(settings, name, "") or "").strip()
-        if v and v in registry_ids and v not in picked:
-            picked.append(v)
 
     fallback = [
         x
@@ -465,11 +453,11 @@ def render_overview_kpis(
 
     def _focus_tone_color(focus: FocusCard) -> str:
         return {
-            "risk": "#D24756",
-            "warning": "#D07D10",
-            "flow": "#0F7A58",
-            "quality": "#2E67C7",
-            "opportunity": "#1A8A5E",
+            "risk": "var(--bbva-focus-tone-risk)",
+            "warning": "var(--bbva-focus-tone-warning)",
+            "flow": "var(--bbva-focus-tone-flow)",
+            "quality": "var(--bbva-focus-tone-quality)",
+            "opportunity": "var(--bbva-focus-tone-opportunity)",
         }.get(str(focus.tone or "").strip().lower(), "var(--bbva-primary)")
 
     focus_candidates: list[FocusCard] = []

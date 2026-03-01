@@ -9,8 +9,22 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-from bug_resolution_radar.models.schema import IssuesDocument
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.models.schema import IssuesDocument
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_GOAL_ACCENT_7,
+    BBVA_GOAL_SURFACE_8,
+    BBVA_NEUTRAL_SOFT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_GREEN_3,
+    BBVA_SIGNAL_ORANGE_1,
+    BBVA_SIGNAL_ORANGE_2,
+    BBVA_SIGNAL_RED_1,
+    BBVA_SIGNAL_RED_2,
+    BBVA_SIGNAL_RED_3,
+    BBVA_SIGNAL_YELLOW_1,
+)
 
 # ----------------------------
 # Persistence: IssuesDocument
@@ -151,18 +165,18 @@ def _normalize_token(value: Optional[str]) -> str:
     return txt
 
 
-_RED_1 = "#B4232A"
-_RED_2 = "#D64550"
-_RED_3 = "#E85D63"
-_ORANGE_1 = "#D97706"
-_ORANGE_2 = "#F59E0B"
-_YELLOW_1 = "#FBBF24"
-_GREEN_1 = "#15803D"
-_GREEN_2 = "#22A447"
-_GREEN_3 = "#4CAF50"
-_GOAL_ACCENT_7 = "#5B3FD0"
-_GOAL_SURFACE_8 = "#ECE6FF"
-_NEUTRAL = "#E2E6EE"
+_RED_1 = BBVA_SIGNAL_RED_1
+_RED_2 = BBVA_SIGNAL_RED_2
+_RED_3 = BBVA_SIGNAL_RED_3
+_ORANGE_1 = BBVA_SIGNAL_ORANGE_1
+_ORANGE_2 = BBVA_SIGNAL_ORANGE_2
+_YELLOW_1 = BBVA_SIGNAL_YELLOW_1
+_GREEN_1 = BBVA_SIGNAL_GREEN_1
+_GREEN_2 = BBVA_SIGNAL_GREEN_2
+_GREEN_3 = BBVA_SIGNAL_GREEN_3
+_GOAL_ACCENT_7 = BBVA_GOAL_ACCENT_7
+_GOAL_SURFACE_8 = BBVA_GOAL_SURFACE_8
+_NEUTRAL = BBVA_NEUTRAL_SOFT
 
 
 _STATUS_COLOR_BY_KEY: Dict[str, str] = {
@@ -225,7 +239,7 @@ def flow_signal_color_map() -> Dict[str, str]:
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     h = hex_color.lstrip("#")
     if len(h) != 6:
-        return f"rgba(127,146,178,{alpha:.3f})"
+        h = _NEUTRAL.lstrip("#")
     r = int(h[0:2], 16)
     g = int(h[2:4], 16)
     b = int(h[4:6], 16)

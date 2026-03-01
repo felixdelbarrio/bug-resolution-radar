@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,18 +10,21 @@ import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
+from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
+from bug_resolution_radar.ui.common import priority_rank
 from bug_resolution_radar.ui.components.issues import (
     prepare_issue_cards_df,
     render_issue_cards,
     render_issue_table,
 )
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     CsvDownloadSpec,
     build_download_filename,
-    download_button_for_df,
     dfs_to_excel_bytes,
+    download_button_for_df,
     make_table_export_df,
 )
 from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
@@ -40,6 +44,72 @@ def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 def _set_issues_view(view_key: str, value: str) -> None:
     st.session_state[view_key] = value
+
+
+def _default_issue_sort_col(df: pd.DataFrame) -> str:
+    if "updated" in df.columns:
+        return "updated"
+    if "created" in df.columns:
+        return "created"
+    if "key" in df.columns:
+        return "key"
+    return str(df.columns[0]) if not df.empty else "updated"
+
+
+def _default_sort_asc(sort_col: str) -> bool:
+    return str(sort_col or "").strip().lower() not in {"updated", "created", "resolved"}
+
+
+def _ensure_shared_sort_state(df: pd.DataFrame, *, key_prefix: str) -> tuple[str, bool]:
+    sort_col_key = f"{key_prefix}::sort_col"
+    sort_asc_key = f"{key_prefix}::sort_asc"
+    default_col = _default_issue_sort_col(df)
+
+    sort_col = str(st.session_state.get(sort_col_key) or "").strip()
+    if not sort_col or sort_col not in df.columns:
+        sort_col = default_col
+        st.session_state[sort_col_key] = sort_col
+
+    if sort_asc_key not in st.session_state:
+        st.session_state[sort_asc_key] = _default_sort_asc(sort_col)
+
+    sort_asc = bool(st.session_state.get(sort_asc_key, _default_sort_asc(sort_col)))
+    return sort_col, sort_asc
+
+
+def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    if sort_col not in df.columns:
+        return df
+
+    out = df.copy(deep=False).copy()
+    sort_col_norm = str(sort_col).strip().lower()
+    key_col = "__sort_shared_key"
+    tie_col = "__sort_shared_updated"
+
+    if sort_col_norm == "status":
+        rank_map = canonical_status_rank_map()
+        status_vals = out[sort_col].fillna("").astype(str).str.strip().str.lower()
+        out[key_col] = status_vals.map(rank_map).fillna(10_000).astype(int)
+    elif sort_col_norm == "priority":
+        out[key_col] = (
+            out[sort_col].fillna("").astype(str).map(priority_rank).fillna(99).astype(int)
+        )
+    elif sort_col_norm in {"created", "updated", "resolved"}:
+        out[key_col] = pd.to_datetime(out[sort_col], errors="coerce", utc=True)
+    else:
+        out[key_col] = out[sort_col].fillna("").astype(str).str.casefold()
+
+    sort_cols = [key_col]
+    asc = [bool(sort_asc)]
+    if sort_col_norm != "updated" and "updated" in out.columns:
+        out[tie_col] = pd.to_datetime(out["updated"], errors="coerce", utc=True)
+        sort_cols.append(tie_col)
+        asc.append(False)
+
+    out = out.sort_values(by=sort_cols, ascending=asc, kind="mergesort", na_position="last")
+    return out.drop(columns=[key_col, tie_col], errors="ignore")
 
 
 @lru_cache(maxsize=8)
@@ -65,21 +135,6 @@ def _load_helix_items_by_merge_key_cached(
     return out
 
 
-def _helix_items_by_merge_key(settings: Settings | None) -> dict[str, HelixWorkItem]:
-    if settings is None:
-        return {}
-    helix_path = (
-        str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip() or "data/helix_dump.json"
-    )
-    p = Path(helix_path)
-    if not p.exists():
-        return {}
-    try:
-        return _load_helix_items_by_merge_key_cached(str(p.resolve()), p.stat().st_mtime_ns)
-    except Exception:
-        return {}
-
-
 def _helix_data_path_and_mtime(settings: Settings | None) -> tuple[str, int]:
     if settings is None:
         return "", -1
@@ -95,7 +150,122 @@ def _helix_data_path_and_mtime(settings: Settings | None) -> tuple[str, int]:
         return str(p), -1
 
 
-@st.cache_data(show_spinner=False, max_entries=24)
+def _extract_helix_item_description(item: HelixWorkItem) -> str:
+    raw = item.raw_fields if isinstance(item.raw_fields, dict) else {}
+    if not raw:
+        return ""
+
+    summary = str(item.summary or "").strip()
+    candidate_keys = (
+        "Detailed Decription",
+        "Detailed Description",
+        "Descripción Detallada",
+        "Descripcion Detallada",
+        "Description",
+        "summary",
+    )
+    for key in candidate_keys:
+        value = raw.get(key)
+        text = str(value or "").strip()
+        if not text or text == ".":
+            continue
+        text = re.sub(r"\s+", " ", text).strip()
+        if not text:
+            continue
+        if summary and text.lower() == summary.lower():
+            continue
+        return text
+    return ""
+
+
+@lru_cache(maxsize=8)
+def _load_helix_descriptions_cached(helix_path: str, mtime_ns: int) -> dict[str, str]:
+    items = _load_helix_items_by_merge_key_cached(helix_path, mtime_ns)
+    if not items:
+        return {}
+
+    out: dict[str, str] = {}
+    for merge_key, item in items.items():
+        desc = _extract_helix_item_description(item)
+        if not desc:
+            continue
+        out[merge_key] = desc
+        item_id = str(item.id or "").strip().upper()
+        if item_id and item_id not in out:
+            out[item_id] = desc
+    return out
+
+
+def _inject_helix_descriptions(
+    dff: pd.DataFrame,
+    *,
+    settings: Settings | None,
+) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    if "source_type" not in dff.columns or "key" not in dff.columns:
+        return dff
+
+    stype = dff["source_type"].astype(str).str.strip().str.lower()
+    helix_mask = stype.eq("helix")
+    if not bool(helix_mask.any()):
+        return dff
+
+    helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
+    if not helix_path:
+        return dff
+    desc_map = _load_helix_descriptions_cached(helix_path, helix_mtime_ns)
+    if not desc_map:
+        return dff
+
+    out = dff.copy(deep=False).copy()
+    if "description" not in out.columns:
+        out["description"] = ""
+
+    for idx in out.index[helix_mask]:
+        key = str(out.at[idx, "key"] or "").strip().upper()
+        if not key:
+            continue
+        source_id = (
+            str(out.at[idx, "source_id"] or "").strip().lower()
+            if "source_id" in out.columns
+            else ""
+        )
+        merge_key = f"{source_id}::{key}" if source_id else key
+        desc = str(desc_map.get(merge_key) or desc_map.get(key) or "").strip()
+        if not desc:
+            continue
+        curr = str(out.at[idx, "description"] or "").strip()
+        summary = str(out.at[idx, "summary"] or "").strip()
+        if curr and curr != "—" and curr.lower() != summary.lower():
+            continue
+        out.at[idx, "description"] = desc
+    return out
+
+
+def _inject_missing_jira_descriptions_from_summary(dff: pd.DataFrame) -> pd.DataFrame:
+    """Do not synthesize Jira descriptions from summary text.
+
+    Earlier fallback logic split summary by separators and copied the tail into
+    `description`, which caused duplicated/incorrect descriptions. We now keep
+    description empty when Jira did not provide it.
+    """
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    if "source_type" not in dff.columns:
+        return dff
+
+    out = dff.copy(deep=False).copy()
+    if "description" not in out.columns:
+        out["description"] = ""
+    return out
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=24,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _cached_helix_issues_export_xlsx(
     export_df: pd.DataFrame,
     *,
@@ -313,20 +483,38 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
-        dff_show = _sorted_for_display(dff)
+        dff_show_raw = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
+        dff_show_raw = _inject_missing_jira_descriptions_from_summary(dff_show_raw)
+        sort_col, sort_asc = _ensure_shared_sort_state(dff_show_raw, key_prefix=key_prefix)
+        dff_show = _apply_shared_sort(dff_show_raw, sort_col=sort_col, sort_asc=sort_asc)
 
-        # CSV export always uses the "table-like" dataframe
-        export_df = make_table_export_df(dff_show)
+        # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
+        table_pref_cols = [
+            "key",
+            "summary",
+            "description",
+            "status",
+            "type",
+            "priority",
+            "assignee",
+            "created",
+            "updated",
+            "resolved",
+            "resolution",
+            "url",
+        ]
+        table_df = make_table_export_df(dff_show, preferred_cols=table_pref_cols)
+        export_df = table_df.copy(deep=False)
 
         # Compact toolbar: CSV + count + view mode (same visual language as top tabs)
         view_key = f"{key_prefix}::view_mode"
         if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
             st.session_state[view_key] = "Cards"
         view = str(st.session_state.get(view_key) or "Cards")
-        total_filtered = 0 if export_df is None else int(len(export_df))
+        total_filtered = 0 if table_df is None else int(len(table_df))
         max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
         cards_df = (
-            prepare_issue_cards_df(dff_show, max_cards=max_cards)
+            prepare_issue_cards_df(dff_show, max_cards=max_cards, preserve_order=True)
             if view == "Cards"
             else pd.DataFrame()
         )
@@ -380,13 +568,20 @@ def render_issues_section(
                 )
             render_issue_cards(
                 dff_show,
-                max_cards=max_cards,
+                max_cards=len(cards_df),
                 title="",
+                settings=settings,
                 prepared_df=cards_df,
             )
             return
 
-        render_issue_table(export_df)
+        render_issue_table(
+            table_df,
+            settings=settings,
+            table_key=f"{key_prefix}::issues_table_grid",
+            preserve_order=True,
+            sort_state_prefix=key_prefix,
+        )
 
 
 def render_issues_tab(

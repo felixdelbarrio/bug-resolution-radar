@@ -39,20 +39,62 @@ def dataframe_signature(
     h.update(str(tuple(cols)).encode("utf-8"))
     h.update(str(len(df)).encode("utf-8"))
 
-    if cols:
-        hashed = pd.util.hash_pandas_object(
-            df.loc[:, cols],
-            index=True,
-            categorize=True,
-        ).to_numpy(dtype="uint64", copy=False)
-    else:
-        hashed = pd.util.hash_pandas_object(
-            df.index.to_series(),
-            index=False,
-            categorize=True,
-        ).to_numpy(dtype="uint64", copy=False)
+    try:
+        if cols:
+            hashed = pd.util.hash_pandas_object(
+                df.loc[:, cols],
+                index=True,
+                categorize=True,
+            ).to_numpy(dtype="uint64", copy=False)
+        else:
+            hashed = pd.util.hash_pandas_object(
+                df.index.to_series(),
+                index=False,
+                categorize=True,
+            ).to_numpy(dtype="uint64", copy=False)
+        h.update(hashed.tobytes())
+    except Exception:
+        # Some object columns may contain unhashable values (lists/dicts). Use a stable
+        # JSON fallback so cache signatures remain deterministic without crashing.
+        if cols:
+            payload = df.loc[:, cols].to_json(
+                orient="split",
+                date_format="iso",
+                default_handler=str,
+            )
+        else:
+            payload = df.index.to_series().to_json(date_format="iso", default_handler=str)
+        h.update(payload.encode("utf-8", errors="replace"))
+    return h.hexdigest()
 
-    h.update(hashed.tobytes())
+
+def streamlit_cache_df_hash(df: pd.DataFrame) -> str:
+    """
+    Streamlit cache hash for DataFrames that may include list/dict object columns.
+    """
+    h = blake2b(digest_size=16)
+    if not isinstance(df, pd.DataFrame):
+        h.update(b"no_df")
+        return h.hexdigest()
+
+    h.update(str(tuple(df.columns)).encode("utf-8"))
+    h.update(str(len(df)).encode("utf-8"))
+    if df.empty:
+        h.update(b"empty_df")
+        return h.hexdigest()
+
+    try:
+        hashed = pd.util.hash_pandas_object(df, index=True, categorize=True).to_numpy(
+            dtype="uint64", copy=False
+        )
+        h.update(hashed.tobytes())
+    except Exception:
+        payload = df.to_json(
+            orient="split",
+            date_format="iso",
+            default_handler=str,
+        )
+        h.update(payload.encode("utf-8", errors="replace"))
     return h.hexdigest()
 
 

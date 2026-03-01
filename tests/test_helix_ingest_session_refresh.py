@@ -637,6 +637,10 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
     monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
     monkeypatch.setenv("HELIX_BROWSER_LOGIN_WAIT_SECONDS", "5")
     monkeypatch.setenv("HELIX_BROWSER_LOGIN_POLL_SECONDS", "0.5")
+    monkeypatch.setenv(
+        "HELIX_DASHBOARD_URL",
+        "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    )
 
     ok, msg, _ = helix_mod.ingest_helix(
         browser="chrome",
@@ -647,8 +651,51 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
 
     assert ok is True
     assert "ingesta Helix OK" in msg
-    assert opened_urls
-    assert "/dashboards/" in opened_urls[0]
+    assert opened_urls == [
+        "chrome:https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
+    ]
+
+
+def test_ingest_helix_does_not_open_browser_when_cookie_exists_even_if_page_not_open(
+    monkeypatch: Any,
+) -> None:
+    opened_urls: list[str] = []
+
+    def fake_open(url: str, browser: str) -> bool:
+        opened_urls.append(f"{browser}:{url}")
+        return True
+
+    def fake_cookie(browser: str, host: str) -> str:
+        return "JSESSIONID=abc; XSRF-TOKEN=xyz; loginId=test-user"
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}
+        )
+
+    def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
+        return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
+
+    monkeypatch.setattr(helix_mod, "_open_url_in_configured_browser", fake_open)
+    monkeypatch.setattr(
+        helix_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: False,
+    )
+    monkeypatch.setattr(helix_mod, "_request", fake_request)
+    monkeypatch.setattr(helix_mod, "get_helix_session_cookie", fake_cookie)
+    monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
+
+    ok, msg, _ = helix_mod.ingest_helix(
+        browser="chrome",
+        chunk_size=75,
+        dry_run=False,
+        create_date_year=2026,
+    )
+
+    assert ok is True
+    assert "ingesta Helix OK" in msg
+    assert opened_urls == []
 
 
 def test_ingest_helix_does_not_open_browser_when_target_page_is_already_open(
@@ -717,3 +764,50 @@ def test_ingest_helix_does_not_open_invalid_dashboards_url_when_host_missing(
     assert ok is False
     assert "no se pudo resolver host ARSQL" in msg
     assert opened_urls == []
+
+
+def test_ingest_helix_forces_interactive_bootstrap_on_preflight_sso_redirect(
+    monkeypatch: Any,
+) -> None:
+    opened_urls: list[str] = []
+
+    def fake_open_many(urls: list[str], browser: str) -> int:
+        for url in urls:
+            opened_urls.append(f"{browser}:{url}")
+        return len(urls)
+
+    def fake_cookie(browser: str, host: str) -> str:
+        if opened_urls:
+            return "JSESSIONID=new; XSRF-TOKEN=xyz; loginId=test-user"
+        return "JSESSIONID=stale; XSRF-TOKEN=old; loginId=test-user"
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}
+        )
+
+    def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
+        if not opened_urls:
+            return _FakeResponse(200, text="redirecting to single sign-on", url=f"{url}/rsso/start")
+        return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
+
+    monkeypatch.setattr(helix_mod, "_open_urls_in_configured_browser", fake_open_many)
+    monkeypatch.setattr(
+        helix_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: True,
+    )
+    monkeypatch.setattr(helix_mod, "_request", fake_request)
+    monkeypatch.setattr(helix_mod, "get_helix_session_cookie", fake_cookie)
+    monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
+
+    ok, msg, _ = helix_mod.ingest_helix(
+        browser="chrome",
+        chunk_size=75,
+        dry_run=False,
+        create_date_year=2026,
+    )
+
+    assert ok is True
+    assert "ingesta Helix OK" in msg
+    assert opened_urls

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import multiprocessing as mp
@@ -9,10 +11,14 @@ import os
 import queue
 import re
 import tempfile
+import threading
 import time
-from dataclasses import dataclass
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import pandas as pd
@@ -42,6 +48,37 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_SANS_MEDIUM_PPT,
     BBVA_FONT_SANS_PPT,
     BBVA_LIGHT,
+    BBVA_REPORT_AMBER,
+    BBVA_REPORT_AMBER_BG,
+    BBVA_REPORT_AMBER_BORDER,
+    BBVA_REPORT_AMBER_TEXT,
+    BBVA_REPORT_BLUE_BG,
+    BBVA_REPORT_BLUE_BORDER,
+    BBVA_REPORT_BLUE_TEXT,
+    BBVA_REPORT_DARK_ACCENT_LINE,
+    BBVA_REPORT_DARK_BG_1,
+    BBVA_REPORT_DARK_BG_2,
+    BBVA_REPORT_DARK_TEXT_MID,
+    BBVA_REPORT_DARK_TEXT_SOFT,
+    BBVA_REPORT_DARK_TEXT_SUBTLE,
+    BBVA_REPORT_GREEN,
+    BBVA_REPORT_GREEN_BG,
+    BBVA_REPORT_GREEN_BORDER,
+    BBVA_REPORT_GREEN_TEXT,
+    BBVA_REPORT_LINE,
+    BBVA_REPORT_MIST,
+    BBVA_REPORT_NEUTRAL_BORDER,
+    BBVA_REPORT_RED,
+    BBVA_REPORT_RED_BG,
+    BBVA_REPORT_RED_BORDER,
+    BBVA_REPORT_RED_TEXT,
+    BBVA_REPORT_SKY_BG,
+    BBVA_REPORT_SKY_BORDER,
+    BBVA_REPORT_SKY_TEXT,
+    BBVA_REPORT_TEAL_BG,
+    BBVA_REPORT_TEAL_BORDER,
+    BBVA_REPORT_TEAL_TEXT,
+    hex_to_rgba,
 )
 from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
@@ -55,6 +92,14 @@ from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
 _T = TypeVar("_T")
+_PPT_PNG_CACHE_VERSION = "v1"
+_PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES = 24
+_PPT_PNG_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
+_PPT_PNG_CACHE_LOCK = threading.Lock()
+_PPT_RESULT_CACHE_VERSION = "v1"
+_PPT_RESULT_CACHE_DEFAULT_MAX_ENTRIES = 12
+_PPT_RESULT_CACHE: "OrderedDict[str, ExecutiveReportResult]" = OrderedDict()
+_PPT_RESULT_CACHE_LOCK = threading.Lock()
 
 SLIDE_WIDTH = int(Inches(13.333))
 SLIDE_HEIGHT = int(Inches(7.5))
@@ -69,15 +114,40 @@ PALETTE: Dict[str, str] = {
     "blue": BBVA_LIGHT.core_blue.lstrip("#"),
     "sky": BBVA_LIGHT.serene_dark_blue.lstrip("#"),
     "teal": BBVA_LIGHT.aqua.lstrip("#"),
-    "green": "38761D",
-    "amber": "F5B942",
-    "red": "D64550",
+    "green": BBVA_REPORT_GREEN.lstrip("#"),
+    "amber": BBVA_REPORT_AMBER.lstrip("#"),
+    "red": BBVA_REPORT_RED.lstrip("#"),
     "ink": BBVA_LIGHT.ink.lstrip("#"),
     "muted": BBVA_LIGHT.ink_muted.lstrip("#"),
     "panel": BBVA_LIGHT.white.lstrip("#"),
     "bg": BBVA_LIGHT.bg_light.lstrip("#"),
-    "line": "D3D8E1",
-    "mist": "EEF3FB",
+    "line": BBVA_REPORT_LINE.lstrip("#"),
+    "mist": BBVA_REPORT_MIST.lstrip("#"),
+    "tone_blue_bg": BBVA_REPORT_BLUE_BG.lstrip("#"),
+    "tone_blue_border": BBVA_REPORT_BLUE_BORDER.lstrip("#"),
+    "tone_blue_text": BBVA_REPORT_BLUE_TEXT.lstrip("#"),
+    "tone_sky_bg": BBVA_REPORT_SKY_BG.lstrip("#"),
+    "tone_sky_border": BBVA_REPORT_SKY_BORDER.lstrip("#"),
+    "tone_sky_text": BBVA_REPORT_SKY_TEXT.lstrip("#"),
+    "tone_teal_bg": BBVA_REPORT_TEAL_BG.lstrip("#"),
+    "tone_teal_border": BBVA_REPORT_TEAL_BORDER.lstrip("#"),
+    "tone_teal_text": BBVA_REPORT_TEAL_TEXT.lstrip("#"),
+    "tone_amber_bg": BBVA_REPORT_AMBER_BG.lstrip("#"),
+    "tone_amber_border": BBVA_REPORT_AMBER_BORDER.lstrip("#"),
+    "tone_amber_text": BBVA_REPORT_AMBER_TEXT.lstrip("#"),
+    "tone_green_bg": BBVA_REPORT_GREEN_BG.lstrip("#"),
+    "tone_green_border": BBVA_REPORT_GREEN_BORDER.lstrip("#"),
+    "tone_green_text": BBVA_REPORT_GREEN_TEXT.lstrip("#"),
+    "tone_red_bg": BBVA_REPORT_RED_BG.lstrip("#"),
+    "tone_red_border": BBVA_REPORT_RED_BORDER.lstrip("#"),
+    "tone_red_text": BBVA_REPORT_RED_TEXT.lstrip("#"),
+    "tone_neutral_border": BBVA_REPORT_NEUTRAL_BORDER.lstrip("#"),
+    "dark_bg_1": BBVA_REPORT_DARK_BG_1.lstrip("#"),
+    "dark_bg_2": BBVA_REPORT_DARK_BG_2.lstrip("#"),
+    "dark_line": BBVA_REPORT_DARK_ACCENT_LINE.lstrip("#"),
+    "dark_text_soft": BBVA_REPORT_DARK_TEXT_SOFT.lstrip("#"),
+    "dark_text_subtle": BBVA_REPORT_DARK_TEXT_SUBTLE.lstrip("#"),
+    "dark_text_mid": BBVA_REPORT_DARK_TEXT_MID.lstrip("#"),
 }
 
 ORTHO_REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
@@ -228,6 +298,7 @@ class _ChartSection:
     subtitle: str
     figure: Optional[go.Figure]
     insight_pack: TrendInsightPack
+    image_png: Optional[bytes] = None
 
 
 @dataclass(frozen=True)
@@ -246,7 +317,7 @@ class _ScopeContext:
 def _rgb(hex_code: str) -> RGBColor:
     code = str(hex_code or "").strip().lstrip("#")
     if len(code) != 6:
-        code = "000000"
+        code = PALETTE["ink"]
     return RGBColor(int(code[0:2], 16), int(code[2:4], 16), int(code[4:6], 16))
 
 
@@ -254,21 +325,6 @@ def _slug(value: str) -> str:
     txt = str(value or "").strip().lower()
     txt = re.sub(r"[^a-z0-9]+", "-", txt).strip("-")
     return txt or "scope"
-
-
-def _to_dt_naive(series: pd.Series | None) -> pd.Series:
-    if series is None:
-        return pd.Series([], dtype="datetime64[ns]")
-    out = pd.to_datetime(series, errors="coerce")
-    try:
-        if hasattr(out.dt, "tz") and out.dt.tz is not None:
-            out = out.dt.tz_localize(None)
-    except Exception:
-        try:
-            out = out.dt.tz_localize(None)
-        except Exception:
-            pass
-    return out
 
 
 def _is_finalist_status(value: object) -> bool:
@@ -494,17 +550,37 @@ def _set_rich_text(
 def _tone_style(tone: str) -> Tuple[str, str, str]:
     key = str(tone or "").strip().lower()
     styles: Dict[str, Tuple[str, str, str]] = {
-        "blue": ("EAF2FF", "B8CCE8", "0B3A75"),
-        "sky": ("E8F7FF", "9DDCFB", "0B4A6F"),
-        "teal": ("E6F9F7", "9EDFD9", "0E5C5C"),
-        "amber": ("FFF4DE", "F3D89B", "7A5A12"),
-        "green": ("EAF6EC", "B8DDBF", "1F5B2E"),
-        "red": ("FDEBEC", "E3A5AA", "8B1D26"),
-        "urgency_must": ("FDEBEC", "E3A5AA", "8B1D26"),
-        "urgency_should": ("FFF4DE", "F3D89B", "7A5A12"),
-        "urgency_nice": ("EAF6EC", "B8DDBF", "1F5B2E"),
+        "blue": (PALETTE["tone_blue_bg"], PALETTE["tone_blue_border"], PALETTE["tone_blue_text"]),
+        "sky": (PALETTE["tone_sky_bg"], PALETTE["tone_sky_border"], PALETTE["tone_sky_text"]),
+        "teal": (PALETTE["tone_teal_bg"], PALETTE["tone_teal_border"], PALETTE["tone_teal_text"]),
+        "amber": (
+            PALETTE["tone_amber_bg"],
+            PALETTE["tone_amber_border"],
+            PALETTE["tone_amber_text"],
+        ),
+        "green": (
+            PALETTE["tone_green_bg"],
+            PALETTE["tone_green_border"],
+            PALETTE["tone_green_text"],
+        ),
+        "red": (PALETTE["tone_red_bg"], PALETTE["tone_red_border"], PALETTE["tone_red_text"]),
+        "urgency_must": (
+            PALETTE["tone_red_bg"],
+            PALETTE["tone_red_border"],
+            PALETTE["tone_red_text"],
+        ),
+        "urgency_should": (
+            PALETTE["tone_amber_bg"],
+            PALETTE["tone_amber_border"],
+            PALETTE["tone_amber_text"],
+        ),
+        "urgency_nice": (
+            PALETTE["tone_green_bg"],
+            PALETTE["tone_green_border"],
+            PALETTE["tone_green_text"],
+        ),
     }
-    return styles.get(key, ("EEF3FB", "C8D6E8", PALETTE["navy"]))
+    return styles.get(key, (PALETTE["mist"], PALETTE["tone_neutral_border"], PALETTE["navy"]))
 
 
 def _urgency_from_score(score: float) -> Tuple[str, str]:
@@ -607,8 +683,8 @@ def _build_sections(
 
 def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_ChartSection]:
     """
-    Report-only slide: combines "Por funcionalidad" + "Duplicados" insights.
-    Reuses the app's exact logic for theme classification and duplicate detection.
+    Report-only slide: visualiza "Por funcionalidad".
+    Mantiene la señal de duplicados en la narrativa de insights (panel derecho).
     """
     open_df = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
     if open_df.empty:
@@ -645,11 +721,6 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         duplicate_issues = int(sum(len(keys) for keys in groups))
 
     heuristic_clusters = int(len([c for c in clusters if int(getattr(c, "size", 0) or 0) > 1]))
-    heuristic_issues = int(
-        sum(
-            int(getattr(c, "size", 0) or 0) for c in clusters if int(getattr(c, "size", 0) or 0) > 1
-        )
-    )
 
     has_topics = (
         (not top_tbl.empty) and ("tema" in top_tbl.columns) and ("open_count" in top_tbl.columns)
@@ -671,11 +742,9 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
 
     fig = make_subplots(
         rows=1,
-        cols=2,
-        specs=[[{"type": "domain"}, {"type": "xy"}]],
-        column_widths=[0.62, 0.38],
-        subplot_titles=("Por funcionalidad", "Duplicados"),
-        horizontal_spacing=0.10,
+        cols=1,
+        specs=[[{"type": "domain"}]],
+        subplot_titles=("Por funcionalidad",),
     )
 
     if has_topics:
@@ -716,31 +785,23 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
                 hole=0.55,
                 sort=False,
                 direction="clockwise",
-                marker=dict(colors=colors, line=dict(color="#FFFFFF", width=2)),
+                marker=dict(colors=colors, line=dict(color=f"#{PALETTE['panel']}", width=2)),
                 hovertemplate="Tema: %{label}<br>Abiertas: %{value}<br>%{percent}<extra></extra>",
                 showlegend=True,
             ),
             row=1,
             col=1,
         )
-
-    dup_names = ["Por título", "Por heurística"]
-    dup_values = [int(duplicate_issues), int(heuristic_issues)]
-    fig.add_trace(
-        go.Bar(
-            x=dup_names,
-            y=dup_values,
-            marker=dict(color=[f"#{PALETTE['red']}", f"#{PALETTE['amber']}"]),
-            text=[str(v) if v > 0 else "" for v in dup_values],
-            textposition="outside",
-            cliponaxis=False,
-            hovertemplate="%{x}<br>Casos: %{y}<extra></extra>",
-            showlegend=False,
-        ),
-        row=1,
-        col=2,
-    )
-    fig.update_yaxes(title_text="Casos", row=1, col=2)
+    else:
+        fig.add_annotation(
+            text="No hay datos suficientes para distribución por funcionalidad.",
+            showarrow=False,
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            font=dict(color=f"#{PALETTE['muted']}", size=13),
+        )
     fig.update_layout(title_text="", showlegend=True, margin=dict(l=16, r=16, t=52, b=56))
     fig = apply_plotly_bbva(fig, showlegend=True)
 
@@ -834,6 +895,52 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     )
 
 
+def _prerender_section_images(sections: Sequence[_ChartSection]) -> List[_ChartSection]:
+    if not sections:
+        return []
+    if not _bool_env("BUG_RESOLUTION_RADAR_PPT_PRERENDER_CHARTS", True):
+        return list(sections)
+
+    workers = max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_RENDER_WORKERS",
+            _default_ppt_render_workers(),
+        ),
+    )
+    total = len(sections)
+    if workers <= 1 or total <= 1:
+        out: List[_ChartSection] = []
+        for sec in sections:
+            if sec.figure is None:
+                out.append(sec)
+                continue
+            out.append(replace(sec, image_png=_fig_to_png(sec.figure)))
+        return out
+
+    max_workers = min(workers, total)
+    out = list(sections)
+    futures: Dict[Any, int] = {}
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-render") as pool:
+        for idx, sec in enumerate(sections):
+            if sec.figure is None:
+                continue
+            futures[pool.submit(_fig_to_png, sec.figure)] = idx
+        for fut in as_completed(futures):
+            idx = int(futures[fut])
+            try:
+                payload = fut.result()
+            except Exception as exc:
+                LOGGER.warning(
+                    "PPT chart prerender failed: %s (%s)",
+                    sections[idx].chart_id,
+                    exc,
+                )
+                payload = None
+            out[idx] = replace(out[idx], image_png=payload)
+    return out
+
+
 def _build_context(
     settings: Settings,
     *,
@@ -863,10 +970,7 @@ def _build_context(
                 open_df_override.copy(deep=False), settings=settings
             )
             if not dff.empty and not open_df.empty:
-                open_index = set(open_df.index.tolist())
-                closed_df = dff.loc[[idx for idx in dff.index if idx not in open_index]].copy(
-                    deep=False
-                )
+                closed_df = dff.loc[~dff.index.isin(open_df.index)].copy(deep=False)
             else:
                 closed_df = pd.DataFrame()
 
@@ -875,7 +979,7 @@ def _build_context(
             "No hay incidencias para el país/origen y filtros seleccionados. Ajusta scope o filtros."
         )
 
-    sections = _build_sections(settings, dff=dff, open_df=open_df)
+    sections = _prerender_section_images(_build_sections(settings, dff=dff, open_df=open_df))
     return _ScopeContext(
         country=str(country or "").strip(),
         source_id=str(source_id or "").strip(),
@@ -908,6 +1012,192 @@ def _bool_env(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _ppt_png_cache_max_entries() -> int:
+    return max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_IMAGE_CACHE_MAX_ENTRIES",
+            _PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+    )
+
+
+def _ppt_result_cache_enabled() -> bool:
+    return _bool_env("BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE", True)
+
+
+def _ppt_result_cache_max_entries() -> int:
+    return max(
+        1,
+        _int_env(
+            "BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE_MAX_ENTRIES",
+            _PPT_RESULT_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+    )
+
+
+def _compact_df_signature(df: pd.DataFrame | None) -> str:
+    if not isinstance(df, pd.DataFrame):
+        return "none"
+    if df.empty:
+        return "empty"
+
+    preferred_cols = [
+        "key",
+        "summary",
+        "status",
+        "priority",
+        "created",
+        "updated",
+        "resolved",
+        "assignee",
+        "country",
+        "source_id",
+        "source_type",
+        "url",
+    ]
+    cols = [c for c in preferred_cols if c in df.columns]
+    if not cols:
+        cols = list(df.columns)
+    try:
+        hashed = pd.util.hash_pandas_object(
+            df.loc[:, cols],
+            index=True,
+            categorize=True,
+        )
+        digest = hashlib.blake2b(
+            hashed.to_numpy(dtype="uint64", copy=False).tobytes(),
+            digest_size=16,
+        ).hexdigest()
+        return f"{len(df)}:{len(cols)}:{digest}"
+    except Exception:
+        return f"{len(df)}:{len(cols)}:{abs(hash(tuple(cols)))}"
+
+
+def _report_request_cache_key(
+    settings: Settings,
+    *,
+    country: str,
+    source_id: str,
+    status_filters: Sequence[str] | None,
+    priority_filters: Sequence[str] | None,
+    assignee_filters: Sequence[str] | None,
+    dff_override: pd.DataFrame | None,
+) -> str:
+    data_path = Path(str(getattr(settings, "DATA_PATH", "") or "")).expanduser()
+    if data_path.exists():
+        data_rev = f"{int(data_path.stat().st_mtime_ns)}:{int(data_path.stat().st_size)}"
+    else:
+        data_rev = "missing"
+
+    payload = {
+        "cache_version": _PPT_RESULT_CACHE_VERSION,
+        "country": str(country or "").strip(),
+        "source_id": str(source_id or "").strip(),
+        "status_filters": _normalize_filter_values(status_filters),
+        "priority_filters": _normalize_filter_values(priority_filters),
+        "assignee_filters": _normalize_filter_values(assignee_filters),
+        "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
+        "data_path": str(data_path),
+        "data_rev": data_rev,
+        # If callers provide prefiltered frames without backing file changes, keep a
+        # compact signature to safely reuse cached report bytes.
+        "dff_override_sig": _compact_df_signature(dff_override),
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8", errors="replace")
+    return hashlib.blake2b(encoded, digest_size=20).hexdigest()
+
+
+def _ppt_result_cache_get(cache_key: str) -> Optional[ExecutiveReportResult]:
+    if not _ppt_result_cache_enabled():
+        return None
+    with _PPT_RESULT_CACHE_LOCK:
+        item = _PPT_RESULT_CACHE.get(cache_key)
+        if item is None:
+            return None
+        _PPT_RESULT_CACHE.move_to_end(cache_key)
+        return item
+
+
+def _ppt_result_cache_put(cache_key: str, result: ExecutiveReportResult) -> None:
+    if not _ppt_result_cache_enabled():
+        return
+    max_entries = _ppt_result_cache_max_entries()
+    with _PPT_RESULT_CACHE_LOCK:
+        _PPT_RESULT_CACHE[cache_key] = result
+        _PPT_RESULT_CACHE.move_to_end(cache_key)
+        while len(_PPT_RESULT_CACHE) > max_entries:
+            _PPT_RESULT_CACHE.popitem(last=False)
+
+
+def _clear_ppt_result_cache() -> None:
+    with _PPT_RESULT_CACHE_LOCK:
+        _PPT_RESULT_CACHE.clear()
+
+
+def _ppt_png_cache_key(
+    fig_dict: dict[str, object],
+    *,
+    scale: float,
+    export_width: int,
+    export_height: int,
+) -> str:
+    raw = json.dumps(
+        fig_dict,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8", errors="replace")
+    h = hashlib.blake2b(digest_size=20)
+    h.update(raw)
+    h.update(
+        (
+            f"|{_PPT_PNG_CACHE_VERSION}|{float(scale):.3f}|{int(export_width)}|{int(export_height)}"
+        ).encode("utf-8")
+    )
+    return h.hexdigest()
+
+
+def _ppt_png_cache_get(cache_key: str) -> Optional[bytes]:
+    with _PPT_PNG_CACHE_LOCK:
+        item = _PPT_PNG_CACHE.get(cache_key)
+        if item is None:
+            return None
+        _PPT_PNG_CACHE.move_to_end(cache_key)
+        return item
+
+
+def _ppt_png_cache_put(cache_key: str, payload: bytes) -> None:
+    if not payload:
+        return
+    max_entries = _ppt_png_cache_max_entries()
+    with _PPT_PNG_CACHE_LOCK:
+        _PPT_PNG_CACHE[cache_key] = payload
+        _PPT_PNG_CACHE.move_to_end(cache_key)
+        while len(_PPT_PNG_CACHE) > max_entries:
+            _PPT_PNG_CACHE.popitem(last=False)
+
+
+def _clear_ppt_png_cache() -> None:
+    with _PPT_PNG_CACHE_LOCK:
+        _PPT_PNG_CACHE.clear()
+
+
+def _default_ppt_render_workers() -> int:
+    cpu_count = int(os.cpu_count() or 2)
+    if cpu_count >= 8:
+        return 3
+    if cpu_count >= 4:
+        return 2
+    return 1
 
 
 def _kaleido_tmp_dir() -> str:
@@ -1055,6 +1345,16 @@ def _kaleido_png_bytes(
         timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20)
     )
     fig_dict = _validate_plotly_fig_to_dict(fig_obj)
+    cache_key = _ppt_png_cache_key(
+        fig_dict,
+        scale=scale,
+        export_width=export_width,
+        export_height=export_height,
+    )
+    cached = _ppt_png_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     tmp_dir = _kaleido_tmp_dir()
 
     use_isolated_process = _bool_env(
@@ -1066,7 +1366,7 @@ def _kaleido_png_bytes(
         False,
     )
     if not use_isolated_process:
-        return _kaleido_calc_fig_sync_png(
+        rendered = _kaleido_calc_fig_sync_png(
             fig_dict,
             scale=scale,
             export_width=export_width,
@@ -1074,17 +1374,20 @@ def _kaleido_png_bytes(
             timeout_s=timeout_s,
             tmp_dir=tmp_dir,
         )
+    else:
+        rendered = _call_in_subprocess_with_timeout(
+            _kaleido_calc_fig_sync_png,
+            fig_dict,
+            scale=scale,
+            export_width=export_width,
+            export_height=export_height,
+            timeout_s=timeout_s,
+            tmp_dir=tmp_dir,
+            hard_timeout_s=float(hard_timeout_s),
+        )
 
-    return _call_in_subprocess_with_timeout(
-        _kaleido_calc_fig_sync_png,
-        fig_dict,
-        scale=scale,
-        export_width=export_width,
-        export_height=export_height,
-        timeout_s=timeout_s,
-        tmp_dir=tmp_dir,
-        hard_timeout_s=float(hard_timeout_s),
-    )
+    _ppt_png_cache_put(cache_key, rendered)
+    return rendered
 
 
 def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
@@ -1214,8 +1517,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 size=18,
                 color=f"#{PALETTE['ink']}",
             ),
-            paper_bgcolor="#FFFFFF",
-            plot_bgcolor="#FFFFFF",
+            paper_bgcolor=f"#{PALETTE['panel']}",
+            plot_bgcolor=f"#{PALETTE['panel']}",
             legend=dict(
                 orientation="h",
                 yanchor="top",
@@ -1227,7 +1530,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     size=legend_render_font,
                     color=f"#{PALETTE['ink']}",
                 ),
-                bgcolor="rgba(255,255,255,0.98)",
+                bgcolor=hex_to_rgba(BBVA_LIGHT.white, 0.98, fallback=BBVA_LIGHT.white),
                 bordercolor=f"#{PALETTE['line']}",
                 borderwidth=1,
                 title=dict(text=""),
@@ -1364,8 +1667,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             color=f"#{PALETTE['ink']}",
             showline=True,
             linecolor=f"#{PALETTE['line']}",
-            gridcolor="#E8EDF4",
-            zerolinecolor="#E8EDF4",
+            gridcolor=f"#{PALETTE['mist']}",
+            zerolinecolor=f"#{PALETTE['mist']}",
         )
         export_fig.update_yaxes(
             tickfont=dict(family=FONT_BODY_BOOK, size=axis_tick_size, color=f"#{PALETTE['ink']}"),
@@ -1375,8 +1678,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             color=f"#{PALETTE['ink']}",
             showline=True,
             linecolor=f"#{PALETTE['line']}",
-            gridcolor="#E8EDF4",
-            zerolinecolor="#E8EDF4",
+            gridcolor=f"#{PALETTE['mist']}",
+            zerolinecolor=f"#{PALETTE['mist']}",
         )
         for trace in traces:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
@@ -1508,7 +1811,7 @@ def _add_header(slide: Any, *, title: str, subtitle: str, dark: bool = False) ->
     run.font.name = FONT_HEAD
     run.font.bold = True
     run.font.size = Pt(23 if dark else 20)
-    run.font.color.rgb = _rgb("FFFFFF" if dark else PALETTE["navy"])
+    run.font.color.rgb = _rgb(PALETTE["panel"] if dark else PALETTE["navy"])
 
     subtitle_box = slide.shapes.add_textbox(Inches(0.52), Inches(0.50), Inches(11.9), Inches(0.20))
     tf2 = subtitle_box.text_frame
@@ -1518,7 +1821,7 @@ def _add_header(slide: Any, *, title: str, subtitle: str, dark: bool = False) ->
     run2.text = subtitle
     run2.font.name = FONT_BODY_BOOK
     run2.font.size = Pt(11.2)
-    run2.font.color.rgb = _rgb("CFE2FF" if dark else PALETTE["muted"])
+    run2.font.color.rgb = _rgb(PALETTE["dark_text_subtle"] if dark else PALETTE["muted"])
 
 
 def _add_footer(slide: Any, *, context: _ScopeContext) -> None:
@@ -1591,7 +1894,7 @@ def _metric_card(
 
 def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, "001B4A")
+    _add_bg(slide, PALETTE["dark_bg_1"])
     _add_header(
         slide,
         title="Radar de Resolución de Incidencias",
@@ -1608,7 +1911,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     dr.text = context.generated_at.strftime("%B %Y").capitalize()
     dr.font.name = FONT_BODY_BOOK
     dr.font.size = Pt(11)
-    dr.font.color.rgb = _rgb("CFE2FF")
+    dr.font.color.rgb = _rgb(PALETTE["dark_text_subtle"])
 
     line = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
@@ -1630,7 +1933,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     run.font.name = FONT_HEAD
     run.font.bold = True
     run.font.size = Pt(36)
-    run.font.color.rgb = _rgb("FFFFFF")
+    run.font.color.rgb = _rgb(PALETTE["panel"])
 
     _metric_card(
         slide,
@@ -1671,8 +1974,8 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
         Inches(1.26),
     )
     scope_box.fill.solid()
-    scope_box.fill.fore_color.rgb = _rgb("0A2E67")
-    scope_box.line.color.rgb = _rgb("2A66B8")
+    scope_box.fill.fore_color.rgb = _rgb(PALETTE["blue"])
+    scope_box.line.color.rgb = _rgb(PALETTE["dark_line"])
     tf2 = scope_box.text_frame
     tf2.clear()
     tf2.word_wrap = True
@@ -1682,7 +1985,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     run2.text = f"Scope: {context.country} · {context.source_label}"
     run2.font.name = FONT_BODY_MEDIUM
     run2.font.size = Pt(12.5)
-    run2.font.color.rgb = _rgb("FFFFFF")
+    run2.font.color.rgb = _rgb(PALETTE["panel"])
 
     p3 = tf2.add_paragraph()
     p3.alignment = PP_ALIGN.LEFT
@@ -1690,7 +1993,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     run3.text = f"Filtros aplicados: {context.filters.summary()}"
     run3.font.name = FONT_BODY_BOOK
     run3.font.size = Pt(11.2)
-    run3.font.color.rgb = _rgb("DDEBFF")
+    run3.font.color.rgb = _rgb(PALETTE["dark_text_mid"])
 
     foot = slide.shapes.add_textbox(Inches(0.62), Inches(6.97), Inches(12.0), Inches(0.20))
     ftf = foot.text_frame
@@ -1700,7 +2003,7 @@ def _add_cover_slide(prs: Any, context: _ScopeContext) -> None:
     fr.text = "Objetivo del informe: concentrar esfuerzos donde el impacto en servicio y productividad es mayor."
     fr.font.name = FONT_BODY_BOOK
     fr.font.size = Pt(10)
-    fr.font.color.rgb = _rgb("BDD8FF")
+    fr.font.color.rgb = _rgb(PALETTE["dark_text_soft"])
 
 
 def _group_sections_by_theme(
@@ -1759,97 +2062,6 @@ def _section_ribbon_items(section: _ChartSection) -> List[Tuple[str, str, str]]:
         )
     items.append(("Prioridad de acción", urgency_label, urgency_tone))
     return items[:4]
-
-
-def _add_index_row(
-    tf: Any,
-    *,
-    code: str,
-    title: str,
-    detail: str,
-    code_color: str,
-) -> None:
-    p_code = tf.add_paragraph()
-    p_code.space_before = Pt(7)
-    p_code.space_after = Pt(0)
-    r_code = p_code.add_run()
-    r_code.text = code
-    r_code.font.name = FONT_HEAD
-    r_code.font.bold = True
-    r_code.font.size = Pt(16)
-    r_code.font.color.rgb = _rgb(code_color)
-
-    p_title = tf.add_paragraph()
-    p_title.space_before = Pt(0)
-    p_title.space_after = Pt(0)
-    r_title = p_title.add_run()
-    r_title.text = title
-    r_title.font.name = FONT_HEAD
-    r_title.font.bold = True
-    r_title.font.size = Pt(14)
-    r_title.font.color.rgb = _rgb(PALETTE["ink"])
-
-    p_detail = tf.add_paragraph()
-    p_detail.space_before = Pt(0)
-    p_detail.space_after = Pt(2)
-    r_detail = p_detail.add_run()
-    r_detail.text = detail
-    r_detail.font.name = FONT_BODY_BOOK
-    r_detail.font.size = Pt(10.5)
-    r_detail.font.color.rgb = _rgb(PALETTE["muted"])
-
-
-def _add_index_slide(prs: Any, context: _ScopeContext) -> None:
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, PALETTE["bg"])
-    _add_header(
-        slide,
-        title="Índice",
-        subtitle="Historia del análisis y decisiones sugeridas",
-    )
-    rows: List[Tuple[str, str, str, str]] = [
-        ("01", "Apertura", "Alcance y reglas de lectura del análisis", PALETTE["blue"]),
-        ("02", "Panorama", "Tamaño del problema, foco y prioridades", PALETTE["teal"]),
-    ]
-    idx = 3
-    for theme, themed_sections in _group_sections_by_theme(context.sections):
-        detail = " · ".join([_clip_text(sec.title, max_len=45) for sec in themed_sections])
-        rows.append((f"{idx:02d}", theme, detail, PALETTE["navy"]))
-        idx += 1
-    rows.append(
-        (
-            f"{idx:02d}",
-            "Cierre y acciones",
-            "Plan de trabajo priorizado por impacto",
-            PALETTE["blue"],
-        )
-    )
-
-    body = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-        Inches(0.70),
-        Inches(1.30),
-        Inches(12.00),
-        Inches(5.65),
-    )
-    body.fill.solid()
-    body.fill.fore_color.rgb = _rgb(PALETTE["panel"])
-    body.line.color.rgb = _rgb(PALETTE["line"])
-
-    tf = body.text_frame
-    tf.clear()
-    tf.word_wrap = True
-    tf.paragraphs[0].clear()
-    for row in rows:
-        _add_index_row(
-            tf,
-            code=row[0],
-            title=row[1],
-            detail=row[2],
-            code_color=row[3],
-        )
-
-    _add_footer(slide, context=context)
 
 
 def _dominant_value(series: pd.Series, empty: str) -> str:
@@ -2092,8 +2304,8 @@ def _add_chart_insight_slide(
         Inches(0.30),
     )
     chip.fill.solid()
-    chip.fill.fore_color.rgb = _rgb("EAF2FF")
-    chip.line.color.rgb = _rgb("B8CCE8")
+    chip.fill.fore_color.rgb = _rgb(PALETTE["tone_blue_bg"])
+    chip.line.color.rgb = _rgb(PALETTE["tone_blue_border"])
     ctf = chip.text_frame
     ctf.clear()
     cp = ctf.paragraphs[0]
@@ -2116,15 +2328,17 @@ def _add_chart_insight_slide(
     chart_frame.fill.fore_color.rgb = _rgb(PALETTE["panel"])
     chart_frame.line.color.rgb = _rgb(PALETTE["line"])
 
-    chart_render_started = time.monotonic()
-    LOGGER.info("PPT chart render started: %s", section.chart_id)
-    image = _fig_to_png(section.figure)
-    LOGGER.info(
-        "PPT chart render finished: %s (ok=%s, %.2fs)",
-        section.chart_id,
-        image is not None,
-        max(0.0, time.monotonic() - chart_render_started),
-    )
+    image = section.image_png
+    if image is None and section.figure is not None:
+        chart_render_started = time.monotonic()
+        LOGGER.info("PPT chart render started: %s", section.chart_id)
+        image = _fig_to_png(section.figure)
+        LOGGER.info(
+            "PPT chart render finished: %s (ok=%s, %.2fs)",
+            section.chart_id,
+            image is not None,
+            max(0.0, time.monotonic() - chart_render_started),
+        )
     if image is None:
         tf = chart_frame.text_frame
         tf.clear()
@@ -2531,7 +2745,7 @@ def _select_actions_for_final_slide(actions: Sequence[ActionInsight]) -> List[Ac
 
 def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_bg(slide, "001C4A")
+    _add_bg(slide, PALETTE["dark_bg_2"])
     _add_header(
         slide,
         title="Plan de acción",
@@ -2546,8 +2760,8 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
         Inches(5.64),
     )
     actions_panel.fill.solid()
-    actions_panel.fill.fore_color.rgb = _rgb("FFFFFF")
-    actions_panel.line.color.rgb = _rgb("D3D8E1")
+    actions_panel.fill.fore_color.rgb = _rgb(PALETTE["panel"])
+    actions_panel.line.color.rgb = _rgb(PALETTE["line"])
 
     atf = actions_panel.text_frame
     atf.clear()
@@ -2610,7 +2824,7 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
     frun.text = f"{context.country} · {context.source_label} · {context.generated_at.strftime('%Y-%m-%d %H:%M UTC')}"
     frun.font.name = FONT_BODY_BOOK
     frun.font.size = Pt(10)
-    frun.font.color.rgb = _rgb("BDD8FF")
+    frun.font.color.rgb = _rgb(PALETTE["dark_text_soft"])
 
 
 def _compose_presentation(context: _ScopeContext) -> Any:
@@ -2646,6 +2860,19 @@ def generate_scope_executive_ppt(
     source_txt = str(source_id or "").strip()
     if not source_txt:
         raise ValueError("No se ha seleccionado un origen válido para generar el informe.")
+
+    cache_key = _report_request_cache_key(
+        settings,
+        country=country,
+        source_id=source_txt,
+        status_filters=status_filters,
+        priority_filters=priority_filters,
+        assignee_filters=assignee_filters,
+        dff_override=dff_override,
+    )
+    cached_result = _ppt_result_cache_get(cache_key)
+    if cached_result is not None:
+        return cached_result
 
     if scoped_source_df_override is not None:
         scoped_source_df = scoped_source_df_override
@@ -2686,7 +2913,7 @@ def generate_scope_executive_ppt(
     stamp = context.generated_at.strftime("%Y%m%d-%H%M")
     file_name = f"radar-{_slug(context.country)}-{_slug(context.source_id)}-{stamp}.pptx"
 
-    return ExecutiveReportResult(
+    result = ExecutiveReportResult(
         file_name=file_name,
         content=content,
         slide_count=len(prs.slides),
@@ -2698,3 +2925,5 @@ def generate_scope_executive_ppt(
         source_label=context.source_label,
         applied_filter_summary=context.filters.summary(),
     )
+    _ppt_result_cache_put(cache_key, result)
+    return result

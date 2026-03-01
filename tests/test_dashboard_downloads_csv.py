@@ -100,3 +100,21 @@ def test_df_to_excel_bytes_sizes_by_id_not_by_long_summary() -> None:
     assert float(ws.row_dimensions[2].height or 0.0) == 18.0
     # ID/key column width is explicitly adjusted and capped.
     assert 18.0 <= float(ws.column_dimensions["A"].width or 0.0) <= 26.0
+
+
+def test_df_to_excel_bytes_row_height_not_affected_by_long_description() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "INC000104226433",
+                "summary": "Titulo corto",
+                "description": "Descripcion muy larga\n" * 20,
+            }
+        ]
+    )
+
+    xlsx = df_to_excel_bytes(df, sheet_name="Issues")
+    wb = load_workbook(BytesIO(xlsx))
+    ws = wb["Issues"]
+
+    assert float(ws.row_dimensions[2].height or 0.0) == 18.0

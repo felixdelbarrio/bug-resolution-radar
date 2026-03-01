@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import html
-from io import BytesIO
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from io import BytesIO
 from typing import Any, Iterable, Literal, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
 from openpyxl.utils import get_column_letter
 
-from bug_resolution_radar.theme.design_tokens import BBVA_FONT_HEADLINE, BBVA_FONT_SANS, BBVA_LIGHT
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_FONT_HEADLINE,
+    BBVA_FONT_SANS,
+    BBVA_LIGHT,
+    hex_to_rgba,
+)
+from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
 
 EXCEL_DATETIME_NUMFMT = "dd/mm/yyyy hh:mm:ss"
 EXCEL_DEFAULT_DATA_ROW_HEIGHT = 18.0
@@ -81,14 +87,15 @@ def _csv_key_as_link_df(df: pd.DataFrame) -> pd.DataFrame:
     if "key" not in df.columns or "url" not in df.columns:
         return df
 
-    out = df.copy()
+    out = df.copy(deep=False)
+    key_values = out["key"].tolist()
+    url_values = out["url"].tolist()
     link_values = [
-        _csv_hyperlink_formula(url=row.get("url"), label=row.get("key"))
-        for _, row in out[["key", "url"]].iterrows()
+        _csv_hyperlink_formula(url=url, label=key) for key, url in zip(key_values, url_values)
     ]
     out["key"] = [
         link if link is not None else str(orig if orig is not None else "")
-        for link, orig in zip(link_values, out["key"].tolist())
+        for link, orig in zip(link_values, key_values)
     ]
     # Once the link is embedded in `key`, the raw `url` column is redundant in the CSV export.
     out = out.drop(columns=["url"], errors="ignore")
@@ -289,7 +296,11 @@ def _write_excel_sheet(
             cell.style = "Hyperlink"
 
 
-@st.cache_data(show_spinner=False, max_entries=64)
+@st.cache_data(
+    show_spinner=False,
+    max_entries=64,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _dfs_to_excel_bytes_cached(
     sheets: Sequence[tuple[str, pd.DataFrame]],
     *,
@@ -434,6 +445,7 @@ def download_button_for_df(
 DEFAULT_TABLE_COLS = [
     "key",
     "summary",
+    "description",
     "status",
     "type",
     "priority",
@@ -564,6 +576,8 @@ def figures_to_html_bytes(
     if not blocks:
         return b""
 
+    panel_border = hex_to_rgba(BBVA_LIGHT.ink, 0.14, fallback=BBVA_LIGHT.ink)
+    subtitle_color = hex_to_rgba(BBVA_LIGHT.ink, 0.72, fallback=BBVA_LIGHT.ink)
     doc = f"""<!doctype html>
 <html lang="en">
   <head>
@@ -586,7 +600,7 @@ def figures_to_html_bytes(
       }}
       .panel {{
         background: {BBVA_LIGHT.white};
-        border: 1px solid rgba(17,25,45,0.14);
+        border: 1px solid {panel_border};
         border-radius: 16px;
         padding: 12px;
       }}
@@ -599,7 +613,7 @@ def figures_to_html_bytes(
         margin: 0 0 8px 0;
         font-size: 0.9rem;
         font-weight: 700;
-        color: rgba(17,25,45,0.72);
+        color: {subtitle_color};
         font-family: {BBVA_FONT_SANS};
       }}
     </style>
@@ -607,7 +621,7 @@ def figures_to_html_bytes(
   <body>
     <h1>{html.escape(title)}</h1>
     <div class="wrap">
-      {''.join(blocks)}
+      {"".join(blocks)}
     </div>
   </body>
 </html>

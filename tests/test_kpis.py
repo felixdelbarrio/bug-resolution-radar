@@ -6,8 +6,8 @@ from typing import Any
 import pandas as pd
 
 from bug_resolution_radar.analytics import kpis as kpis_module
-from bug_resolution_radar.config import Settings
 from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.config import Settings
 
 
 def test_kpis_basic_counts() -> None:
@@ -147,3 +147,22 @@ def test_kpis_treats_accepted_without_resolved_as_closed() -> None:
     assert k["issues_total"] == 2
     assert k["issues_open"] == 1
     assert k["issues_closed"] == 1
+
+
+def test_kpis_can_skip_timeseries_chart_generation() -> None:
+    now = datetime.now(timezone.utc)
+    df = pd.DataFrame(
+        [
+            {
+                "key": "K-1",
+                "summary": "Bug",
+                "status": "Open",
+                "priority": "High",
+                "created": now - timedelta(days=2),
+                "updated": now - timedelta(days=1),
+                "resolved": pd.NaT,
+            }
+        ]
+    )
+    k = compute_kpis(df, settings=Settings(), include_timeseries_chart=False)
+    assert k["timeseries_chart"] is None

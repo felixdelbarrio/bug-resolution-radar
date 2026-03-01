@@ -6,20 +6,28 @@ from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 from pptx import Presentation
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.reports import executive_ppt as executive_ppt_module
 from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.reports.executive_ppt import (
     _best_actions,
     _build_sections,
     _call_in_subprocess_with_timeout,
     _ChartSection,
+    _clear_ppt_png_cache,
+    _clear_ppt_result_cache,
     _fig_to_png,
+    _FilterSnapshot,
     _is_finalist_status,
+    _kaleido_png_bytes,
     _open_closed,
+    _prerender_section_images,
+    _ScopeContext,
     _select_actions_for_final_slide,
     _soften_insight_tone,
     _urgency_from_score,
@@ -287,6 +295,108 @@ def test_fig_to_png_renders_open_priority_pie() -> None:
         pytest.skip("Exportador de imágenes de Plotly no disponible en este entorno.")
     assert image is not None
     assert len(image) > 1_000
+
+
+def test_kaleido_png_bytes_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    fig = go.Figure(data=[go.Bar(x=["A"], y=[1])])
+    calls = {"n": 0}
+
+    def _fake_calc(*args: object, **kwargs: object) -> bytes:
+        del args, kwargs
+        calls["n"] += 1
+        return b"fake-png-bytes"
+
+    _clear_ppt_png_cache()
+    monkeypatch.setattr(executive_ppt_module, "_kaleido_calc_fig_sync_png", _fake_calc)
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PPT_RENDER_ISOLATED_PROCESS", "0")
+
+    out1 = _kaleido_png_bytes(fig, scale=2, export_width=640, export_height=400)
+    out2 = _kaleido_png_bytes(fig, scale=2, export_width=640, export_height=400)
+    assert out1 == b"fake-png-bytes"
+    assert out2 == b"fake-png-bytes"
+    assert calls["n"] == 1
+
+
+def test_prerender_section_images_populates_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    section = _ChartSection(
+        chart_id="timeseries",
+        theme="Ritmo del flujo",
+        title="Serie temporal",
+        subtitle="Entrada y salida",
+        figure=go.Figure(data=[go.Bar(x=["A"], y=[2])]),
+        insight_pack=TrendInsightPack(metrics=[], cards=[], executive_tip=""),
+    )
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PPT_PRERENDER_CHARTS", "1")
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PPT_RENDER_WORKERS", "1")
+    monkeypatch.setattr(executive_ppt_module, "_fig_to_png", lambda _fig: b"img")
+
+    rendered = _prerender_section_images([section])
+    assert len(rendered) == 1
+    assert rendered[0].image_png == b"img"
+
+
+def test_generate_scope_executive_ppt_uses_result_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed_now = datetime(2026, 2, 20, 12, 0, tzinfo=timezone.utc)
+    base_df = pd.DataFrame([{"key": "MX-1"}])
+    fake_ctx = _ScopeContext(
+        country="México",
+        source_id="jira:mexico:core-mx",
+        source_label="México · Core MX (JIRA)",
+        filters=_FilterSnapshot(status=(), priority=(), assignee=()),
+        dff=base_df,
+        open_df=base_df,
+        closed_df=pd.DataFrame(),
+        generated_at=fixed_now,
+        sections=[],
+    )
+
+    class _FakePresentation:
+        slides = [object(), object()]
+
+        def save(self, buffer: BytesIO) -> None:
+            buffer.write(b"PPT-CACHED")
+
+    calls = {"compose": 0}
+
+    def _fake_build_context(*args: object, **kwargs: object) -> _ScopeContext:
+        del args, kwargs
+        return fake_ctx
+
+    def _fake_compose(context: _ScopeContext) -> _FakePresentation:
+        del context
+        calls["compose"] += 1
+        return _FakePresentation()
+
+    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PPT_RESULT_CACHE", "1")
+    _clear_ppt_result_cache()
+    monkeypatch.setattr(executive_ppt_module, "_build_context", _fake_build_context)
+    monkeypatch.setattr(executive_ppt_module, "_compose_presentation", _fake_compose)
+
+    settings = Settings(DATA_PATH="unused.json")
+    out1 = generate_scope_executive_ppt(
+        settings,
+        country="México",
+        source_id="jira:mexico:core-mx",
+        dff_override=base_df,
+        open_df_override=base_df,
+        scoped_source_df_override=base_df,
+    )
+    out2 = generate_scope_executive_ppt(
+        settings,
+        country="México",
+        source_id="jira:mexico:core-mx",
+        dff_override=base_df,
+        open_df_override=base_df,
+        scoped_source_df_override=base_df,
+    )
+
+    assert calls["compose"] == 1
+    assert out1.content == b"PPT-CACHED"
+    assert out2.content == out1.content
 
 
 def test_build_sections_skips_resolution_chart_when_no_closed_data() -> None:

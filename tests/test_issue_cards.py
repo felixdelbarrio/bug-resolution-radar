@@ -60,3 +60,21 @@ def test_prepare_issue_cards_df_treats_accepted_as_closed_without_resolved() -> 
     is_open_by_key = dict(zip(out["key"].astype(str), out["__is_open"].astype(bool)))
     assert is_open_by_key["A-1"] is True
     assert is_open_by_key["A-2"] is False
+
+
+def test_prepare_issue_cards_df_can_preserve_input_order() -> None:
+    df = pd.DataFrame(
+        {
+            "key": ["A-2", "A-1"],
+            "summary": ["later", "earlier"],
+            "status": ["New", "New"],
+            "priority": ["Low", "High"],
+            "assignee": ["ana", "ana"],
+            "created": ["2025-01-01", "2025-01-01"],
+            "updated": ["2025-01-01", "2025-02-01"],
+            "resolved": [pd.NaT, pd.NaT],
+            "url": ["u2", "u1"],
+        }
+    )
+    out = prepare_issue_cards_df(df, max_cards=10, preserve_order=True)
+    assert out["key"].tolist() == ["A-2", "A-1"]

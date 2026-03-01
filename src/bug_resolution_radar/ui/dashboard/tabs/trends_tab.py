@@ -12,14 +12,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.config import Settings
+from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -335,13 +335,6 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     return (priority_rank(p), pl)
 
 
-def _resolution_band(days: pd.Series) -> pd.Categorical:
-    """Build resolution speed bands for semantic coloring."""
-    bins = [-np.inf, 7, 30, np.inf]
-    labels = ["Rapida (0-7d)", "Media (8-30d)", "Lenta (>30d)"]
-    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
-
-
 def _resolution_bucket(days: pd.Series) -> pd.Categorical:
     """Build categorical buckets to avoid confusion in continuous histograms."""
     bins = [-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, np.inf]
@@ -366,9 +359,8 @@ def _add_bar_totals(
         return
     ymax = max(float(v) for v in y_totals) if y_totals else 0.0
     offset = max(1.0, ymax * 0.035)
-    text_color = (
-        "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
-    )
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    text_color = (BBVA_DARK if dark_mode else BBVA_LIGHT).ink
     fig.add_scatter(
         x=x_values,
         y=[float(v) + offset for v in y_totals],

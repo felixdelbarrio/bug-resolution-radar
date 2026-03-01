@@ -81,6 +81,54 @@ def _resolve_app_script() -> Path:
     raise FileNotFoundError(f"Could not find bundled Streamlit entrypoint: {script}")
 
 
+def _runtime_app_icon_candidates() -> list[Path]:
+    out: list[Path] = []
+    # Local/dev repository icon.
+    out.append(Path(__file__).resolve().parent / "assets" / "app_icon" / "bug-resolution-radar.png")
+
+    if getattr(sys, "frozen", False):
+        try:
+            exe = Path(sys.executable).resolve()
+            exe_dir = exe.parent
+            contents_dir = exe_dir.parent
+            out.append(contents_dir / "Resources" / "bug-resolution-radar.icns")
+            out.append(contents_dir / "Resources" / "bug-resolution-radar.png")
+        except Exception:
+            pass
+
+    # De-dup preserving order.
+    seen: set[str] = set()
+    uniq: list[Path] = []
+    for path in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(path)
+    return uniq
+
+
+def _set_macos_runtime_dock_icon() -> None:
+    """Best-effort Dock icon override for local pywebview runs on macOS."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplication, NSImage  # type: ignore
+    except Exception:
+        return
+
+    icon_path = next((p for p in _runtime_app_icon_candidates() if p.exists()), None)
+    if icon_path is None:
+        return
+    try:
+        image = NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+        if image is None:
+            return
+        NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        return
+
+
 def _candidate_streamlit_config_paths() -> list[Path]:
     out: list[Path] = []
 
@@ -117,6 +165,97 @@ def _candidate_streamlit_config_paths() -> list[Path]:
         seen.add(key)
         uniq.append(path)
     return uniq
+
+
+def _candidate_runtime_seed_paths(filename: str) -> list[Path]:
+    out: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        out.append(Path(meipass) / filename)
+
+    try:
+        exe = Path(sys.executable).resolve()
+        exe_dir = exe.parent
+        contents_dir = exe_dir.parent
+        out.append(exe_dir / filename)
+        out.append(contents_dir / filename)
+
+        if (
+            sys.platform == "darwin"
+            and exe_dir.name == "MacOS"
+            and contents_dir.name == "Contents"
+            and contents_dir.parent.suffix.lower() == ".app"
+        ):
+            app_dir = contents_dir.parent
+            out.append(contents_dir / "Resources" / filename)
+            out.append(contents_dir / "Frameworks" / filename)
+            out.append(app_dir / filename)
+            out.append(app_dir.parent / filename)
+            out.append(app_dir.parent.parent / filename)
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    uniq: list[Path] = []
+    for path in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(path)
+    return uniq
+
+
+def _first_existing_file(paths: list[Path]) -> Path | None:
+    for path in paths:
+        try:
+            if path.exists() and path.is_file():
+                return path
+        except Exception:
+            continue
+    return None
+
+
+def _ensure_runtime_env_seed(runtime_home: Path) -> None:
+    """
+    Seed runtime `.env` and `.env.example` on first run for packaged desktop app.
+
+    Priority:
+    1) bundled `.env` (if present) -> runtime `.env`
+    2) bundled `.env.example` -> runtime `.env` (fallback)
+    Also copy `.env.example` for user guidance.
+    """
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    target_env = runtime_home / ".env"
+    target_example = runtime_home / ".env.example"
+
+    source_example = _first_existing_file(_candidate_runtime_seed_paths(".env.example"))
+    if source_example is not None and not target_example.exists():
+        try:
+            target_example.write_text(source_example.read_text(encoding="utf-8"), encoding="utf-8")
+            _launcher_log(f"Plantilla .env.example inicializada desde: {source_example}")
+        except Exception:
+            pass
+
+    if target_env.exists():
+        return
+
+    source_env = _first_existing_file(_candidate_runtime_seed_paths(".env"))
+    if source_env is not None:
+        try:
+            target_env.write_text(source_env.read_text(encoding="utf-8"), encoding="utf-8")
+            _launcher_log(f"Configuración .env inicializada desde: {source_env}")
+            return
+        except Exception:
+            pass
+
+    if target_example.exists():
+        try:
+            target_env.write_text(target_example.read_text(encoding="utf-8"), encoding="utf-8")
+            _launcher_log("Configuración .env inicializada desde .env.example en runtime.")
+        except Exception:
+            pass
 
 
 def _load_dotenv_if_present(dotenv_path: Path) -> None:
@@ -428,11 +567,23 @@ def _desktop_webview_enabled_for_frozen_binary() -> bool:
     """
     Return whether packaged binaries should use embedded pywebview.
 
-    On macOS we default to external-browser mode to reduce OS permission prompts
-    from embedded WebKit (camera/mic/accessibility/automation checks).
+    Default is embedded container mode unless explicitly disabled.
     """
-    default = sys.platform != "darwin"
-    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", default)
+    return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", True)
+
+
+def _configure_webview_runtime_settings(webview_module: object) -> None:
+    """Apply runtime-safe pywebview settings required by desktop container UX."""
+    settings = getattr(webview_module, "settings", None)
+    if settings is None:
+        return
+
+    try:
+        # Product decision: desktop container downloads are always enabled.
+        settings["ALLOW_DOWNLOADS"] = True
+    except Exception:
+        return
+    _launcher_log("pywebview setting ALLOW_DOWNLOADS=true")
 
 
 def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
@@ -443,7 +594,11 @@ def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
     for key in ("NO_PROXY", "no_proxy"):
         env[key] = str(os.environ.get(key) or "localhost,127.0.0.1,::1")
     _launcher_log(f"Iniciando servidor interno de Streamlit en puerto {port}.")
-    return subprocess.Popen([sys.executable], env=env, cwd=os.getcwd())
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable]
+    else:
+        cmd = [sys.executable, str(Path(__file__).resolve())]
+    return subprocess.Popen(cmd, env=env, cwd=os.getcwd())
 
 
 def _stop_internal_streamlit_subprocess(proc: subprocess.Popen[bytes]) -> None:
@@ -505,6 +660,7 @@ def _run_desktop_container() -> int:
             raise RuntimeError(
                 "No se pudo cargar pywebview para abrir el contenedor de escritorio."
             ) from exc
+        _configure_webview_runtime_settings(webview)
 
         title = str(os.environ.get("APP_TITLE") or "Bug Resolution Radar").strip() or (
             "Bug Resolution Radar"
@@ -514,6 +670,7 @@ def _run_desktop_container() -> int:
         min_width = max(800, _int_env("BUG_RESOLUTION_RADAR_WINDOW_MIN_WIDTH", 1024))
         min_height = max(600, _int_env("BUG_RESOLUTION_RADAR_WINDOW_MIN_HEIGHT", 700))
 
+        _set_macos_runtime_dock_icon()
         webview.create_window(
             title=title,
             url=_streamlit_base_url(chosen_port),
@@ -541,24 +698,29 @@ def _prepare_frozen_runtime() -> None:
     runtime_home.mkdir(parents=True, exist_ok=True)
     _set_launcher_log_file(runtime_home / "logs" / "desktop-launcher.log")
     _launcher_log("Inicializando runtime empaquetado.")
+    _ensure_runtime_env_seed(runtime_home)
     _ensure_streamlit_config(runtime_home)
     _configure_streamlit_first_run_noninteractive_defaults()
     os.chdir(runtime_home)
     _load_dotenv_if_present(runtime_home / ".env")
+    # Keep embedded container as the default launch mode for packaged binaries.
+    os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
     _ensure_localhost_no_proxy_env()
     _configure_streamlit_runtime_stability_for_binary()
 
 
 def main() -> int:
     script = _resolve_app_script()
+    is_frozen = bool(getattr(sys, "frozen", False))
 
-    if not getattr(sys, "frozen", False):
-        return _run_streamlit_cli(script, port=None, headless=False)
-
-    _prepare_frozen_runtime()
+    if is_frozen:
+        _prepare_frozen_runtime()
+    else:
+        _load_dotenv_if_present(Path.cwd() / ".env")
+        os.environ.setdefault("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true")
+        _ensure_localhost_no_proxy_env()
 
     if _is_internal_server_mode():
-        _start_binary_auto_shutdown_monitor()
         port = max(1, _int_env(_INTERNAL_SERVER_PORT_ENV, 8501))
         return _run_streamlit_cli(script, port=port, headless=True)
 
@@ -566,12 +728,21 @@ def main() -> int:
         _launcher_log(
             "Modo desktop sin pywebview activado: usando navegador del sistema para minimizar permisos."
         )
-        _start_binary_auto_shutdown_monitor()
+        if is_frozen:
+            _start_binary_auto_shutdown_monitor()
         return _run_streamlit_cli(script, port=None, headless=False)
 
     try:
         return _run_desktop_container()
     except Exception as exc:
+        if not is_frozen:
+            # In local/dev mode, fall back to the system browser if pywebview
+            # or the embedded container cannot start.
+            print(
+                f"Contenedor desktop no disponible ({exc}). Continuando en navegador.",
+                file=sys.stderr,
+            )
+            return _run_streamlit_cli(script, port=None, headless=False)
         _launcher_log("Error fatal iniciando contenedor desktop.\n" + format_exc())
         log_hint = f" Revisa: {_LAUNCHER_LOG_FILE}" if _LAUNCHER_LOG_FILE is not None else ""
         print(f"Error iniciando contenedor de escritorio: {exc}.{log_hint}", file=sys.stderr)

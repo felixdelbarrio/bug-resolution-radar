@@ -15,7 +15,7 @@ from bug_resolution_radar.analytics.analysis_window import (
     max_available_backlog_months,
     parse_analysis_lookback_months,
 )
-from bug_resolution_radar.config import Settings, config_home
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
@@ -32,18 +32,25 @@ _REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
 _REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
 
 
-def _default_report_export_dir(settings: Settings) -> Path:
-    """Pick a user-friendly, writable export directory for manual PPT downloads."""
+def _configured_export_path(settings: Settings) -> Path | None:
     configured = str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+    if not configured:
+        return None
+    return Path(configured).expanduser()
+
+
+def _default_report_export_dir(settings: Settings) -> Path:
+    """
+    Pick a writable export directory.
+
+    Default: system Downloads folder.
+    Override: REPORT_PPT_DOWNLOAD_DIR (if configured by the user).
+    """
+    configured = _configured_export_path(settings)
     candidates: list[Path] = []
-    if configured:
+    if configured is not None:
         candidates.append(Path(configured).expanduser())
-    candidates.extend(
-        [
-            Path.home() / "Downloads",
-            config_home() / "exports",
-        ]
-    )
+    candidates.append((Path.home() / "Downloads").expanduser())
 
     seen: set[str] = set()
     for candidate in candidates:
@@ -448,7 +455,8 @@ def render(settings: Settings) -> None:
                 ctx = build_dashboard_data_context(
                     df_all=scoped_df,
                     settings=settings,
-                    include_kpis=True,
+                    include_kpis=False,
+                    include_timeseries_chart=False,
                 )
 
                 result = generate_scope_executive_ppt(
