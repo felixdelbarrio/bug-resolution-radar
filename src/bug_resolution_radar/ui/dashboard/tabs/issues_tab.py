@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -32,8 +31,6 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 )
 
 MAX_CARDS_RENDER = 250
-CARDS_PAGE_SIZE_OPTIONS = (20, 40, 60, 100)
-DEFAULT_CARDS_PAGE_SIZE = 40
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -46,61 +43,6 @@ def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 def _set_issues_view(view_key: str, value: str) -> None:
     st.session_state[view_key] = value
-
-
-def _paginate_cards_df(
-    cards_df: pd.DataFrame,
-    *,
-    key_prefix: str,
-) -> tuple[pd.DataFrame, int, int]:
-    if cards_df is None or cards_df.empty:
-        return pd.DataFrame(), 0, 0
-
-    page_size_key = f"{key_prefix}::cards_page_size"
-    page_key = f"{key_prefix}::cards_page"
-
-    if int(st.session_state.get(page_size_key) or 0) not in CARDS_PAGE_SIZE_OPTIONS:
-        st.session_state[page_size_key] = DEFAULT_CARDS_PAGE_SIZE
-
-    total = int(len(cards_df))
-    page_size = int(st.session_state.get(page_size_key) or DEFAULT_CARDS_PAGE_SIZE)
-    page_size = max(1, page_size)
-    total_pages = max(1, int(math.ceil(float(total) / float(page_size))))
-    current_page = int(st.session_state.get(page_key) or 1)
-    current_page = min(max(1, current_page), total_pages)
-    st.session_state[page_key] = current_page
-
-    with st.container(key=f"{key_prefix}::cards_pager"):
-        c_size, c_page, c_info = st.columns([1.05, 1.0, 1.4], gap="small")
-        with c_size:
-            st.selectbox(
-                "Cards por página",
-                options=list(CARDS_PAGE_SIZE_OPTIONS),
-                key=page_size_key,
-                label_visibility="collapsed",
-            )
-        # Recalculate in case page size changed in this rerun.
-        page_size = int(st.session_state.get(page_size_key) or DEFAULT_CARDS_PAGE_SIZE)
-        page_size = max(1, page_size)
-        total_pages = max(1, int(math.ceil(float(total) / float(page_size))))
-        if int(st.session_state.get(page_key) or 1) > total_pages:
-            st.session_state[page_key] = total_pages
-        with c_page:
-            st.number_input(
-                "Página",
-                min_value=1,
-                max_value=total_pages,
-                step=1,
-                key=page_key,
-                label_visibility="collapsed",
-            )
-        current_page = int(st.session_state.get(page_key) or 1)
-        start = int((current_page - 1) * page_size)
-        end = min(total, start + page_size)
-        with c_info:
-            st.caption(f"Mostrando {start + 1:,}-{end:,} de {total:,} cards")
-
-    return cards_df.iloc[start:end].copy(deep=False), current_page, total_pages
 
 
 @lru_cache(maxsize=8)
@@ -459,15 +401,33 @@ def render_issues_section(
         handle_issue_link_open_request(settings=settings)
         dff_show = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
 
-        # CSV export always uses the "table-like" dataframe
-        export_df = make_table_export_df(dff_show)
+        # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
+        table_pref_cols = [
+            "key",
+            "summary",
+            "description",
+            "status",
+            "type",
+            "priority",
+            "assignee",
+            "created",
+            "updated",
+            "resolved",
+            "resolution",
+            "url",
+        ]
+        table_df = make_table_export_df(dff_show, preferred_cols=table_pref_cols)
+        export_df = table_df.drop(
+            columns=["description", "details", "detailed_description", "detailed_decription"],
+            errors="ignore",
+        )
 
         # Compact toolbar: CSV + count + view mode (same visual language as top tabs)
         view_key = f"{key_prefix}::view_mode"
         if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
             st.session_state[view_key] = "Cards"
         view = str(st.session_state.get(view_key) or "Cards")
-        total_filtered = 0 if export_df is None else int(len(export_df))
+        total_filtered = 0 if table_df is None else int(len(table_df))
         max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
         cards_df = (
             prepare_issue_cards_df(dff_show, max_cards=max_cards)
@@ -522,22 +482,16 @@ def render_issues_section(
                     f"Vista Cards mostrando {max_cards}/{len(dff_show)}. "
                     "Usa Tabla para ver todos los resultados."
                 )
-            paged_cards_df, current_page, total_pages = _paginate_cards_df(
-                cards_df,
-                key_prefix=key_prefix,
-            )
-            if total_pages > 1:
-                st.caption(f"Página {current_page}/{total_pages}")
             render_issue_cards(
                 dff_show,
-                max_cards=len(paged_cards_df),
+                max_cards=len(cards_df),
                 title="",
                 settings=settings,
-                prepared_df=paged_cards_df,
+                prepared_df=cards_df,
             )
             return
 
-        render_issue_table(export_df)
+        render_issue_table(table_df)
 
 
 def render_issues_tab(

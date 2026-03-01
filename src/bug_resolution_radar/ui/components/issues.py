@@ -25,6 +25,7 @@ _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
 _SOURCE_TYPE_TOKENS = {"jira": "Jira", "helix": "Helix"}
 _ISSUE_OPEN_URL_QP = "br_open_issue_url"
 _ISSUE_OPEN_SOURCE_QP = "br_open_issue_source"
+_ISSUE_OPEN_KEY_QP = "br_open_issue_key"
 _SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
@@ -52,15 +53,22 @@ def _extract_query_text(value: object) -> str:
     return str(value or "").strip()
 
 
-def build_issue_open_href(url: str, source_type: str) -> str:
+def build_issue_open_href(url: str, source_type: str, *, key_label: str = "") -> str:
     target = str(url or "").strip()
     if not target:
         return "#"
     source = _normalize_source_type(source_type)
-    return (
-        f"?{_ISSUE_OPEN_URL_QP}={quote(target, safe='')}"
-        f"&{_ISSUE_OPEN_SOURCE_QP}={quote(source, safe='')}"
+    parts: List[str] = []
+    key_txt = str(key_label or "").strip()
+    if key_txt:
+        parts.append(f"{_ISSUE_OPEN_KEY_QP}={quote(key_txt, safe='')}")
+    parts.extend(
+        [
+            f"{_ISSUE_OPEN_URL_QP}={quote(target, safe='')}",
+            f"{_ISSUE_OPEN_SOURCE_QP}={quote(source, safe='')}",
+        ]
     )
+    return "?" + "&".join(parts)
 
 
 def handle_issue_link_open_request(*, settings: Settings | None) -> None:
@@ -82,7 +90,7 @@ def handle_issue_link_open_request(*, settings: Settings | None) -> None:
             f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
             "Revisa la configuración de navegador."
         )
-    for key in (_ISSUE_OPEN_URL_QP, _ISSUE_OPEN_SOURCE_QP):
+    for key in (_ISSUE_OPEN_URL_QP, _ISSUE_OPEN_SOURCE_QP, _ISSUE_OPEN_KEY_QP):
         try:
             del qp[key]
         except Exception:
@@ -206,20 +214,20 @@ def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
     txt = _safe_cell_text(value)
     if txt == "—":
         return (
-            "color: var(--bbva-text-muted) !important; "
+            "color: #5f6b7a !important; "
             "font-weight: 700 !important; "
-            "background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important; "
-            "border: 1px solid var(--bbva-border) !important; "
+            "background: #edf2f7 !important; "
+            "border: 1px solid #d8e0ea !important; "
             "border-radius: 999px !important;"
         )
 
     color = priority_color(txt) if for_priority else status_color(txt)
     if color.upper() == "#E2E6EE":
         return (
-            "color: var(--bbva-text) !important; "
+            "color: #102a43 !important; "
             "font-weight: 700 !important; "
-            "background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important; "
-            "border: 1px solid var(--bbva-border) !important; "
+            "background: #edf2f7 !important; "
+            "border: 1px solid #d8e0ea !important; "
             "border-radius: 999px !important;"
         )
 
@@ -387,15 +395,38 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
 
 def _render_issue_table_native(display_df: pd.DataFrame, show_cols: List[str]) -> None:
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
-    df_show = display_df[show_cols].copy(deep=False)
+    df_show = display_df[show_cols].copy(deep=False).copy()
     col_cfg = {}
     origin_header = _origin_link_header(display_df)
+
+    records = display_df.to_dict(orient="records")
     if "key" in df_show.columns:
-        col_cfg["key"] = st.column_config.TextColumn(origin_header, width="small")
-    if "url" in df_show.columns:
-        col_cfg["url"] = st.column_config.LinkColumn("Abrir", display_text="Abrir")
+        href_values: List[str] = []
+        for row in records:
+            label = _safe_cell_text(row.get("key"))
+            if label == "—":
+                label = _jira_label_from_row(row)
+            url = str(row.get("url") or "").strip()
+            if not url:
+                href_values.append("")
+                continue
+            source_type = _normalize_source_type(row.get("source_type"))
+            href_values.append(build_issue_open_href(url, source_type, key_label=label))
+        df_show["key"] = href_values
+        col_cfg["key"] = st.column_config.LinkColumn(
+            origin_header,
+            display_text=r".*[?&]br_open_issue_key=([^&]+).*",
+            width="small",
+        )
+    if "status" in df_show.columns:
+        df_show["status"] = display_df["status"].map(_safe_cell_text)
+    if "priority" in df_show.columns:
+        df_show["priority"] = display_df["priority"].map(_safe_cell_text)
     if "summary" in df_show.columns:
         col_cfg["summary"] = st.column_config.TextColumn("summary", width="large")
+    if "description" in df_show.columns:
+        df_show["description"] = display_df["description"].map(_safe_cell_text)
+        col_cfg["description"] = st.column_config.TextColumn("description", width="large")
     if "status" in df_show.columns:
         col_cfg["status"] = st.column_config.TextColumn("status", width="medium")
     if "priority" in df_show.columns:
@@ -564,7 +595,7 @@ def render_issue_cards(
 
 
 def render_issue_table(dff: pd.DataFrame) -> None:
-    """Render issues in a custom HTML table with chip-style status/priority cells."""
+    """Render issues in an interactive table with sortable headers."""
     if dff is None or dff.empty:
         st.info("No hay issues para mostrar con los filtros actuales.")
         return
@@ -574,6 +605,7 @@ def render_issue_table(dff: pd.DataFrame) -> None:
     show_cols = [
         "key",
         "summary",
+        "description",
         "status",
         "type",
         "priority",
@@ -590,21 +622,11 @@ def render_issue_table(dff: pd.DataFrame) -> None:
     if sort_by:
         display_df = display_df.sort_values(by=sort_by, ascending=False)
 
-    if len(display_df) > MAX_TABLE_HTML_ROWS:
+    if len(display_df) > MAX_TABLE_NATIVE_ROWS:
         st.caption(
-            f"Tabla optimizada: vista virtualizada para {len(display_df)} filas "
-            "(mejor rendimiento y menor consumo de memoria)."
+            f"Mostrando {MAX_TABLE_NATIVE_ROWS}/{len(display_df)} filas en pantalla. "
+            "Usa Excel para el dataset completo."
         )
-        if len(display_df) > MAX_TABLE_NATIVE_ROWS:
-            st.caption(
-                f"Mostrando {MAX_TABLE_NATIVE_ROWS}/{len(display_df)} filas en pantalla. "
-                "Usa Excel para el dataset completo."
-            )
-            display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
-        native_cols = list(show_cols)
-        if "url" in display_df.columns and "url" not in native_cols:
-            native_cols.insert(1 if "key" in native_cols else 0, "url")
-        _render_issue_table_native(display_df, native_cols)
-        return
+        display_df = display_df.head(MAX_TABLE_NATIVE_ROWS).copy(deep=False)
 
-    _render_issue_table_html(display_df, show_cols)
+    _render_issue_table_native(display_df, list(show_cols))

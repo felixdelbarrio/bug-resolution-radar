@@ -18,6 +18,17 @@ def test_build_issue_open_href_encodes_url_and_source_type() -> None:
     assert "br_open_issue_source=jira" in href
 
 
+def test_build_issue_open_href_can_embed_key_label_for_link_text() -> None:
+    href = issues.build_issue_open_href(
+        "https://jira.example.com/browse/ABC-123",
+        "jira",
+        key_label="ABC-123",
+    )
+
+    assert "br_open_issue_key=ABC-123" in href
+    assert "br_open_issue_source=jira" in href
+
+
 def test_title_and_description_from_row_prefers_explicit_description() -> None:
     title, description = issues._title_and_description_from_row(
         {"summary": "Titulo", "description": "Descripción extendida"}
