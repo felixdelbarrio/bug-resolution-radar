@@ -32,6 +32,20 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 )
 
 MAX_CARDS_RENDER = 250
+ISSUES_TABLE_PREFERRED_COLS: list[str] = [
+    "key",
+    "summary",
+    "description",
+    "status",
+    "type",
+    "priority",
+    "assignee",
+    "created",
+    "updated",
+    "resolved",
+    "resolution",
+    "url",
+]
 _SORT_LABELS: dict[str, str] = {
     "updated": "Updated",
     "created": "Created",
@@ -61,10 +75,9 @@ def _set_issues_view(view_key: str, value: str) -> None:
 
 
 def _default_issue_sort_col(df: pd.DataFrame) -> str:
-    if "updated" in df.columns:
-        return "updated"
-    if "created" in df.columns:
-        return "created"
+    options = _sort_columns_for_controls(df)
+    if options:
+        return str(options[0])
     if "key" in df.columns:
         return "key"
     return str(df.columns[0]) if not df.empty else "updated"
@@ -77,12 +90,12 @@ def _default_sort_asc(sort_col: str) -> bool:
 def _ensure_shared_sort_state(df: pd.DataFrame, *, key_prefix: str) -> tuple[str, bool]:
     sort_col_key = f"{key_prefix}::sort_col"
     sort_asc_key = f"{key_prefix}::sort_asc"
+    options = _sort_columns_for_controls(df)
     default_col = _default_issue_sort_col(df)
 
     sort_col = str(st.session_state.get(sort_col_key) or "").strip()
-    if not sort_col or sort_col not in df.columns:
+    if not sort_col or (options and sort_col not in options):
         sort_col = default_col
-        st.session_state[sort_col_key] = sort_col
 
     if sort_asc_key not in st.session_state:
         st.session_state[sort_asc_key] = _default_sort_asc(sort_col)
@@ -94,46 +107,83 @@ def _ensure_shared_sort_state(df: pd.DataFrame, *, key_prefix: str) -> tuple[str
 def _sort_columns_for_controls(df: pd.DataFrame) -> list[str]:
     if df is None or df.empty:
         return []
-    preferred = [
-        "updated",
-        "created",
-        "status",
-        "priority",
-        "assignee",
-        "type",
-        "key",
-        "summary",
-        "resolved",
-        "country",
-        "source_type",
-    ]
+    preferred = [c for c in ISSUES_TABLE_PREFERRED_COLS if c != "url"] + ["country", "source_type"]
     out: list[str] = [c for c in preferred if c in df.columns]
     extra = [c for c in df.columns if c not in out and c != "url"]
     extra_sorted = sorted(extra, key=lambda x: str(x).casefold())
     return out + extra_sorted
 
 
+def _sort_label(col: str) -> str:
+    return _SORT_LABELS.get(str(col), str(col))
+
+
 def _render_shared_sort_controls(df: pd.DataFrame, *, key_prefix: str) -> None:
     sort_col_key = f"{key_prefix}::sort_col"
-    sort_asc_key = f"{key_prefix}::sort_asc"
     sort_col, _ = _ensure_shared_sort_state(df, key_prefix=key_prefix)
     options = _sort_columns_for_controls(df)
     if not options:
         return
-    if sort_col not in options:
-        options = [sort_col] + options
+    if sort_col_key in st.session_state:
+        current = str(st.session_state.get(sort_col_key) or "").strip()
+        if current and current not in options:
+            # Let selectbox fall back to first option instead of forcing an invalid value.
+            del st.session_state[sort_col_key]
 
-    c_sort, c_dir = st.columns([2.1, 1.0], gap="small")
+    c_sort, c_search = st.columns([1.35, 1.45], gap="small")
     with c_sort:
         st.selectbox(
             "Ordenar por",
             options=options,
             key=sort_col_key,
             width="stretch",
-            format_func=lambda x: _SORT_LABELS.get(str(x), str(x)),
+            format_func=lambda x: _sort_label(str(x)),
         )
-    with c_dir:
-        st.toggle("Ascendente", key=sort_asc_key, width="stretch")
+    selected_col = str(st.session_state.get(sort_col_key) or sort_col or options[0]).strip()
+    search_key = f"{key_prefix}::sort_like_query"
+    with c_search:
+        st.text_input(
+            f"Buscar similares por {_sort_label(selected_col)}",
+            key=search_key,
+            width="stretch",
+            placeholder=f"Like sobre {_sort_label(selected_col)}",
+            help="Búsqueda parcial (like) sobre el campo seleccionado en 'Ordenar por'.",
+        )
+
+
+def _render_sort_direction_control(*, key_prefix: str) -> None:
+    sort_asc_key = f"{key_prefix}::sort_asc"
+    st.toggle("Ascendente", key=sort_asc_key, width="content")
+
+
+def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
+    """Apply a lightweight literal-like filter over the selected sort column."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    if sort_col not in df.columns:
+        return df
+
+    query_key = f"{key_prefix}::sort_like_query"
+    query = str(st.session_state.get(query_key) or "").strip()
+    if not query:
+        return df
+
+    col = df[sort_col]
+    try:
+        if pd.api.types.is_datetime64_any_dtype(col) or isinstance(col.dtype, pd.DatetimeTZDtype):
+            text = pd.to_datetime(col, errors="coerce", utc=True).dt.strftime("%Y-%m-%d %H:%M:%S")
+        elif pd.api.types.is_numeric_dtype(col):
+            text = col.astype("string")
+        else:
+            text = col.astype("string")
+        mask = text.fillna("").str.contains(query, case=False, regex=False, na=False)
+    except Exception:
+        text = col.astype(str)
+        mask = text.str.contains(query, case=False, regex=False, na=False)
+
+    if bool(mask.all()):
+        return df
+    return df.loc[mask]
 
 
 def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd.DataFrame:
@@ -532,6 +582,7 @@ def _inject_issues_sort_export_css(*, scope_key: str) -> None:
         <style>
           .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
             gap: 0.72rem !important;
+            align-items: end !important;
           }}
           .st-key-{scope_key} .stDownloadButton {{
             width: 100% !important;
@@ -542,6 +593,9 @@ def _inject_issues_sort_export_css(*, scope_key: str) -> None:
           }}
           .st-key-{scope_key} .stDownloadButton > button {{
             margin-left: auto !important;
+          }}
+          .st-key-{scope_key} [class*="st-key-"] [data-testid="stToggle"] {{
+            margin-right: 0.32rem;
           }}
         </style>
         """,
@@ -569,24 +623,11 @@ def render_issues_section(
         dff_show_raw = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
         dff_show_raw = _inject_missing_jira_descriptions_from_summary(dff_show_raw)
         sort_col, sort_asc = _ensure_shared_sort_state(dff_show_raw, key_prefix=key_prefix)
-        dff_show = _apply_shared_sort(dff_show_raw, sort_col=sort_col, sort_asc=sort_asc)
+        dff_like = _apply_shared_like_filter(dff_show_raw, sort_col=sort_col, key_prefix=key_prefix)
+        dff_show = _apply_shared_sort(dff_like, sort_col=sort_col, sort_asc=sort_asc)
 
         # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
-        table_pref_cols = [
-            "key",
-            "summary",
-            "description",
-            "status",
-            "type",
-            "priority",
-            "assignee",
-            "created",
-            "updated",
-            "resolved",
-            "resolution",
-            "url",
-        ]
-        table_df = make_table_export_df(dff_show, preferred_cols=table_pref_cols)
+        table_df = make_table_export_df(dff_show, preferred_cols=ISSUES_TABLE_PREFERRED_COLS)
         export_df = table_df.copy(deep=False)
 
         # Compact toolbar: top row for view toggle + count.
@@ -631,16 +672,18 @@ def render_issues_section(
                     args=(view_key, "Tabla"),
                 )
 
-        # Independent bar below Cards/Tabla: sort controls (left) + Excel (right), aligned.
+        # Independent bar below Cards/Tabla: sort controls (left) + Asc/Excel (right), aligned.
         sort_export_scope = f"{key_prefix}_sort_export"
         _inject_issues_sort_export_css(scope_key=sort_export_scope)
         with st.container(border=True, key=sort_export_scope):
-            left, right = st.columns([2.35, 1.0], gap="small")
+            left, right = st.columns([2.2, 1.25], gap="small")
             with left:
                 _render_shared_sort_controls(dff_show_raw, key_prefix=key_prefix)
             with right:
-                _, btn_slot = st.columns([1.0, 0.001], gap="small")
-                with btn_slot:
+                _, toggle_col, btn_col = st.columns([0.62, 1.0, 1.0], gap="small")
+                with toggle_col:
+                    _render_sort_direction_control(key_prefix=key_prefix)
+                with btn_col:
                     _render_issues_download_button(
                         export_df,
                         key_prefix=key_prefix,

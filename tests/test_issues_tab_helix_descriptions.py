@@ -8,6 +8,11 @@ from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.ui.dashboard.tabs import issues_tab
 
 
+class _FakeStreamlitState:
+    def __init__(self, session_state: dict[str, object]) -> None:
+        self.session_state = session_state
+
+
 def test_extract_helix_item_description_prefers_detailed_text() -> None:
     item = HelixWorkItem(
         id="INC123",
@@ -98,6 +103,78 @@ def test_sort_columns_for_controls_prioritizes_known_columns_and_hides_url() -> 
 
     out = issues_tab._sort_columns_for_controls(df)
 
-    assert out[:4] == ["updated", "status", "priority", "summary"]
+    assert out[:4] == ["summary", "status", "priority", "updated"]
     assert "url" not in out
     assert "foo_custom" in out
+
+
+def test_default_issue_sort_col_prefers_first_table_column_id() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "MEXBMI1-1",
+                "summary": "A",
+                "status": "New",
+                "updated": "2026-01-01",
+            }
+        ]
+    )
+
+    out = issues_tab._default_issue_sort_col(df)
+
+    assert out == "key"
+
+
+def test_ensure_shared_sort_state_falls_back_to_first_option_without_forcing_sort_col(
+    monkeypatch: Any,
+) -> None:
+    fake_state = {"issues::sort_col": "non_existing_col"}
+    monkeypatch.setattr(issues_tab, "st", _FakeStreamlitState(fake_state))
+    df = pd.DataFrame(
+        [
+            {"key": "MEXBMI1-1", "summary": "A", "status": "New"},
+        ]
+    )
+
+    sort_col, _ = issues_tab._ensure_shared_sort_state(df, key_prefix="issues")
+
+    assert sort_col == "key"
+    assert fake_state["issues::sort_col"] == "non_existing_col"
+
+
+def test_apply_shared_like_filter_matches_selected_sort_column_case_insensitive(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        issues_tab,
+        "st",
+        _FakeStreamlitState({"issues::sort_like_query": "mexbmi1-2834"}),
+    )
+    df = pd.DataFrame(
+        [
+            {"key": "MEXBMI1-283490", "summary": "uno"},
+            {"key": "ABC-1", "summary": "dos"},
+        ]
+    )
+
+    out = issues_tab._apply_shared_like_filter(df, sort_col="key", key_prefix="issues")
+
+    assert out["key"].tolist() == ["MEXBMI1-283490"]
+
+
+def test_apply_shared_like_filter_uses_literal_like_not_regex(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        issues_tab,
+        "st",
+        _FakeStreamlitState({"issues::sort_like_query": "A.B"}),
+    )
+    df = pd.DataFrame(
+        [
+            {"summary": "A.B issue"},
+            {"summary": "ACB issue"},
+        ]
+    )
+
+    out = issues_tab._apply_shared_like_filter(df, sort_col="summary", key_prefix="issues")
+
+    assert out["summary"].tolist() == ["A.B issue"]
