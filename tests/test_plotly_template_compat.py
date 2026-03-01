@@ -14,4 +14,3 @@ def test_apply_plotly_bbva_template_drops_deprecated_scattermapbox() -> None:
 
     assert isinstance(template_data, dict)
     assert "scattermapbox" not in template_data
-
