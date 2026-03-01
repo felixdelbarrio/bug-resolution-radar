@@ -36,6 +36,7 @@ from bug_resolution_radar.analytics.analysis_window import (
     effective_analysis_lookback_months,
     max_available_backlog_months,
 )
+from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.status_semantics import (
     effective_closed_mask,
@@ -709,16 +710,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     clusters = dup_payload.get("clusters") if isinstance(dup_payload, dict) else None
     clusters = clusters if isinstance(clusters, list) else []
 
-    duplicate_issues = 0
-    if "summary" in open_df.columns and "key" in open_df.columns:
-        title_groups = (
-            open_df[open_df["summary"].fillna("").astype(str).str.strip() != ""]
-            .groupby("summary", sort=False)["key"]
-            .apply(lambda s: [str(k).strip() for k in s.tolist() if str(k).strip()])
-            .to_dict()
-        )
-        groups = [keys for keys in title_groups.values() if len(keys) > 1]
-        duplicate_issues = int(sum(len(keys) for keys in groups))
+    duplicate_stats = exact_title_duplicate_stats(open_df, summary_col="summary")
+    duplicate_issues = int(duplicate_stats.issues)
 
     heuristic_clusters = int(len([c for c in clusters if int(getattr(c, "size", 0) or 0) > 1]))
 

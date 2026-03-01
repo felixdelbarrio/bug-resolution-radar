@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
@@ -248,13 +249,10 @@ def render_overview_kpis(
     resolved_14 = 0
 
     if not open_df.empty and "summary" in open_df.columns:
-        summaries = open_df["summary"].fillna("").astype(str).str.strip()
-        summaries = summaries[summaries != ""]
-        if not summaries.empty:
-            vc = summaries.value_counts()
-            dup_groups = int((vc > 1).sum())
-            dup_issues = int(vc[vc > 1].sum())
-            top_theme, top_theme_count = top_non_other_theme(open_df)
+        duplicate_stats = exact_title_duplicate_stats(open_df, summary_col="summary")
+        dup_groups = int(duplicate_stats.groups)
+        dup_issues = int(duplicate_stats.issues)
+        top_theme, top_theme_count = top_non_other_theme(open_df)
 
     if not dff.empty and "created" in dff.columns:
         created_dt = pd.to_datetime(dff["created"], errors="coerce", utc=True).dt.tz_localize(None)

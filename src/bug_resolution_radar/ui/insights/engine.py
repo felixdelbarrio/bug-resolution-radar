@@ -10,6 +10,7 @@ from typing import Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
@@ -545,24 +546,21 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
         )
 
     if "summary" in open_df.columns and open_now > 0:
-        summaries = open_df["summary"].fillna("").astype(str).str.strip()
-        summaries = summaries[summaries != ""]
-        if not summaries.empty:
-            dup_vc = summaries.value_counts()
-            dup_groups = int((dup_vc > 1).sum())
-            dup_issues = int(dup_vc[dup_vc > 1].sum())
-            dup_share = (dup_issues / open_now) if open_now else 0.0
-            if dup_share >= 0.12:
-                cards.append(
-                    ActionInsight(
-                        title="Reincidencia funcional",
-                        body=(
-                            f"{dup_issues} incidencias abiertas pertenecen a {dup_groups} grupos repetidos "
-                            f"({_fmt_pct(dup_share)} del backlog). Atacar esta bolsa acelera cierres netos."
-                        ),
-                        score=12.0 + (dup_share * 100.0),
-                    )
+        duplicate_stats = exact_title_duplicate_stats(open_df, summary_col="summary")
+        dup_groups = int(duplicate_stats.groups)
+        dup_issues = int(duplicate_stats.issues)
+        dup_share = (dup_issues / open_now) if open_now else 0.0
+        if dup_share >= 0.12:
+            cards.append(
+                ActionInsight(
+                    title="Reincidencia funcional",
+                    body=(
+                        f"{dup_issues} incidencias abiertas pertenecen a {dup_groups} grupos repetidos "
+                        f"({_fmt_pct(dup_share)} del backlog). Atacar esta bolsa acelera cierres netos."
+                    ),
+                    score=12.0 + (dup_share * 100.0),
                 )
+            )
 
     if "assignee" in open_df.columns and open_now >= 6:
         assignee = normalize_text_col(open_df["assignee"], "(sin asignar)")
