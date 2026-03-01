@@ -218,6 +218,20 @@ def test_desktop_webview_can_be_explicitly_enabled_by_user_env(monkeypatch) -> N
     assert run_streamlit._desktop_webview_enabled_for_frozen_binary() is True
 
 
+def test_configure_webview_runtime_settings_always_enables_downloads() -> None:
+    fake_webview = type("FakeWebview", (), {"settings": {"ALLOW_DOWNLOADS": False}})()
+
+    run_streamlit._configure_webview_runtime_settings(fake_webview)
+
+    assert fake_webview.settings["ALLOW_DOWNLOADS"] is True
+
+
+def test_configure_webview_runtime_settings_noops_without_settings() -> None:
+    fake_webview = type("FakeWebview", (), {})()
+
+    run_streamlit._configure_webview_runtime_settings(fake_webview)
+
+
 def test_start_internal_streamlit_subprocess_passes_internal_env(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

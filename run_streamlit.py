@@ -572,6 +572,20 @@ def _desktop_webview_enabled_for_frozen_binary() -> bool:
     return _bool_env("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", True)
 
 
+def _configure_webview_runtime_settings(webview_module: object) -> None:
+    """Apply runtime-safe pywebview settings required by desktop container UX."""
+    settings = getattr(webview_module, "settings", None)
+    if settings is None:
+        return
+
+    try:
+        # Product decision: desktop container downloads are always enabled.
+        settings["ALLOW_DOWNLOADS"] = True
+    except Exception:
+        return
+    _launcher_log("pywebview setting ALLOW_DOWNLOADS=true")
+
+
 def _start_internal_streamlit_subprocess(port: int) -> subprocess.Popen[bytes]:
     env = os.environ.copy()
     env[_INTERNAL_SERVER_ENV] = "1"
@@ -646,6 +660,7 @@ def _run_desktop_container() -> int:
             raise RuntimeError(
                 "No se pudo cargar pywebview para abrir el contenedor de escritorio."
             ) from exc
+        _configure_webview_runtime_settings(webview)
 
         title = str(os.environ.get("APP_TITLE") or "Bug Resolution Radar").strip() or (
             "Bug Resolution Radar"
