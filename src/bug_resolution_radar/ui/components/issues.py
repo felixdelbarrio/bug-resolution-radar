@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import html
 import re
-from typing import List
+from typing import List, Tuple
+from urllib.parse import quote, unquote
 
 import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_browser
 from bug_resolution_radar.ui.common import (
     chip_palette_for_color,
     chip_style_from_color,
@@ -20,8 +23,107 @@ from bug_resolution_radar.ui.common import (
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
 _SOURCE_TYPE_TOKENS = {"jira": "Jira", "helix": "Helix"}
+_ISSUE_OPEN_URL_QP = "br_open_issue_url"
+_ISSUE_OPEN_SOURCE_QP = "br_open_issue_source"
+_SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
+
+
+def _normalize_source_type(value: object) -> str:
+    token = str(value or "").strip().lower()
+    return token if token in _SOURCE_TYPE_TOKENS else "jira"
+
+
+def _browser_for_source_type(settings: Settings | None, source_type: str) -> str:
+    source = _normalize_source_type(source_type)
+    if source == "helix":
+        raw = str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip()
+    else:
+        raw = str(getattr(settings, "JIRA_BROWSER", "chrome") or "chrome").strip()
+    return raw.lower() or "chrome"
+
+
+def _extract_query_text(value: object) -> str:
+    if isinstance(value, list):
+        if not value:
+            return ""
+        value = value[0]
+    return str(value or "").strip()
+
+
+def build_issue_open_href(url: str, source_type: str) -> str:
+    target = str(url or "").strip()
+    if not target:
+        return "#"
+    source = _normalize_source_type(source_type)
+    return (
+        f"?{_ISSUE_OPEN_URL_QP}={quote(target, safe='')}"
+        f"&{_ISSUE_OPEN_SOURCE_QP}={quote(source, safe='')}"
+    )
+
+
+def handle_issue_link_open_request(*, settings: Settings | None) -> None:
+    qp = st.query_params
+    raw_url = _extract_query_text(qp.get(_ISSUE_OPEN_URL_QP))
+    if not raw_url:
+        return
+    raw_source = _extract_query_text(qp.get(_ISSUE_OPEN_SOURCE_QP))
+    target_url = unquote(raw_url)
+    source_type = _normalize_source_type(unquote(raw_source))
+    browser = _browser_for_source_type(settings, source_type)
+    opened = open_url_in_configured_browser(
+        target_url,
+        browser,
+        allow_system_default_fallback=False,
+    )
+    if not opened:
+        st.warning(
+            f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
+            "Revisa la configuración de navegador."
+        )
+    for key in (_ISSUE_OPEN_URL_QP, _ISSUE_OPEN_SOURCE_QP):
+        try:
+            del qp[key]
+        except Exception:
+            pass
+    st.rerun()
+
+
+def _title_and_description_from_row(
+    row: dict[str, object] | pd.Series,
+) -> Tuple[str, str]:
+    summary = _safe_cell_text(row.get("summary"))
+    description = ""
+    for col in (
+        "description",
+        "details",
+        "detailed_description",
+        "detailed_decription",
+    ):
+        txt = _safe_cell_text(row.get(col))
+        if txt != "—":
+            description = txt
+            break
+    if summary == "—":
+        summary = ""
+    if description:
+        return (summary or "Sin título"), description
+    txt = summary or "Sin título"
+    for token in _SUMMARY_SPLIT_TOKENS:
+        if token not in txt:
+            continue
+        head, tail = txt.split(token, 1)
+        if head.strip() and tail.strip():
+            return head.strip(), tail.strip()
+    if len(txt) > 110:
+        head = txt[:110]
+        if " " in head:
+            head = head.rsplit(" ", 1)[0]
+        tail = txt[len(head) :].strip(" -–—:;,.")
+        if head.strip() and tail:
+            return head.strip(), tail
+    return txt, ""
 
 
 def _safe_cell_text(value: object) -> str:
@@ -157,14 +259,17 @@ def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> 
         for col in show_cols:
             if col == "key":
                 url = str(row.get("url") or "").strip()
+                source_type = _normalize_source_type(row.get("source_type"))
                 label = _safe_cell_text(row.get("key"))
                 if label == "—":
                     label = _jira_label_from_row(row)
                 if url:
+                    href = html.escape(build_issue_open_href(url, source_type))
                     row_cells.append(
                         "<td>"
-                        f'<a class="issue-table-origin" href="{html.escape(url)}" '
-                        f'target="_blank" rel="noopener noreferrer">{html.escape(label)}</a>'
+                        f'<a class="issue-table-origin" href="{href}" '
+                        'target="_self" '
+                        f'rel="noopener noreferrer">{html.escape(label)}</a>'
                         "</td>"
                     )
                 else:
@@ -374,9 +479,12 @@ def render_issue_cards(
     *,
     max_cards: int,
     title: str,
+    settings: Settings | None = None,
     prepared_df: pd.DataFrame | None = None,
 ) -> None:
     """Render issues as BBVA-styled cards over the full filtered set (open first)."""
+    handle_issue_link_open_request(settings=settings)
+
     if title:
         st.markdown(f"### {title}")
 
@@ -395,8 +503,12 @@ def render_issue_cards(
         key_txt = _safe_cell_text(row.get("key"))
         key = html.escape(key_txt if key_txt != "—" else _jira_label_from_row(row))
         url_raw = str(row.get("url") or "").strip()
-        url = html.escape(url_raw)
-        summary = html.escape(_safe_cell_text(row.get("summary")))
+        source_type = _normalize_source_type(row.get("source_type"))
+        url_href = html.escape(build_issue_open_href(url_raw, source_type))
+        title_txt, desc_txt = _title_and_description_from_row(row)
+        issue_title = html.escape(title_txt)
+        issue_desc = html.escape(desc_txt)
+        issue_desc_html = f'<div class="issue-description">{issue_desc}</div>' if issue_desc else ""
         status_txt = _safe_cell_text(row.get("status"))
         prio_txt = _safe_cell_text(row.get("priority"))
         assignee_txt = _safe_cell_text(row.get("assignee"))
@@ -426,9 +538,12 @@ def render_issue_cards(
             (
                 '<article class="issue-card">'
                 '<div class="issue-top">'
-                f'<div class="issue-key"><a href="{url}" target="_blank" rel="noopener noreferrer">{key}</a></div>'
+                '<div class="issue-headline">'
+                f'<div class="issue-key"><a href="{url_href}" target="_self" rel="noopener noreferrer">{key}</a></div>'
+                f'<div class="issue-title">{issue_title}</div>'
                 "</div>"
-                f'<div class="issue-summary">{summary}</div>'
+                "</div>"
+                f"{issue_desc_html}"
                 f'<div class="badges">{"".join(badges)}</div>'
                 "</article>"
             )

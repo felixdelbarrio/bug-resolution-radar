@@ -607,8 +607,8 @@ def _build_sections(
 
 def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_ChartSection]:
     """
-    Report-only slide: combines "Por funcionalidad" + "Duplicados" insights.
-    Reuses the app's exact logic for theme classification and duplicate detection.
+    Report-only slide: visualiza "Por funcionalidad".
+    Mantiene la señal de duplicados en la narrativa de insights (panel derecho).
     """
     open_df = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
     if open_df.empty:
@@ -645,11 +645,6 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         duplicate_issues = int(sum(len(keys) for keys in groups))
 
     heuristic_clusters = int(len([c for c in clusters if int(getattr(c, "size", 0) or 0) > 1]))
-    heuristic_issues = int(
-        sum(
-            int(getattr(c, "size", 0) or 0) for c in clusters if int(getattr(c, "size", 0) or 0) > 1
-        )
-    )
 
     has_topics = (
         (not top_tbl.empty) and ("tema" in top_tbl.columns) and ("open_count" in top_tbl.columns)
@@ -671,11 +666,9 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
 
     fig = make_subplots(
         rows=1,
-        cols=2,
-        specs=[[{"type": "domain"}, {"type": "xy"}]],
-        column_widths=[0.62, 0.38],
-        subplot_titles=("Por funcionalidad", "Duplicados"),
-        horizontal_spacing=0.10,
+        cols=1,
+        specs=[[{"type": "domain"}]],
+        subplot_titles=("Por funcionalidad",),
     )
 
     if has_topics:
@@ -723,24 +716,16 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
             row=1,
             col=1,
         )
-
-    dup_names = ["Por título", "Por heurística"]
-    dup_values = [int(duplicate_issues), int(heuristic_issues)]
-    fig.add_trace(
-        go.Bar(
-            x=dup_names,
-            y=dup_values,
-            marker=dict(color=[f"#{PALETTE['red']}", f"#{PALETTE['amber']}"]),
-            text=[str(v) if v > 0 else "" for v in dup_values],
-            textposition="outside",
-            cliponaxis=False,
-            hovertemplate="%{x}<br>Casos: %{y}<extra></extra>",
-            showlegend=False,
-        ),
-        row=1,
-        col=2,
-    )
-    fig.update_yaxes(title_text="Casos", row=1, col=2)
+    else:
+        fig.add_annotation(
+            text="No hay datos suficientes para distribución por funcionalidad.",
+            showarrow=False,
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            font=dict(color=f"#{PALETTE['muted']}", size=13),
+        )
     fig.update_layout(title_text="", showlegend=True, margin=dict(l=16, r=16, t=52, b=56))
     fig = apply_plotly_bbva(fig, showlegend=True)
 

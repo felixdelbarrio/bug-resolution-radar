@@ -1333,17 +1333,40 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             display: flex;
             gap: 10px;
             align-items: baseline;
-            justify-content: space-between;
+            justify-content: flex-start;
+            min-width: 0;
+          }
+          .issue-headline {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 8px;
+            min-width: 0;
+            max-width: 100%;
           }
           .issue-key a {
             font-weight: 700;
             text-decoration: none;
+            white-space: nowrap;
           }
-          .issue-summary {
+          .issue-title {
+            font-weight: 700;
+            color: color-mix(in srgb, var(--bbva-text) 96%, transparent);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+          }
+          .issue-description {
             margin-top: 6px;
-            font-size: 0.95rem;
-            line-height: 1.25rem;
-            color: color-mix(in srgb, var(--bbva-text) 95%, transparent);
+            font-size: 0.93rem;
+            line-height: 1.24rem;
+            color: color-mix(in srgb, var(--bbva-text) 90%, transparent);
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: break-word;
           }
           .badges {
             margin-top: 8px;

@@ -156,8 +156,17 @@ def _launch_url_with_macos_selected_app(url: str, *, use_chrome: bool) -> bool:
         return False
 
 
-def open_url_in_configured_browser(url: str, browser: str) -> bool:
-    """Open URL in the configured browser with platform-specific fallbacks."""
+def open_url_in_configured_browser(
+    url: str,
+    browser: str,
+    *,
+    allow_system_default_fallback: bool = True,
+) -> bool:
+    """Open URL in the configured browser with platform-specific fallbacks.
+
+    When ``allow_system_default_fallback`` is ``False``, the helper never falls
+    back to the OS default browser (`webbrowser.open`).
+    """
     if not _root_from_url(url):
         return False
 
@@ -202,10 +211,12 @@ def open_url_in_configured_browser(url: str, browser: str) -> bool:
         except Exception:
             pass
 
-    try:
-        return bool(webbrowser.open(url, new=2, autoraise=True))
-    except Exception:
-        return False
+    if allow_system_default_fallback:
+        try:
+            return bool(webbrowser.open(url, new=2, autoraise=True))
+        except Exception:
+            return False
+    return False
 
 
 def open_urls_in_configured_browser(

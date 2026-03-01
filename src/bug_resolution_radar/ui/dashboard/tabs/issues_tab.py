@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.ui.cache import streamlit_cache_df_hash
 from bug_resolution_radar.ui.components.issues import (
+    handle_issue_link_open_request,
     prepare_issue_cards_df,
     render_issue_cards,
     render_issue_table,
@@ -137,6 +139,99 @@ def _helix_data_path_and_mtime(settings: Settings | None) -> tuple[str, int]:
         return str(p.resolve()), int(p.stat().st_mtime_ns)
     except Exception:
         return str(p), -1
+
+
+def _extract_helix_item_description(item: HelixWorkItem) -> str:
+    raw = item.raw_fields if isinstance(item.raw_fields, dict) else {}
+    if not raw:
+        return ""
+
+    summary = str(item.summary or "").strip()
+    candidate_keys = (
+        "Detailed Decription",
+        "Detailed Description",
+        "Descripción Detallada",
+        "Descripcion Detallada",
+        "Description",
+        "summary",
+    )
+    for key in candidate_keys:
+        value = raw.get(key)
+        text = str(value or "").strip()
+        if not text or text == ".":
+            continue
+        text = re.sub(r"\s+", " ", text).strip()
+        if not text:
+            continue
+        if summary and text.lower() == summary.lower():
+            continue
+        return text
+    return ""
+
+
+@lru_cache(maxsize=8)
+def _load_helix_descriptions_cached(helix_path: str, mtime_ns: int) -> dict[str, str]:
+    items = _load_helix_items_by_merge_key_cached(helix_path, mtime_ns)
+    if not items:
+        return {}
+
+    out: dict[str, str] = {}
+    for merge_key, item in items.items():
+        desc = _extract_helix_item_description(item)
+        if not desc:
+            continue
+        out[merge_key] = desc
+        item_id = str(item.id or "").strip().upper()
+        if item_id and item_id not in out:
+            out[item_id] = desc
+    return out
+
+
+def _inject_helix_descriptions(
+    dff: pd.DataFrame,
+    *,
+    settings: Settings | None,
+) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    if "source_type" not in dff.columns or "key" not in dff.columns:
+        return dff
+
+    stype = dff["source_type"].astype(str).str.strip().str.lower()
+    helix_mask = stype.eq("helix")
+    if not bool(helix_mask.any()):
+        return dff
+
+    helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
+    if not helix_path:
+        return dff
+    desc_map = _load_helix_descriptions_cached(helix_path, helix_mtime_ns)
+    if not desc_map:
+        return dff
+
+    out = dff.copy(deep=False).copy()
+    if "description" not in out.columns:
+        out["description"] = ""
+
+    for idx in out.index[helix_mask]:
+        key = str(out.at[idx, "key"] or "").strip().upper()
+        if not key:
+            continue
+        source_id = (
+            str(out.at[idx, "source_id"] or "").strip().lower()
+            if "source_id" in out.columns
+            else ""
+        )
+        merge_key = f"{source_id}::{key}" if source_id else key
+        desc = str(desc_map.get(merge_key) or desc_map.get(key) or "").strip()
+        if not desc:
+            continue
+        curr = str(out.at[idx, "description"] or "").strip()
+        summary = str(out.at[idx, "summary"] or "").strip()
+        if curr and curr != "—" and curr.lower() != summary.lower():
+            continue
+        out.at[idx, "description"] = desc
+    return out
 
 
 @st.cache_data(
@@ -361,7 +456,8 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
-        dff_show = _sorted_for_display(dff)
+        handle_issue_link_open_request(settings=settings)
+        dff_show = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
 
         # CSV export always uses the "table-like" dataframe
         export_df = make_table_export_df(dff_show)
@@ -436,6 +532,7 @@ def render_issues_section(
                 dff_show,
                 max_cards=len(paged_cards_df),
                 title="",
+                settings=settings,
                 prepared_df=paged_cards_df,
             )
             return

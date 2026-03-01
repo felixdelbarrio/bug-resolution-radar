@@ -128,6 +128,31 @@ def test_open_url_falls_back_to_default_browser_when_preferred_get_fails(
     assert captured["autoraise"] is True
 
 
+def test_open_url_does_not_fallback_to_default_when_disabled(monkeypatch: Any) -> None:
+    monkeypatch.setattr(browser_runtime, "platform_system", lambda: "Linux")
+    monkeypatch.setattr(browser_runtime, "_resolve_base_command", lambda cmd: None)
+
+    called: dict[str, bool] = {"default_open_called": False}
+
+    def _failing_get(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("controller unavailable")
+
+    def _fake_open(url: str, new: int = 0, autoraise: bool = True) -> bool:
+        called["default_open_called"] = True
+        return True
+
+    monkeypatch.setattr(browser_runtime.webbrowser, "get", _failing_get)
+    monkeypatch.setattr(browser_runtime.webbrowser, "open", _fake_open)
+
+    ok = browser_runtime.open_url_in_configured_browser(
+        "https://example.com/path",
+        "chrome",
+        allow_system_default_fallback=False,
+    )
+    assert ok is False
+    assert called["default_open_called"] is False
+
+
 def test_open_urls_dedups_invalid_and_honors_default_limit(
     monkeypatch: Any,
 ) -> None:

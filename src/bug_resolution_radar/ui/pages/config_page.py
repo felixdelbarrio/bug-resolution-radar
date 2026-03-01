@@ -538,8 +538,7 @@ def _render_full_restore_container(*, key_prefix: str) -> Dict[str, Any]:
 
         if has_partial_input and not armed:
             st.warning(
-                "Para restaurar la configuración debes marcar confirmación "
-                "y escribir RESTAURAR."
+                "Para restaurar la configuración debes marcar confirmación y escribir RESTAURAR."
             )
         elif armed:
             st.success("Restauración preparada. Pulsa el botón para aplicarla ahora.")
@@ -724,6 +723,7 @@ def _clear_jira_delete_widget_state() -> None:
             "cfg_jira_delete_confirm",
             "cfg_jira_delete_phrase",
             "cfg_jira_sources_editor",
+            "cfg_jira_sources_rows_state",
         ]
     )
 
@@ -734,6 +734,7 @@ def _clear_helix_delete_widget_state() -> None:
             "cfg_helix_delete_confirm",
             "cfg_helix_delete_phrase",
             "cfg_helix_sources_editor",
+            "cfg_helix_sources_rows_state",
         ]
     )
 
@@ -901,22 +902,29 @@ def render(settings: Settings) -> None:
         st.markdown("### Fuentes Jira por país")
         st.caption("Alias y JQL son obligatorios.")
         jira_rows = _rows_from_jira_settings(settings, countries)
-        jira_df = pd.DataFrame(
-            jira_rows
-            or [
-                {
-                    "__delete__": False,
-                    "__source_id__": "",
-                    "country": countries[0],
-                    "alias": "",
-                    "jql": "",
-                }
-            ]
+        jira_default_row = {
+            "__delete__": False,
+            "__source_id__": "",
+            "country": countries[0] if countries else "",
+            "alias": "",
+            "jql": "",
+        }
+        jira_rows_state_key = "cfg_jira_sources_rows_state"
+        if jira_rows_state_key not in st.session_state:
+            st.session_state[jira_rows_state_key] = jira_rows or [jira_default_row]
+        if st.button("Añadir fila", key="cfg_jira_add_row_btn", width="content"):
+            raw_rows = st.session_state.get(jira_rows_state_key, [])
+            rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
+            rows_state.append(dict(jira_default_row))
+            st.session_state[jira_rows_state_key] = rows_state
+        jira_rows_for_editor = st.session_state.get(
+            jira_rows_state_key, jira_rows or [jira_default_row]
         )
+        jira_df = pd.DataFrame(jira_rows_for_editor)
         jira_editor = st.data_editor(
             jira_df,
             hide_index=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             width="stretch",
             key="cfg_jira_sources_editor",
             column_order=["__delete__", "country", "alias", "jql"],
@@ -927,6 +935,7 @@ def render(settings: Settings) -> None:
                 "jql": st.column_config.TextColumn("jql"),
             },
         )
+        st.session_state[jira_rows_state_key] = jira_editor.to_dict(orient="records")
         _render_sources_excel_download(
             jira_editor,
             source_type="jira",
@@ -1005,7 +1014,13 @@ def render(settings: Settings) -> None:
                     "Configuración Jira y eliminación aplicadas."
                 )
             else:
-                _queue_widget_state_clear(["cfg_jira_delete_confirm", "cfg_jira_delete_phrase"])
+                _queue_widget_state_clear(
+                    [
+                        "cfg_jira_delete_confirm",
+                        "cfg_jira_delete_phrase",
+                        "cfg_jira_sources_rows_state",
+                    ]
+                )
                 st.session_state["__cfg_flash_success"] = "Configuración Jira guardada."
             st.session_state["__cfg_active_tab"] = "Jira"
             st.rerun()
@@ -1055,24 +1070,31 @@ def render(settings: Settings) -> None:
         st.markdown("### Fuentes Helix por país")
         st.caption("Alias y filtros de servicio por fuente. La conexión Helix se define arriba.")
         helix_rows = _rows_from_helix_settings(settings, countries)
-        helix_df = pd.DataFrame(
-            helix_rows
-            or [
-                {
-                    "__delete__": False,
-                    "__source_id__": "",
-                    "country": countries[0],
-                    "alias": "",
-                    "service_origin_buug": "BBVA México",
-                    "service_origin_n1": "ENTERPRISE WEB",
-                    "service_origin_n2": "",
-                }
-            ]
+        helix_default_row = {
+            "__delete__": False,
+            "__source_id__": "",
+            "country": countries[0] if countries else "",
+            "alias": "",
+            "service_origin_buug": "BBVA México",
+            "service_origin_n1": "ENTERPRISE WEB",
+            "service_origin_n2": "",
+        }
+        helix_rows_state_key = "cfg_helix_sources_rows_state"
+        if helix_rows_state_key not in st.session_state:
+            st.session_state[helix_rows_state_key] = helix_rows or [helix_default_row]
+        if st.button("Añadir fila", key="cfg_helix_add_row_btn", width="content"):
+            raw_rows = st.session_state.get(helix_rows_state_key, [])
+            rows_state = [dict(x) for x in raw_rows] if isinstance(raw_rows, list) else []
+            rows_state.append(dict(helix_default_row))
+            st.session_state[helix_rows_state_key] = rows_state
+        helix_rows_for_editor = st.session_state.get(
+            helix_rows_state_key, helix_rows or [helix_default_row]
         )
+        helix_df = pd.DataFrame(helix_rows_for_editor)
         helix_editor = st.data_editor(
             helix_df,
             hide_index=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             width="stretch",
             key="cfg_helix_sources_editor",
             column_order=[
@@ -1092,6 +1114,7 @@ def render(settings: Settings) -> None:
                 "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
             },
         )
+        st.session_state[helix_rows_state_key] = helix_editor.to_dict(orient="records")
         _render_sources_excel_download(
             helix_editor,
             source_type="helix",
@@ -1171,7 +1194,13 @@ def render(settings: Settings) -> None:
                     "Configuración Helix y eliminación aplicadas."
                 )
             else:
-                _queue_widget_state_clear(["cfg_helix_delete_confirm", "cfg_helix_delete_phrase"])
+                _queue_widget_state_clear(
+                    [
+                        "cfg_helix_delete_confirm",
+                        "cfg_helix_delete_phrase",
+                        "cfg_helix_sources_rows_state",
+                    ]
+                )
                 st.session_state["__cfg_flash_success"] = "Configuración Helix guardada."
             st.session_state["__cfg_active_tab"] = "Helix"
             st.rerun()
