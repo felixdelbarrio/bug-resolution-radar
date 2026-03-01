@@ -63,8 +63,10 @@ make run
 
 App disponible en `http://localhost:8501`.
 
-Las distribuciones binarias (`.app`, `.exe`, Linux) se abren en su propia ventana
-de escritorio y no lanzan el navegador del sistema.
+Las distribuciones binarias usan modo escritorio embebido en Windows/Linux.
+En macOS, por defecto se abre en navegador del sistema para minimizar prompts
+de permisos del sistema; se puede reactivar el contenedor embebido con
+`BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true`.
 
 Para empaquetado local robusto, usa:
 
@@ -97,6 +99,8 @@ El proyecto usa `.env` (puedes partir de `.env.example`).
 Variables más relevantes:
 
 - App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`.
+- Desktop/permisos (macOS): `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW`,
+  `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL`.
 - Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_BROWSER`.
 - Helix: `HELIX_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
 - Helix avanzado: `HELIX_QUERY_MODE` (`person_workitems|arsql|auto`), `HELIX_ARSQL_BASE_URL`,
