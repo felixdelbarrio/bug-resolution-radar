@@ -32,6 +32,20 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 )
 
 MAX_CARDS_RENDER = 250
+_SORT_LABELS: dict[str, str] = {
+    "updated": "Updated",
+    "created": "Created",
+    "resolved": "Resolved",
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "type": "Type",
+    "summary": "Summary",
+    "description": "Description",
+    "key": "ID",
+    "country": "Country",
+    "source_type": "Origen",
+}
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -75,6 +89,51 @@ def _ensure_shared_sort_state(df: pd.DataFrame, *, key_prefix: str) -> tuple[str
 
     sort_asc = bool(st.session_state.get(sort_asc_key, _default_sort_asc(sort_col)))
     return sort_col, sort_asc
+
+
+def _sort_columns_for_controls(df: pd.DataFrame) -> list[str]:
+    if df is None or df.empty:
+        return []
+    preferred = [
+        "updated",
+        "created",
+        "status",
+        "priority",
+        "assignee",
+        "type",
+        "key",
+        "summary",
+        "resolved",
+        "country",
+        "source_type",
+    ]
+    out: list[str] = [c for c in preferred if c in df.columns]
+    extra = [c for c in df.columns if c not in out and c != "url"]
+    extra_sorted = sorted(extra, key=lambda x: str(x).casefold())
+    return out + extra_sorted
+
+
+def _render_shared_sort_controls(df: pd.DataFrame, *, key_prefix: str) -> None:
+    sort_col_key = f"{key_prefix}::sort_col"
+    sort_asc_key = f"{key_prefix}::sort_asc"
+    sort_col, _ = _ensure_shared_sort_state(df, key_prefix=key_prefix)
+    options = _sort_columns_for_controls(df)
+    if not options:
+        return
+    if sort_col not in options:
+        options = [sort_col] + options
+
+    c_sort, c_dir = st.columns([2.1, 1.0], gap="small")
+    with c_sort:
+        st.selectbox(
+            "Ordenar por",
+            options=options,
+            key=sort_col_key,
+            width="stretch",
+            format_func=lambda x: _SORT_LABELS.get(str(x), str(x)),
+        )
+    with c_dir:
+        st.toggle("Ascendente", key=sort_asc_key, width="stretch")
 
 
 def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd.DataFrame:
@@ -506,7 +565,7 @@ def render_issues_section(
         table_df = make_table_export_df(dff_show, preferred_cols=table_pref_cols)
         export_df = table_df.copy(deep=False)
 
-        # Compact toolbar: CSV + count + view mode (same visual language as top tabs)
+        # Compact toolbar: CSV + sort + count + view mode (same visual language as top tabs)
         view_key = f"{key_prefix}::view_mode"
         if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
             st.session_state[view_key] = "Cards"
@@ -520,8 +579,7 @@ def render_issues_section(
         )
         shown_in_cards = int(len(cards_df)) if view == "Cards" else total_filtered
 
-        # Keep same grid as filters (Estado | Priority | Asignado) for strict visual alignment.
-        left, center, right = st.columns([1.35, 1.0, 1.0], gap="small")
+        left, sort_box, center, right = st.columns([1.15, 1.95, 0.9, 1.0], gap="small")
         with left:
             _render_issues_download_button(
                 export_df,
@@ -529,6 +587,8 @@ def render_issues_section(
                 settings=settings,
                 helix_only=_is_helix_only_scope(dff_show),
             )
+        with sort_box:
+            _render_shared_sort_controls(dff_show_raw, key_prefix=key_prefix)
         with center:
             if view == "Cards" and shown_in_cards != total_filtered:
                 st.caption(f"{shown_in_cards:,}/{total_filtered:,} issues filtradas")

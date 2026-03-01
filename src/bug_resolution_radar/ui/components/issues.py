@@ -406,7 +406,8 @@ def _render_issue_table_native(
         hide_index=True,
         column_config=col_cfg or None,
         on_select="rerun",
-        selection_mode="single-cell",
+        # Keep sorting controlled in backend (shared with cards/export) and retain cell-click actions.
+        selection_mode=["single-cell", "single-column"],
         key=table_key,
     )
 

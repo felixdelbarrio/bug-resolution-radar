@@ -71,6 +71,8 @@ def test_render_issue_table_native_sanitizes_status_and_priority_with_reset_inde
     assert rendered["status"].tolist() == ["New", "Blocked"]
     assert rendered["priority"].tolist() == ["High", "Medium"]
     assert rendered["description"].tolist() == ["detalle", "—"]
+    assert fake_st.captured_kwargs is not None
+    assert fake_st.captured_kwargs.get("selection_mode") == ["single-cell", "single-column"]
 
 
 def test_render_issue_table_native_opens_issue_when_alias_key_cell_is_selected(
