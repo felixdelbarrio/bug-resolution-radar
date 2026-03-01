@@ -141,10 +141,10 @@ all-github-actions:
 		echo "pytest no está instalado en el venv. Ejecuta: make setup"; \
 		exit 1; \
 	fi
-	@echo "[1/7] ruff format ."
-	@$(VENV)/bin/ruff format .
-	@echo "[2/7] black ."
-	@$(BLACK) .
+	@echo "[1/7] ruff format --check ."
+	@$(VENV)/bin/ruff format --check .
+	@echo "[2/7] black --check ."
+	@$(BLACK) --check .
 	@echo "[3/7] ruff check ."
 	@$(VENV)/bin/ruff check .
 	@echo "[4/7] mypy src"
