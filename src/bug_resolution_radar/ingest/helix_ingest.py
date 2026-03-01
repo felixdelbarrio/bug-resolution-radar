@@ -72,6 +72,7 @@ _HELIX_FINALIST_STATUS_TOKENS: tuple[str, ...] = (
     "canceled",
 )
 _INSECURE_TLS_WARNING_SUPPRESSED = False
+_RE_SPACES = re.compile(r"\s+")
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
@@ -87,6 +88,10 @@ def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
     if s in {"0", "false", "f", "no", "n", "off"}:
         return False
     return default
+
+
+def _normalize_space_token(value: Any) -> str:
+    return _RE_SPACES.sub(" ", str(value or "").strip().lower())
 
 
 def _suppress_insecure_request_warning_once() -> None:
@@ -216,9 +221,7 @@ def _iso_to_epoch_ms(value: Any) -> Optional[int]:
 
 
 def _is_helix_finalist_status(value: Any) -> bool:
-    token = re.sub(
-        r"\s+", " ", str(value or "").strip().lower().replace("_", " ").replace("-", " ")
-    )
+    token = _normalize_space_token(str(value or "").replace("_", " ").replace("-", " "))
     if not token:
         return False
     return any(part in token for part in _HELIX_FINALIST_STATUS_TOKENS)
@@ -959,16 +962,19 @@ def _rows_to_dicts(rows: List[Any], columns: Optional[List[Any]] = None) -> List
         if columns is not None
         else list(_ARSQL_SELECT_ALIASES)
     )
+    names_count = len(names)
     for row in rows:
         if isinstance(row, dict):
             out.append(dict(row))
             continue
         if not isinstance(row, (list, tuple)):
             continue
-        item: Dict[str, Any] = {}
-        for idx, value in enumerate(row):
-            key = names[idx] if idx < len(names) else _column_name(None, idx)
-            item[key] = value
+        row_values = list(row)
+        row_count = len(row_values)
+        item = dict(zip(names[:row_count], row_values[:names_count]))
+        if row_count > names_count:
+            for idx in range(names_count, row_count):
+                item[_column_name(None, idx)] = row_values[idx]
         out.append(item)
     return out
 
@@ -986,21 +992,22 @@ def _frame_to_rows(frame: Dict[str, Any]) -> List[Dict[str, Any]]:
         if isinstance(fields, list)
         else []
     )
+    columns_data: List[Tuple[str, List[Any], int]] = []
     row_count = 0
-    for col in values:
+    for cidx, col in enumerate(values):
         if isinstance(col, list):
-            row_count = max(row_count, len(col))
+            col_len = len(col)
+            row_count = max(row_count, col_len)
+            key = field_names[cidx] if cidx < len(field_names) else _column_name(None, cidx)
+            columns_data.append((key, col, col_len))
     if row_count <= 0:
         return []
 
     rows: List[Dict[str, Any]] = []
     for ridx in range(row_count):
         row: Dict[str, Any] = {}
-        for cidx, col_values in enumerate(values):
-            if not isinstance(col_values, list):
-                continue
-            key = field_names[cidx] if cidx < len(field_names) else _column_name(None, cidx)
-            row[key] = col_values[ridx] if ridx < len(col_values) else None
+        for key, col_values, col_len in columns_data:
+            row[key] = col_values[ridx] if ridx < col_len else None
         rows.append(row)
     return rows
 
@@ -1799,6 +1806,11 @@ def ingest_helix(
         "",
     )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
+    allowed_env_tokens = {
+        _normalize_space_token(x) for x in arsql_environments_filter if str(x).strip()
+    }
+    if {"produccion", "producción"} & allowed_env_tokens:
+        allowed_env_tokens.add("production")
     arsql_include_all_fields = _parse_bool(
         os.getenv("HELIX_ARSQL_SELECT_ALL_FIELDS", "true"),
         default=True,
@@ -2258,21 +2270,14 @@ def ingest_helix(
             if arsql_environments_filter:
                 env_raw = ""
                 raw_fields = mapped_item.raw_fields or {}
-                for env_key in ("BBVA_Environment", "BBVA_Entorno", "Entorno"):
+                for env_key in _ARSQL_ENVIRONMENT_FIELD_CANDIDATES:
                     env_candidate = str(raw_fields.get(env_key) or "").strip()
                     if env_candidate:
                         env_raw = env_candidate
                         break
-                env_token = re.sub(r"\s+", " ", env_raw.strip().lower())
-                allowed_env_tokens = {
-                    re.sub(r"\s+", " ", str(x).strip().lower())
-                    for x in arsql_environments_filter
-                    if str(x).strip()
-                }
+                env_token = _normalize_space_token(env_raw)
                 if env_token in {"producción", "produccion"}:
                     env_token = "production"
-                if "produccion" in allowed_env_tokens or "producción" in allowed_env_tokens:
-                    allowed_env_tokens.add("production")
                 if allowed_env_tokens and env_token and env_token not in allowed_env_tokens:
                     filtered_out_by_environment += 1
                     continue

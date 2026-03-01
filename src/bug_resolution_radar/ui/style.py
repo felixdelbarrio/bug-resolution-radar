@@ -716,6 +716,9 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             color: var(--bbva-text-muted) !important;
             fill: var(--bbva-text-muted) !important;
           }
+          div[data-baseweb="popover"] {
+            max-height: min(21rem, 62vh) !important;
+          }
           div[data-baseweb="popover"] [role="listbox"],
           div[data-baseweb="popover"] [role="menu"],
           div[data-baseweb="popover"] ul {
@@ -729,8 +732,12 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             gap: 0 !important;
             row-gap: 0 !important;
             column-gap: 0 !important;
+            max-height: min(19.25rem, 56vh) !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior: contain !important;
           }
-          /* BaseWeb may wrap options in virtualized row nodes. Keep wrappers neutral (no fixed height). */
+          /* Keep wrapper selectors present but avoid overriding virtualization heights. */
           div[data-baseweb="popover"] [role="listbox"] > *,
           div[data-baseweb="popover"] [role="menu"] > *,
           div[data-baseweb="popover"] ul > li,
@@ -738,8 +745,6 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             margin: 0 !important;
             padding: 0 !important;
             min-height: 0 !important;
-            height: auto !important;
-            max-height: none !important;
             box-sizing: border-box !important;
           }
           /* Extra virtualized wrapper level used by BaseWeb in some Streamlit versions. */
@@ -748,9 +753,10 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             margin: 0 !important;
             padding: 0 !important;
             min-height: 0 !important;
-            height: auto !important;
-            max-height: none !important;
             box-sizing: border-box !important;
+          }
+          div[data-baseweb="popover"] ul > li {
+            height: auto !important;
           }
           div[data-baseweb="popover"] li {
             list-style: none !important;
@@ -1746,6 +1752,36 @@ def render_hero(app_title: str) -> None:
     )
 
 
+@lru_cache(maxsize=2)
+def _plotly_template_without_scattermapbox(*, dark_mode: bool) -> Any:
+    """
+    Return a Plotly base template with deprecated `scattermapbox` defaults removed.
+
+    Plotly keeps `scattermapbox` in built-in template data for backward compatibility,
+    but newer versions emit a DeprecationWarning for that trace type. We strip only
+    that entry and preserve the rest of the template.
+    """
+    template_name = "plotly_dark" if dark_mode else "plotly_white"
+    try:
+        import plotly.io as pio
+
+        template_payload: dict[str, Any] = dict(pio.templates[template_name].to_plotly_json())
+    except Exception:
+        return template_name
+
+    data_payload = template_payload.get("data")
+    if not isinstance(data_payload, dict):
+        return template_payload
+
+    if "scattermapbox" not in data_payload:
+        return template_payload
+
+    cleaned_data = dict(data_payload)
+    cleaned_data.pop("scattermapbox", None)
+    template_payload["data"] = cleaned_data
+    return template_payload
+
+
 def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
     """Apply a consistent Plotly style aligned with app design tokens."""
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
@@ -1793,7 +1829,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
         return es_label_map.get(clean.strip().lower(), clean)
 
     fig.update_layout(
-        template="plotly_dark" if dark_mode else "plotly_white",
+        template=_plotly_template_without_scattermapbox(dark_mode=dark_mode),
         paper_bgcolor=transparent_bg,
         plot_bgcolor=transparent_bg,
         font=dict(

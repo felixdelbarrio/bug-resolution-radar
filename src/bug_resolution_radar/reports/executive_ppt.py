@@ -13,6 +13,7 @@ import re
 import tempfile
 import threading
 import time
+import warnings
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
@@ -36,6 +37,7 @@ from bug_resolution_radar.analytics.analysis_window import (
     effective_analysis_lookback_months,
     max_available_backlog_months,
 )
+from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.status_semantics import (
     effective_closed_mask,
@@ -709,16 +711,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     clusters = dup_payload.get("clusters") if isinstance(dup_payload, dict) else None
     clusters = clusters if isinstance(clusters, list) else []
 
-    duplicate_issues = 0
-    if "summary" in open_df.columns and "key" in open_df.columns:
-        title_groups = (
-            open_df[open_df["summary"].fillna("").astype(str).str.strip() != ""]
-            .groupby("summary", sort=False)["key"]
-            .apply(lambda s: [str(k).strip() for k in s.tolist() if str(k).strip()])
-            .to_dict()
-        )
-        groups = [keys for keys in title_groups.values() if len(keys) > 1]
-        duplicate_issues = int(sum(len(keys) for keys in groups))
+    duplicate_stats = exact_title_duplicate_stats(open_df, summary_col="summary")
+    duplicate_issues = int(duplicate_stats.issues)
 
     heuristic_clusters = int(len([c for c in clusters if int(getattr(c, "size", 0) or 0) > 1]))
 
@@ -908,37 +902,48 @@ def _prerender_section_images(sections: Sequence[_ChartSection]) -> List[_ChartS
             _default_ppt_render_workers(),
         ),
     )
-    total = len(sections)
-    if workers <= 1 or total <= 1:
-        out: List[_ChartSection] = []
-        for sec in sections:
-            if sec.figure is None:
-                out.append(sec)
-                continue
-            out.append(replace(sec, image_png=_fig_to_png(sec.figure)))
-        return out
+    # Plotly built-in templates still include `scattermapbox` defaults for
+    # backward compatibility; when figures are rendered in worker threads this
+    # emits a noisy deprecation warning from Plotly internals.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"\*scattermapbox\* is deprecated! Use \*scattermap\* instead\..*",
+            category=DeprecationWarning,
+            module=r"_plotly_utils\.basevalidators",
+        )
 
-    max_workers = min(workers, total)
-    out = list(sections)
-    futures: Dict[Any, int] = {}
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-render") as pool:
-        for idx, sec in enumerate(sections):
-            if sec.figure is None:
-                continue
-            futures[pool.submit(_fig_to_png, sec.figure)] = idx
-        for fut in as_completed(futures):
-            idx = int(futures[fut])
-            try:
-                payload = fut.result()
-            except Exception as exc:
-                LOGGER.warning(
-                    "PPT chart prerender failed: %s (%s)",
-                    sections[idx].chart_id,
-                    exc,
-                )
-                payload = None
-            out[idx] = replace(out[idx], image_png=payload)
-    return out
+        total = len(sections)
+        if workers <= 1 or total <= 1:
+            out: List[_ChartSection] = []
+            for sec in sections:
+                if sec.figure is None:
+                    out.append(sec)
+                    continue
+                out.append(replace(sec, image_png=_fig_to_png(sec.figure)))
+            return out
+
+        max_workers = min(workers, total)
+        out = list(sections)
+        futures: Dict[Any, int] = {}
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ppt-render") as pool:
+            for idx, sec in enumerate(sections):
+                if sec.figure is None:
+                    continue
+                futures[pool.submit(_fig_to_png, sec.figure)] = idx
+            for fut in as_completed(futures):
+                idx = int(futures[fut])
+                try:
+                    payload = fut.result()
+                except Exception as exc:
+                    LOGGER.warning(
+                        "PPT chart prerender failed: %s (%s)",
+                        sections[idx].chart_id,
+                        exc,
+                    )
+                    payload = None
+                out[idx] = replace(out[idx], image_png=payload)
+        return out
 
 
 def _build_context(

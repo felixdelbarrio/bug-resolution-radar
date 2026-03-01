@@ -56,6 +56,49 @@ def test_choreographer_wrapper_passthrough_executes_wrapper_script(
     assert run_streamlit.sys.argv == original_argv
 
 
+def test_choreographer_wrapper_passthrough_falls_back_when_wrapper_missing(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeProcess:
+        def terminate(self) -> None:
+            captured["terminated"] = True
+
+        def kill(self) -> None:
+            captured["killed"] = True
+
+        def wait(self, timeout=None):  # noqa: ANN001
+            captured["wait_timeout"] = timeout
+            return 0
+
+    def _fake_popen(cmd, **kwargs):  # noqa: ANN001
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return _FakeProcess()
+
+    missing_wrapper = "/tmp/not-found/_unix_pipe_chromium_wrapper.py"
+    original_argv = [
+        "/Applications/bug-resolution-radar.app/Contents/MacOS/bug-resolution-radar",
+        missing_wrapper,
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "--headless",
+    ]
+
+    monkeypatch.setattr(run_streamlit.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(run_streamlit.sys, "argv", list(original_argv))
+
+    assert run_streamlit._maybe_run_choreographer_wrapper_passthrough() == 0
+    assert captured["cmd"] == original_argv[2:]
+    kwargs = captured.get("kwargs")
+    assert isinstance(kwargs, dict)
+    if run_streamlit.os.name == "nt":
+        assert kwargs.get("pass_fds") in {(), None}
+    else:
+        assert kwargs.get("pass_fds") == (3, 4)
+    assert run_streamlit.sys.argv == original_argv
+
+
 def test_binary_runtime_stability_config_binds_localhost(monkeypatch) -> None:
     monkeypatch.delenv("STREAMLIT_SERVER_ADDRESS", raising=False)
     monkeypatch.delenv("STREAMLIT_SERVER_FILE_WATCHER_TYPE", raising=False)

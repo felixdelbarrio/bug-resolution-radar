@@ -30,6 +30,12 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/services/source_maintenance.py`
   - Eliminación de fuentes y limpieza de cachés asociadas.
 
+- `src/bug_resolution_radar/services/ingest_profiler.py`
+  - Perfilado de ingestas por fase (latencia/CPU/memoria) y persistencia JSONL.
+
+- `src/bug_resolution_radar/services/ingest_circuit_breaker.py`
+  - Circuit breaker persistente por fuente con ventana de fallos y cooldown.
+
 - `src/bug_resolution_radar/analytics/analysis_window.py`
   - Ventana global de análisis por meses.
 
@@ -46,6 +52,9 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 
 - `src/bug_resolution_radar/ingest/browser_runtime.py`
   - Apertura de navegador, control de permisos y bootstrap multi-URL.
+
+- `src/bug_resolution_radar/ingest/cookie_utils.py`
+  - Utilidades compartidas para extracción de cookies Chromium y armado de header `Cookie`.
 
 - `src/bug_resolution_radar/ingest/jira_session.py`
   - Extracción de cookies Jira desde navegador.
@@ -128,3 +137,8 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `tests/`
   - tests unitarios e integración ligera por módulo.
   - todos se ejecutan en `quality-gate`.
+
+## Operations
+
+- `scripts/ingest_profile_report.py`
+  - CLI para inspeccionar el último perfil de ingesta y revisar p50/p95 por fase.

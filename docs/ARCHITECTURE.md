@@ -8,10 +8,11 @@ Definir un flujo único y explícito desde configuración hasta visualización/e
 
 1. `run_streamlit.py` prepara runtime (modo local o binario).
 2. `src/bug_resolution_radar/ui/app.py` carga `Settings`, sincroniza `os.environ` y selecciona scope (`country` + `source_id`).
-3. `src/bug_resolution_radar/ui/pages` enruta por secciones (Ingesta, Dashboard, Reporte, Configuración).
-4. `src/bug_resolution_radar/ui/pages/dashboard_page.py` construye `DashboardDataContext` una sola vez por rerun.
-5. Tabs del dashboard consumen `dff/open_df/kpis` compartidos (sin recomputar por tab).
-6. Exportes (CSV/PPT) usan exactamente el mismo scope/filtros activos en UI.
+3. `src/bug_resolution_radar/ui/pages/ingest_page.py` orquesta Jira/Helix por fuente, con merge incremental y persistencia local.
+4. Durante la ingesta, `IngestCircuitBreaker` decide fast-fail por fuente inestable y `IngestRunProfiler` captura métricas por fase.
+5. `src/bug_resolution_radar/ui/pages/dashboard_page.py` construye `DashboardDataContext` una sola vez por rerun.
+6. Tabs del dashboard consumen `dff/open_df/kpis` compartidos (sin recomputar por tab).
+7. Exportes (CSV/PPT) usan exactamente el mismo scope/filtros activos en UI.
 
 ## Module Layers
 
@@ -23,6 +24,7 @@ Definir un flujo único y explícito desde configuración hasta visualización/e
   - `src/bug_resolution_radar/ingest/jira_ingest.py`
   - `src/bug_resolution_radar/ingest/helix_ingest.py`
   - `src/bug_resolution_radar/ingest/browser_runtime.py`
+  - `src/bug_resolution_radar/ingest/cookie_utils.py`
   - Responsabilidad: autenticación vía cookies de navegador, extracción y normalización inicial.
 
 - Modelo y repositorios
@@ -46,6 +48,9 @@ Definir un flujo único y explícito desde configuración hasta visualización/e
 - Servicios de soporte
   - `src/bug_resolution_radar/services/notes.py`
   - `src/bug_resolution_radar/services/source_maintenance.py`
+  - `src/bug_resolution_radar/services/ingest_profiler.py`
+  - `src/bug_resolution_radar/services/ingest_circuit_breaker.py`
+  - Responsabilidad: persistencia de notas, mantenimiento de fuentes y hardening/observabilidad de ingesta.
 
 - Reporting ejecutivo
   - `src/bug_resolution_radar/reports/executive_ppt.py`
@@ -65,6 +70,9 @@ Regla operativa: una única fuente de verdad por concepto. Si una sección neces
 - Ingesta persiste en JSON local con `source_id` obligatorio por issue/item.
 - Dashboard, Insights y Reporte operan sobre el mismo dataframe ya scopeado y filtrado.
 - `ANALYSIS_LOOKBACK_MONTHS` es la única palanca de profundidad temporal.
+- Observabilidad de ingesta persiste en:
+  - `data/observability/ingest_profiles.jsonl`
+  - `data/observability/ingest_circuit_state.json`
 
 ## Non-Goals
 

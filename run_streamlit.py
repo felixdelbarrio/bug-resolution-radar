@@ -39,6 +39,77 @@ def _launcher_log(message: str) -> None:
         pass
 
 
+def _is_choreographer_wrapper_invocation(argv: list[str]) -> bool:
+    if len(argv) < 2:
+        return False
+    wrapper_arg = str(argv[1] or "")
+    wrapper_name = Path(wrapper_arg).name
+    return wrapper_name in {
+        "_unix_pipe_chromium_wrapper.py",
+        "_unix_pipe_chromium_wrapper.pyc",
+    }
+
+
+def _run_choreographer_wrapper_compat(cli: list[str]) -> int:
+    """
+    Run Chromium with the same fd contract as choreographer's unix wrapper.
+
+    In frozen builds, the wrapper script file may not exist on disk even though
+    choreographer still invokes this binary as if it did. This inline fallback
+    avoids relaunch loops and preserves Plotly/Kaleido rendering.
+    """
+    if not cli:
+        _launcher_log("Invocación de wrapper Chromium sin CLI objetivo.")
+        return 1
+
+    try:
+        os.dup2(0, 3)
+        os.dup2(1, 4)
+        os.set_inheritable(3, True)
+        os.set_inheritable(4, True)
+    except Exception:
+        # Best-effort. If fd reassignment fails, still try to launch Chromium.
+        pass
+
+    pass_fds: tuple[int, ...] = (3, 4) if os.name != "nt" else tuple()
+    try:
+        proc = subprocess.Popen(cli, pass_fds=pass_fds)  # noqa: S603
+    except TypeError:
+        proc = subprocess.Popen(cli)  # noqa: S603
+    except Exception as exc:
+        _launcher_log(f"Fallo lanzando Chromium wrapper inline: {type(exc).__name__}: {exc}")
+        return 1
+
+    try:
+        import signal
+
+        def _terminate(_sig_num: int, _frame: object) -> None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+        for sig_name in ("SIGTERM", "SIGINT"):
+            sig = getattr(signal, sig_name, None)
+            if sig is not None:
+                signal.signal(sig, _terminate)
+    except Exception:
+        pass
+
+    rc = proc.wait()
+    # Keep compatibility with choreographer wrapper protocol.
+    try:
+        print("{bye}")  # noqa: T201
+    except Exception:
+        pass
+    return int(rc if isinstance(rc, int) else 0)
+
+
 def _maybe_run_choreographer_wrapper_passthrough() -> int | None:
     """
     Execute choreographer's Chromium pipe wrapper when the frozen app is invoked as a Python executable.
@@ -48,16 +119,17 @@ def _maybe_run_choreographer_wrapper_passthrough() -> int | None:
     In a PyInstaller app, ``sys.executable`` points to this bundled app binary, so
     without this passthrough we accidentally relaunch Streamlit and open extra tabs.
     """
-    if len(sys.argv) < 2:
-        return None
-
-    wrapper_path = Path(str(sys.argv[1] or ""))
-    if wrapper_path.name != "_unix_pipe_chromium_wrapper.py":
-        return None
-    if not wrapper_path.exists() or not wrapper_path.is_file():
-        return None
-
     original_argv = list(sys.argv)
+    if not _is_choreographer_wrapper_invocation(original_argv):
+        return None
+
+    wrapper_path = Path(str(original_argv[1] or ""))
+    if not wrapper_path.exists() or not wrapper_path.is_file():
+        _launcher_log(
+            f"Wrapper choreographer no encontrado ({wrapper_path}); usando fallback inline."
+        )
+        return _run_choreographer_wrapper_compat([str(arg) for arg in original_argv[2:]])
+
     try:
         # Emulate regular `python wrapper.py ...` argv semantics.
         sys.argv = [str(wrapper_path), *original_argv[2:]]

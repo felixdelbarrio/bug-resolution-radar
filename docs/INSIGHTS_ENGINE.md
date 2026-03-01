@@ -14,6 +14,8 @@ Producir insights accionables, trazables y coherentes con el contexto visible en
 2. Cálculo de packs por gráfico:
 - `src/bug_resolution_radar/ui/insights/engine.py`
 - API principal: `build_trend_insight_pack(...)`
+- Analítica transversal de duplicados exactos:
+  - `src/bug_resolution_radar/analytics/duplicates.py`
 
 3. Render por superficie:
 - Dashboard (tendencias/resumen): `src/bug_resolution_radar/ui/dashboard/tabs`

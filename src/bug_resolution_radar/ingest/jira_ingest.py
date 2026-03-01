@@ -6,7 +6,7 @@ import os
 import re
 import time
 from html import unescape
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import requests
@@ -23,6 +23,47 @@ from .browser_runtime import (
     open_url_in_configured_browser as _open_url_in_browser,
 )
 from .jira_session import get_jira_session_cookie
+
+_ADF_BLOCK_TYPES_WITH_BREAK: set[str] = {
+    "paragraph",
+    "heading",
+    "listitem",
+    "bulletlist",
+    "orderedlist",
+    "blockquote",
+    "codeblock",
+    "tablecell",
+    "tablerow",
+    "hardbreak",
+}
+_RE_INLINE_WHITESPACE = re.compile(r"[ \t\f\v]+")
+_RE_NEWLINE_PADDING = re.compile(r"\n[ \t]+")
+_RE_NEWLINE_CLUSTER = re.compile(r"\n{3,}")
+_RE_HTML_BR = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
+_RE_HTML_P_CLOSE = re.compile(r"</p\s*>", flags=re.IGNORECASE)
+_RE_HTML_H_CLOSE = re.compile(r"</h[1-6]\s*>", flags=re.IGNORECASE)
+_RE_HTML_DIV_CLOSE = re.compile(r"</div\s*>", flags=re.IGNORECASE)
+_RE_HTML_LI_OPEN = re.compile(r"<li[^>]*>", flags=re.IGNORECASE)
+_RE_HTML_LI_CLOSE = re.compile(r"</li\s*>", flags=re.IGNORECASE)
+_RE_HTML_STYLE_BLOCK = re.compile(r"<style.*?>.*?</style>", flags=re.IGNORECASE | re.DOTALL)
+_RE_HTML_SCRIPT_BLOCK = re.compile(r"<script.*?>.*?</script>", flags=re.IGNORECASE | re.DOTALL)
+_RE_HTML_TAG = re.compile(r"<[^>]+>", flags=re.DOTALL)
+_JIRA_SEARCH_EXPAND: tuple[str, ...] = ("renderedFields",)
+_JIRA_SEARCH_FIELDS: tuple[str, ...] = (
+    "summary",
+    "description",
+    "status",
+    "issuetype",
+    "priority",
+    "created",
+    "updated",
+    "resolutiondate",
+    "assignee",
+    "reporter",
+    "labels",
+    "components",
+    "resolution",
+)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
@@ -141,21 +182,16 @@ def _cookie_names_from_header(cookie_header: str) -> List[str]:
 
 
 def _has_jira_auth_cookie(cookie_names: List[str]) -> bool:
-    got = {str(x).strip().lower() for x in cookie_names}
-    if not got:
-        return False
-    wanted = {
-        "jsessionid",
-        "atlassian.xsrf.token",
-        "atlassian.account.id",
-        "cloud.session.token",
-        "seraph.rememberme.cookie",
-    }
-    if any(x in got for x in wanted):
-        return True
-    if any(name.startswith("atlassian.") for name in got):
-        return True
-    return True
+    # Atlassian cookie names vary across Cloud/DC and tenant security layers.
+    # Presence of at least one cookie from the browser session is enough to proceed.
+    return bool({str(x).strip().lower() for x in cookie_names})
+
+
+def _normalize_multiline_text(text: str) -> str:
+    normalized = _RE_INLINE_WHITESPACE.sub(" ", str(text or ""))
+    normalized = _RE_NEWLINE_PADDING.sub("\n", normalized)
+    normalized = _RE_NEWLINE_CLUSTER.sub("\n\n", normalized)
+    return normalized.strip()
 
 
 def _jira_description_to_text(value: object) -> str:
@@ -186,49 +222,83 @@ def _jira_description_to_text(value: object) -> str:
                 parts.append(txt)
             _walk(node.get("content"))
             t = str(node.get("type") or "").strip().lower()
-            if t in {
-                "paragraph",
-                "heading",
-                "listitem",
-                "bulletlist",
-                "orderedlist",
-                "blockquote",
-                "codeblock",
-                "tablecell",
-                "tablerow",
-                "hardbreak",
-            }:
+            if t in _ADF_BLOCK_TYPES_WITH_BREAK:
                 parts.append("\n")
 
     _walk(value)
     if not parts:
         return ""
-    text = "".join(parts)
-    text = re.sub(r"[ \t\f\v]+", " ", text)
-    text = re.sub(r"\n[ \t]+", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return _normalize_multiline_text("".join(parts))
 
 
 def _jira_html_to_text(value: str) -> str:
     txt = str(value or "").strip()
     if not txt:
         return ""
-    txt = re.sub(r"(?i)<br\s*/?>", "\n", txt)
-    txt = re.sub(r"(?i)</p\s*>", "\n", txt)
-    txt = re.sub(r"(?i)</h[1-6]\s*>", "\n", txt)
-    txt = re.sub(r"(?i)</div\s*>", "\n", txt)
-    txt = re.sub(r"(?i)<li[^>]*>", "- ", txt)
-    txt = re.sub(r"(?i)</li\s*>", "\n", txt)
-    txt = re.sub(r"(?is)<style.*?>.*?</style>", " ", txt)
-    txt = re.sub(r"(?is)<script.*?>.*?</script>", " ", txt)
-    txt = re.sub(r"(?s)<[^>]+>", " ", txt)
+    txt = _RE_HTML_BR.sub("\n", txt)
+    txt = _RE_HTML_P_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_H_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_DIV_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_LI_OPEN.sub("- ", txt)
+    txt = _RE_HTML_LI_CLOSE.sub("\n", txt)
+    txt = _RE_HTML_STYLE_BLOCK.sub(" ", txt)
+    txt = _RE_HTML_SCRIPT_BLOCK.sub(" ", txt)
+    txt = _RE_HTML_TAG.sub(" ", txt)
     txt = unescape(txt)
     txt = txt.replace("\r", "")
-    txt = re.sub(r"[ \t\f\v]+", " ", txt)
-    txt = re.sub(r"\n[ \t]+", "\n", txt)
-    txt = re.sub(r"\n{3,}", "\n\n", txt)
-    return txt.strip()
+    return _normalize_multiline_text(txt)
+
+
+def _dict_text(value: object, *, key: str = "name") -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get(key) or "").strip()
+
+
+def _components_names(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item.get("name", "")) for item in value if isinstance(item, dict)]
+
+
+def _jira_issue_to_normalized(
+    issue_payload: Dict[str, Any],
+    *,
+    base_url: str,
+    country: str,
+    alias: str,
+    source_id: str,
+) -> NormalizedIssue:
+    fields = issue_payload.get("fields") or {}
+    rendered_fields = issue_payload.get("renderedFields") or {}
+
+    resolution = _dict_text(fields.get("resolution"), key="name")
+    desc_text = _jira_description_to_text(fields.get("description"))
+    if not desc_text:
+        desc_text = _jira_description_to_text(rendered_fields.get("description"))
+
+    return NormalizedIssue(
+        key=str(issue_payload.get("key") or ""),
+        summary=str(fields.get("summary") or ""),
+        description=desc_text,
+        status=_dict_text(fields.get("status"), key="name"),
+        type=_dict_text(fields.get("issuetype"), key="name"),
+        priority=_dict_text(fields.get("priority"), key="name"),
+        created=fields.get("created"),
+        updated=fields.get("updated"),
+        resolved=fields.get("resolutiondate"),
+        assignee=_dict_text(fields.get("assignee"), key="displayName"),
+        reporter=_dict_text(fields.get("reporter"), key="displayName"),
+        labels=fields.get("labels") or [],
+        components=_components_names(fields.get("components") or []),
+        resolution=resolution,
+        resolution_type=resolution,
+        url=f"{base_url}/browse/{issue_payload.get('key', '')}",
+        country=country,
+        source_type="jira",
+        source_alias=alias,
+        source_id=source_id,
+    )
 
 
 def _bootstrap_jira_cookie_from_browser(
@@ -388,6 +458,13 @@ def ingest_jira(
     start_at = 0
     max_results = 100
     issues: List[NormalizedIssue] = []
+    payload_base: Dict[str, Any] = {
+        "jql": jql,
+        "maxResults": max_results,
+        # Jira DC/Server REST v2 expects expand as array in POST payload.
+        "expand": list(_JIRA_SEARCH_EXPAND),
+        "fields": list(_JIRA_SEARCH_FIELDS),
+    }
 
     api_base: Optional[str] = None
     while True:
@@ -395,28 +472,8 @@ def ingest_jira(
             # Autodetect the working API base on first request.
             api_base = api_candidates[0] if api_candidates else f"{base}/rest/api/3"
 
-        payload = {
-            "jql": jql,
-            "startAt": start_at,
-            "maxResults": max_results,
-            # Jira DC/Server REST v2 expects expand as array in POST payload.
-            "expand": ["renderedFields"],
-            "fields": [
-                "summary",
-                "description",
-                "status",
-                "issuetype",
-                "priority",
-                "created",
-                "updated",
-                "resolutiondate",
-                "assignee",
-                "reporter",
-                "labels",
-                "components",
-                "resolution",
-            ],
-        }
+        payload = dict(payload_base)
+        payload["startAt"] = start_at
         r = _jira_search_request(session, api_base, payload)
         if r.status_code == 404:
             # Try alternate API versions and/or /jira context path.
@@ -439,54 +496,17 @@ def ingest_jira(
             )
         data = r.json()
 
-        for it in data.get("issues", []):
-            fields = it.get("fields") or {}
-            rendered_fields = it.get("renderedFields") or {}
-            priority = (
-                (fields.get("priority") or {}).get("name", "") if fields.get("priority") else ""
-            ).strip()
-            labels = fields.get("labels") or []
-            components = [c.get("name", "") for c in (fields.get("components") or [])]
-            resolution = (
-                (fields.get("resolution") or {}).get("name", "") if fields.get("resolution") else ""
+        issues.extend(
+            _jira_issue_to_normalized(
+                cast(Dict[str, Any], it if isinstance(it, dict) else {}),
+                base_url=base,
+                country=country,
+                alias=alias,
+                source_id=source_id,
             )
-            res_type = resolution
-            desc_text = _jira_description_to_text(fields.get("description"))
-            if not desc_text:
-                desc_text = _jira_description_to_text(rendered_fields.get("description"))
-
-            issues.append(
-                NormalizedIssue(
-                    key=it.get("key", ""),
-                    summary=fields.get("summary", ""),
-                    description=desc_text,
-                    status=((fields.get("status") or {}).get("name", "") or "").strip(),
-                    type=((fields.get("issuetype") or {}).get("name", "") or "").strip(),
-                    priority=priority,
-                    created=fields.get("created"),
-                    updated=fields.get("updated"),
-                    resolved=fields.get("resolutiondate"),
-                    assignee=(
-                        (fields.get("assignee") or {}).get("displayName", "")
-                        if fields.get("assignee")
-                        else ""
-                    ),
-                    reporter=(
-                        (fields.get("reporter") or {}).get("displayName", "")
-                        if fields.get("reporter")
-                        else ""
-                    ),
-                    labels=labels,
-                    components=components,
-                    resolution=resolution,
-                    resolution_type=res_type,
-                    url=f"{base}/browse/{it.get('key', '')}",
-                    country=country,
-                    source_type="jira",
-                    source_alias=alias,
-                    source_id=source_id,
-                )
-            )
+            for it in data.get("issues", [])
+            if isinstance(it, dict)
+        )
 
         start_at += max_results
         if start_at >= int(data.get("total", 0)):
