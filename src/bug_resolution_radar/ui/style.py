@@ -169,19 +169,17 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
         )
-        # Keep banner surfaces cool (BBVA blues) in dark mode; warm tones stay as accents only.
-        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-primary) 16%)"
-        nba_banner_border = (
-            "color-mix(in srgb, var(--bbva-primary) 44%, var(--bbva-border-strong) 56%)"
-        )
-        nba_banner_shadow = "color-mix(in srgb, var(--bbva-shadow-deep) 90%, transparent)"
-        nba_ink_primary = "color-mix(in srgb, var(--bbva-text) 98%, transparent)"
-        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 82%, transparent)"
-        nba_accent_a = "color-mix(in srgb, var(--bbva-signal-orange) 90%, var(--bbva-signal-red-soft) 10%)"
-        nba_accent_b = "color-mix(in srgb, var(--bbva-signal-red-soft) 68%, var(--bbva-signal-orange) 32%)"
-        nba_kicker_border = "color-mix(in srgb, var(--bbva-signal-red-soft) 64%, transparent)"
-        nba_kicker_bg = "color-mix(in srgb, var(--bbva-signal-red-soft) 22%, var(--bbva-surface) 78%)"
-        nba_kicker_text = "color-mix(in srgb, var(--bbva-signal-red-soft) 84%, var(--bbva-text) 16%)"
+        # Banner base stays on neutral app surface; severity remains only in accents.
+        nba_banner_bg = "var(--bbva-surface-elevated)"
+        nba_banner_border = "var(--bbva-accent-border-soft)"
+        nba_banner_shadow = "var(--bbva-shadow-strong)"
+        nba_ink_primary = "var(--bbva-text)"
+        nba_ink_muted = "var(--bbva-text-muted)"
+        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.92, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.82, fallback=BBVA_SIGNAL_RED_3)
+        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.66, fallback=BBVA_SIGNAL_RED_3)
+        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.22, fallback=BBVA_SIGNAL_RED_3)
+        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.92, fallback=BBVA_SIGNAL_RED_3)
     else:
         surface_base = palette.white
         surface_soft = hex_to_rgba(palette.white, 0.62, fallback=BBVA_LIGHT.white)
@@ -219,19 +217,16 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
         )
-        # Keep banner surfaces cool in light mode too; avoid warm muddy fills.
-        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-primary) 12%)"
-        nba_banner_border = (
-            "color-mix(in srgb, var(--bbva-primary) 34%, var(--bbva-border-strong) 66%)"
-        )
-        nba_banner_shadow = "color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent)"
-        nba_ink_primary = "color-mix(in srgb, var(--bbva-text) 96%, transparent)"
-        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 78%, transparent)"
-        nba_accent_a = "color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight))"
-        nba_accent_b = "color-mix(in srgb, var(--bbva-signal-orange) 54%, var(--bbva-signal-red-soft))"
-        nba_kicker_border = "color-mix(in srgb, var(--bbva-signal-red) 74%, transparent)"
-        nba_kicker_bg = "color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-signal-red-soft) 16%)"
-        nba_kicker_text = "color-mix(in srgb, var(--bbva-signal-red-strong) 88%, var(--bbva-text) 12%)"
+        nba_banner_bg = "var(--bbva-surface-elevated)"
+        nba_banner_border = "var(--bbva-accent-border-soft)"
+        nba_banner_shadow = "var(--bbva-shadow-soft)"
+        nba_ink_primary = "var(--bbva-text)"
+        nba_ink_muted = "var(--bbva-text-muted)"
+        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.86, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.74, fallback=BBVA_SIGNAL_RED_3)
+        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_RED_2, 0.74, fallback=BBVA_SIGNAL_RED_2)
+        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.16, fallback=BBVA_SIGNAL_RED_3)
+        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_RED_1, 0.88, fallback=BBVA_SIGNAL_RED_1)
 
     css_vars = f"""
       :root {{

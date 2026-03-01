@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -124,6 +126,32 @@ def _inject_filters_panel_css() -> None:
           [data-testid="stMultiSelect"] [role="option"] {
             color: var(--bbva-text) !important;
           }
+          /* Semantic marker (status/priority) driven by centralized token map. */
+          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"] {
+            position: relative !important;
+            padding-left: 1.72rem !important;
+            border-left: 2px solid var(--bbva-opt-border) !important;
+            background: var(--bbva-opt-bg) !important;
+          }
+          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"]::before {
+            content: "" !important;
+            width: 0.56rem !important;
+            height: 0.56rem !important;
+            border-radius: 999px !important;
+            background: var(--bbva-opt-dot) !important;
+            position: absolute !important;
+            left: 0.60rem !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+          }
+          [data-baseweb="tag"][data-bbva-semantic="1"] {
+            background: var(--bbva-opt-bg) !important;
+            border: 1px solid var(--bbva-opt-border) !important;
+            color: var(--bbva-opt-dot) !important;
+          }
+          [data-baseweb="tag"][data-bbva-semantic="1"] * {
+            color: var(--bbva-opt-dot) !important;
+          }
         </style>
     """
     css = (
@@ -240,6 +268,104 @@ def _inject_colored_multiselect_css(
         st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
+def _normalize_semantic_label(label: str) -> str:
+    return re.sub(r"\s+", " ", str(label or "").strip().lower()).strip()
+
+
+def _semantic_label_tone_map(
+    *, status_labels: List[str], priority_labels: List[str]
+) -> dict[str, dict[str, str]]:
+    tones: dict[str, dict[str, str]] = {}
+    for label in list(status_labels or []):
+        color = status_color(label)
+        tones[_normalize_semantic_label(label)] = {
+            "color": color,
+            "bg": _hex_with_alpha(color, 24),
+            "border": _hex_with_alpha(color, 120),
+        }
+    for label in list(priority_labels or []):
+        color = priority_color(label)
+        tones[_normalize_semantic_label(label)] = {
+            "color": color,
+            "bg": _hex_with_alpha(color, 24),
+            "border": _hex_with_alpha(color, 120),
+        }
+    return tones
+
+
+def _inject_semantic_option_runtime_bridge(
+    *, status_labels: List[str], priority_labels: List[str]
+) -> None:
+    tones = _semantic_label_tone_map(status_labels=status_labels, priority_labels=priority_labels)
+    if not tones:
+        return
+    payload = json.dumps(tones, ensure_ascii=False)
+    components_html(
+        f"""
+        <script>
+          (function () {{
+            const toneMap = {payload};
+            const parentWin = window.parent || window;
+            let parentDoc = document;
+            try {{
+              if (parentWin && parentWin.document) {{
+                parentDoc = parentWin.document;
+              }}
+            }} catch (e) {{
+              parentDoc = document;
+            }}
+
+            const normalize = (txt) =>
+              String(txt || "")
+                .toLowerCase()
+                .replace(/[\\u00d7\\u2715\\u2716]/g, "")
+                .replace(/[_-]+/g, " ")
+                .replace(/\\s+/g, " ")
+                .trim();
+
+            const applyTones = () => {{
+              const tones = parentWin.__bbvaSemanticTones || toneMap;
+              parentDoc.querySelectorAll('div[data-baseweb="popover"] [role="option"]').forEach((opt) => {{
+                const tone = tones[normalize(opt.textContent)];
+                if (!tone) {{
+                  opt.removeAttribute("data-bbva-semantic");
+                  return;
+                }}
+                opt.setAttribute("data-bbva-semantic", "1");
+                opt.style.setProperty("--bbva-opt-dot", tone.color);
+                opt.style.setProperty("--bbva-opt-border", tone.border);
+                opt.style.setProperty("--bbva-opt-bg", tone.bg);
+              }});
+
+              parentDoc.querySelectorAll('[data-baseweb="tag"]').forEach((tag) => {{
+                const tone = tones[normalize(tag.textContent)];
+                if (!tone) {{
+                  tag.removeAttribute("data-bbva-semantic");
+                  return;
+                }}
+                tag.setAttribute("data-bbva-semantic", "1");
+                tag.style.setProperty("--bbva-opt-dot", tone.color);
+                tag.style.setProperty("--bbva-opt-border", tone.border);
+                tag.style.setProperty("--bbva-opt-bg", tone.bg);
+              }});
+            }};
+
+            parentWin.__bbvaSemanticTones = toneMap;
+            applyTones();
+
+            if (!parentWin.__bbvaSemanticToneObserver && parentDoc && parentDoc.body) {{
+              const observer = new MutationObserver(() => applyTones());
+              observer.observe(parentDoc.body, {{ childList: true, subtree: true }});
+              parentWin.__bbvaSemanticToneObserver = observer;
+            }}
+          }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
     """Before creating widgets, ensure their state reflects canonical keys (for cross-component sync)."""
     st.session_state[ui_status_key] = [
@@ -337,6 +463,10 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
 
     # Inject option/tag color styles once to avoid per-column layout jitter.
     _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
+    _inject_semantic_option_runtime_bridge(
+        status_labels=status_opts_ui,
+        priority_labels=prio_opts_ui,
+    )
 
     with st.container(border=True, key=f"{(key_prefix or 'dashboard')}_filters_panel"):
         if ctx_label:

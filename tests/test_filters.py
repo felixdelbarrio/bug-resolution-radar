@@ -8,6 +8,7 @@ from bug_resolution_radar.ui.common import status_color
 from bug_resolution_radar.ui.components.filters import (
     _active_context_label,
     _matrix_header_button_css,
+    _semantic_label_tone_map,
     apply_filters,
 )
 from bug_resolution_radar.ui.dashboard.state import FilterState
@@ -76,3 +77,28 @@ def test_matrix_header_css_selection_keeps_same_base_color() -> None:
     selected = _matrix_header_button_css(status_color("Blocked"), selected=True)
     assert _css_prop(selected, "background") == _css_prop(base, "background")
     assert _css_prop(selected, "border") == _css_prop(base, "border")
+
+
+def test_semantic_label_tone_map_groups_equivalent_statuses() -> None:
+    tones = _semantic_label_tone_map(
+        status_labels=[
+            "New",
+            "Analysing",
+            "Blocked",
+            "En progreso",
+            "To Rework",
+            "Test",
+            "Ready To Verify",
+            "Accepted",
+            "Ready to Deploy",
+        ],
+        priority_labels=["Highest", "High", "Medium", "Low"],
+    )
+    assert tones["new"]["color"] == tones["analysing"]["color"] == tones["blocked"]["color"]
+    assert (
+        tones["en progreso"]["color"]
+        == tones["to rework"]["color"]
+        == tones["test"]["color"]
+        == tones["ready to verify"]["color"]
+    )
+    assert tones["accepted"]["color"] == tones["ready to deploy"]["color"]

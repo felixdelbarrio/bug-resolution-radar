@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import streamlit as st
 
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.common.security import mask_secret, safe_log_text
@@ -20,6 +21,7 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
+from bug_resolution_radar.ui.style import inject_bbva_css
 
 
 def test_now_iso_is_valid_utc_timestamp() -> None:
@@ -275,6 +277,32 @@ def test_semantic_popover_rules_are_built_from_shared_color_tokens() -> None:
     assert '[aria-label*="accepted" i]' in css
     assert '[aria-label*="ready to deploy" i]' in css
     assert "--bbva-opt-dot: #4CAF50;" in css
+
+
+def _captured_injected_css(*, dark_mode: bool) -> str:
+    captured: list[str] = []
+    original = st.markdown
+
+    def _fake_markdown(body: str, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        captured.append(str(body))
+
+    st.markdown = _fake_markdown  # type: ignore[assignment]
+    try:
+        inject_bbva_css(dark_mode=dark_mode)
+    finally:
+        st.markdown = original  # type: ignore[assignment]
+    return "\n".join(captured)
+
+
+def test_nba_banner_base_uses_neutral_surface_tokens_in_both_themes() -> None:
+    css_dark = _captured_injected_css(dark_mode=True)
+    css_light = _captured_injected_css(dark_mode=False)
+    for css in [css_dark, css_light]:
+        assert "--bbva-nba-banner-bg: var(--bbva-surface-elevated);" in css
+        assert "--bbva-nba-banner-border: var(--bbva-accent-border-soft);" in css
+        assert "--bbva-nba-ink-primary: var(--bbva-text);" in css
+        assert "--bbva-nba-ink-muted: var(--bbva-text-muted);" in css
 
 
 def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:
