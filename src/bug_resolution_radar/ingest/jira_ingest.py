@@ -420,7 +420,6 @@ def ingest_jira(
         r = _jira_search_request(session, api_base, payload)
         if r.status_code == 404:
             # Try alternate API versions and/or /jira context path.
-            found = False
             for trial in api_candidates:
                 if trial == api_base:
                     continue
@@ -428,7 +427,6 @@ def ingest_jira(
                 if rr.status_code == 200:
                     api_base = trial
                     r = rr
-                    found = True
                     break
         if r.status_code != 200:
             hint = ""

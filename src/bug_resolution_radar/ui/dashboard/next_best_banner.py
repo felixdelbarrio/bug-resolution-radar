@@ -210,9 +210,7 @@ def _filters_markup(
     assignee_filters: List[str],
     dark_mode: bool,
 ) -> str:
-    del (
-        assignee_filters
-    )  # Owner is intentionally omitted: it is already implicit in the insight context.
+    del assignee_filters  # Owner is intentionally omitted: it is already implicit in the insight context.
     status_chips = _chips_html(status_filters, color_fn=status_color, dark_mode=dark_mode)
     priority_chips = _chips_html(priority_filters, color_fn=priority_color, dark_mode=dark_mode)
     if not status_chips and not priority_chips:
