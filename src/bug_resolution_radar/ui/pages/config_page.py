@@ -20,6 +20,7 @@ from bug_resolution_radar.config import (
     helix_sources,
     jira_sources,
     normalize_analysis_lookback_months,
+    restore_env_from_example,
     save_settings,
     supported_countries,
     to_env_json,
@@ -201,13 +202,18 @@ def _is_reset_phrase_valid(value: Any) -> bool:
     return str(value or "").strip().upper() == "RESETEAR"
 
 
+def _is_restore_phrase_valid(value: Any) -> bool:
+    return str(value or "").strip().upper() == "RESTAURAR"
+
+
 def _inject_delete_zone_css() -> None:
     st.markdown(
         """
         <style>
           [class*="st-key-cfg_jira_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
           [class*="st-key-cfg_helix_delete_shell"] [data-testid="stVerticalBlockBorderWrapper"],
-          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
+          [class*="st-key-cfg_cache_cache_reset_shell"] [data-testid="stVerticalBlockBorderWrapper"],
+          [class*="st-key-cfg_prefs_restore_shell"] [data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 86%, #95BAFF 14%) !important;
             background:
               radial-gradient(1200px 280px at 0% 0%, color-mix(in srgb, var(--bbva-primary) 8%, transparent), transparent 55%),
@@ -505,6 +511,42 @@ def _render_cache_reset_container(
         return {"cache_ids": selected_cache_ids, "armed": armed, "valid": valid}
 
 
+def _render_full_restore_container(*, key_prefix: str) -> Dict[str, Any]:
+    st.markdown(
+        '<div class="bbva-icon-recycle-title">Restaurar configuración completa</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.container(border=True, key=f"{key_prefix}_restore_shell"):
+        st.markdown("#### Zona segura de restauración")
+
+        confirm = st.checkbox(
+            "Confirmo que quiero restaurar toda la configuración desde cero.",
+            key=f"{key_prefix}_restore_confirm",
+        )
+        phrase = st.text_input(
+            "Escribe RESTAURAR para confirmar",
+            value="",
+            key=f"{key_prefix}_restore_phrase",
+            help="Confirmación reforzada para evitar restauraciones accidentales.",
+        )
+
+        phrase_ok = _is_restore_phrase_valid(phrase)
+        has_partial_input = bool(confirm or str(phrase).strip())
+        armed = bool(confirm and phrase_ok)
+        valid = bool((not has_partial_input) or armed)
+
+        if has_partial_input and not armed:
+            st.warning(
+                "Para restaurar la configuración debes marcar confirmación "
+                "y escribir RESTAURAR."
+            )
+        elif armed:
+            st.success("Restauración preparada. Pulsa el botón para aplicarla ahora.")
+
+        return {"armed": armed, "valid": valid}
+
+
 def _render_cache_reset_results(results: List[Dict[str, Any]]) -> None:
     if not results:
         return
@@ -706,6 +748,20 @@ def _clear_cache_reset_widget_state() -> None:
     )
 
 
+def _clear_restore_widget_state() -> None:
+    _queue_widget_state_clear(
+        [
+            "cfg_prefs_restore_confirm",
+            "cfg_prefs_restore_phrase",
+        ]
+    )
+
+
+def _queue_all_config_widget_state_clear() -> None:
+    keys = [str(k).strip() for k in st.session_state.keys() if str(k).strip().startswith("cfg_")]
+    _queue_widget_state_clear(keys)
+
+
 def _queue_widget_state_clear(keys: List[str]) -> None:
     pending = st.session_state.get("__cfg_pending_widget_clears", [])
     if not isinstance(pending, list):
@@ -726,6 +782,22 @@ def _apply_queued_widget_state_clear() -> None:
         k = str(key or "").strip()
         if k:
             st.session_state.pop(k, None)
+
+
+def _clear_runtime_state_after_restore() -> None:
+    # Theme + scope + filters are hydrated once; clear them so next run reflects restored `.env`.
+    for key in [
+        "workspace_dark_mode",
+        "workspace_country",
+        "workspace_source_id",
+        "workspace_source_id_aux",
+        "filter_status",
+        "filter_priority",
+        "filter_assignee",
+        "__filters_bootstrapped_from_env",
+        "__cfg_cache_reset_results",
+    ]:
+        st.session_state.pop(key, None)
 
 
 def _apply_workspace_scope(df: pd.DataFrame) -> pd.DataFrame:
@@ -1127,24 +1199,6 @@ def render(settings: Settings) -> None:
                 )
                 st.caption("Se guarda en el .env como preferencia del usuario.")
 
-                desktop_webview_default = _boolish(
-                    getattr(settings, "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true"),
-                    default=True,
-                )
-                launch_mode = st.radio(
-                    "Inicio de la app de escritorio",
-                    options=["container", "browser"],
-                    index=0 if desktop_webview_default else 1,
-                    format_func=lambda v: (
-                        "Contenedor embebido (recomendado)" if v == "container" else "Navegador"
-                    ),
-                    key="cfg_workspace_launch_mode",
-                )
-                st.caption(
-                    "Predeterminado: contenedor embebido. "
-                    "Si cambias esta opción, se aplica al reiniciar la app."
-                )
-
             with st.container(border=True, key="cfg_prefs_card_analysis"):
                 st.markdown("#### Profundidad del análisis")
                 analysis_max_months, analysis_selected_months = _analysis_window_defaults(settings)
@@ -1245,15 +1299,42 @@ def render(settings: Settings) -> None:
                         key="cfg_trend_fav_3",
                     )
 
-            if st.button("Guardar configuración", key="cfg_save_prefs_btn"):
+            with st.container(border=True, key="cfg_prefs_card_restore"):
+                restore_cfg = _render_full_restore_container(key_prefix="cfg_prefs")
+            prefs_save_help = None
+            if not bool(restore_cfg.get("valid", True)):
+                prefs_save_help = (
+                    "Completa la confirmación de restauración (checkbox + texto RESTAURAR) "
+                    "o limpia esos campos para continuar."
+                )
+            if st.button(
+                "Guardar configuración",
+                key="cfg_save_prefs_btn",
+                disabled=not bool(restore_cfg.get("valid", True)),
+                help=prefs_save_help,
+            ):
+                if bool(restore_cfg.get("armed", False)):
+                    try:
+                        restore_env_from_example()
+                    except FileNotFoundError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"No se pudo restaurar la configuración: {exc}")
+                    else:
+                        _clear_restore_widget_state()
+                        _queue_all_config_widget_state_clear()
+                        _clear_runtime_state_after_restore()
+                        st.session_state["__cfg_flash_success"] = (
+                            "Configuración restaurada desde `.env.example`."
+                        )
+                        st.session_state["__cfg_active_tab"] = "Preferencias"
+                        st.rerun()
+                    return
                 summary_csv = ",".join([str(fav1), str(fav2), str(fav3)])
                 new_settings = _safe_update_settings(
                     settings,
                     {
                         "THEME": str(theme_mode).strip().lower(),
-                        "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW": (
-                            "true" if str(launch_mode).strip().lower() == "container" else "false"
-                        ),
                         "DASHBOARD_SUMMARY_CHARTS": summary_csv,
                         "TREND_SELECTED_CHARTS": summary_csv,
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),

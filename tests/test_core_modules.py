@@ -169,6 +169,40 @@ def test_config_save_settings_can_prune_legacy_keys(monkeypatch: Any, tmp_path: 
     assert "BUG_RESOLUTION_RADAR_CORPORATE_MODE=" not in saved
 
 
+def test_config_restore_env_from_example_overwrites_env(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("APP_TITLE=Old\n", encoding="utf-8")
+    env_example = tmp_path / ".env.example"
+    env_example.write_text("APP_TITLE=Recovered\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
+
+    restored_from = cfg.restore_env_from_example()
+
+    assert restored_from == env_example
+    assert env_path.read_text(encoding="utf-8") == "APP_TITLE=Recovered\n"
+
+
+def test_config_restore_env_from_example_raises_when_example_missing(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_example = tmp_path / ".env.example"
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
+
+    try:
+        cfg.restore_env_from_example()
+    except FileNotFoundError as exc:
+        assert "No se encontró `.env.example`" in str(exc)
+    else:
+        raise AssertionError("Expected FileNotFoundError when .env.example does not exist")
+
+
 def test_normalize_analysis_lookback_months_defaults_for_non_positive_values() -> None:
     assert cfg.normalize_analysis_lookback_months("0") == 12
     assert cfg.normalize_analysis_lookback_months("-8") == 12

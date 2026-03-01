@@ -300,6 +300,16 @@ def ensure_env() -> None:
         ENV_PATH.write_text("", encoding="utf-8")
 
 
+def restore_env_from_example() -> Path:
+    """Overwrite `.env` with the first available `.env.example` candidate."""
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
+    if example_path is None:
+        raise FileNotFoundError("No se encontró `.env.example` para restaurar configuración.")
+    ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return example_path
+
+
 def load_settings() -> Settings:
     vals = {k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None}
     settings = Settings.model_validate(vals)
