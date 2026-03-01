@@ -729,11 +729,6 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             gap: 0 !important;
             row-gap: 0 !important;
             column-gap: 0 !important;
-            /* Keep dropdowns compact and avoid giant blank popovers. */
-            max-height: min(20rem, 58vh) !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            overscroll-behavior: contain !important;
           }
           /* Keep wrapper selectors present but avoid overriding virtualization heights. */
           div[data-baseweb="popover"] [role="listbox"] > *,
