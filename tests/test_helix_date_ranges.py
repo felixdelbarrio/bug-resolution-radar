@@ -7,6 +7,7 @@ from bug_resolution_radar.ingest.helix_ingest import (
     _cache_pending_refresh_ids,
     _optimize_create_start_from_cache,
     _resolve_create_date_range_ms,
+    _smartit_base_from_dashboard_url,
     _utc_year_create_date_range_ms,
 )
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
@@ -80,6 +81,11 @@ def test_analysis_lookback_months_from_env_uses_12_when_non_positive(monkeypatch
 def test_analysis_lookback_months_from_env_uses_configured_positive(monkeypatch) -> None:
     monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "6")
     assert _analysis_lookback_months_from_env() == 6
+
+
+def test_smartit_base_from_dashboard_url_normalizes_ir1_admin_to_smartit() -> None:
+    base = _smartit_base_from_dashboard_url("https://itsmhelixbbva-ir1.onbmc.com/admin/#/landing")
+    assert base == "https://itsmhelixbbva-smartit.onbmc.com/smartit"
 
 
 def test_optimize_create_start_from_cache_uses_recent_tail_even_with_non_final_items() -> None:

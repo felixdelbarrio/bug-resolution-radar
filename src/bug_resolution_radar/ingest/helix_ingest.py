@@ -436,15 +436,10 @@ def _smartit_base_from_dashboard_url(url: str) -> str:
     if not scheme or not host:
         return ""
 
-    path = str(parsed.path or "").strip()
-    base_path = ""
-    if "/app" in path:
-        base_path = path.split("/app", 1)[0].rstrip("/")
-    else:
-        base_path = path.rstrip("/")
-    if not base_path:
-        base_path = "/smartit"
-    candidate = f"{scheme}://{host}{base_path}"
+    # Dashboard URLs can come from ARSQL/Grafana hosts (e.g. -ir1).
+    # Always normalize bootstrap base to SmartIT ticket-console host path.
+    smartit_host = host.replace("-ir1.", "-smartit.", 1) if "-ir1." in host else host
+    candidate = f"{scheme}://{smartit_host}/smartit"
     try:
         return validate_service_base_url(candidate, service_name="Helix")
     except ValueError:
@@ -1353,8 +1348,7 @@ def ingest_helix(
     # SmartIT ticket console is the right "safe landing" URL for work items.
     # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
     ticket_console_url = (
-        dashboard_url_cfg.strip()
-        or (f"{base}/app/#/ticket-console" if base else "")
+        (f"{base}/app/#/ticket-console" if base else "")
         or (f"{base_scheme}://{base_host}/smartit/app/#/ticket-console" if base_host else "")
     )
     login_bootstrap_url = ""
@@ -1513,23 +1507,10 @@ def ingest_helix(
             seen.add(txt)
             out.append(txt)
 
-        _push(login_bootstrap_url)
         _push(ticket_console_url)
-        _push(_root_from_url(login_bootstrap_url))
-        _push(_root_from_url(ticket_console_url))
-
-        bootstrap_scheme = str(urlparse(login_bootstrap_url).scheme or "https").strip() or "https"
-        for h in auth_cookie_hosts:
-            if len(out) >= 6:
-                break
-            host = str(h or "").strip().lower()
-            if not host:
-                continue
-            _push(f"{bootstrap_scheme}://{host}/")
-
         return out
 
-    can_bootstrap_page = bool(auth_cookie_hosts) and bool(_root_from_url(login_bootstrap_url))
+    can_bootstrap_page = bool(auth_cookie_hosts) and bool(_root_from_url(ticket_console_url))
     bootstrap_page_checked = False
     bootstrap_page_ready = False
 
@@ -1540,7 +1521,7 @@ def ingest_helix(
         if bootstrap_page_checked and not force_recheck:
             return bootstrap_page_ready
         bootstrap_page_ready = _ensure_target_page_open_in_configured_browser(
-            login_bootstrap_url, browser
+            ticket_console_url, browser
         )
         bootstrap_page_checked = True
         return bootstrap_page_ready
@@ -1563,7 +1544,9 @@ def ingest_helix(
         force_interactive: bool = False,
     ) -> Tuple[Optional[str], str]:
         nonlocal bootstrap_page_ready
-        page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
+        page_ready = False
+        if not force_interactive:
+            page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
 
         if not force_interactive:
             try:
@@ -1594,7 +1577,6 @@ def ingest_helix(
             time.sleep(login_poll_seconds)
         return None, ""
 
-    _ensure_login_bootstrap_page_open(force_recheck=True)
     cookie, cookie_source_host, cookie_error = _read_auth_cookie_from_browser()
     cookie_names_from_header = _cookie_names_from_header(cookie or "")
     if not cookie or not _has_auth_cookie(cookie_names_from_header):
@@ -1631,7 +1613,6 @@ def ingest_helix(
         )
 
     def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
-        _ensure_login_bootstrap_page_open(force_recheck=True)
         fresh_cookie, fresh_cookie_host, cookie_refresh_error = _read_auth_cookie_from_browser()
         if not fresh_cookie:
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
