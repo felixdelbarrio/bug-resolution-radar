@@ -729,28 +729,11 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             gap: 0 !important;
             row-gap: 0 !important;
             column-gap: 0 !important;
-          }
-          /* BaseWeb may wrap options in virtualized row nodes. Keep wrappers neutral (no fixed height). */
-          div[data-baseweb="popover"] [role="listbox"] > *,
-          div[data-baseweb="popover"] [role="menu"] > *,
-          div[data-baseweb="popover"] ul > li,
-          div[data-baseweb="popover"] ul > * {
-            margin: 0 !important;
-            padding: 0 !important;
-            min-height: 0 !important;
-            height: auto !important;
-            max-height: none !important;
-            box-sizing: border-box !important;
-          }
-          /* Extra virtualized wrapper level used by BaseWeb in some Streamlit versions. */
-          div[data-baseweb="popover"] [role="listbox"] > div > *,
-          div[data-baseweb="popover"] [role="menu"] > div > * {
-            margin: 0 !important;
-            padding: 0 !important;
-            min-height: 0 !important;
-            height: auto !important;
-            max-height: none !important;
-            box-sizing: border-box !important;
+            /* Keep dropdowns compact and avoid giant blank popovers. */
+            max-height: min(20rem, 58vh) !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior: contain !important;
           }
           div[data-baseweb="popover"] li {
             list-style: none !important;
