@@ -621,30 +621,68 @@ def render_issue_cards(
     st.markdown(
         """
         <style>
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"][data-testid="stVerticalBlockBorderWrapper"],
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid rgba(151, 188, 255, 0.42) !important;
+            border-radius: var(--bbva-radius-xl) !important;
+            padding: 14px 16px !important;
+            background: linear-gradient(
+              180deg,
+              rgba(15, 49, 101, 0.92) 0%,
+              rgba(10, 33, 72, 0.94) 100%
+            ) !important;
+            box-shadow: 0 10px 26px rgba(1, 8, 26, 0.42),
+                        inset 0 0 0 1px rgba(157, 192, 255, 0.15) !important;
+          }
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"][data-testid="stVerticalBlockBorderWrapper"]:hover,
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlockBorderWrapper"]:hover {
+            border-color: rgba(94, 176, 255, 0.68) !important;
+            box-shadow: 0 12px 30px rgba(1, 8, 26, 0.48),
+                        inset 0 0 0 1px rgba(157, 192, 255, 0.26) !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stHorizontalBlock"] {
+            align-items: baseline !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
+            margin-bottom: 0.22rem !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"]:last-child {
+            margin-bottom: 0 !important;
+          }
           [class*="st-key-issue_open_btn_"] [data-testid="stButton"] {
             margin: 0 !important;
           }
-          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button {
+          [class*="st-key-issue_open_btn_"] button {
             border: 0 !important;
             background: transparent !important;
             color: #3b82f6 !important;
             text-decoration: underline !important;
             font-weight: 800 !important;
             padding: 0 !important;
+            margin: 0 !important;
             min-height: auto !important;
             height: auto !important;
             line-height: 1.08 !important;
             white-space: nowrap !important;
             box-shadow: none !important;
+            width: auto !important;
+            min-width: 0 !important;
+            border-radius: 0 !important;
           }
-          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button:hover {
+          [class*="st-key-issue_open_btn_"] button:hover {
             color: #60a5fa !important;
             background: transparent !important;
           }
-          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button:focus,
-          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] > button:focus-visible {
+          [class*="st-key-issue_open_btn_"] button:focus,
+          [class*="st-key-issue_open_btn_"] button:focus-visible {
             outline: none !important;
             box-shadow: none !important;
+          }
+          [class*="st-key-issue_open_btn_"] button > div,
+          [class*="st-key-issue_open_btn_"] button > div > p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1.08 !important;
           }
           .issue-title-inline {
             font-weight: 700;
@@ -653,6 +691,14 @@ def render_issue_cards(
             overflow: hidden;
             text-overflow: ellipsis;
             margin-top: 1px;
+          }
+          .issue-cards-stack-spacer {
+            height: 0.15rem;
+          }
+          .issue-card-badges {
+            margin-top: 11px !important;
+            padding-bottom: 7px !important;
+            row-gap: 8px !important;
           }
         </style>
         """,
@@ -698,35 +744,38 @@ def render_issue_cards(
                     f'<span class="badge badge-age">Resolved in: {cycle_days:.0f}d</span>'
                 )
 
-            st.markdown('<article class="issue-card">', unsafe_allow_html=True)
-            c_key, c_title = st.columns([2.4, 9.6], gap="small")
-            with c_key:
-                if st.button(
-                    key_label,
-                    key=f"issue_open_btn_{idx_card}",
-                    type="tertiary",
-                    width="content",
-                ):
-                    browser = _browser_for_source_type(settings, source_type)
-                    opened = open_url_in_configured_browser(
-                        url_raw,
-                        browser,
-                        allow_system_default_fallback=False,
-                    )
-                    if not opened:
-                        st.warning(
-                            f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
-                            "Revisa la configuración de navegador."
+            with st.container(border=True, key=f"issue_card_shell_{idx_card}"):
+                c_key, c_title = st.columns([1.8, 10.2], gap="small")
+                with c_key:
+                    if st.button(
+                        key_label,
+                        key=f"issue_open_btn_{idx_card}",
+                        type="tertiary",
+                        width="content",
+                    ):
+                        browser = _browser_for_source_type(settings, source_type)
+                        opened = open_url_in_configured_browser(
+                            url_raw,
+                            browser,
+                            allow_system_default_fallback=False,
                         )
-            with c_title:
+                        if not opened:
+                            st.warning(
+                                f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
+                                "Revisa la configuración de navegador."
+                            )
+                with c_title:
+                    st.markdown(
+                        f'<div class="issue-title-inline">{issue_title}</div>',
+                        unsafe_allow_html=True,
+                    )
+                if issue_desc_html:
+                    st.markdown(issue_desc_html, unsafe_allow_html=True)
                 st.markdown(
-                    f'<div class="issue-title-inline">{issue_title}</div>',
+                    f'<div class="badges issue-card-badges">{"".join(badges)}</div>',
                     unsafe_allow_html=True,
                 )
-            if issue_desc_html:
-                st.markdown(issue_desc_html, unsafe_allow_html=True)
-            st.markdown(f'<div class="badges">{"".join(badges)}</div>', unsafe_allow_html=True)
-            st.markdown("</article>", unsafe_allow_html=True)
+            st.markdown('<div class="issue-cards-stack-spacer"></div>', unsafe_allow_html=True)
 
 
 def render_issue_table(
