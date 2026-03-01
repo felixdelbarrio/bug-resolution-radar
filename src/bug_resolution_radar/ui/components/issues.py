@@ -22,6 +22,7 @@ from bug_resolution_radar.ui.common import (
 )
 
 _JIRA_KEY_RE = re.compile(r"/browse/([^/?#]+)")
+_SUMMARY_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 _SOURCE_TYPE_TOKENS = {"jira": "Jira", "helix": "Helix"}
 _ISSUE_OPEN_URL_QP = "br_open_issue_url"
 _ISSUE_OPEN_SOURCE_QP = "br_open_issue_source"
@@ -196,7 +197,15 @@ def _jira_label_from_row(row: dict[str, object] | pd.Series) -> str:
         return key
     url = str(row.get("jira") or row.get("url") or "").strip()
     m = _JIRA_KEY_RE.search(url)
-    return m.group(1) if m else "Jira"
+    if m:
+        return m.group(1)
+    summary = _safe_cell_text(row.get("summary"))
+    if summary != "—":
+        mm = _SUMMARY_KEY_RE.search(summary)
+        if mm:
+            return mm.group(1)
+    source = _normalize_source_type(row.get("source_type"))
+    return _SOURCE_TYPE_TOKENS.get(source, "Issue")
 
 
 def _chip_html(value: object, *, for_priority: bool) -> str:
@@ -213,21 +222,33 @@ def _chip_html(value: object, *, for_priority: bool) -> str:
 def _native_signal_cell_style(value: object, *, for_priority: bool) -> str:
     txt = _safe_cell_text(value)
     if txt == "—":
-        return "color: #7a869a; font-weight: 600; background-color: rgba(148, 163, 184, 0.14);"
+        return (
+            "color: #7a869a; font-weight: 700; background-color: rgba(148, 163, 184, 0.14); "
+            "border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 999px;"
+        )
 
     color = priority_color(txt) if for_priority else status_color(txt)
     if color.upper() == "#E2E6EE":
-        return "color: #9fb3c8; font-weight: 700; background-color: rgba(148, 163, 184, 0.14);"
+        return (
+            "color: #9fb3c8; font-weight: 700; background-color: rgba(148, 163, 184, 0.14); "
+            "border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 999px;"
+        )
 
-    txt_color, _, bg = chip_palette_for_color(color)
-    return f"color: {txt_color}; background-color: {bg}; font-weight: 700;"
+    txt_color, border, bg = chip_palette_for_color(color)
+    return (
+        f"color: {txt_color}; background-color: {bg}; border: 1px solid {border}; "
+        "border-radius: 999px; font-weight: 700;"
+    )
 
 
 def _native_key_cell_style(value: object) -> str:
     txt = _safe_cell_text(value)
     if txt == "—":
         return ""
-    return "color: #3b82f6 !important; text-decoration: underline !important; font-weight: 700;"
+    return (
+        "color: #5EB0FF !important; text-decoration: underline !important; "
+        "font-weight: 800 !important; opacity: 1 !important;"
+    )
 
 
 def _render_issue_table_html(display_df: pd.DataFrame, show_cols: List[str]) -> None:
@@ -449,6 +470,7 @@ def _render_issue_table_native(
     *,
     settings: Settings | None,
     table_key: str,
+    sort_state_prefix: str | None = None,
 ) -> None:
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
     df_show = display_df[show_cols].copy(deep=False).copy()
@@ -459,14 +481,12 @@ def _render_issue_table_native(
     if "key" in df_show.columns:
         key_values: List[str] = []
         for row in records:
-            label = _safe_cell_text(row.get("key"))
-            if label == "—":
-                label = _jira_label_from_row(row)
+            label = _jira_label_from_row(row)
             key_values.append(label)
         df_show["key"] = key_values
         col_cfg["key"] = st.column_config.TextColumn(
             origin_header,
-            width="small",
+            width="medium",
         )
     if "status" in df_show.columns:
         df_show["status"] = display_df["status"].map(_safe_cell_text)
@@ -478,7 +498,7 @@ def _render_issue_table_native(
         df_show["description"] = display_df["description"].map(_safe_cell_text)
         col_cfg["description"] = st.column_config.TextColumn("description", width="large")
     if "status" in df_show.columns:
-        col_cfg["status"] = st.column_config.TextColumn("status", width="medium")
+        col_cfg["status"] = st.column_config.TextColumn("status", width="small")
     if "priority" in df_show.columns:
         col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
 
@@ -499,14 +519,36 @@ def _render_issue_table_native(
     event = st.dataframe(
         styler,
         width="stretch",
-        hide_index=False,
+        hide_index=True,
         column_config=col_cfg or None,
         on_select="rerun",
-        selection_mode="single-cell",
+        selection_mode=("single-cell", "single-column"),
         key=table_key,
     )
 
     row_value, col_value = _selected_cell_from_event(event)
+    if row_value is None and col_value:
+        col_token = str(col_value or "").strip()
+        col_token_lower = col_token.lower()
+        origin_lower = str(origin_header or "").strip().lower()
+        sortable_map = {str(c).strip().lower(): str(c) for c in df_show.columns}
+        if col_token_lower == origin_lower:
+            col_token_lower = "key"
+        selected_sort_col = sortable_map.get(col_token_lower)
+        if selected_sort_col and sort_state_prefix:
+            sort_col_key = f"{sort_state_prefix}::sort_col"
+            sort_asc_key = f"{sort_state_prefix}::sort_asc"
+            current_col = str(st.session_state.get(sort_col_key) or "")
+            current_asc = bool(st.session_state.get(sort_asc_key, False))
+            default_asc = selected_sort_col not in {"updated", "created", "resolved"}
+            if current_col == selected_sort_col:
+                st.session_state[sort_asc_key] = not current_asc
+            else:
+                st.session_state[sort_col_key] = selected_sort_col
+                st.session_state[sort_asc_key] = default_asc
+            st.rerun()
+        return
+
     last_open_key = f"{table_key}::last_open_token"
     col_token = str(col_value or "").strip().lower()
     if col_token not in {"key", str(origin_header or "").strip().lower()} or row_value is None:
@@ -543,7 +585,9 @@ def _render_issue_table_native(
     st.rerun()
 
 
-def prepare_issue_cards_df(dff: pd.DataFrame, *, max_cards: int) -> pd.DataFrame:
+def prepare_issue_cards_df(
+    dff: pd.DataFrame, *, max_cards: int, preserve_order: bool = False
+) -> pd.DataFrame:
     """Prepare card rows with consistent ordering over the full filtered dataset."""
     if dff is None or dff.empty:
         return pd.DataFrame()
@@ -588,6 +632,9 @@ def prepare_issue_cards_df(dff: pd.DataFrame, *, max_cards: int) -> pd.DataFrame
         card_df["priority"].astype(str).map(priority_rank) if "priority" in card_df.columns else 99
     )
 
+    if preserve_order:
+        return card_df.head(max_cards)
+
     sort_cols = ["__is_open", "__prio_rank"]
     asc = [False, True]
     if "updated" in card_df.columns:
@@ -621,24 +668,27 @@ def render_issue_cards(
     st.markdown(
         """
         <style>
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"][data-testid="stVerticalBlockBorderWrapper"],
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlockBorderWrapper"] {
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] {
             border: 1px solid rgba(151, 188, 255, 0.42) !important;
             border-radius: var(--bbva-radius-xl) !important;
-            padding: 14px 16px !important;
+            padding: 14px 16px 12px 16px !important;
+            margin: 0 0 12px 0 !important;
             background: linear-gradient(
               180deg,
-              rgba(15, 49, 101, 0.92) 0%,
-              rgba(10, 33, 72, 0.94) 100%
+              rgba(9, 31, 66, 0.96) 0%,
+              rgba(7, 24, 52, 0.96) 100%
             ) !important;
             box-shadow: 0 10px 26px rgba(1, 8, 26, 0.42),
                         inset 0 0 0 1px rgba(157, 192, 255, 0.15) !important;
+            overflow: visible !important;
           }
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"][data-testid="stVerticalBlockBorderWrapper"]:hover,
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlockBorderWrapper"]:hover {
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"]:hover {
             border-color: rgba(94, 176, 255, 0.68) !important;
             box-shadow: 0 12px 30px rgba(1, 8, 26, 0.48),
                         inset 0 0 0 1px rgba(157, 192, 255, 0.26) !important;
+          }
+          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] {
+            gap: 0 !important;
           }
           [class*="st-key-issue_card_shell_"] [data-testid="stHorizontalBlock"] {
             align-items: baseline !important;
@@ -686,18 +736,16 @@ def render_issue_cards(
           }
           .issue-title-inline {
             font-weight: 700;
-            color: color-mix(in srgb, var(--bbva-text) 96%, transparent);
+            color: var(--bbva-text);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             margin-top: 1px;
           }
-          .issue-cards-stack-spacer {
-            height: 0.15rem;
-          }
           .issue-card-badges {
             margin-top: 11px !important;
-            padding-bottom: 7px !important;
+            margin-bottom: 2px !important;
+            padding-bottom: 8px !important;
             row-gap: 8px !important;
           }
         </style>
@@ -744,7 +792,7 @@ def render_issue_cards(
                     f'<span class="badge badge-age">Resolved in: {cycle_days:.0f}d</span>'
                 )
 
-            with st.container(border=True, key=f"issue_card_shell_{idx_card}"):
+            with st.container(key=f"issue_card_shell_{idx_card}"):
                 c_key, c_title = st.columns([1.8, 10.2], gap="small")
                 with c_key:
                     if st.button(
@@ -775,7 +823,6 @@ def render_issue_cards(
                     f'<div class="badges issue-card-badges">{"".join(badges)}</div>',
                     unsafe_allow_html=True,
                 )
-            st.markdown('<div class="issue-cards-stack-spacer"></div>', unsafe_allow_html=True)
 
 
 def render_issue_table(
@@ -783,6 +830,8 @@ def render_issue_table(
     *,
     settings: Settings | None = None,
     table_key: str = "issues_table_grid",
+    preserve_order: bool = False,
+    sort_state_prefix: str | None = None,
 ) -> None:
     """Render issues in an interactive table with sortable headers."""
     if dff is None or dff.empty:
@@ -807,7 +856,7 @@ def render_issue_table(
     ]
     show_cols = [c for c in show_cols if c in display_df.columns]
 
-    sort_by = "updated" if "updated" in display_df.columns else None
+    sort_by = "updated" if ("updated" in display_df.columns and not preserve_order) else None
     if sort_by:
         display_df = display_df.sort_values(by=sort_by, ascending=False)
 
@@ -823,4 +872,5 @@ def render_issue_table(
         list(show_cols),
         settings=settings,
         table_key=table_key,
+        sort_state_prefix=sort_state_prefix,
     )

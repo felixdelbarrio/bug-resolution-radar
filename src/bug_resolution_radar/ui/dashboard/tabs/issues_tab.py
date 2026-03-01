@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Sequence
 
 import pandas as pd
 import streamlit as st
@@ -28,9 +29,22 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
 from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
     build_helix_official_export_frames,
 )
+from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.common import priority_rank
 
 MAX_CARDS_RENDER = 250
 _SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
+_ISSUES_SORTABLE_PREFS: Sequence[str] = (
+    "status",
+    "priority",
+    "updated",
+    "created",
+    "resolved",
+    "assignee",
+    "type",
+    "key",
+    "summary",
+)
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -43,6 +57,72 @@ def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 def _set_issues_view(view_key: str, value: str) -> None:
     st.session_state[view_key] = value
+
+
+def _default_issue_sort_col(df: pd.DataFrame) -> str:
+    if "updated" in df.columns:
+        return "updated"
+    if "created" in df.columns:
+        return "created"
+    if "key" in df.columns:
+        return "key"
+    return str(df.columns[0]) if not df.empty else "updated"
+
+
+def _default_sort_asc(sort_col: str) -> bool:
+    return str(sort_col or "").strip().lower() not in {"updated", "created", "resolved"}
+
+
+def _ensure_shared_sort_state(df: pd.DataFrame, *, key_prefix: str) -> tuple[str, bool]:
+    sort_col_key = f"{key_prefix}::sort_col"
+    sort_asc_key = f"{key_prefix}::sort_asc"
+    default_col = _default_issue_sort_col(df)
+
+    sort_col = str(st.session_state.get(sort_col_key) or "").strip()
+    if not sort_col or sort_col not in df.columns:
+        sort_col = default_col
+        st.session_state[sort_col_key] = sort_col
+
+    if sort_asc_key not in st.session_state:
+        st.session_state[sort_asc_key] = _default_sort_asc(sort_col)
+
+    sort_asc = bool(st.session_state.get(sort_asc_key, _default_sort_asc(sort_col)))
+    return sort_col, sort_asc
+
+
+def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    if sort_col not in df.columns:
+        return df
+
+    out = df.copy(deep=False).copy()
+    sort_col_norm = str(sort_col).strip().lower()
+    key_col = "__sort_shared_key"
+    tie_col = "__sort_shared_updated"
+
+    if sort_col_norm == "status":
+        rank_map = canonical_status_rank_map()
+        status_vals = out[sort_col].fillna("").astype(str).str.strip().str.lower()
+        out[key_col] = status_vals.map(rank_map).fillna(10_000).astype(int)
+    elif sort_col_norm == "priority":
+        out[key_col] = (
+            out[sort_col].fillna("").astype(str).map(priority_rank).fillna(99).astype(int)
+        )
+    elif sort_col_norm in {"created", "updated", "resolved"}:
+        out[key_col] = pd.to_datetime(out[sort_col], errors="coerce", utc=True)
+    else:
+        out[key_col] = out[sort_col].fillna("").astype(str).str.casefold()
+
+    sort_cols = [key_col]
+    asc = [bool(sort_asc)]
+    if sort_col_norm != "updated" and "updated" in out.columns:
+        out[tie_col] = pd.to_datetime(out["updated"], errors="coerce", utc=True)
+        sort_cols.append(tie_col)
+        asc.append(False)
+
+    out = out.sort_values(by=sort_cols, ascending=asc, kind="mergesort", na_position="last")
+    return out.drop(columns=[key_col, tie_col], errors="ignore")
 
 
 @lru_cache(maxsize=8)
@@ -433,8 +513,10 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
-        dff_show = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
-        dff_show = _inject_missing_jira_descriptions_from_summary(dff_show)
+        dff_show_raw = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
+        dff_show_raw = _inject_missing_jira_descriptions_from_summary(dff_show_raw)
+        sort_col, sort_asc = _ensure_shared_sort_state(dff_show_raw, key_prefix=key_prefix)
+        dff_show = _apply_shared_sort(dff_show_raw, sort_col=sort_col, sort_asc=sort_asc)
 
         # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
         table_pref_cols = [
@@ -462,7 +544,7 @@ def render_issues_section(
         total_filtered = 0 if table_df is None else int(len(table_df))
         max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
         cards_df = (
-            prepare_issue_cards_df(dff_show, max_cards=max_cards)
+            prepare_issue_cards_df(dff_show, max_cards=max_cards, preserve_order=True)
             if view == "Cards"
             else pd.DataFrame()
         )
@@ -527,6 +609,8 @@ def render_issues_section(
             table_df,
             settings=settings,
             table_key=f"{key_prefix}::issues_table_grid",
+            preserve_order=True,
+            sort_state_prefix=key_prefix,
         )
 
 

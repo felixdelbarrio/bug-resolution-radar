@@ -68,3 +68,15 @@ def test_inject_missing_jira_descriptions_from_summary() -> None:
     out = issues_tab._inject_missing_jira_descriptions_from_summary(df)
 
     assert out.loc[0, "description"] == "No se visualiza pantalla"
+
+
+def test_apply_shared_sort_status_uses_canonical_order() -> None:
+    df = pd.DataFrame(
+        [
+            {"key": "A-1", "status": "Ready To Verify", "updated": "2026-01-01"},
+            {"key": "A-2", "status": "New", "updated": "2026-01-02"},
+            {"key": "A-3", "status": "Accepted", "updated": "2026-01-03"},
+        ]
+    )
+    out = issues_tab._apply_shared_sort(df, sort_col="status", sort_asc=True)
+    assert out["key"].tolist() == ["A-2", "A-1", "A-3"]

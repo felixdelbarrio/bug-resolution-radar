@@ -68,3 +68,16 @@ def test_selected_cell_from_event_supports_dict_shape() -> None:
 
     assert row == 3
     assert col == "key"
+
+
+def test_jira_label_from_row_fallbacks_to_summary_key_pattern() -> None:
+    label = issues._jira_label_from_row(
+        {
+            "key": "",
+            "url": "",
+            "summary": "MEXBMI1-283384 - Error de dashboard",
+            "source_type": "jira",
+        }
+    )
+
+    assert label == "MEXBMI1-283384"
