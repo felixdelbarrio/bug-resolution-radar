@@ -716,6 +716,9 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             color: var(--bbva-text-muted) !important;
             fill: var(--bbva-text-muted) !important;
           }
+          div[data-baseweb="popover"] {
+            max-height: min(21rem, 62vh) !important;
+          }
           div[data-baseweb="popover"] [role="listbox"],
           div[data-baseweb="popover"] [role="menu"],
           div[data-baseweb="popover"] ul {
@@ -729,6 +732,10 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             gap: 0 !important;
             row-gap: 0 !important;
             column-gap: 0 !important;
+            max-height: min(19.25rem, 56vh) !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior: contain !important;
           }
           /* Keep wrapper selectors present but avoid overriding virtualization heights. */
           div[data-baseweb="popover"] [role="listbox"] > *,

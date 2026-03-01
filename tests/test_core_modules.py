@@ -322,11 +322,16 @@ def test_nba_banner_base_uses_alert_tokens_by_theme() -> None:
 
 def test_select_popover_rows_keep_compact_single_line_layout() -> None:
     css = _captured_injected_css(dark_mode=False)
+    assert 'div[data-baseweb="popover"] {' in css
     assert 'div[data-baseweb="popover"] [role="option"],' in css
     assert 'div[data-baseweb="popover"] li[role="option"]' in css
+    assert 'div[data-baseweb="popover"] [role="listbox"],' in css
     assert 'div[data-baseweb="popover"] [role="listbox"] > *,' in css
     assert 'div[data-baseweb="popover"] ul > li,' in css
     assert 'div[data-baseweb="popover"] [role="listbox"] > div > *,' in css
+    assert "max-height: min(21rem, 62vh) !important;" in css
+    assert "max-height: min(19.25rem, 56vh) !important;" in css
+    assert "overflow-y: auto !important;" in css
     assert "min-height: 1.92rem !important;" in css
     assert "height: 1.92rem !important;" in css
     assert "display: flex !important;" in css
