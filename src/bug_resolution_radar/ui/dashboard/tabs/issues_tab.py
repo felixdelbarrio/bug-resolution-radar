@@ -6,6 +6,7 @@ import math
 import re
 from functools import lru_cache
 from pathlib import Path
+from time import perf_counter
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +25,7 @@ from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_ma
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     CsvDownloadSpec,
     build_download_filename,
+    df_to_excel_bytes,
     dfs_to_excel_bytes,
     download_button_for_df,
     make_table_export_df,
@@ -34,6 +36,20 @@ from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
 
 MAX_CARDS_RENDER = 120
 CARDS_PAGE_SIZE = 30
+_ISSUES_PERF_BUDGETS_MS: dict[str, dict[str, float]] = {
+    "Cards": {
+        "filters": 95.0,
+        "exports": 45.0,
+        "cards": 210.0,
+        "total": 380.0,
+    },
+    "Tabla": {
+        "filters": 95.0,
+        "exports": 45.0,
+        "table": 235.0,
+        "total": 420.0,
+    },
+}
 ISSUES_TABLE_PREFERRED_COLS: list[str] = [
     "key",
     "summary",
@@ -62,6 +78,62 @@ _SORT_LABELS: dict[str, str] = {
     "country": "Country",
     "source_type": "Origen",
 }
+
+
+def _issues_perf_budget(view: str) -> dict[str, float]:
+    return _ISSUES_PERF_BUDGETS_MS.get(str(view or ""), _ISSUES_PERF_BUDGETS_MS["Cards"])
+
+
+def _elapsed_ms(start_ts: float) -> float:
+    return max(0.0, (perf_counter() - float(start_ts)) * 1000.0)
+
+
+def _issues_perf_budget_overruns(
+    *,
+    view: str,
+    metrics_ms: dict[str, float],
+) -> list[str]:
+    budgets = _issues_perf_budget(view)
+    ordered = ["filters", "cards" if view == "Cards" else "table", "exports", "total"]
+    out: list[str] = []
+    for block in ordered:
+        budget = float(budgets.get(block, 0.0) or 0.0)
+        value = float(metrics_ms.get(block, 0.0) or 0.0)
+        if budget > 0.0 and value > budget:
+            out.append(block)
+    return out
+
+
+def _render_issues_perf_footer(
+    *,
+    key_prefix: str,
+    view: str,
+    metrics_ms: dict[str, float],
+) -> None:
+    budgets = _issues_perf_budget(view)
+    ordered = ["filters", "cards" if view == "Cards" else "table", "exports", "total"]
+    parts: list[str] = []
+    for block in ordered:
+        if block not in metrics_ms:
+            continue
+        value = float(metrics_ms.get(block, 0.0) or 0.0)
+        budget = float(budgets.get(block, 0.0) or 0.0)
+        if budget > 0:
+            parts.append(f"{block} {value:.0f}/{budget:.0f}ms")
+        else:
+            parts.append(f"{block} {value:.0f}ms")
+
+    overruns = _issues_perf_budget_overruns(view=view, metrics_ms=metrics_ms)
+    st.session_state[f"{key_prefix}::perf_snapshot"] = {
+        "view": view,
+        "metrics_ms": {k: float(v) for k, v in metrics_ms.items()},
+        "budget_ms": {k: float(v) for k, v in budgets.items()},
+        "overruns": list(overruns),
+    }
+    if parts:
+        st.caption(f"Perf {view}: {' · '.join(parts)}")
+    if overruns:
+        st.caption(f"Budget excedido en: {', '.join(overruns)}")
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -515,6 +587,17 @@ def _cached_make_table_export_df(dff: pd.DataFrame) -> pd.DataFrame:
     max_entries=24,
     hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
 )
+def _cached_standard_issues_export_xlsx(export_df: pd.DataFrame) -> bytes | None:
+    if export_df is None or export_df.empty:
+        return None
+    return df_to_excel_bytes(export_df, include_index=False, sheet_name="Issues")
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=24,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _cached_helix_issues_export_xlsx(
     export_df: pd.DataFrame,
     *,
@@ -571,14 +654,51 @@ def _render_issues_download_button(
         return
 
     if not helix_only:
-        download_button_for_df(
-            export_df,
+        export_sig = _issues_export_signature(export_df, helix_path="", helix_mtime_ns=-1)
+        sig_key = f"{key_prefix}::jira_export_sig"
+        prepared_key = f"{key_prefix}::jira_export_prepared"
+        if str(st.session_state.get(sig_key) or "") != export_sig:
+            st.session_state[sig_key] = export_sig
+            st.session_state[prepared_key] = False
+
+        if not bool(st.session_state.get(prepared_key, False)):
+            if st.button(
+                "Preparar Excel",
+                key=f"{key_prefix}::prepare_excel_jira",
+                type="secondary",
+                width="stretch",
+                help=(
+                    "Genera el Excel bajo demanda para mantener la vista de Issues "
+                    "fluida en alcance Jira."
+                ),
+            ):
+                xlsx_probe = _cached_standard_issues_export_xlsx(export_df)
+                st.session_state[prepared_key] = bool(xlsx_probe)
+                st.rerun()
+            return
+
+        xlsx_bytes = _cached_standard_issues_export_xlsx(export_df)
+        if xlsx_bytes is None:
+            download_button_for_df(
+                export_df,
+                label="Excel",
+                key=f"{key_prefix}::download_csv",
+                spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
+                suffix="issues",
+                disabled=False,
+                width="stretch",
+            )
+            return
+
+        st.download_button(
             label="Excel",
+            data=xlsx_bytes,
+            file_name=build_download_filename("issues_filtradas", suffix="issues", ext="xlsx"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{key_prefix}::download_csv",
-            spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
-            suffix="issues",
             disabled=False,
             width="stretch",
+            help="Exporta el dataset filtrado completo (Jira/mixto) en formato Excel.",
         )
         return
 
@@ -596,7 +716,7 @@ def _render_issues_download_button(
     if not bool(st.session_state.get(prepared_key, False)):
         if st.button(
             "Preparar Excel",
-            key=f"{key_prefix}::prepare_excel",
+            key=f"{key_prefix}::prepare_excel_helix",
             type="secondary",
             width="stretch",
             help="Genera el Excel oficial Helix bajo demanda para acelerar la carga de la pantalla.",
@@ -646,6 +766,16 @@ def _render_issues_download_button(
 def _issues_export_signature(
     export_df: pd.DataFrame, *, helix_path: str, helix_mtime_ns: int
 ) -> str:
+    digest = _cached_export_df_digest(export_df)
+    return f"{helix_path}|{helix_mtime_ns}|{len(export_df) if isinstance(export_df, pd.DataFrame) else 0}|{digest}"
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=64,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_export_df_digest(export_df: pd.DataFrame) -> str:
     if export_df is None or export_df.empty:
         return "empty"
     # Table export shape is flat (no nested lists), so pandas hashing is cheap and stable enough.
@@ -654,7 +784,7 @@ def _issues_export_signature(
         digest = str(int(hashed.sum()))
     except Exception:
         digest = str(abs(hash(export_df.to_json(date_format="iso", orient="split"))))
-    return f"{helix_path}|{helix_mtime_ns}|{len(export_df)}|{digest}"
+    return digest
 
 
 def _is_helix_only_scope(df: pd.DataFrame) -> bool:
@@ -766,6 +896,10 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
+        section_start_ts = perf_counter()
+        perf_ms: dict[str, float] = {}
+
+        filters_start_ts = perf_counter()
         helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
         dff_show_raw = _cached_prepare_issues_base_df(
             dff,
@@ -779,6 +913,7 @@ def render_issues_section(
         # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
         table_df = _cached_make_table_export_df(dff_show)
         export_df = table_df.copy(deep=False)
+        perf_ms["filters"] = _elapsed_ms(filters_start_ts)
 
         # Compact toolbar: top row for view toggle + count.
         view_key = f"{key_prefix}::view_mode"
@@ -858,6 +993,7 @@ def render_issues_section(
         # Independent bar below Cards/Tabla: sort controls (left) + Asc/Excel (right), aligned.
         sort_export_scope = f"{key_prefix}_sort_export"
         _inject_issues_sort_export_css(scope_key=sort_export_scope)
+        exports_start_ts = perf_counter()
         with st.container(border=True, key=sort_export_scope):
             left, right = st.columns([2.2, 1.25], gap="small")
             with left:
@@ -875,12 +1011,20 @@ def render_issues_section(
                             settings=settings,
                             helix_only=_is_helix_only_scope(dff_show),
                         )
+        perf_ms["exports"] = _elapsed_ms(exports_start_ts)
 
         if dff_show.empty:
+            perf_ms["total"] = _elapsed_ms(section_start_ts)
+            _render_issues_perf_footer(
+                key_prefix=key_prefix,
+                view=view,
+                metrics_ms=perf_ms,
+            )
             st.info("No hay issues para mostrar con los filtros actuales.")
             return
 
         if view == "Cards":
+            cards_start_ts = perf_counter()
             render_issue_cards(
                 cards_slice,
                 max_cards=len(cards_df),
@@ -899,8 +1043,16 @@ def render_issues_section(
                 prev_button_key=f"{key_prefix}::cards_prev",
                 next_button_key=f"{key_prefix}::cards_next",
             )
+            perf_ms["cards"] = _elapsed_ms(cards_start_ts)
+            perf_ms["total"] = _elapsed_ms(section_start_ts)
+            _render_issues_perf_footer(
+                key_prefix=key_prefix,
+                view=view,
+                metrics_ms=perf_ms,
+            )
             return
 
+        table_start_ts = perf_counter()
         render_issue_table(
             table_slice,
             settings=settings,
@@ -918,6 +1070,13 @@ def render_issues_section(
             total_rows=total_filtered,
             prev_button_key=f"{key_prefix}::table_prev",
             next_button_key=f"{key_prefix}::table_next",
+        )
+        perf_ms["table"] = _elapsed_ms(table_start_ts)
+        perf_ms["total"] = _elapsed_ms(section_start_ts)
+        _render_issues_perf_footer(
+            key_prefix=key_prefix,
+            view=view,
+            metrics_ms=perf_ms,
         )
 
 
