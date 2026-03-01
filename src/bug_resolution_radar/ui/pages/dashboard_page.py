@@ -20,6 +20,8 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
+    ISSUES_SCOPE_LIKE_QUERY_KEY,
+    ISSUES_SCOPE_SORT_COL_KEY,
 )
 from bug_resolution_radar.ui.dashboard.tabs.issues_tab import render_issues_tab
 from bug_resolution_radar.ui.dashboard.tabs.kanban_tab import render_kanban_tab
@@ -99,6 +101,10 @@ def _dashboard_data_cache_signature(
         _cache_filter_values(FILTER_PRIORITY_KEY),
         _cache_filter_values(FILTER_ASSIGNEE_KEY),
     )
+    issue_scope_sig = (
+        str(st.session_state.get(ISSUES_SCOPE_SORT_COL_KEY) or "").strip(),
+        str(st.session_state.get(ISSUES_SCOPE_LIKE_QUERY_KEY) or "").strip().casefold(),
+    )
 
     # Scoped dataframe is derived from source/country, but include a tiny shape signature
     # to stay safe when data is injected from tests or non-file sources.
@@ -115,6 +121,7 @@ def _dashboard_data_cache_signature(
             f"lookback_m={getattr(settings, 'ANALYSIS_LOOKBACK_MONTHS', 0)}",
             scoped_sig,
             str(filters_sig),
+            str(issue_scope_sig),
         ]
     )
 
