@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import List, Optional
 
@@ -9,13 +10,14 @@ import pandas as pd
 import streamlit as st
 from streamlit.components.v1 import html as components_html
 
+from bug_resolution_radar.theme.design_tokens import hex_with_alpha
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color,
     priority_rank,
     status_color,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_map
+from bug_resolution_radar.ui.dashboard.constants import order_statuses_canonical
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -24,18 +26,6 @@ from bug_resolution_radar.ui.dashboard.state import (
 )
 
 FILTER_ACTION_CONTEXT_KEY = "__filters_action_context"
-
-
-def _order_statuses_canonical(statuses: List[str]) -> List[str]:
-    """Order statuses by canonical flow. Unknown ones keep stable order and go last."""
-    idx = canonical_status_rank_map()
-
-    def key_fn(pair: tuple[int, str]) -> tuple[int, int]:
-        orig_i, s = pair
-        k = (s or "").strip().lower()
-        return (idx.get(k, 10_000), orig_i)
-
-    return [s for _, s in sorted(list(enumerate(statuses)), key=key_fn)]
 
 
 # ---------------------------------------------------------------------
@@ -61,30 +51,21 @@ def _priority_combo_label(priority: str) -> str:
     return priority
 
 
-def _hex_with_alpha(hex_color: str, alpha: int) -> str:
-    h = (hex_color or "").strip()
+def _theme_alpha(alpha: int) -> int:
+    alpha_i = int(alpha)
     if bool(st.session_state.get("workspace_dark_mode", False)):
-        if alpha <= 40:
-            alpha = 52
-        elif alpha <= 130:
-            alpha = 178
-    if len(h) == 7 and h.startswith("#"):
-        return f"{h}{alpha:02X}"
-    return h
+        if alpha_i <= 40:
+            return 52
+        if alpha_i <= 130:
+            return 178
+    return alpha_i
 
 
 def _inject_filters_panel_css() -> None:
-    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
-    if is_dark:
-        chip_border = "#9A7A3A"
-        chip_bg = "rgba(201, 173, 98, 0.20)"
-        chip_text = "#F1C66D"
-        chip_lbl = "#E8D7AE"
-    else:
-        chip_border = "color-mix(in srgb, #8F5C00 34%, var(--bbva-border))"
-        chip_bg = "color-mix(in srgb, #FFF5DE 56%, var(--bbva-surface))"
-        chip_text = "color-mix(in srgb, #8F5C00 86%, var(--bbva-text))"
-        chip_lbl = "currentColor"
+    chip_border = "var(--bbva-flt-action-chip-border)"
+    chip_bg = "var(--bbva-flt-action-chip-bg)"
+    chip_text = "var(--bbva-flt-action-chip-text)"
+    chip_lbl = "var(--bbva-flt-action-chip-label)"
     css = """
         <style>
           .flt-action-chip {
@@ -143,359 +124,183 @@ def _inject_filters_panel_css() -> None:
     st.markdown(css, unsafe_allow_html=True)
 
 
-def _inject_combo_signal_script() -> None:
-    """Apply semantic signal colors to dropdown options/tags when frontend DOM differs by version."""
-    components_html(
-        """
-        <script>
-        (() => {
-          try {
-            const root = window.parent;
-            const doc = root && root.document;
-            if (!doc) return;
-            const raf = root.requestAnimationFrame || ((fn) => root.setTimeout(fn, 16));
-            const PAINTER_VERSION = 9; // bump to force refresh of painter logic/colors in active sessions
+def _normalize_semantic_label(label: str) -> str:
+    return re.sub(r"\s+", " ", str(label or "").strip().lower()).strip()
 
-            const normalizeText = (raw) =>
-              String(raw || "")
+
+def _css_attr_value(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _semantic_label_tone_map(
+    *, status_labels: List[str], priority_labels: List[str]
+) -> dict[str, dict[str, str]]:
+    tones: dict[str, dict[str, str]] = {}
+    for label in list(status_labels or []):
+        color = status_color(label)
+        tones[_normalize_semantic_label(label)] = {
+            "color": color,
+            "bg": hex_with_alpha(color, _theme_alpha(24), fallback=status_color("")),
+            "border": hex_with_alpha(color, _theme_alpha(120), fallback=status_color("")),
+        }
+    for label in list(priority_labels or []):
+        color = priority_color(label)
+        tones[_normalize_semantic_label(label)] = {
+            "color": color,
+            "bg": hex_with_alpha(color, _theme_alpha(24), fallback=priority_color("")),
+            "border": hex_with_alpha(color, _theme_alpha(120), fallback=priority_color("")),
+        }
+    return tones
+
+
+def _semantic_tag_css_rules(*, status_labels: List[str], priority_labels: List[str]) -> str:
+    tones = _semantic_label_tone_map(status_labels=status_labels, priority_labels=priority_labels)
+    if not tones:
+        return ""
+
+    rules: List[str] = []
+    seen_labels: set[str] = set()
+    for label in [*list(status_labels or []), *list(priority_labels or [])]:
+        raw = str(label or "").strip()
+        if not raw:
+            continue
+        norm = _normalize_semantic_label(raw)
+        if norm in seen_labels:
+            continue
+        seen_labels.add(norm)
+        tone = tones.get(norm)
+        if not tone:
+            continue
+        escaped = _css_attr_value(raw)
+        selector = f'[data-baseweb="tag"][aria-label^="{escaped}" i]'
+        rules.append(
+            (
+                f"{selector} {{"
+                f" background: {tone['bg']} !important;"
+                f" border: 1px solid {tone['border']} !important;"
+                f" color: {tone['color']} !important;"
+                "}"
+                f"{selector} * {{ color: {tone['color']} !important; }}"
+            )
+        )
+    return "".join(rules)
+
+
+def _inject_semantic_tag_css(*, status_labels: List[str], priority_labels: List[str]) -> None:
+    rules = _semantic_tag_css_rules(status_labels=status_labels, priority_labels=priority_labels)
+    if not rules:
+        return
+    st.markdown(f"<style>{rules}</style>", unsafe_allow_html=True)
+
+
+def _inject_semantic_option_runtime_bridge(
+    *, status_labels: List[str], priority_labels: List[str]
+) -> None:
+    tones = _semantic_label_tone_map(status_labels=status_labels, priority_labels=priority_labels)
+    if not tones:
+        return
+    payload = json.dumps(tones, ensure_ascii=False)
+    components_html(
+        f"""
+        <script>
+          (function () {{
+            const toneMap = {payload};
+            const parentWin = window.parent || window;
+            let parentDoc = document;
+            try {{
+              if (parentWin && parentWin.document) {{
+                parentDoc = parentWin.document;
+              }}
+            }} catch (e) {{
+              parentDoc = document;
+            }}
+
+            const normalize = (txt) =>
+              String(txt || "")
                 .toLowerCase()
-                .normalize("NFD")
-                .replace(/[\\u0300-\\u036f]/g, "")
+                .replace(/[\\u00d7\\u2715\\u2716]/g, "")
+                .replace(/[_-]+/g, " ")
                 .replace(/\\s+/g, " ")
                 .trim();
-            const canonicalToken = (raw) => {
-              let t = normalizeText(raw);
-              t = t.replace(/^(status|estado|priority|prioridad)\\s*:\\s*/i, "");
-              t = t.replace(/\\s*\\(\\d+\\)\\s*$/, "");
-              return t.trim();
-            };
-            const cssEscape = (raw) => {
-              const t = String(raw || "");
-              if (!t) return "";
-              try {
-                if (root.CSS && typeof root.CSS.escape === "function") return root.CSS.escape(t);
-              } catch (e) {}
-              return t.replace(/["\\\\]/g, "\\\\$&");
-            };
-            const semanticLabelHints = ["estado", "status", "priority", "prioridad"];
 
-            const STATUS_RED = new Set(["new", "analysing", "ready", "blocked", "created"]);
-            const STATUS_AMBER = new Set([
-              "en progreso",
-              "in progress",
-              "to rework",
-              "test",
-              "ready to verify",
-              "open",
-            ]);
-            const STATUS_GREEN = new Set(["accepted", "ready to deploy", "closed", "resolved", "done"]);
-            const PRIORITY_RED = new Set(["supone un impedimento", "impedimento", "highest", "high"]);
-            const PRIORITY_AMBER = new Set(["medium"]);
-            const PRIORITY_GREEN = new Set(["low", "lowest"]);
-            const GOAL_GREEN =
-              (root.getComputedStyle && doc.documentElement
-                ? String(root.getComputedStyle(doc.documentElement).getPropertyValue("--bbva-goal-green") || "").trim()
-                : "") || "#5B3FD0";
-            const GOAL_BG =
-              (root.getComputedStyle && doc.documentElement
-                ? String(root.getComputedStyle(doc.documentElement).getPropertyValue("--bbva-goal-green-bg") || "").trim()
-                : "") || "#ECE6FF";
+            const optionLabel = (opt) => {{
+              const aria = String(opt.getAttribute("aria-label") || "").trim();
+              if (aria) return aria;
+              const titled = opt.querySelector("[title]");
+              if (titled && titled.getAttribute("title")) return titled.getAttribute("title");
+              return String(opt.textContent || "");
+            }};
 
-            const toRgba = (hex, alpha) => {
-              const h = String(hex || "").replace("#", "");
-              if (h.length !== 6) return "rgba(122,139,173," + alpha + ")";
-              const r = parseInt(h.slice(0, 2), 16);
-              const g = parseInt(h.slice(2, 4), 16);
-              const b = parseInt(h.slice(4, 6), 16);
-              return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
-            };
+            const applyTones = () => {{
+              const tones = parentWin.__bbvaSemanticTones || toneMap;
+              parentDoc.querySelectorAll('div[data-baseweb="popover"] [role="option"]').forEach((opt) => {{
+                const toneKey = normalize(optionLabel(opt));
+                const tone = tones[toneKey];
+                if (!tone) {{
+                  opt.removeAttribute("data-bbva-semantic");
+                  opt.removeAttribute("data-bbva-semantic-key");
+                  opt.style.removeProperty("--bbva-opt-dot");
+                  return;
+                }}
+                opt.setAttribute("data-bbva-semantic", "1");
+                opt.setAttribute("data-bbva-semantic-key", toneKey);
+                opt.style.setProperty("--bbva-opt-dot", tone.color);
+              }});
+            }};
 
-            const signalColor = (raw) => {
-              const t = canonicalToken(raw);
-              if (!t) return "";
-              if (STATUS_RED.has(t) || PRIORITY_RED.has(t)) return "#B4232A";
-              if (STATUS_AMBER.has(t) || PRIORITY_AMBER.has(t)) return "#E08A00";
-              if (t === "deployed") return GOAL_GREEN;
-              if (STATUS_GREEN.has(t) || PRIORITY_GREEN.has(t)) return "#1E9E53";
-              return "";
-            };
+            const scheduleApply = () => {{
+              if (parentWin.__bbvaSemanticToneRAF) return;
+              const run = () => {{
+                parentWin.__bbvaSemanticToneRAF = 0;
+                applyTones();
+              }};
+              try {{
+                parentWin.__bbvaSemanticToneRAF = parentWin.requestAnimationFrame(run);
+              }} catch (e) {{
+                setTimeout(run, 30);
+              }}
+            }};
 
-            const optionLabel = (el) => {
-              const a = String(el.getAttribute("aria-label") || "").trim();
-              if (a) return a;
-              const t = String(el.getAttribute("title") || "").trim();
-              if (t) return t;
-              return String(el.textContent || "").replace(/\\s+/g, " ").trim();
-            };
+            parentWin.__bbvaSemanticTones = toneMap;
+            applyTones();
+            setTimeout(() => applyTones(), 40);
 
-            const readWidgetLabel = (node) => {
-              const host = node
-                ? node.closest('[data-testid="stMultiSelect"], [data-testid="stSelectbox"], .stMultiSelect, .stSelectbox')
-                : null;
-              const scope = host || (node ? node.closest('[data-testid="stWidget"], .element-container') : null);
-              if (!scope) return "";
-              const labelEl = scope.querySelector(
-                '[data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label, label'
-              );
-              return normalizeText(labelEl ? labelEl.textContent : "");
-            };
+            const shouldRescan = (node) => {{
+              if (!node || node.nodeType !== 1) return false;
+              if (node.matches && node.matches('div[data-baseweb="popover"], [role="option"]')) {{
+                return true;
+              }}
+              try {{
+                return Boolean(
+                  node.querySelector &&
+                  node.querySelector('div[data-baseweb="popover"], [role="option"]')
+                );
+              }} catch (e) {{
+                return false;
+              }};
+            }};
 
-            const isSemanticWidgetLabel = (labelText) =>
-              semanticLabelHints.some((hint) => labelText.includes(hint));
-
-            const listContainerOf = (el) => el.closest('[role="listbox"], [role="menu"], ul');
-
-            const semanticScopeForOption = (el) => {
-              const pop = el.closest('div[data-baseweb="popover"]');
-              const list = listContainerOf(el);
-              if (!pop || !list) return false;
-              const listId = String(list.getAttribute("id") || "").trim();
-              let control = null;
-              if (listId) {
-                const escaped = cssEscape(listId);
-                if (escaped) {
-                  try {
-                    control = doc.querySelector('[aria-controls="' + escaped + '"]');
-                  } catch (e) {}
-                }
-              }
-              if (!control) {
-                const expanded = Array.from(doc.querySelectorAll('[aria-expanded="true"][aria-controls]'));
-                control =
-                  expanded.find((node) => {
-                    const controls = String(node.getAttribute("aria-controls") || "").trim();
-                    return controls && listId && controls === listId;
-                  }) || expanded[0] || null;
-              }
-              const semantic = isSemanticWidgetLabel(readWidgetLabel(control));
-              pop.classList.toggle("bbva-semantic-popover", semantic);
-              return semantic;
-            };
-
-            const clearOptionSignal = (el) => {
-              el.style.removeProperty("--bbva-opt-dot");
-              el.style.removeProperty("border-left");
-              el.style.removeProperty("padding-left");
-              el.style.removeProperty("background-image");
-              el.style.removeProperty("background-repeat");
-            };
-
-            const paintOption = (el) => {
-              const inList = !!el.closest('[data-baseweb="popover"], [role="listbox"], [role="menu"]');
-              if (!inList) return;
-              if (!semanticScopeForOption(el)) {
-                clearOptionSignal(el);
-                return;
-              }
-              const label = optionLabel(el);
-              if (!label) return;
-              const color = signalColor(label);
-              if (!color) {
-                clearOptionSignal(el);
-                return;
-              }
-              el.style.setProperty("--bbva-opt-dot", color, "important");
-              el.style.setProperty("border-left", "2px solid " + toRgba(color, 0.75), "important");
-              el.style.setProperty("padding-left", "1.72rem", "important");
-              el.style.setProperty(
-                "background-image",
-                "radial-gradient(circle at 0.68rem 50%, " + color + " 0 0.30rem, transparent 0.31rem)",
-                "important"
-              );
-              el.style.setProperty("background-repeat", "no-repeat", "important");
-            };
-
-            const clearTagSignal = (el) => {
-              el.style.removeProperty("background");
-              el.style.removeProperty("border");
-              el.style.removeProperty("color");
-              el.style.removeProperty("background-image");
-              el.querySelectorAll("*").forEach((n) => {
-                n.style.removeProperty("color");
-              });
-            };
-
-            const paintTag = (el) => {
-              if (!isSemanticWidgetLabel(readWidgetLabel(el))) {
-                clearTagSignal(el);
-                return;
-              }
-              const label = optionLabel(el);
-              if (!label) return;
-              const color = signalColor(label);
-              if (!color) {
-                clearTagSignal(el);
-                return;
-              }
-              const token = canonicalToken(label);
-              const isGoal = token === "deployed";
-              const bgAlpha = isGoal ? 0.24 : 0.14;
-              const borderAlpha = isGoal ? 0.64 : 0.52;
-              el.style.setProperty("background", isGoal ? GOAL_BG : toRgba(color, bgAlpha), "important");
-              el.style.setProperty("border", "1px solid " + toRgba(color, borderAlpha), "important");
-              el.style.setProperty("color", color, "important");
-              el.style.setProperty("background-image", "none", "important");
-              el.querySelectorAll("*").forEach((n) => {
-                n.style.setProperty("color", color, "important");
-              });
-            };
-
-            const tick = () => {
-              doc
-                .querySelectorAll(
-                  'div[data-baseweb="popover"] [role="option"], ' +
-                  'div[data-baseweb="popover"] li[role="option"], ' +
-                  'div[data-baseweb="popover"] li, ' +
-                  '[role="option"]'
-                )
-                .forEach(paintOption);
-              doc
-                .querySelectorAll('[data-baseweb="select"] [data-baseweb="tag"]')
-                .forEach(paintTag);
-            };
-
-            if (root.__bbvaSignalPainterVersion !== PAINTER_VERSION) {
-              root.__bbvaSignalPainterVersion = PAINTER_VERSION;
-              root.__bbvaSignalPaintQueued = false;
-
-              root.__bbvaScheduleSignalPaint = () => {
-                if (root.__bbvaSignalPaintQueued) return;
-                root.__bbvaSignalPaintQueued = true;
-                raf(() => {
-                  root.__bbvaSignalPaintQueued = false;
-                  try { tick(); } catch (e) {}
-                });
-              };
-
-              if (root.__bbvaSignalObserver) {
-                try { root.__bbvaSignalObserver.disconnect(); } catch (e) {}
-              }
-              root.__bbvaSignalObserver = new MutationObserver(() => {
-                root.__bbvaScheduleSignalPaint();
-              });
-              root.__bbvaSignalObserver.observe(doc.body, { childList: true, subtree: true });
-            }
-            if (typeof root.__bbvaScheduleSignalPaint === "function") {
-              root.__bbvaScheduleSignalPaint();
-            } else {
-              tick();
-            }
-          } catch (e) {
-            // no-op
-          }
-        })();
+            if (!parentWin.__bbvaSemanticToneObserver && parentDoc && parentDoc.body) {{
+              const observer = new MutationObserver((mutations) => {{
+                for (const mutation of mutations) {{
+                  if (mutation.type !== "childList") continue;
+                  for (const node of mutation.addedNodes || []) {{
+                    if (shouldRescan(node)) {{
+                      scheduleApply();
+                      return;
+                    }}
+                  }}
+                }}
+              }});
+              observer.observe(parentDoc.body, {{ childList: true, subtree: true }});
+              parentWin.__bbvaSemanticToneObserver = observer;
+            }}
+          }})();
         </script>
         """,
         height=0,
         width=0,
     )
-
-
-def _css_attr_value(txt: str) -> str:
-    return (txt or "").replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _inject_colored_multiselect_css(
-    *, status_labels: List[str], priority_labels: List[str]
-) -> None:
-    rules: List[str] = []
-
-    def _opt_sel(v: str) -> str:
-        return (
-            f'[role="option"][aria-label*="{v}" i], '
-            f'[role="option"][title*="{v}" i], '
-            f'[role="option"]:has([title*="{v}" i])'
-        )
-
-    def _tag_sel(v: str) -> str:
-        return (
-            f'[data-baseweb="tag"][title*="{v}" i], ' f'[data-baseweb="tag"]:has([title*="{v}" i])'
-        )
-
-    for label in status_labels:
-        raw = (label or "").strip()
-        c = status_color(raw)
-        bg = _hex_with_alpha(c, 24)
-        border = _hex_with_alpha(c, 120)
-        v = _css_attr_value(label)
-        option_selector = _opt_sel(v)
-        tag_selector = _tag_sel(v)
-        rules.append(
-            f"""
-            {option_selector} {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            {option_selector}::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            {tag_selector} {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            {tag_selector} * {{
-              color: {c} !important;
-            }}
-            """
-        )
-
-    for label in priority_labels:
-        raw = (label or "").strip()
-        c = priority_color(raw)
-        bg = _hex_with_alpha(c, 24)
-        border = _hex_with_alpha(c, 120)
-        v = _css_attr_value(label)
-        option_selector = _opt_sel(v)
-        tag_selector = _tag_sel(v)
-        rules.append(
-            f"""
-            {option_selector} {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            {option_selector}::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            {tag_selector} {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            {tag_selector} * {{
-              color: {c} !important;
-            }}
-            """
-        )
-
-    if rules:
-        st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
 def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
@@ -551,7 +356,6 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
       so matrix/kanban/insights can still sync by writing those keys.
     """
     _inject_filters_panel_css()
-    _inject_combo_signal_script()
 
     # Normalize empty values so filters + matrix can round-trip selections.
     status_col = (
@@ -583,7 +387,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         st.session_state.pop(FILTER_ACTION_CONTEXT_KEY, None)
 
     status_opts_raw = status_col.astype(str).unique().tolist()
-    status_opts_raw = _order_statuses_canonical(status_opts_raw)
+    status_opts_raw = order_statuses_canonical(status_opts_raw)
     status_opts_ui = [_status_combo_label(s) for s in status_opts_raw]
 
     prio_opts_ui: List[str] = []
@@ -594,8 +398,11 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         )
         prio_opts_ui = [_priority_combo_label(p) for p in prio_opts]
 
-    # Inject option/tag color styles once to avoid per-column layout jitter.
-    _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
+    # Tags use stable aria-label selectors (color only, no dot) from centralized token map.
+    _inject_semantic_tag_css(
+        status_labels=status_opts_ui,
+        priority_labels=prio_opts_ui,
+    )
 
     with st.container(border=True, key=f"{(key_prefix or 'dashboard')}_filters_panel"):
         if ctx_label:
@@ -761,32 +568,6 @@ def _matrix_toggle_priority_filter(prio: str) -> None:
     st.session_state[FILTER_PRIORITY_KEY] = [] if priorities == [prio] else [prio]
 
 
-def _matrix_chip_style(hex_color: str, *, selected: bool = False) -> str:
-    color = (hex_color or "#8EA2C4").strip()
-    deployed_color = status_color("Deployed").strip().upper()
-    if color.strip().upper() == deployed_color:
-        border = _hex_with_alpha(color, 180 if selected else 150)
-        bg = (
-            "color-mix(in srgb, var(--bbva-goal-green-bg) 86%, var(--bbva-goal-green) 14%)"
-            if selected
-            else "var(--bbva-goal-green-bg)"
-        )
-        fw = "800" if selected else "700"
-        return (
-            f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
-            f"border-radius:11px; border:1px solid {border}; background:{bg}; "
-            f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
-        )
-    border = _hex_with_alpha(color, 150 if selected else 110)
-    bg = _hex_with_alpha(color, 48 if selected else 24)
-    fw = "800" if selected else "700"
-    return (
-        f"display:block; width:100%; text-align:center; padding:0.42rem 0.54rem; "
-        f"border-radius:11px; border:1px solid {border}; background:{bg}; "
-        f"color:{color}; font-weight:{fw}; font-size:0.92rem; line-height:1.18;"
-    )
-
-
 def _matrix_priority_label(priority: str) -> str:
     p = str(priority or "").strip()
     if p.lower() == "supone un impedimento":
@@ -800,18 +581,12 @@ def _matrix_safe_token(value: str) -> str:
 
 
 def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
-    color = (hex_color or "#8EA2C4").strip()
+    color = (hex_color or status_color("")).strip()
     deployed_color = status_color("Deployed").strip().upper()
     if color.strip().upper() == deployed_color:
-        border = _hex_with_alpha(color, 178 if selected else 145)
-        bg = (
-            "color-mix(in srgb, var(--bbva-goal-green-bg) 84%, var(--bbva-goal-green) 16%)"
-            if selected
-            else "var(--bbva-goal-green-bg)"
-        )
+        border = hex_with_alpha(color, _theme_alpha(145), fallback=status_color(""))
+        bg = "var(--bbva-goal-green-bg)"
         hover_bg = "color-mix(in srgb, var(--bbva-goal-green-bg) 78%, var(--bbva-goal-green) 22%)"
-        ring = _hex_with_alpha(color, 86)
-        glow = _hex_with_alpha(color, 66)
         fw = "800" if selected else "700"
         return (
             f"border:1px solid {border} !important;"
@@ -824,15 +599,13 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
             "line-height:1.16 !important;"
             "white-space:normal !important;"
             "word-break:break-word !important;"
-            f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+            f"box-shadow:{'0 0 0 2px var(--bbva-focus-ring)' if selected else 'none'} !important;"
             f"--mx-hover-bg:{hover_bg};"
-            f"--mx-focus-ring:{ring};"
+            "--mx-focus-ring:var(--bbva-focus-ring);"
         )
-    border = _hex_with_alpha(color, 170 if selected else 125)
-    bg = _hex_with_alpha(color, 64 if selected else 28)
-    hover_bg = _hex_with_alpha(color, 76 if selected else 42)
-    ring = _hex_with_alpha(color, 86)
-    glow = _hex_with_alpha(color, 62)
+    border = hex_with_alpha(color, _theme_alpha(125), fallback=status_color(""))
+    bg = hex_with_alpha(color, _theme_alpha(28), fallback=status_color(""))
+    hover_bg = hex_with_alpha(color, _theme_alpha(42), fallback=status_color(""))
     fw = "800" if selected else "700"
     return (
         f"border:1px solid {border} !important;"
@@ -845,9 +618,9 @@ def _matrix_header_button_css(hex_color: str, *, selected: bool) -> str:
         "line-height:1.16 !important;"
         "white-space:normal !important;"
         "word-break:break-word !important;"
-        f"box-shadow:{'0 0 0 2px ' + glow if selected else 'none'} !important;"
+        f"box-shadow:{'0 0 0 2px var(--bbva-focus-ring)' if selected else 'none'} !important;"
         f"--mx-hover-bg:{hover_bg};"
-        f"--mx-focus-ring:{ring};"
+        "--mx-focus-ring:var(--bbva-focus-ring);"
     )
 
 
@@ -935,7 +708,7 @@ def render_status_priority_matrix(
     )
 
     # Orden filas: CANÓNICO
-    statuses = _order_statuses_canonical(mx["status"].value_counts().index.tolist())
+    statuses = order_statuses_canonical(mx["status"].value_counts().index.tolist())
 
     # Orden columnas: impedimento primero + resto por rank
     priorities = sorted(

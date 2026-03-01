@@ -42,7 +42,7 @@ def test_scope_sources_only_include_source_ids_with_results(monkeypatch: Any) ->
     assert [row["source_id"] for row in grouped["España"]] == [es_core_id]
 
 
-def test_scope_sources_fallback_to_country_when_source_id_missing(monkeypatch: Any) -> None:
+def test_scope_sources_requires_source_id_metadata(monkeypatch: Any) -> None:
     settings = _settings_with_jira_sources()
 
     monkeypatch.setattr(
@@ -57,8 +57,7 @@ def test_scope_sources_fallback_to_country_when_source_id_missing(monkeypatch: A
     )
 
     grouped = app._sources_with_results_by_country(settings)
-    assert list(grouped.keys()) == ["México"]
-    assert [row["alias"] for row in grouped["México"]] == ["MX Core", "MX BEX"]
+    assert grouped == {}
 
 
 def test_scope_sources_empty_when_there_are_no_results(monkeypatch: Any) -> None:

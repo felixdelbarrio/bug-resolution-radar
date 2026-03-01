@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import calendar
 import os
 import re
 import time
 import warnings
-import calendar
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from urllib.parse import urlparse
@@ -22,13 +22,18 @@ from tenacity import (
     wait_exponential,
 )
 
-from ..config import build_source_id
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
+from ..config import build_source_id
 from ..models.schema_helix import HelixDocument, HelixWorkItem
 from .browser_runtime import (
     is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
+)
+from .browser_runtime import (
     open_url_in_configured_browser as _open_url_in_browser,
+)
+from .browser_runtime import (
+    open_urls_in_configured_browser as _open_urls_in_browser,
 )
 from .helix_mapper import (
     is_allowed_helix_business_incident_type,
@@ -67,6 +72,7 @@ _HELIX_FINALIST_STATUS_TOKENS: tuple[str, ...] = (
     "canceled",
 )
 _INSECURE_TLS_WARNING_SUPPRESSED = False
+_RE_SPACES = re.compile(r"\s+")
 
 
 def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
@@ -82,6 +88,10 @@ def _parse_bool(value: Union[str, bool, None], default: bool = True) -> bool:
     if s in {"0", "false", "f", "no", "n", "off"}:
         return False
     return default
+
+
+def _normalize_space_token(value: Any) -> str:
+    return _RE_SPACES.sub(" ", str(value or "").strip().lower())
 
 
 def _suppress_insecure_request_warning_once() -> None:
@@ -105,6 +115,14 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def _analysis_lookback_months_from_env() -> int:
+    """Read analysis lookback months from env with business default of 12."""
+    value = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 12)
+    if value <= 0:
+        return 12
+    return int(value)
 
 
 def _csv_list(value: Any, default: str = "") -> List[str]:
@@ -203,9 +221,7 @@ def _iso_to_epoch_ms(value: Any) -> Optional[int]:
 
 
 def _is_helix_finalist_status(value: Any) -> bool:
-    token = re.sub(
-        r"\s+", " ", str(value or "").strip().lower().replace("_", " ").replace("-", " ")
-    )
+    token = _normalize_space_token(str(value or "").replace("_", " ").replace("-", " "))
     if not token:
         return False
     return any(part in token for part in _HELIX_FINALIST_STATUS_TOKENS)
@@ -350,6 +366,10 @@ def _is_target_page_open_in_configured_browser(url: str, browser: str) -> Option
     return _is_target_page_open_in_browser(url=url, browser=browser)
 
 
+def _open_urls_in_configured_browser(urls: List[str], browser: str) -> int:
+    return int(_open_urls_in_browser(urls=urls, browser=browser))
+
+
 def _ensure_target_page_open_in_configured_browser(url: str, browser: str) -> bool:
     is_open = _is_target_page_open_in_configured_browser(url, browser)
     if is_open is True:
@@ -419,15 +439,10 @@ def _smartit_base_from_dashboard_url(url: str) -> str:
     if not scheme or not host:
         return ""
 
-    path = str(parsed.path or "").strip()
-    base_path = ""
-    if "/app" in path:
-        base_path = path.split("/app", 1)[0].rstrip("/")
-    else:
-        base_path = path.rstrip("/")
-    if not base_path:
-        base_path = "/smartit"
-    candidate = f"{scheme}://{host}{base_path}"
+    # Dashboard URLs can come from ARSQL/Grafana hosts (e.g. -ir1).
+    # Always normalize bootstrap base to SmartIT ticket-console host path.
+    smartit_host = host.replace("-ir1.", "-smartit.", 1) if "-ir1." in host else host
+    candidate = f"{scheme}://{smartit_host}/smartit"
     try:
         return validate_service_base_url(candidate, service_name="Helix")
     except ValueError:
@@ -903,11 +918,13 @@ def _dry_run_timeouts(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception(
-        lambda e: isinstance(
-            e,
-            (RuntimeError, requests.exceptions.ConnectionError),
+        lambda e: (
+            isinstance(
+                e,
+                (RuntimeError, requests.exceptions.ConnectionError),
+            )
+            and not isinstance(e, requests.exceptions.SSLError)
         )
-        and not isinstance(e, requests.exceptions.SSLError)
     ),
 )
 def _request(
@@ -945,16 +962,19 @@ def _rows_to_dicts(rows: List[Any], columns: Optional[List[Any]] = None) -> List
         if columns is not None
         else list(_ARSQL_SELECT_ALIASES)
     )
+    names_count = len(names)
     for row in rows:
         if isinstance(row, dict):
             out.append(dict(row))
             continue
         if not isinstance(row, (list, tuple)):
             continue
-        item: Dict[str, Any] = {}
-        for idx, value in enumerate(row):
-            key = names[idx] if idx < len(names) else _column_name(None, idx)
-            item[key] = value
+        row_values = list(row)
+        row_count = len(row_values)
+        item = dict(zip(names[:row_count], row_values[:names_count]))
+        if row_count > names_count:
+            for idx in range(names_count, row_count):
+                item[_column_name(None, idx)] = row_values[idx]
         out.append(item)
     return out
 
@@ -972,21 +992,22 @@ def _frame_to_rows(frame: Dict[str, Any]) -> List[Dict[str, Any]]:
         if isinstance(fields, list)
         else []
     )
+    columns_data: List[Tuple[str, List[Any], int]] = []
     row_count = 0
-    for col in values:
+    for cidx, col in enumerate(values):
         if isinstance(col, list):
-            row_count = max(row_count, len(col))
+            col_len = len(col)
+            row_count = max(row_count, col_len)
+            key = field_names[cidx] if cidx < len(field_names) else _column_name(None, cidx)
+            columns_data.append((key, col, col_len))
     if row_count <= 0:
         return []
 
     rows: List[Dict[str, Any]] = []
     for ridx in range(row_count):
         row: Dict[str, Any] = {}
-        for cidx, col_values in enumerate(values):
-            if not isinstance(col_values, list):
-                continue
-            key = field_names[cidx] if cidx < len(field_names) else _column_name(None, cidx)
-            row[key] = col_values[ridx] if ridx < len(col_values) else None
+        for key, col_values, col_len in columns_data:
+            row[key] = col_values[ridx] if ridx < col_len else None
         rows.append(row)
     return rows
 
@@ -1333,10 +1354,8 @@ def ingest_helix(
     arsql_base_candidates: List[str] = []
     # SmartIT ticket console is the right "safe landing" URL for work items.
     # HELIX_DASHBOARD_URL is used only for ARSQL login bootstrap, not for issue links.
-    ticket_console_url = (
-        dashboard_url_cfg.strip()
-        or (f"{base}/app/#/ticket-console" if base else "")
-        or (f"{base_scheme}://{base_host}/smartit/app/#/ticket-console" if base_host else "")
+    ticket_console_url = (f"{base}/app/#/ticket-console" if base else "") or (
+        f"{base_scheme}://{base_host}/smartit/app/#/ticket-console" if base_host else ""
     )
     login_bootstrap_url = ""
     arsql_dashboard_path_default = "/dashboards/"
@@ -1480,7 +1499,24 @@ def ingest_helix(
         return out
 
     auth_cookie_hosts = _auth_cookie_hosts()
-    can_bootstrap_page = bool(auth_cookie_hosts) and bool(_root_from_url(login_bootstrap_url))
+
+    def _cookie_bootstrap_urls() -> List[str]:
+        out: List[str] = []
+        seen: set[str] = set()
+
+        def _push(url: str) -> None:
+            txt = str(url or "").strip()
+            if not txt:
+                return
+            if txt in seen:
+                return
+            seen.add(txt)
+            out.append(txt)
+
+        _push(ticket_console_url)
+        return out
+
+    can_bootstrap_page = bool(auth_cookie_hosts) and bool(_root_from_url(ticket_console_url))
     bootstrap_page_checked = False
     bootstrap_page_ready = False
 
@@ -1491,7 +1527,7 @@ def ingest_helix(
         if bootstrap_page_checked and not force_recheck:
             return bootstrap_page_ready
         bootstrap_page_ready = _ensure_target_page_open_in_configured_browser(
-            login_bootstrap_url, browser
+            ticket_console_url, browser
         )
         bootstrap_page_checked = True
         return bootstrap_page_ready
@@ -1509,23 +1545,33 @@ def ingest_helix(
                 return candidate, cookie_host, ""
         return None, "", last_error
 
-    def _bootstrap_cookie_from_browser() -> Tuple[Optional[str], str]:
+    def _bootstrap_cookie_from_browser(
+        *,
+        force_interactive: bool = False,
+    ) -> Tuple[Optional[str], str]:
         nonlocal bootstrap_page_ready
-        page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
+        page_ready = False
+        if not force_interactive:
+            page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
 
-        try:
-            existing, existing_host, _ = _read_auth_cookie_from_browser()
-        except Exception:
-            existing, existing_host = None, ""
-        if existing:
-            return existing, existing_host
+        if not force_interactive:
+            try:
+                existing, existing_host, _ = _read_auth_cookie_from_browser()
+            except Exception:
+                existing, existing_host = None, ""
+            if existing:
+                return existing, existing_host
 
         if not auth_cookie_hosts:
             return None, ""
         if not can_bootstrap_page:
             return None, ""
-        if not page_ready:
-            page_ready = _open_url_in_configured_browser(login_bootstrap_url, browser)
+        if force_interactive:
+            page_ready = _open_urls_in_configured_browser(_cookie_bootstrap_urls(), browser) > 0
+            if page_ready:
+                bootstrap_page_ready = True
+        elif not page_ready:
+            page_ready = _open_urls_in_configured_browser(_cookie_bootstrap_urls(), browser) > 0
             if page_ready:
                 bootstrap_page_ready = True
 
@@ -1537,7 +1583,6 @@ def ingest_helix(
             time.sleep(login_poll_seconds)
         return None, ""
 
-    _ensure_login_bootstrap_page_open(force_recheck=True)
     cookie, cookie_source_host, cookie_error = _read_auth_cookie_from_browser()
     cookie_names_from_header = _cookie_names_from_header(cookie or "")
     if not cookie or not _has_auth_cookie(cookie_names_from_header):
@@ -1551,9 +1596,7 @@ def ingest_helix(
         details = f" Detalle: {cookie_error}" if cookie_error else ""
         hint = ""
         if not auth_cookie_hosts:
-            hint = (
-                " Revisa HELIX_DASHBOARD_URL (URL absoluta de SmartIT) " "o HELIX_ARSQL_BASE_URL."
-            )
+            hint = " Revisa HELIX_DASHBOARD_URL (URL absoluta de SmartIT) o HELIX_ARSQL_BASE_URL."
         elif not can_bootstrap_page:
             hint = (
                 " Revisa HELIX_DASHBOARD_URL/HELIX_ARSQL_DASHBOARD_URL: "
@@ -1576,7 +1619,6 @@ def ingest_helix(
         )
 
     def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
-        _ensure_login_bootstrap_page_open(force_recheck=True)
         fresh_cookie, fresh_cookie_host, cookie_refresh_error = _read_auth_cookie_from_browser()
         if not fresh_cookie:
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
@@ -1601,7 +1643,9 @@ def ingest_helix(
             session, fresh_cookie, host=(fresh_cookie_host or host)
         )
         if not _has_auth_cookie(refreshed_cookie_names):
-            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
+                force_interactive=True
+            )
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()
@@ -1640,7 +1684,9 @@ def ingest_helix(
             )
 
         if _looks_like_sso_redirect(refresh_preflight):
-            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
+            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
+                force_interactive=True
+            )
             if bootstrapped_cookie:
                 try:
                     session.cookies.clear()
@@ -1690,7 +1736,7 @@ def ingest_helix(
                 None,
             )
 
-    analysis_lookback_months = _coerce_int(os.getenv("ANALYSIS_LOOKBACK_MONTHS"), 0)
+    analysis_lookback_months = _analysis_lookback_months_from_env()
     cache_reference_doc = cache_doc if cache_doc is not None else existing_doc
     source_cached_items = _cached_items_for_source(
         cache_reference_doc,
@@ -1699,9 +1745,7 @@ def ingest_helix(
         alias=alias_value,
     )
     if source_cached_items:
-        rolling_lookback_months = (
-            int(analysis_lookback_months) if analysis_lookback_months > 0 else 12
-        )
+        rolling_lookback_months = int(analysis_lookback_months)
         create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
             analysis_lookback_months=rolling_lookback_months,
         )
@@ -1712,7 +1756,7 @@ def ingest_helix(
     else:
         create_start_ms, create_end_ms, create_window_rule = _resolve_create_date_range_ms(
             create_date_year=create_date_year,
-            analysis_lookback_months=0,
+            analysis_lookback_months=analysis_lookback_months,
         )
         create_window_rule = f"{create_window_rule}; first_ingest=true"
 
@@ -1730,8 +1774,7 @@ def ingest_helix(
     )
     create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
     create_window_rule = (
-        f"{create_window_rule}; {cache_window_rule}; "
-        f"pending_ids={len(arsql_pending_incident_ids)}"
+        f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )
     # Keep official extraction filters for business type/environment/time fields.
     # Only the temporal window changes according to configured analysis depth.
@@ -1763,6 +1806,11 @@ def ingest_helix(
         "",
     )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
+    allowed_env_tokens = {
+        _normalize_space_token(x) for x in arsql_environments_filter if str(x).strip()
+    }
+    if {"produccion", "producción"} & allowed_env_tokens:
+        allowed_env_tokens.add("production")
     arsql_include_all_fields = _parse_bool(
         os.getenv("HELIX_ARSQL_SELECT_ALL_FIELDS", "true"),
         default=True,
@@ -1926,7 +1974,7 @@ def ingest_helix(
             return (
                 False,
                 f"{source_label}: Helix no autenticado (redirección a SSO en {preflight_name}). "
-                f"cookies_cargadas={cookie_names} | "
+                f"Abre SmartIT en '{browser}', autentícate y reintenta. "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -1936,7 +1984,6 @@ def ingest_helix(
                 False,
                 f"{source_label}: Helix dry-run rápido falló en {preflight_name} "
                 f"({preflight.status_code}): {_short_text(preflight.text)} | "
-                f"cookies_cargadas={cookie_names} | "
                 f"proxy={helix_proxy or '(sin proxy)'} | verify={verify_desc}",
                 None,
             )
@@ -2223,21 +2270,14 @@ def ingest_helix(
             if arsql_environments_filter:
                 env_raw = ""
                 raw_fields = mapped_item.raw_fields or {}
-                for env_key in ("BBVA_Environment", "BBVA_Entorno", "Entorno"):
+                for env_key in _ARSQL_ENVIRONMENT_FIELD_CANDIDATES:
                     env_candidate = str(raw_fields.get(env_key) or "").strip()
                     if env_candidate:
                         env_raw = env_candidate
                         break
-                env_token = re.sub(r"\s+", " ", env_raw.strip().lower())
-                allowed_env_tokens = {
-                    re.sub(r"\s+", " ", str(x).strip().lower())
-                    for x in arsql_environments_filter
-                    if str(x).strip()
-                }
+                env_token = _normalize_space_token(env_raw)
                 if env_token in {"producción", "produccion"}:
                     env_token = "production"
-                if "produccion" in allowed_env_tokens or "producción" in allowed_env_tokens:
-                    allowed_env_tokens.add("production")
                 if allowed_env_tokens and env_token and env_token not in allowed_env_tokens:
                     filtered_out_by_environment += 1
                     continue

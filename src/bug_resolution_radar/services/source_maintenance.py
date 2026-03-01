@@ -36,7 +36,7 @@ def _cache_defs() -> List[tuple[str, str]]:
 
 
 def remove_jira_source_from_settings(settings: Settings, source_id: str) -> Tuple[Settings, bool]:
-    """Remove a Jira source from settings and disable legacy Jira fallback."""
+    """Remove a Jira source from `JIRA_SOURCES_JSON` settings."""
     target = _sid(source_id)
     if not target:
         return settings, False
@@ -55,13 +55,7 @@ def remove_jira_source_from_settings(settings: Settings, source_id: str) -> Tupl
         }
         for row in kept
     ]
-    updated = settings.model_copy(
-        update={
-            "JIRA_SOURCES_JSON": to_env_json(payload),
-            # Avoid resurrecting deleted sources via legacy fallback.
-            "JIRA_JQL": "",
-        }
-    )
+    updated = settings.model_copy(update={"JIRA_SOURCES_JSON": to_env_json(payload)})
     return updated, True
 
 

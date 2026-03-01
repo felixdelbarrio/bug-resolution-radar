@@ -5,20 +5,24 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import streamlit as st
 
 from bug_resolution_radar import config as cfg
-from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.common.security import mask_secret, safe_log_text
+from bug_resolution_radar.common.utils import now_iso, parse_age_buckets, parse_int_list
+from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
     flow_signal_color_map,
     open_issues_only,
     priority_color,
     priority_color_map,
+    semantic_popover_css_rules,
     status_color,
 )
+from bug_resolution_radar.ui.dashboard import layout as dashboard_layout
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
-from bug_resolution_radar.common.utils import now_iso, parse_age_buckets, parse_int_list
+from bug_resolution_radar.ui.style import inject_bbva_css
 
 
 def test_now_iso_is_valid_utc_timestamp() -> None:
@@ -59,7 +63,11 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
     env_path = tmp_path / ".env"
     env_example = tmp_path / ".env.example"
     env_example.write_text(
-        "APP_TITLE=Radar\nJIRA_JQL=project = X\\\\nAND status = Open\n", encoding="utf-8"
+        (
+            "APP_TITLE=Radar\n"
+            'JIRA_SOURCES_JSON=[{"country":"México","alias":"Core","jql":"project = X\\\\nAND status = Open"}]\n'
+        ),
+        encoding="utf-8",
     )
 
     monkeypatch.setattr(cfg, "ENV_PATH", env_path)
@@ -70,12 +78,15 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
 
     settings = cfg.load_settings()
     assert settings.APP_TITLE == "Radar"
-    assert "\n" in settings.JIRA_JQL
+    jira_cfg = cfg.jira_sources(settings)
+    assert len(jira_cfg) == 1
+    assert "\n" in jira_cfg[0]["jql"]
 
-    settings.JIRA_JQL = "linea 1\nlinea 2"
+    settings.JIRA_SOURCES_JSON = '[{"country":"México","alias":"Core","jql":"linea 1\\nlinea 2"}]'
     cfg.save_settings(settings)
     saved = env_path.read_text(encoding="utf-8")
-    assert "JIRA_JQL=linea 1\\nlinea 2" in saved
+    assert "JIRA_SOURCES_JSON=" in saved
+    assert "linea 1\\nlinea 2" in saved
 
 
 def test_config_resolves_relative_data_paths_against_env_location(
@@ -114,11 +125,106 @@ def test_config_resolves_relative_data_paths_against_env_location(
     assert "REPORT_PPT_DOWNLOAD_DIR=exports/ppt" in saved
 
 
+def test_config_save_settings_preserves_unknown_env_keys(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        ("APP_TITLE=Radar\nBUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true\nCUSTOM_CORP_FLAG=keep-me\n"),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    settings.APP_TITLE = "Radar Pro"
+    cfg.save_settings(settings)
+
+    saved = env_path.read_text(encoding="utf-8")
+    assert "APP_TITLE=Radar Pro" in saved
+    assert "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true" in saved
+    assert "CUSTOM_CORP_FLAG=keep-me" in saved
+
+
+def test_config_save_settings_can_prune_legacy_keys(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        (
+            "APP_TITLE=Radar\n"
+            "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true\n"
+            "ANALYSIS_LOOKBACK_DAYS=365\n"
+            "BUG_RESOLUTION_RADAR_CORPORATE_MODE=true\n"
+            "CUSTOM_CORP_FLAG=keep-me\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    settings.APP_TITLE = "Radar Pro"
+    cfg.save_settings(settings, drop_keys=cfg.LEGACY_ENV_KEYS_TO_PRUNE)
+
+    saved = env_path.read_text(encoding="utf-8")
+    assert "APP_TITLE=Radar Pro" in saved
+    assert "BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true" in saved
+    assert "CUSTOM_CORP_FLAG=keep-me" in saved
+    assert "ANALYSIS_LOOKBACK_DAYS=" not in saved
+    assert "BUG_RESOLUTION_RADAR_CORPORATE_MODE=" not in saved
+
+
+def test_config_restore_env_from_example_overwrites_env(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("APP_TITLE=Old\n", encoding="utf-8")
+    env_example = tmp_path / ".env.example"
+    env_example.write_text("APP_TITLE=Recovered\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
+
+    restored_from = cfg.restore_env_from_example()
+
+    assert restored_from == env_example
+    assert env_path.read_text(encoding="utf-8") == "APP_TITLE=Recovered\n"
+
+
+def test_config_restore_env_from_example_raises_when_example_missing(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_example = tmp_path / ".env.example"
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
+
+    try:
+        cfg.restore_env_from_example()
+    except FileNotFoundError as exc:
+        assert "No se encontró la plantilla de configuración" in str(exc)
+    else:
+        raise AssertionError("Expected FileNotFoundError when .env.example does not exist")
+
+
+def test_normalize_analysis_lookback_months_defaults_for_non_positive_values() -> None:
+    assert cfg.normalize_analysis_lookback_months("0") == 12
+    assert cfg.normalize_analysis_lookback_months("-8") == 12
+    assert cfg.normalize_analysis_lookback_months("abc") == 12
+    assert cfg.normalize_analysis_lookback_months("6") == 6
+
+
 def test_semantic_status_and_priority_colors() -> None:
     assert status_color("New") == "#E85D63"
     assert status_color("Ready") == "#E85D63"
-    assert status_color("Analysing") == "#D64550"
-    assert status_color("Blocked") == "#B4232A"
+    assert status_color("Analysing") == "#E85D63"
+    assert status_color("Blocked") == "#E85D63"
+    assert status_color("In Progress") == "#F59E0B"
+    assert status_color("To Rework") == "#F59E0B"
+    assert status_color("Test") == "#F59E0B"
+    assert status_color("Ready To Verify") == "#F59E0B"
+    assert status_color("Accepted") == "#4CAF50"
+    assert status_color("Ready to Deploy") == "#4CAF50"
     assert status_color("Open") == "#FBBF24"
     assert status_color("Closed") == "#15803D"
     assert status_color("Deployed") == "#5B3FD0"
@@ -152,9 +258,117 @@ def test_semantic_color_maps_include_flow_signals() -> None:
 def test_goal_state_chip_uses_stronger_fill() -> None:
     deployed_style = chip_style_from_color(status_color("Deployed"))
     accepted_style = chip_style_from_color(status_color("Accepted"))
+    ready_deploy_style = chip_style_from_color(status_color("Ready to Deploy"))
     assert "background:#ECE6FF" in deployed_style
     assert "color:#5B3FD0" in deployed_style
     assert "rgba(76,175,80,0.160)" in accepted_style
+    assert accepted_style == ready_deploy_style
+
+
+def test_semantic_popover_rules_are_built_from_shared_color_tokens() -> None:
+    css = semantic_popover_css_rules()
+    assert '[aria-label*="new" i]' in css
+    assert '[aria-label*="analysing" i]' in css
+    assert '[aria-label*="blocked" i]' in css
+    assert "--bbva-opt-dot: #E85D63;" in css
+    assert '[aria-label*="to rework" i]' in css
+    assert '[aria-label*="test" i]' in css
+    assert '[aria-label*="ready to verify" i]' in css
+    assert "--bbva-opt-dot: #F59E0B;" in css
+    assert '[aria-label*="accepted" i]' in css
+    assert '[aria-label*="ready to deploy" i]' in css
+    assert "--bbva-opt-dot: #4CAF50;" in css
+
+
+def _captured_injected_css(*, dark_mode: bool) -> str:
+    captured: list[str] = []
+    original = st.markdown
+
+    def _fake_markdown(body: str, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        captured.append(str(body))
+
+    st.markdown = _fake_markdown  # type: ignore[assignment]
+    try:
+        inject_bbva_css(dark_mode=dark_mode)
+    finally:
+        st.markdown = original  # type: ignore[assignment]
+    return "\n".join(captured)
+
+
+def test_nba_banner_base_uses_alert_tokens_by_theme() -> None:
+    css_dark = _captured_injected_css(dark_mode=True)
+    css_light = _captured_injected_css(dark_mode=False)
+    assert (
+        "--bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-signal-orange) 20%, "
+        "var(--bbva-surface-elevated) 80%);" in css_dark
+    )
+    assert (
+        "--bbva-nba-banner-border: color-mix(in srgb, var(--bbva-signal-orange) 70%, "
+        "var(--bbva-border) 30%);" in css_dark
+    )
+    assert (
+        "--bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-signal-yellow) 22%, "
+        "var(--bbva-surface-elevated) 78%);" in css_light
+    )
+    assert (
+        "--bbva-nba-banner-border: color-mix(in srgb, var(--bbva-signal-orange) 58%, "
+        "var(--bbva-border) 42%);" in css_light
+    )
+    for css in [css_dark, css_light]:
+        assert "--bbva-signal-yellow: #FBBF24;" in css
+        assert "--bbva-nba-ink-primary: var(--bbva-text);" in css
+
+
+def test_select_popover_rows_keep_compact_single_line_layout() -> None:
+    css = _captured_injected_css(dark_mode=False)
+    assert 'div[data-baseweb="popover"] {' in css
+    assert 'div[data-baseweb="popover"] [role="option"],' in css
+    assert 'div[data-baseweb="popover"] li[role="option"]' in css
+    assert 'div[data-baseweb="popover"] [role="listbox"],' in css
+    assert 'div[data-baseweb="popover"] [role="listbox"] > *,' in css
+    assert 'div[data-baseweb="popover"] ul > li,' in css
+    assert 'div[data-baseweb="popover"] [role="listbox"] > div > *,' in css
+    assert "max-height: min(21rem, 62vh) !important;" in css
+    assert "max-height: min(19.25rem, 56vh) !important;" in css
+    assert "overflow-y: auto !important;" in css
+    assert "min-height: 1.92rem !important;" in css
+    assert "height: 1.92rem !important;" in css
+    assert "display: flex !important;" in css
+    assert "height: auto !important;" in css
+    assert "padding: 0.34rem 0.72rem !important;" in css
+    assert "overflow: hidden !important;" in css
+    assert "text-overflow: ellipsis !important;" in css
+    assert '[role="option"]:is([aria-label*="new" i], [title*="new" i])' in css
+    assert "border-left: 2px solid color-mix(in srgb, #E85D63 72%, transparent);" in css
+    assert (
+        '[role="option"][data-bbva-semantic="1"] {\n            position: relative !important;'
+        not in css
+    )
+    assert "background-image: radial-gradient(" in css
+    assert "background-position: 0.80rem 50% !important;" in css
+    assert 'div[data-baseweb="popover"] [role="option"] p,' in css
+
+
+def test_global_css_avoids_expensive_layout_selectors() -> None:
+    css = _captured_injected_css(dark_mode=False)
+    assert ":has(" not in css
+    assert '[data-testid="stDataFrame"] *,' not in css
+
+
+def test_dashboard_layout_css_avoids_backdrop_filter(monkeypatch: Any) -> None:
+    captured: list[str] = []
+
+    def _fake_markdown(body: str, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        captured.append(str(body))
+
+    monkeypatch.setattr(dashboard_layout.st, "set_page_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard_layout.st, "markdown", _fake_markdown)
+    dashboard_layout.apply_dashboard_layout()
+
+    css = "\n".join(captured)
+    assert "backdrop-filter:" not in css
 
 
 def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:

@@ -16,7 +16,9 @@ from bug_resolution_radar.config import (
     load_settings,
     save_settings,
 )
+from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.components.issues import handle_issue_link_open_request
 from bug_resolution_radar.ui.dashboard.state import (
     bootstrap_filters_from_env,
     clear_all_filters,
@@ -28,10 +30,10 @@ from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 def _sync_settings_to_process_env(settings: Settings) -> None:
     """
-    Keep runtime `os.environ` aligned with `.env` values already parsed into Settings.
+    Keep runtime `os.environ` aligned with values already parsed into Settings.
 
     Some ingestion modules read configuration via `os.getenv(...)` directly. In the
-    Streamlit app we load `.env` through `load_settings()` (without exporting vars),
+    Streamlit app we load settings through `load_settings()` (without exporting vars),
     so this bridge avoids mismatches between what the UI shows and what backend
     ingestion code reads.
     """
@@ -92,53 +94,36 @@ def _on_workspace_scope_change() -> None:
     _reset_scope_filters()
 
 
-def _sources_with_results(settings: Settings) -> List[Dict[str, str]]:
+def _sources_with_results(
+    settings: Settings,
+    *,
+    configured_sources: List[Dict[str, str]] | None = None,
+) -> List[Dict[str, str]]:
     """Return configured sources that currently have ingested rows."""
-    configured_sources = all_configured_sources(settings)
-    if not configured_sources:
+    source_rows = (
+        configured_sources if configured_sources is not None else all_configured_sources(settings)
+    )
+    if not source_rows:
         return []
 
     try:
         df = load_issues_df(settings.DATA_PATH)
     except Exception:
         # If data cannot be loaded, keep configured options available.
-        return configured_sources
+        return source_rows
     if df.empty:
         return []
 
     has_source_id_column = "source_id" in df.columns
-    has_country_column = "country" in df.columns
+    if not has_source_id_column:
+        return []
 
-    source_ids_with_results: set[str] = set()
-    if has_source_id_column:
-        source_ids_with_results = {
-            sid.strip()
-            for sid in df["source_id"].fillna("").astype(str).tolist()
-            if sid and sid.strip()
-        }
-
-    countries_with_results: set[str] = set()
-    if has_country_column:
-        countries_with_results = {
-            country.strip()
-            for country in df["country"].fillna("").astype(str).tolist()
-            if country and country.strip()
-        }
-
-    # Legacy fallback: if dataset has no source_id metadata, filter by country only.
-    use_country_fallback = not source_ids_with_results and has_country_column
-    if not has_source_id_column and not has_country_column:
-        return configured_sources
+    source_ids = df["source_id"].dropna().astype(str).str.strip()
+    source_ids_with_results = {sid for sid in source_ids.unique().tolist() if sid}
 
     filtered_sources: List[Dict[str, str]] = []
-    for src in configured_sources:
+    for src in source_rows:
         sid = str(src.get("source_id") or "").strip()
-        country = str(src.get("country") or "").strip()
-
-        if use_country_fallback:
-            if country and country in countries_with_results:
-                filtered_sources.append(src)
-            continue
 
         if sid and sid in source_ids_with_results:
             filtered_sources.append(src)
@@ -149,7 +134,8 @@ def _sources_with_results(settings: Settings) -> List[Dict[str, str]]:
 def _sources_with_results_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     """Group result-backed sources by country while preserving configuration order."""
     grouped: Dict[str, List[Dict[str, str]]] = {}
-    for src in _sources_with_results(settings):
+    configured_sources = all_configured_sources(settings)
+    for src in _sources_with_results(settings, configured_sources=configured_sources):
         country = str(src.get("country") or "").strip()
         if not country:
             continue
@@ -157,7 +143,7 @@ def _sources_with_results_by_country(settings: Settings) -> Dict[str, List[Dict[
     return grouped
 
 
-def _ensure_scope_state(settings: Settings) -> None:
+def _ensure_scope_state(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     """Ensure selected country/source are valid for current configuration."""
     sources_by_country = _sources_with_results_by_country(settings)
     countries = list(sources_by_country.keys())
@@ -166,7 +152,7 @@ def _ensure_scope_state(settings: Settings) -> None:
     if not countries:
         st.session_state["workspace_country"] = ""
         st.session_state["workspace_source_id"] = ""
-        return
+        return {}
 
     if "workspace_country" not in st.session_state:
         st.session_state["workspace_country"] = default_country
@@ -185,6 +171,7 @@ def _ensure_scope_state(settings: Settings) -> None:
         st.session_state["workspace_source_id"] = source_ids[0]
     if not source_ids:
         st.session_state["workspace_source_id"] = ""
+    return sources_by_country
 
 
 def _ensure_nav_state() -> None:
@@ -251,19 +238,19 @@ def _sync_streamlit_theme_from_workspace() -> bool:
     desired = (
         {
             "theme.base": "dark",
-            "theme.primaryColor": "#5F9FFF",
-            "theme.backgroundColor": "#0A1228",
-            "theme.secondaryBackgroundColor": "#1A2B47",
-            "theme.textColor": "#EAF0FF",
+            "theme.primaryColor": BBVA_DARK.royal_blue,
+            "theme.backgroundColor": BBVA_DARK.bg_light,
+            "theme.secondaryBackgroundColor": BBVA_DARK.core_blue,
+            "theme.textColor": BBVA_DARK.ink,
             "theme.font": "sans serif",
         }
         if is_dark
         else {
             "theme.base": "light",
-            "theme.primaryColor": "#0051F1",
-            "theme.backgroundColor": "#F4F6F9",
-            "theme.secondaryBackgroundColor": "#FFFFFF",
-            "theme.textColor": "#11192D",
+            "theme.primaryColor": BBVA_LIGHT.electric_blue,
+            "theme.backgroundColor": BBVA_LIGHT.bg_light,
+            "theme.secondaryBackgroundColor": BBVA_LIGHT.white,
+            "theme.textColor": BBVA_LIGHT.ink,
             "theme.font": "sans serif",
         }
     )
@@ -377,10 +364,14 @@ def _render_workspace_header() -> None:
                     )
 
 
-def _render_workspace_scope(settings: Settings) -> None:
+def _render_workspace_scope(
+    settings: Settings,
+    *,
+    sources_by_country: Dict[str, List[Dict[str, str]]] | None = None,
+) -> None:
     """Render country/source selectors used to scope the working dataset."""
-    sources_by_country = _sources_with_results_by_country(settings)
-    countries = list(sources_by_country.keys())
+    scoped_sources = sources_by_country or _sources_with_results_by_country(settings)
+    countries = list(scoped_sources.keys())
     if not countries:
         return
 
@@ -392,7 +383,7 @@ def _render_workspace_scope(settings: Settings) -> None:
             key="workspace_country",
             on_change=_on_workspace_scope_change,
         )
-    source_rows = sources_by_country.get(selected_country, [])
+    source_rows = scoped_sources.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
     ]
@@ -455,6 +446,9 @@ def main() -> None:
         hero_title = "Cuadro de mando de incidencias"
 
     st.set_page_config(page_title=hero_title, page_icon=_page_favicon(), layout="wide")
+    # Handle lightweight issue-link actions early to avoid rendering the full page
+    # when the request only needs to open an external issue URL.
+    handle_issue_link_open_request(settings=settings)
 
     theme_changed = _sync_streamlit_theme_from_workspace()
     theme_rerun_key = "__theme_config_sync_rerun"
@@ -472,13 +466,13 @@ def main() -> None:
 
     inject_bbva_css(dark_mode=bool(st.session_state.get("workspace_dark_mode", False)))
     render_hero(hero_title)
-    _ensure_scope_state(settings)
+    sources_by_country = _ensure_scope_state(settings)
     _ensure_nav_state()
     section_before_header = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
     with st.container(key="workspace_scope_bar"):
-        _render_workspace_scope(settings)
+        _render_workspace_scope(settings, sources_by_country=sources_by_country)
     with st.container(key=f"workspace_nav_bar_{section_before_header}"):
         _render_workspace_header()
 

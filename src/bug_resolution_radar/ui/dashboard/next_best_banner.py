@@ -137,17 +137,17 @@ def _target_issue_count(
     return int(len(dff_target))
 
 
-def _tone(action_title: str) -> Tuple[str, str, str]:
+def _tone(action_title: str) -> Tuple[str, str]:
     t = str(action_title or "").strip().lower()
     if "ownership" in t or "critico" in t:
-        return ("PRIORIDAD OPERATIVA", "#8F5C00", "Foco en criticidad")
+        return ("PRIORIDAD OPERATIVA", "Foco en criticidad")
     if "bloqueo" in t:
-        return ("SEÑAL DE BLOQUEO", "#A56A12", "Flujo condicionado")
+        return ("SEÑAL DE BLOQUEO", "Flujo condicionado")
     if "balance" in t or "entrada" in t:
-        return ("SEÑAL DE CAPACIDAD", "#9A6510", "Control semanal")
+        return ("SEÑAL DE CAPACIDAD", "Control semanal")
     if "seguimiento" in t:
-        return ("SEGUIMIENTO", "#1A8A5E", "Ritmo estable")
-    return ("ACCION RECOMENDADA", "#8F5C00", "Foco recomendado")
+        return ("SEGUIMIENTO", "Ritmo estable")
+    return ("ACCION RECOMENDADA", "Foco recomendado")
 
 
 def _apply_action(
@@ -187,36 +187,33 @@ def _apply_action(
     st.session_state["__jump_to_tab"] = str(target_section or "issues")
 
 
-def _filters_caption(
-    *, status_filters: List[str], priority_filters: List[str], assignee_filters: List[str]
-) -> str:
-    parts: List[str] = []
-    if status_filters:
-        parts.append(f"Status: {', '.join(status_filters)}")
-    if priority_filters:
-        parts.append(f"Priority: {', '.join(priority_filters)}")
-    if assignee_filters:
-        parts.append(f"Owner: {', '.join(assignee_filters)}")
-    return " · ".join(parts) if parts else "Sin filtro adicional"
+def _chip_style_for_banner(hex_color: str, *, dark_mode: bool) -> str:
+    del dark_mode  # Banner chips must use the shared design-token palette in every theme.
+    return chip_style_from_color(str(hex_color or "").strip())
 
 
-def _chips_html(values: List[str], *, color_fn: Callable[[str], str]) -> str:
+def _chips_html(values: List[str], *, color_fn: Callable[[str], str], dark_mode: bool) -> str:
     chips: List[str] = []
     for raw in list(values or []):
         txt = str(raw or "").strip()
         if not txt:
             continue
-        style = chip_style_from_color(color_fn(txt))
+        style = _chip_style_for_banner(color_fn(txt), dark_mode=dark_mode)
         chips.append(f'<span class="nba-inline-chip" style="{style}">{html.escape(txt)}</span>')
     return "".join(chips)
 
 
 def _filters_markup(
-    *, status_filters: List[str], priority_filters: List[str], assignee_filters: List[str]
+    *,
+    status_filters: List[str],
+    priority_filters: List[str],
+    assignee_filters: List[str],
+    dark_mode: bool,
 ) -> str:
-    del assignee_filters  # Owner is intentionally omitted: it is already implicit in the insight context.
-    status_chips = _chips_html(status_filters, color_fn=status_color)
-    priority_chips = _chips_html(priority_filters, color_fn=priority_color)
+    # Owner is intentionally omitted: it is already implicit in the insight context.
+    del assignee_filters
+    status_chips = _chips_html(status_filters, color_fn=status_color, dark_mode=dark_mode)
+    priority_chips = _chips_html(priority_filters, color_fn=priority_color, dark_mode=dark_mode)
     if not status_chips and not priority_chips:
         return '<div class="nba-tgt">Sin filtro adicional</div>'
     return (
@@ -365,6 +362,7 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
 
     snapshot = build_operational_snapshot(dff=dff, open_df=open_df)
     section_norm = str(section or "").strip().lower()
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     primary_target = "kanban" if section_norm == "kanban" else "issues"
     scope_key = _scope_key()
 
@@ -421,37 +419,21 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
         return
 
     action_id, action, status_filters, priority_filters, assignee_filters, matches = selected
-    kicker, _, tone = _tone(action.title)
+    kicker, tone = _tone(action.title)
     _, resolved_impact = _resolved_copy(action, matches=matches)
     context_label = _context_label_for_action(action)
-    is_dark = bool(st.session_state.get("workspace_dark_mode", False))
-    if is_dark:
-        # Subtle amber tuned for dark backgrounds (premium + high readability).
-        banner_bg = "#CDBB86"
-        banner_border = "#9D7A35"
-        banner_shadow = "rgba(2, 8, 24, 0.56)"
-        ink_primary = "#0F1E37"
-        ink_muted = "#263B5E"
-        accent_left_a = "#835914"
-        accent_left_b = "#B78631"
-        kicker_border = "#C63F50"
-        kicker_bg = "#F7E9EC"
-        kicker_text = "#981B2B"
-        action_link_color = "var(--bbva-action-link)"
-        link_hover = "var(--bbva-action-link-hover)"
-    else:
-        banner_bg = "#FFE8A8"
-        banner_border = "#C79A3B"
-        banner_shadow = "rgba(161, 113, 29, 0.18)"
-        ink_primary = "#13233A"
-        ink_muted = "#2A3A57"
-        accent_left_a = "#9B6F1B"
-        accent_left_b = "#D2A44C"
-        kicker_border = "#C63F50"
-        kicker_bg = "#FDECEE"
-        kicker_text = "#9A1E2D"
-        action_link_color = "var(--bbva-action-link)"
-        link_hover = "var(--bbva-action-link-hover)"
+    banner_bg = "var(--bbva-nba-banner-bg)"
+    banner_border = "var(--bbva-nba-banner-border)"
+    banner_shadow = "var(--bbva-nba-banner-shadow)"
+    ink_primary = "var(--bbva-nba-ink-primary)"
+    ink_muted = "var(--bbva-nba-ink-muted)"
+    accent_left_a = "var(--bbva-nba-accent-a)"
+    accent_left_b = "var(--bbva-nba-accent-b)"
+    kicker_border = "var(--bbva-nba-kicker-border)"
+    kicker_bg = "var(--bbva-nba-kicker-bg)"
+    kicker_text = "var(--bbva-nba-kicker-text)"
+    action_link_color = "var(--bbva-action-link)"
+    link_hover = "var(--bbva-action-link-hover)"
 
     st.markdown(
         f"""
@@ -656,10 +638,14 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
     )
 
     with st.container(key=f"next_best_banner_shell_{section_norm}"):
+        kicker_html = html.escape(str(kicker or ""))
+        title_html = html.escape(str(action.title or ""))
+        tone_html = html.escape(str(tone or ""))
+        impact_html = html.escape(str(resolved_impact or ""))
         top_l, top_r = st.columns([0.66, 0.34], gap="small")
         with top_l:
             st.markdown(
-                f'<div class="nba-topline"><span class="nba-kicker">{kicker}</span></div>',
+                f'<div class="nba-topline"><span class="nba-kicker">{kicker_html}</span></div>',
                 unsafe_allow_html=True,
             )
         with top_r:
@@ -671,9 +657,9 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
                     on_click=_advance_pending_preview,
                     args=(scope_key,),
                 )
-        st.markdown(f'<div class="nba-title">{action.title}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="nba-title">{title_html}</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<div class="nba-sub">{tone} · {resolved_impact}</div>',
+            f'<div class="nba-sub">{tone_html} · {impact_html}</div>',
             unsafe_allow_html=True,
         )
         st.markdown('<div class="nba-inline-actions-row"></div>', unsafe_allow_html=True)
@@ -684,6 +670,7 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
                     status_filters=status_filters,
                     priority_filters=priority_filters,
                     assignee_filters=assignee_filters,
+                    dark_mode=dark_mode,
                 ),
                 unsafe_allow_html=True,
             )

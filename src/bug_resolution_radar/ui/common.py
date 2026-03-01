@@ -9,8 +9,22 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-from bug_resolution_radar.models.schema import IssuesDocument
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.models.schema import IssuesDocument
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_GOAL_ACCENT_7,
+    BBVA_GOAL_SURFACE_8,
+    BBVA_NEUTRAL_SOFT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_GREEN_3,
+    BBVA_SIGNAL_ORANGE_2,
+    BBVA_SIGNAL_RED_1,
+    BBVA_SIGNAL_RED_2,
+    BBVA_SIGNAL_RED_3,
+    BBVA_SIGNAL_YELLOW_1,
+    hex_to_rgba,
+)
 
 # ----------------------------
 # Persistence: IssuesDocument
@@ -151,33 +165,32 @@ def _normalize_token(value: Optional[str]) -> str:
     return txt
 
 
-_RED_1 = "#B4232A"
-_RED_2 = "#D64550"
-_RED_3 = "#E85D63"
-_ORANGE_1 = "#D97706"
-_ORANGE_2 = "#F59E0B"
-_YELLOW_1 = "#FBBF24"
-_GREEN_1 = "#15803D"
-_GREEN_2 = "#22A447"
-_GREEN_3 = "#4CAF50"
-_GOAL_ACCENT_7 = "#5B3FD0"
-_GOAL_SURFACE_8 = "#ECE6FF"
-_NEUTRAL = "#E2E6EE"
+_RED_1 = BBVA_SIGNAL_RED_1
+_RED_2 = BBVA_SIGNAL_RED_2
+_RED_3 = BBVA_SIGNAL_RED_3
+_ORANGE_2 = BBVA_SIGNAL_ORANGE_2
+_YELLOW_1 = BBVA_SIGNAL_YELLOW_1
+_GREEN_1 = BBVA_SIGNAL_GREEN_1
+_GREEN_2 = BBVA_SIGNAL_GREEN_2
+_GREEN_3 = BBVA_SIGNAL_GREEN_3
+_GOAL_ACCENT_7 = BBVA_GOAL_ACCENT_7
+_GOAL_SURFACE_8 = BBVA_GOAL_SURFACE_8
+_NEUTRAL = BBVA_NEUTRAL_SOFT
 
 
 _STATUS_COLOR_BY_KEY: Dict[str, str] = {
     "new": _RED_3,
     "ready": _RED_3,
-    "analysing": _RED_2,
-    "blocked": _RED_1,
+    "analysing": _RED_3,
+    "blocked": _RED_3,
     "en progreso": _ORANGE_2,
     "in progress": _ORANGE_2,
-    "to rework": _ORANGE_1,
-    "rework": _ORANGE_1,
-    "test": _YELLOW_1,
+    "to rework": _ORANGE_2,
+    "rework": _ORANGE_2,
+    "test": _ORANGE_2,
     "ready to verify": _ORANGE_2,
     "accepted": _GREEN_3,
-    "ready to deploy": _GREEN_2,
+    "ready to deploy": _GREEN_3,
     # Deployed is a goal state and uses a dedicated purple scale (7/8) for clear differentiation.
     "deployed": _GOAL_ACCENT_7,
     "closed": _GREEN_1,
@@ -222,14 +235,64 @@ def flow_signal_color_map() -> Dict[str, str]:
     }
 
 
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = hex_color.lstrip("#")
-    if len(h) != 6:
-        return f"rgba(127,146,178,{alpha:.3f})"
-    r = int(h[0:2], 16)
-    g = int(h[2:4], 16)
-    b = int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha:.3f})"
+def _css_attr_value(txt: str) -> str:
+    return str(txt or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _group_tokens_by_color(token_color_map: Dict[str, str]) -> Dict[str, List[str]]:
+    grouped: Dict[str, List[str]] = {}
+    for raw_token, raw_color in token_color_map.items():
+        token = _normalize_token(raw_token)
+        color = str(raw_color or "").strip()
+        if not token or not color:
+            continue
+        bucket = grouped.setdefault(color, [])
+        if token not in bucket:
+            bucket.append(token)
+    return grouped
+
+
+def _semantic_option_css_block(*, tokens: List[str], color: str) -> str:
+    selectors: List[str] = []
+    for token in list(tokens or []):
+        txt = _css_attr_value(token)
+        selectors.append(
+            (
+                'div[data-baseweb="popover"] '
+                f'[role="option"]:is([aria-label*="{txt}" i], [title*="{txt}" i])'
+            )
+        )
+    if not selectors:
+        return ""
+    selector_group = ",\n".join(selectors)
+    return (
+        f"{selector_group} {{\n"
+        "  padding-left: 1.62rem !important;\n"
+        f"  --bbva-opt-dot: {color};\n"
+        f"  border-left: 2px solid color-mix(in srgb, {color} 72%, transparent);\n"
+        "  background-image: radial-gradient(\n"
+        "    circle at 0.80rem center,\n"
+        "    var(--bbva-opt-dot) 0.24rem,\n"
+        "    transparent 0.25rem\n"
+        "  ) !important;\n"
+        "  background-repeat: no-repeat !important;\n"
+        "}\n"
+    )
+
+
+@lru_cache(maxsize=1)
+def semantic_popover_css_rules() -> str:
+    """Build semantic option CSS from central status/priority token maps."""
+    blocks: List[str] = []
+    for color, tokens in _group_tokens_by_color(_STATUS_COLOR_BY_KEY).items():
+        block = _semantic_option_css_block(tokens=tokens, color=color)
+        if block:
+            blocks.append(block)
+    for color, tokens in _group_tokens_by_color(_PRIORITY_COLOR_BY_KEY).items():
+        block = _semantic_option_css_block(tokens=tokens, color=color)
+        if block:
+            blocks.append(block)
+    return "\n".join(blocks)
 
 
 def chip_tone_for_color(hex_color: str) -> Tuple[float, float]:
@@ -247,9 +310,17 @@ def chip_palette_for_color(hex_color: str) -> Tuple[str, str, str]:
     normalized = txt.upper()
     if normalized == _GOAL_ACCENT_7:
         # Explicit BBVA-like 7/8 pairing: text 7 over background 8.
-        return (_GOAL_ACCENT_7, _hex_to_rgba(_GOAL_ACCENT_7, 0.64), _GOAL_SURFACE_8)
+        return (
+            _GOAL_ACCENT_7,
+            hex_to_rgba(_GOAL_ACCENT_7, 0.64, fallback=_NEUTRAL),
+            _GOAL_SURFACE_8,
+        )
     border_alpha, bg_alpha = chip_tone_for_color(txt)
-    return (txt, _hex_to_rgba(txt, border_alpha), _hex_to_rgba(txt, bg_alpha))
+    return (
+        txt,
+        hex_to_rgba(txt, border_alpha, fallback=_NEUTRAL),
+        hex_to_rgba(txt, bg_alpha, fallback=_NEUTRAL),
+    )
 
 
 def chip_style_from_color(hex_color: str) -> str:
@@ -257,6 +328,15 @@ def chip_style_from_color(hex_color: str) -> str:
     return (
         f"color:{txt}; border:1px solid {border}; background:{bg}; "
         "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
+    )
+
+
+def neutral_chip_style(*, font_size: str = "0.80rem") -> str:
+    """Neutral chip style token used in non-semantic labels (owner/age/count)."""
+    return (
+        "color:var(--bbva-text-muted); border:1px solid var(--bbva-border-strong); "
+        "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
+        f"border-radius:999px; padding:2px 10px; font-weight:700; font-size:{font_size};"
     )
 
 

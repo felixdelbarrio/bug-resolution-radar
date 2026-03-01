@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bug_resolution_radar.ui.common import priority_color, status_color
 from bug_resolution_radar.ui.dashboard.next_best_banner import (
+    _chip_style_for_banner,
     _derive_actionable_status_scope,
     _exclude_terminal_statuses,
     _resolved_copy,
@@ -111,3 +113,12 @@ def test_select_pending_action_skips_reviewed_and_wraps_index() -> None:
     )
     assert pending == 2
     assert selected is not None and selected[0] == "a3"
+
+
+def test_banner_chips_use_shared_semantic_token_styles_in_both_themes() -> None:
+    for token_color in [status_color("New"), priority_color("High"), priority_color("Highest")]:
+        dark = _chip_style_for_banner(token_color, dark_mode=True)
+        light = _chip_style_for_banner(token_color, dark_mode=False)
+        assert dark == light
+        assert "color-mix(" not in dark
+        assert f"color:{token_color};" in dark

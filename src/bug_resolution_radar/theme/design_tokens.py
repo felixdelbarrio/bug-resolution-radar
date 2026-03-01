@@ -52,6 +52,53 @@ BBVA_DARK = BbvPalette(
     ink_muted="#C6D7EF",
 )
 
+# Semantic signal tokens (status/priority chips and traffic-light cues).
+BBVA_SIGNAL_RED_1 = "#B4232A"
+BBVA_SIGNAL_RED_2 = "#D64550"
+BBVA_SIGNAL_RED_3 = "#E85D63"
+BBVA_SIGNAL_ORANGE_1 = "#D97706"
+BBVA_SIGNAL_ORANGE_2 = "#F59E0B"
+BBVA_SIGNAL_YELLOW_1 = "#FBBF24"
+BBVA_SIGNAL_GREEN_1 = "#15803D"
+BBVA_SIGNAL_GREEN_2 = "#22A447"
+BBVA_SIGNAL_GREEN_3 = "#4CAF50"
+BBVA_GOAL_ACCENT_7 = "#5B3FD0"
+BBVA_GOAL_SURFACE_8 = "#ECE6FF"
+BBVA_NEUTRAL_SOFT = "#E2E6EE"
+BBVA_DARK_SURFACE = "#0A1F45"
+
+# Report semantic tones (PowerPoint/export layer) derived from approved theme palette.
+BBVA_REPORT_GREEN = "#38761D"
+BBVA_REPORT_AMBER = "#F5B942"
+BBVA_REPORT_RED = BBVA_SIGNAL_RED_2
+BBVA_REPORT_LINE = "#D3D8E1"
+BBVA_REPORT_MIST = "#EEF3FB"
+BBVA_REPORT_BLUE_BG = "#EAF2FF"
+BBVA_REPORT_BLUE_BORDER = "#B8CCE8"
+BBVA_REPORT_BLUE_TEXT = "#0B3A75"
+BBVA_REPORT_SKY_BG = "#E8F7FF"
+BBVA_REPORT_SKY_BORDER = "#9DDCFB"
+BBVA_REPORT_SKY_TEXT = "#0B4A6F"
+BBVA_REPORT_TEAL_BG = "#E6F9F7"
+BBVA_REPORT_TEAL_BORDER = "#9EDFD9"
+BBVA_REPORT_TEAL_TEXT = "#0E5C5C"
+BBVA_REPORT_AMBER_BG = "#FFF4DE"
+BBVA_REPORT_AMBER_BORDER = "#F3D89B"
+BBVA_REPORT_AMBER_TEXT = "#7A5A12"
+BBVA_REPORT_GREEN_BG = "#EAF6EC"
+BBVA_REPORT_GREEN_BORDER = "#B8DDBF"
+BBVA_REPORT_GREEN_TEXT = "#1F5B2E"
+BBVA_REPORT_RED_BG = "#FDEBEC"
+BBVA_REPORT_RED_BORDER = "#E3A5AA"
+BBVA_REPORT_RED_TEXT = "#8B1D26"
+BBVA_REPORT_NEUTRAL_BORDER = "#C8D6E8"
+BBVA_REPORT_DARK_BG_1 = "#001B4A"
+BBVA_REPORT_DARK_BG_2 = "#001C4A"
+BBVA_REPORT_DARK_ACCENT_LINE = "#2A66B8"
+BBVA_REPORT_DARK_TEXT_SOFT = "#BDD8FF"
+BBVA_REPORT_DARK_TEXT_SUBTLE = "#CFE2FF"
+BBVA_REPORT_DARK_TEXT_MID = "#DDEBFF"
+
 BBVA_FONT_SANS_BOOK = (
     '"BentonSansBBVA-Book", "Benton Sans BBVA Book", "BentonSansBBVA", '
     '"Benton Sans BBVA", "BBVA Benton Sans", "Lato", "Arial", sans-serif'
@@ -62,7 +109,7 @@ BBVA_FONT_SANS_MEDIUM = (
 )
 BBVA_FONT_SANS = BBVA_FONT_SANS_BOOK
 BBVA_FONT_HEADLINE = (
-    '"Tiempos Headline", "TiemposText-Regular", "Tiempos Text", ' '"Lato", "Arial", serif'
+    '"Tiempos Headline", "TiemposText-Regular", "Tiempos Text", "Lato", "Arial", serif'
 )
 
 
@@ -173,3 +220,32 @@ BBVA_RADIUS_INNER_PX = 8
 BBVA_GRID_BASE_PX = 8
 BBVA_GRID_MARGIN_PX = 24
 BBVA_GRID_GUTTER_PX = 24
+
+
+def _safe_hex(hex_color: str, *, fallback: str) -> str:
+    token = str(hex_color or "").strip().lstrip("#")
+    if re.fullmatch(r"[0-9a-fA-F]{6}", token):
+        return token
+    return str(fallback or "").strip().lstrip("#")
+
+
+def hex_to_rgb(hex_color: str, *, fallback: str = BBVA_LIGHT.ink) -> tuple[int, int, int]:
+    token = _safe_hex(hex_color, fallback=fallback)
+    return (int(token[0:2], 16), int(token[2:4], 16), int(token[4:6], 16))
+
+
+def hex_to_rgb_csv(hex_color: str, *, fallback: str = BBVA_LIGHT.ink) -> str:
+    r, g, b = hex_to_rgb(hex_color, fallback=fallback)
+    return f"{r},{g},{b}"
+
+
+def hex_to_rgba(hex_color: str, alpha: float, *, fallback: str = BBVA_LIGHT.ink) -> str:
+    r, g, b = hex_to_rgb(hex_color, fallback=fallback)
+    return f"rgba({r},{g},{b},{float(alpha):.3f})"
+
+
+def hex_with_alpha(hex_color: str, alpha: int, *, fallback: str = BBVA_LIGHT.ink) -> str:
+    """Return an 8-digit hex color (#RRGGBBAA) with bounded alpha."""
+    token = _safe_hex(hex_color, fallback=fallback)
+    alpha_i = max(0, min(255, int(alpha)))
+    return f"#{token}{alpha_i:02X}"

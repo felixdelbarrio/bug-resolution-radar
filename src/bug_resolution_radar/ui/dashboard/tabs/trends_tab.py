@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -12,14 +13,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.config import Settings
+from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
     priority_color_map,
     priority_rank,
-    status_color_map,
 )
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
@@ -28,6 +29,11 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
+from bug_resolution_radar.ui.dashboard.performance import (
+    elapsed_ms,
+    render_perf_footer,
+    resolve_budget,
+)
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -58,6 +64,59 @@ TERMINAL_STATUS_TOKENS: Tuple[str, ...] = (
     "cancelled",
     "canceled",
 )
+_TRENDS_PERF_BUDGETS_MS: dict[str, dict[str, float]] = {
+    "default": {
+        "selector_scope": 85.0,
+        "chart": 315.0,
+        "exports": 65.0,
+        "insights": 265.0,
+        "total": 735.0,
+    },
+    "timeseries": {
+        "selector_scope": 85.0,
+        "chart": 275.0,
+        "exports": 65.0,
+        "insights": 265.0,
+        "total": 695.0,
+    },
+    "age_buckets": {
+        "selector_scope": 85.0,
+        "chart": 330.0,
+        "exports": 65.0,
+        "insights": 265.0,
+        "total": 770.0,
+    },
+    "resolution_hist": {
+        "selector_scope": 85.0,
+        "chart": 350.0,
+        "exports": 65.0,
+        "insights": 265.0,
+        "total": 790.0,
+    },
+    "open_priority_pie": {
+        "selector_scope": 85.0,
+        "chart": 245.0,
+        "exports": 65.0,
+        "insights": 265.0,
+        "total": 660.0,
+    },
+    "open_status_bar": {
+        "selector_scope": 85.0,
+        "chart": 295.0,
+        "exports": 65.0,
+        "insights": 265.0,
+        "total": 710.0,
+    },
+}
+_TRENDS_PERF_ORDER: list[str] = ["selector_scope", "chart", "exports", "insights", "total"]
+
+
+def _trends_perf_budget(view: str) -> dict[str, float]:
+    return resolve_budget(
+        view=view,
+        budgets_by_view=_TRENDS_PERF_BUDGETS_MS,
+        default_view="default",
+    )
 
 
 def _to_dt_naive(s: pd.Series) -> pd.Series:
@@ -335,13 +394,6 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     return (priority_rank(p), pl)
 
 
-def _resolution_band(days: pd.Series) -> pd.Categorical:
-    """Build resolution speed bands for semantic coloring."""
-    bins = [-np.inf, 7, 30, np.inf]
-    labels = ["Rapida (0-7d)", "Media (8-30d)", "Lenta (>30d)"]
-    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
-
-
 def _resolution_bucket(days: pd.Series) -> pd.Categorical:
     """Build categorical buckets to avoid confusion in continuous histograms."""
     bins = [-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, np.inf]
@@ -366,9 +418,8 @@ def _add_bar_totals(
         return
     ymax = max(float(v) for v in y_totals) if y_totals else 0.0
     offset = max(1.0, ymax * 0.035)
-    text_color = (
-        "#EAF0FF" if bool(st.session_state.get("workspace_dark_mode", False)) else "#11192D"
-    )
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    text_color = (BBVA_DARK if dark_mode else BBVA_LIGHT).ink
     fig.add_scatter(
         x=x_values,
         y=[float(v) + offset for v in y_totals],
@@ -566,11 +617,14 @@ def render_trends_tab(
     *, settings: Settings, dff: pd.DataFrame, open_df: pd.DataFrame, kpis: dict
 ) -> None:
     """Render trends tab with one selected chart and contextual insights."""
+    section_start_ts = perf_counter()
+    perf_ms: dict[str, float] = {}
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
     kpis = kpis if isinstance(kpis, dict) else {}
     ensure_learning_session_loaded(settings=settings)
 
+    selector_start_ts = perf_counter()
     chart_options = available_trend_charts()
     id_to_label: Dict[str, str] = {cid: label for cid, label in chart_options}
     all_ids = [cid for cid, _ in chart_options]
@@ -597,6 +651,7 @@ def render_trends_tab(
         open_df=open_df,
         active_status_filters=active_status_filters,
     )
+    perf_ms["selector_scope"] = elapsed_ms(selector_start_ts)
 
     st.markdown(
         """
@@ -625,14 +680,31 @@ def render_trends_tab(
             st.caption(
                 "Vista adaptada al estado finalista seleccionado (incluye incidencias finalizadas)."
             )
-        _render_trend_chart(chart_id=selected_chart, kpis=kpis, dff=dff, open_df=trends_open_df)
+        chart_perf = _render_trend_chart(
+            chart_id=selected_chart,
+            kpis=kpis,
+            dff=dff,
+            open_df=trends_open_df,
+        )
+        perf_ms["chart"] = float(chart_perf.get("chart", 0.0) or 0.0)
+        perf_ms["exports"] = float(chart_perf.get("exports", 0.0) or 0.0)
         if selected_chart == "open_priority_pie":
             insights_scope_df = _exclude_terminal_status_rows(trends_open_df)
         elif selected_chart == "open_status_bar":
             insights_scope_df = dff
         else:
             insights_scope_df = trends_open_df
+        insights_start_ts = perf_counter()
         _render_trend_insights(chart_id=selected_chart, dff=dff, open_df=insights_scope_df)
+        perf_ms["insights"] = elapsed_ms(insights_start_ts)
+    perf_ms["total"] = elapsed_ms(section_start_ts)
+    render_perf_footer(
+        snapshot_key="trends::perf_snapshot",
+        view=selected_chart,
+        ordered_blocks=_TRENDS_PERF_ORDER,
+        metrics_ms=perf_ms,
+        budgets_ms=_trends_perf_budget(selected_chart),
+    )
 
 
 # -------------------------
@@ -640,7 +712,23 @@ def render_trends_tab(
 # -------------------------
 def _render_trend_chart(
     *, chart_id: str, kpis: dict, dff: pd.DataFrame, open_df: pd.DataFrame
-) -> None:
+) -> dict[str, float]:
+    chart_start_ts = perf_counter()
+    export_ms = 0.0
+
+    def _measure_export(**kwargs: Any) -> None:
+        nonlocal export_ms
+        export_start_ts = perf_counter()
+        render_minimal_export_actions(**kwargs)
+        export_ms += elapsed_ms(export_start_ts)
+
+    def _chart_perf_result() -> dict[str, float]:
+        chart_total_ms = elapsed_ms(chart_start_ts)
+        return {
+            "chart": max(0.0, chart_total_ms - export_ms),
+            "exports": float(export_ms),
+        }
+
     dff = _safe_df(dff)
     open_df = _safe_df(open_df)
 
@@ -658,13 +746,13 @@ def _render_trend_chart(
         )
         if not isinstance(daily, pd.DataFrame) or daily.empty:
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
-            return
+            return _chart_perf_result()
         fig = px.line(daily, x="date", y=["created", "closed", "deployed", "open_backlog_proxy"])
         fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
         export_df = dff[[c for c in export_cols if c in dff.columns]].copy(deep=False)
-        render_minimal_export_actions(
+        _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
             suffix=chart_id,
@@ -672,13 +760,13 @@ def _render_trend_chart(
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)
-        return
+        return _chart_perf_result()
 
     if chart_id == "age_buckets":
         # Issue-level distribution by age bucket (one point per issue).
         if dff.empty or "created" not in dff.columns:
             st.info("No hay datos suficientes (created) para antigüedad con los filtros actuales.")
-            return
+            return _chart_perf_result()
 
         age_sig = dataframe_signature(
             dff,
@@ -693,7 +781,7 @@ def _render_trend_chart(
         )
         if not isinstance(points, pd.DataFrame) or points.empty:
             st.info("No hay datos suficientes para este gráfico con los filtros actuales.")
-            return
+            return _chart_perf_result()
 
         # Orden canónico de status (y los desconocidos al final)
         statuses = points["status"].astype(str).unique().tolist()
@@ -708,7 +796,7 @@ def _render_trend_chart(
             status_order=status_order,
             bucket_order=AGE_BUCKET_ORDER,
         )
-        render_minimal_export_actions(
+        _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
             suffix=chart_id,
@@ -716,12 +804,12 @@ def _render_trend_chart(
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)
-        return
+        return _chart_perf_result()
 
     if chart_id == "resolution_hist":
         if "created" not in dff.columns:
             st.info("No hay fechas suficientes (created) para calcular tiempos hasta estado final.")
-            return
+            return _chart_perf_result()
 
         res_sig = dataframe_signature(
             dff,
@@ -739,7 +827,7 @@ def _render_trend_chart(
 
         if not isinstance(grouped_res, pd.DataFrame) or grouped_res.empty:
             st.info("No hay incidencias en estado final con fechas suficientes para este filtro.")
-            return
+            return _chart_perf_result()
         if not isinstance(closed, pd.DataFrame):
             closed = pd.DataFrame()
 
@@ -797,7 +885,7 @@ def _render_trend_chart(
         )
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_df = closed.copy(deep=False)
-        render_minimal_export_actions(
+        _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
             suffix=chart_id,
@@ -805,7 +893,7 @@ def _render_trend_chart(
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)
-        return
+        return _chart_perf_result()
 
     if chart_id == "open_priority_pie":
         open_scope = _exclude_terminal_status_rows(open_df)
@@ -813,7 +901,7 @@ def _render_trend_chart(
             st.info(
                 "No hay datos suficientes para el gráfico de Priority con los filtros actuales."
             )
-            return
+            return _chart_perf_result()
 
         dff = open_scope.copy()
         dff["priority"] = normalize_text_col(dff["priority"], "(sin priority)")
@@ -831,7 +919,7 @@ def _render_trend_chart(
         pie_export = (
             dff.groupby("priority", dropna=False, observed=False).size().reset_index(name="count")
         )
-        render_minimal_export_actions(
+        _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
             suffix=chart_id,
@@ -839,12 +927,12 @@ def _render_trend_chart(
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)
-        return
+        return _chart_perf_result()
 
     if chart_id == "open_status_bar":
         if dff.empty or "status" not in dff.columns:
             st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
-            return
+            return _chart_perf_result()
 
         status_sig = dataframe_signature(
             dff,
@@ -863,7 +951,7 @@ def _render_trend_chart(
         )
         if not isinstance(grouped, pd.DataFrame) or grouped.empty:
             st.info("No hay datos suficientes para el gráfico de Estado con los filtros actuales.")
-            return
+            return _chart_perf_result()
         status_order = status_order_raw if isinstance(status_order_raw, list) else []
 
         priority_order = sorted(
@@ -890,7 +978,7 @@ def _render_trend_chart(
             font_size=12,
         )
         fig = apply_plotly_bbva(fig, showlegend=True)
-        render_minimal_export_actions(
+        _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",
             suffix=chart_id,
@@ -898,9 +986,10 @@ def _render_trend_chart(
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)
-        return
+        return _chart_perf_result()
 
     st.info("Gráfico no reconocido.")
+    return _chart_perf_result()
 
 
 def _render_trend_insights(*, chart_id: str, dff: pd.DataFrame, open_df: pd.DataFrame) -> None:

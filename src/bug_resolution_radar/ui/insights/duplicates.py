@@ -8,8 +8,14 @@ from typing import Any, List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
+from bug_resolution_radar.analytics.duplicates import (
+    ExactTitleDuplicateStats,
+    exact_title_duplicate_stats,
+    exact_title_groups,
+    sort_exact_title_groups,
+)
 from bug_resolution_radar.analytics.insights import SimilarityCluster, find_similar_issue_clusters
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
@@ -145,17 +151,9 @@ def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
             )
         }
 
-    top_titles: list[tuple[str, list[str]]] = []
-    title_groups: dict[str, list[str]] = {}
-    if col_exists(df2, "summary") and col_exists(df2, "key"):
-        title_groups = (
-            df2[df2["summary"].astype(str).str.strip() != ""]
-            .groupby("summary", sort=False)["key"]
-            .apply(lambda s: [str(k).strip() for k in s.tolist() if str(k).strip()])
-            .to_dict()
-        )
-        top_titles = sorted(title_groups.items(), key=lambda x: len(x[1]), reverse=True)
-        top_titles = [(title, keys) for title, keys in top_titles if len(keys) > 1][:12]
+    title_groups = exact_title_groups(df2, summary_col="summary", key_col="key")
+    top_titles = sort_exact_title_groups(title_groups, limit=12)
+    duplicate_stats = exact_title_duplicate_stats(df2, summary_col="summary")
 
     title_export = pd.DataFrame(
         [
@@ -201,6 +199,7 @@ def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
         "clusters": clusters,
         "heur_export": heur_export,
         "key_to_extra": key_to_extra,
+        "duplicate_stats": duplicate_stats,
     }
 
 
@@ -266,21 +265,11 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
             columns=["cluster_size", "summary", "keys", "status_dominante", "priority_dominante"]
         )
 
-    duplicate_groups = 0
-    duplicate_issues = 0
-    if col_exists(df2, "summary"):
-        summary_vc = (
-            df2["summary"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .replace("", pd.NA)
-            .dropna()
-            .value_counts()
-        )
-        repeated = summary_vc[summary_vc > 1]
-        duplicate_groups = int(len(repeated))
-        duplicate_issues = int(repeated.sum())
+    duplicate_stats = payload.get("duplicate_stats")
+    if not isinstance(duplicate_stats, ExactTitleDuplicateStats):
+        duplicate_stats = exact_title_duplicate_stats(df2, summary_col="summary")
+    duplicate_groups = int(duplicate_stats.groups)
+    duplicate_issues = int(duplicate_stats.issues)
     st.caption(
         build_duplicates_brief(
             total_open=int(len(df2)),

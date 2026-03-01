@@ -1,11 +1,15 @@
 from datetime import datetime, timedelta, timezone
 
 from bug_resolution_radar.ingest.helix_ingest import (
+    _analysis_lookback_months_from_env,
     _arsql_missing_field_name_from_payload,
     _build_arsql_sql,
     _cache_pending_refresh_ids,
+    _frame_to_rows,
     _optimize_create_start_from_cache,
     _resolve_create_date_range_ms,
+    _rows_to_dicts,
+    _smartit_base_from_dashboard_url,
     _utc_year_create_date_range_ms,
 )
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
@@ -62,6 +66,28 @@ def test_resolve_create_date_range_ms_uses_analysis_lookback_plus_one_month() ->
     assert end_ms == expected_end
     assert "analysis_lookback_months=12" in rule
     assert "effective=13m" in rule
+
+
+def test_analysis_lookback_months_from_env_defaults_to_12(monkeypatch) -> None:
+    monkeypatch.delenv("ANALYSIS_LOOKBACK_MONTHS", raising=False)
+    assert _analysis_lookback_months_from_env() == 12
+
+
+def test_analysis_lookback_months_from_env_uses_12_when_non_positive(monkeypatch) -> None:
+    monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "0")
+    assert _analysis_lookback_months_from_env() == 12
+    monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "-4")
+    assert _analysis_lookback_months_from_env() == 12
+
+
+def test_analysis_lookback_months_from_env_uses_configured_positive(monkeypatch) -> None:
+    monkeypatch.setenv("ANALYSIS_LOOKBACK_MONTHS", "6")
+    assert _analysis_lookback_months_from_env() == 6
+
+
+def test_smartit_base_from_dashboard_url_normalizes_ir1_admin_to_smartit() -> None:
+    base = _smartit_base_from_dashboard_url("https://itsmhelixbbva-ir1.onbmc.com/admin/#/landing")
+    assert base == "https://itsmhelixbbva-smartit.onbmc.com/smartit"
 
 
 def test_optimize_create_start_from_cache_uses_recent_tail_even_with_non_final_items() -> None:
@@ -304,3 +330,23 @@ def test_arsql_missing_field_name_from_payload_extracts_field_name() -> None:
         }
     ]
     assert _arsql_missing_field_name_from_payload(payload) == "BBVA_SourceServiceBUUG"
+
+
+def test_rows_to_dicts_uses_alias_fallback_for_extra_values() -> None:
+    rows = [["A", "B", "C"]]
+    out = _rows_to_dicts(rows, columns=["first", "second"])
+
+    assert out == [{"first": "A", "second": "B", "summary": "C"}]
+
+
+def test_frame_to_rows_handles_ragged_column_lengths() -> None:
+    frame = {
+        "schema": {"fields": ["id", "priority"]},
+        "data": {"values": [["INC-1", "INC-2"], ["High"]]},
+    }
+    out = _frame_to_rows(frame)
+
+    assert out == [
+        {"id": "INC-1", "priority": "High"},
+        {"id": "INC-2", "priority": None},
+    ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Sequence
 
@@ -140,7 +141,7 @@ def render_slides(
 
     with mid:
         st.markdown(
-            f'<div class="bbva-slide-toolbar"><div class="meta">Gráfico {idx+1} / {len(deck)}</div></div>',
+            f'<div class="bbva-slide-toolbar"><div class="meta">Gráfico {idx + 1} / {len(deck)}</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -164,11 +165,13 @@ def render_slides(
 
     spec = deck[idx]
     with st.container():
+        title_html = html.escape(str(spec.title or ""))
+        subtitle_html = html.escape(str(spec.subtitle or ""))
         st.markdown('<div class="bbva-slide">', unsafe_allow_html=True)
 
-        st.markdown(f"<h2>{spec.title}</h2>", unsafe_allow_html=True)
+        st.markdown(f"<h2>{title_html}</h2>", unsafe_allow_html=True)
         if spec.subtitle:
-            st.markdown(f'<div class="subtitle">{spec.subtitle}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="subtitle">{subtitle_html}</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 

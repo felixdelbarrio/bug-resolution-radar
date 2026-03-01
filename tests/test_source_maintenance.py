@@ -4,29 +4,28 @@ import json
 from pathlib import Path
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.services.source_maintenance import (
     cache_inventory,
     purge_source_cache,
-    reset_cache_store,
     remove_helix_source_from_settings,
     remove_jira_source_from_settings,
+    reset_cache_store,
     source_cache_impact,
 )
 from bug_resolution_radar.ui.common import save_issues_doc
 from bug_resolution_radar.ui.insights.learning_store import InsightsLearningStore
 
 
-def test_remove_jira_source_from_settings_clears_legacy_fallback() -> None:
+def test_remove_jira_source_from_settings_updates_sources_json() -> None:
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         JIRA_SOURCES_JSON=(
             '[{"country":"México","alias":"Core MX","jql":"status = Open"},'
             '{"country":"España","alias":"Retail ES","jql":"project = RETAIL"}]'
         ),
-        JIRA_JQL="project = LEGACY",
     )
 
     updated, removed = remove_jira_source_from_settings(settings, "jira:mexico:core-mx")
@@ -34,15 +33,13 @@ def test_remove_jira_source_from_settings_clears_legacy_fallback() -> None:
     rows = json.loads(updated.JIRA_SOURCES_JSON)
     assert len(rows) == 1
     assert rows[0]["alias"] == "Retail ES"
-    assert updated.JIRA_JQL == ""
 
 
 def test_remove_helix_source_from_settings_keeps_global_helix_connection_config() -> None:
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         HELIX_SOURCES_JSON=(
-            '[{"country":"México","alias":"MX SmartIT"},'
-            '{"country":"España","alias":"ES SmartIT"}]'
+            '[{"country":"México","alias":"MX SmartIT"},{"country":"España","alias":"ES SmartIT"}]'
         ),
     )
 

@@ -1,152 +1,124 @@
 # Bug Resolution Radar
 
-Dashboard local para seguimiento de incidencias, rendimiento de resolución y salud operativa de backlog.
+Aplicación local para ingesta, análisis y seguimiento operativo de incidencias Jira/Helix con foco en ejecución diaria y reporting ejecutivo.
 
 ## CI/CD Status
 
-### Rama `master`
-[![Format (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/format.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/format.yml?query=branch%3Amaster)
-[![Typecheck (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/typecheck.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/typecheck.yml?query=branch%3Amaster)
-[![Coverage (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/coverage.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/coverage.yml?query=branch%3Amaster)
-[![CodeQL (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml?query=branch%3Amaster)
-[![Build Linux (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-linux.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-linux.yml?query=branch%3Amaster)
-[![Build macOS (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml?query=branch%3Amaster)
-[![Build Windows (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml?query=branch%3Amaster)
+[![Quality Gate (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml?query=branch%3Adevelop)
+[![Quality Gate (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml?query=branch%3Amaster)
+[![CodeQL](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml)
+[![Build Linux](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-linux.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-linux.yml)
+[![Build macOS](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml)
+[![Build Windows](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml)
 [![Release Binaries](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/release-binaries.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/release-binaries.yml)
 
-### Rama `develop`
-[![Format (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/format.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/format.yml?query=branch%3Adevelop)
-[![Typecheck (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/typecheck.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/typecheck.yml?query=branch%3Adevelop)
-[![Coverage (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/coverage.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/coverage.yml?query=branch%3Adevelop)
-[![CodeQL (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml?query=branch%3Adevelop)
+## Support / Donaciones
 
-## Objetivo
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-2ea44f.svg)](https://github.com/sponsors/felixdelbarrio)
+[![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/felixdelbarrio)
 
-Centralizar en una sola aplicación local:
-- Ingesta de incidencias desde Jira y Helix.
-- KPIs operativos de backlog y resolución.
-- Insights accionables para priorización, aging y cuellos de botella.
-- Visualización ejecutiva y operativa en Streamlit.
+Si este proyecto te aporta valor, puedes apoyarlo por GitHub Sponsors o PayPal.
 
-## Funcionalidades principales
+## Quick Start
 
-- Ingesta Jira con sesión de navegador o cookie manual en memoria.
-- Ingesta Helix con controles de timeout, proxy y SSL.
-- Dashboard con pestañas: resumen, issues, kanban, tendencias, insights y notas.
-- Filtros globales sincronizados para evitar incoherencia entre tabs.
-- Exportación CSV de issues filtradas.
-- Persistencia local de datos y notas.
-- Workflows de GitHub Actions para format, typecheck, coverage, CodeQL, build binario por entorno y release.
-
-## Arquitectura (alto nivel)
-
-- `src/bug_resolution_radar/ingest/`: conectores e ingesta (`jira_ingest.py`, `helix_ingest.py`).
-- `src/bug_resolution_radar/ui/`: app Streamlit, páginas, componentes y dashboard modular.
-- `src/bug_resolution_radar/kpis.py`: cálculo de métricas y gráficas base.
-- `src/bug_resolution_radar/insights.py`: lógica de clustering e insights de incidencias similares.
-- `src/bug_resolution_radar/ui/insights/engine.py`: motor de insights adaptativos para tendencias y pestañas analíticas.
-- `src/bug_resolution_radar/security.py`: utilidades de endurecimiento y sanitización.
-- `tests/`: suite de tests unitarios y de regresión.
-
-## Requisitos
-
+Requisitos:
 - Python `>=3.9`
-- `pip` y entorno virtual (`venv`)
-- Navegador Chrome/Edge para extracción automática de cookie (opcional)
+- `pip`
+- Navegador Chrome o Edge (opcional, para bootstrap automático de sesión)
 
-## Instalación rápida
+Instalación y ejecución:
 
 ```bash
 make setup
+make CI
 make run
 ```
 
-App disponible en `http://localhost:8501`.
+La app queda disponible en `http://localhost:8501`.
+`make CI` valida formato, lint, tipado, guardias de documentación/código muerto y tests con cobertura.
 
-Las distribuciones binarias usan modo escritorio embebido en Windows/Linux.
-En macOS, por defecto se abre en navegador del sistema para minimizar prompts
-de permisos del sistema; se puede reactivar el contenedor embebido con
-`BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true`.
+## Architecture
 
-Para empaquetado local robusto, usa:
+Resumen de capas:
+- `src/bug_resolution_radar/config.py`: contrato único de configuración y persistencia `.env`.
+- `src/bug_resolution_radar/ingest/`: conectores Jira/Helix y runtime de navegador.
+- `src/bug_resolution_radar/analytics/`: KPIs, semántica de estado y ventana de análisis.
+- `src/bug_resolution_radar/ui/`: shell Streamlit, páginas, dashboard, componentes e insights.
+- `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
+- `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, perfilado de ingesta y circuit breaker.
 
-```bash
-make sync-build-env
-make build-macos   # o make build-linux
-```
+## Documentation
 
-Esto valida explícitamente las dependencias de runtime desktop (`streamlit`,
-`webview`) antes de generar binarios.
+Guía detallada por tema:
+- [Arquitectura Runtime](docs/ARCHITECTURE.md)
+- [Mapa de Código](docs/CODEBASE.md)
+- [Motor de Insights](docs/INSIGHTS_ENGINE.md)
+- [Theming y reglas visuales](docs/THEMING.md)
+- [Calidad y CI](docs/QUALITY.md)
 
-Si una build de escritorio falla al arrancar, revisa:
+## Desktop Runtime
 
-- macOS: `~/Library/Application Support/bug-resolution-radar/logs/desktop-launcher.log`
+Variables recomendadas para ejecución local/desktop:
+- `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true` (contenedor embebido)
+- `BUG_RESOLUTION_RADAR_HOME=/ruta/escribible` (opcional, para datos/config fuera del repo)
 
-## Instalación manual
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e ".[dev]"
-streamlit run app.py
-```
-
-## Configuración
+## Configuration
 
 El proyecto usa `.env` (puedes partir de `.env.example`).
 
-Variables más relevantes:
+Variables clave:
+- App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`, `LOG_LEVEL`.
+- Jira: `JIRA_BASE_URL`, `JIRA_SOURCES_JSON`, `JIRA_INGEST_DISABLED_SOURCES_JSON`, `JIRA_BROWSER`, `JIRA_BROWSER_LOGIN_URL`.
+- Helix: `HELIX_SOURCES_JSON`, `HELIX_INGEST_DISABLED_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_DASHBOARD_URL`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
+- ARSQL: `HELIX_ARSQL_BASE_URL`, `HELIX_ARSQL_DATASOURCE_UID`, `HELIX_ARSQL_SOURCE_SERVICE_N1`, `HELIX_ARSQL_LIMIT`, `HELIX_ARSQL_DASHBOARD_URL`, `HELIX_ARSQL_GRAFANA_ORG_ID`.
+- Ventana de análisis: `ANALYSIS_LOOKBACK_MONTHS` (recomendado: `12`).
+- Hardening de ingesta:
+  - `INGEST_PROFILE_ENABLED`, `INGEST_PROFILE_JSONL_PATH`
+  - `INGEST_CIRCUIT_ENABLED`, `INGEST_CIRCUIT_STATE_PATH`
+  - `INGEST_CIRCUIT_FAILURE_THRESHOLD`, `INGEST_CIRCUIT_WINDOW_SECONDS`, `INGEST_CIRCUIT_COOLDOWN_SECONDS`
 
-- App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`.
-- Desktop/permisos (macOS): `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW`,
-  `BUG_RESOLUTION_RADAR_BROWSER_APP_CONTROL`.
-- Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_BROWSER`.
-- Helix: `HELIX_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
-- Helix avanzado: `HELIX_QUERY_MODE` (`person_workitems|arsql|auto`), `HELIX_ARSQL_BASE_URL`,
-  `HELIX_ARSQL_DATASOURCE_UID`, `HELIX_ARSQL_SOURCE_SERVICE_N1`, `HELIX_ARSQL_LIMIT`,
-  `HELIX_ARSQL_DASHBOARD_URL`, `HELIX_DASHBOARD_URL`, `HELIX_BROWSER_LOGIN_WAIT_SECONDS`.
-- KPIs: `KPI_FORTNIGHT_DAYS`, `KPI_OPEN_AGE_X_DAYS`, `KPI_AGE_BUCKETS`.
-- Cache fuentes: `KEEP_CACHE_ON_SOURCE_DELETE`.
+## Quality
 
-## Calidad de código y cobertura
-
-Comandos locales:
+Comandos locales principales:
 
 ```bash
-make format
-make lint
-make typecheck
+make setup
+make CI
 make test
 ```
 
-Con cobertura:
+`make CI` valida:
+- `ruff format --check`, `black --check`, `ruff check`
+- `mypy src`
+- `scripts/check_dead_private_helpers.py`
+- `scripts/check_docs_references.py`
+- `pytest --cov`
+
+Para revisar el último perfil de ingesta:
 
 ```bash
-pytest -q --cov=bug_resolution_radar --cov-report=term-missing
+python3 scripts/ingest_profile_report.py --connector jira
+python3 scripts/ingest_profile_report.py --connector helix
 ```
 
-Umbral configurado de cobertura: `80%`.
+## Build and Packaging
 
-## GitFlow
+Para empaquetado local robusto:
 
-Modelo recomendado:
+```bash
+make build
+```
 
-- `master`: rama estable/release.
-- `develop`: integración continua de features.
-- `feature/*`: ramas de desarrollo desde `develop`.
-- `hotfix/*`: correcciones urgentes desde `master`.
+Firma/notarización (opcional, macOS):
+- `APPLE_CODESIGN_IDENTITY="Developer ID Application: ..."`
+- `APPLE_NOTARY_PROFILE="nombre-perfil-notarytool"`
 
-## Seguridad
-
-- Validación y sanitización de URLs/cookies en ingesta.
-- Enmascarado de secretos en logs.
-- Workflow CodeQL activo en CI.
-
-Nota: el workflow de CodeQL está configurado para no fallar si el repositorio no tiene Code Scanning habilitado a nivel de GitHub Security.
-
-## Datos locales
+## Local Data
 
 - Issues: `data/issues.json`
-- Dump Helix: `data/helix_dump.json`
+- Helix dump: `data/helix_dump.json`
+- Insights learning: `data/insights_learning.json`
 - Notas: `data/notes.json`
+- Observabilidad de ingesta:
+  - `data/observability/ingest_profiles.jsonl`
+  - `data/observability/ingest_circuit_state.json`

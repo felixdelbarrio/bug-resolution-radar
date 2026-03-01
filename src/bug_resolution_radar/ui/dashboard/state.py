@@ -17,6 +17,9 @@ FILTER_STATUS_KEY = "filter_status"
 FILTER_PRIORITY_KEY = "filter_priority"
 FILTER_ASSIGNEE_KEY = "filter_assignee"
 FILTERS_BOOTSTRAPPED_KEY = "__filters_bootstrapped_from_env"
+ISSUES_SCOPE_SORT_COL_KEY = "issues_tab::sort_col"
+ISSUES_SCOPE_SORT_ASC_KEY = "issues_tab::sort_asc"
+ISSUES_SCOPE_LIKE_QUERY_KEY = "issues_tab::sort_like_query"
 
 FILTER_STATUS_ENV_KEY = "DASHBOARD_FILTER_STATUS_JSON"
 FILTER_PRIORITY_ENV_KEY = "DASHBOARD_FILTER_PRIORITY_JSON"
@@ -75,7 +78,7 @@ def filters_from_settings(settings: Settings) -> FilterState:
 
 
 def bootstrap_filters_from_env(settings: Settings) -> None:
-    """Hydrate canonical filter session keys from persisted .env once per session."""
+    """Hydrate canonical filter session keys from persisted settings once per session."""
     if bool(st.session_state.get(FILTERS_BOOTSTRAPPED_KEY, False)):
         return
 
@@ -105,7 +108,7 @@ def bootstrap_filters_from_env(settings: Settings) -> None:
 
 
 def persist_filters_in_env(settings: Settings) -> bool:
-    """Persist canonical filter state into .env when it changes."""
+    """Persist canonical filter state into settings when it changes."""
     current = get_filter_state()
     persisted = filters_from_settings(settings)
     if current == persisted:
@@ -153,6 +156,49 @@ def clear_all_filters() -> None:
     st.session_state[FILTER_STATUS_KEY] = []
     st.session_state[FILTER_PRIORITY_KEY] = []
     st.session_state[FILTER_ASSIGNEE_KEY] = []
+    for key in (ISSUES_SCOPE_SORT_COL_KEY, ISSUES_SCOPE_SORT_ASC_KEY, ISSUES_SCOPE_LIKE_QUERY_KEY):
+        st.session_state.pop(key, None)
+
+
+def apply_text_like_filter(
+    df: pd.DataFrame,
+    *,
+    column: str,
+    query: str,
+) -> pd.DataFrame:
+    """Apply a lightweight literal-like filter over a single column."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    col_name = str(column or "").strip()
+    q = str(query or "").strip()
+    if not col_name or not q or col_name not in df.columns:
+        return df
+
+    series = df[col_name]
+    try:
+        if pd.api.types.is_datetime64_any_dtype(series) or isinstance(
+            series.dtype, pd.DatetimeTZDtype
+        ):
+            text = pd.to_datetime(series, errors="coerce", utc=True).dt.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        else:
+            text = series.astype("string")
+        mask = text.fillna("").str.contains(q, case=False, regex=False, na=False)
+    except Exception:
+        text = series.astype(str)
+        mask = text.str.contains(q, case=False, regex=False, na=False)
+
+    if bool(mask.all()):
+        return df
+    return df.loc[mask].copy(deep=False)
+
+
+def apply_issue_scope_like_filter(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply issues scope like-filter from session state (shared across dashboard tabs)."""
+    sort_col = str(st.session_state.get(ISSUES_SCOPE_SORT_COL_KEY) or "").strip()
+    like_query = str(st.session_state.get(ISSUES_SCOPE_LIKE_QUERY_KEY) or "").strip()
+    return apply_text_like_filter(df, column=sort_col, query=like_query)
 
 
 # -------------------------

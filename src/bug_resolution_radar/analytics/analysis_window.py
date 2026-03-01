@@ -17,24 +17,16 @@ def _utc_timestamp(value: datetime | None = None) -> pd.Timestamp:
     return ts.tz_convert("UTC")
 
 
-def parse_analysis_lookback_days(settings: Settings) -> int:
-    """Return configured lookback in days (0 means auto/max)."""
-    raw = getattr(settings, "ANALYSIS_LOOKBACK_DAYS", 0)
-    try:
-        value = int(str(raw).strip())
-    except Exception:
-        return 0
-    return max(0, value)
-
-
 def parse_analysis_lookback_months(settings: Settings) -> int:
-    """Return configured lookback in months (0 means auto/max)."""
-    raw = getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0)
+    """Return configured lookback in months with a business default of 12."""
+    raw = getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 12)
     try:
         value = int(str(raw).strip())
     except Exception:
-        return 0
-    return max(0, value)
+        return 12
+    if value <= 0:
+        return 12
+    return value
 
 
 def max_available_backlog_days(df: pd.DataFrame, *, now: datetime | None = None) -> int:
@@ -67,26 +59,7 @@ def effective_analysis_lookback_months(
     """Resolve configured monthly lookback, clamped to available backlog window."""
     available = max_available_backlog_months(df, now=now)
     configured_months = parse_analysis_lookback_months(settings)
-    if configured_months > 0:
-        return max(1, min(configured_months, available))
-
-    # Legacy fallback for environments that still only have days configured.
-    configured_days = parse_analysis_lookback_days(settings)
-    if configured_days > 0:
-        from_days = max(1, int(math.ceil(float(configured_days) / 30.0)))
-        return max(1, min(from_days, available))
-
-    return available
-
-
-def effective_analysis_lookback_days(
-    settings: Settings,
-    *,
-    df: pd.DataFrame,
-    now: datetime | None = None,
-) -> int:
-    """Compatibility helper: convert effective monthly lookback to days."""
-    return int(effective_analysis_lookback_months(settings, df=df, now=now) * 30)
+    return max(1, min(configured_months, available))
 
 
 def apply_analysis_depth_filter(

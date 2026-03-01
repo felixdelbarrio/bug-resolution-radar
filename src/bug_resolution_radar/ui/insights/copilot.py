@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -94,15 +95,6 @@ def _to_dt_naive(series: pd.Series | None) -> pd.Series:
 
 def _fmt_pct(x: float) -> str:
     return f"{x * 100.0:.1f}%"
-
-
-def _fmt_days(x: float | None) -> str:
-    if x is None or pd.isna(x):
-        return "—"
-    v = max(0.0, float(x))
-    if v < 10:
-        return f"{v:.1f} d"
-    return f"{v:.0f} d"
 
 
 def _norm(txt: str) -> str:
@@ -478,16 +470,9 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         float(closed_subset["__res_days"].median()) if (not closed_subset.empty) else None
     )
 
-    duplicate_groups = 0
-    duplicate_issues = 0
-    if not safe_open.empty and "summary" in safe_open.columns:
-        summaries = safe_open["summary"].fillna("").astype(str).str.strip()
-        summaries = summaries[summaries != ""]
-        if not summaries.empty:
-            dvc = summaries.value_counts()
-            rep = dvc[dvc > 1]
-            duplicate_groups = int(len(rep))
-            duplicate_issues = int(rep.sum())
+    duplicate_stats = exact_title_duplicate_stats(safe_open, summary_col="summary")
+    duplicate_groups = int(duplicate_stats.groups)
+    duplicate_issues = int(duplicate_stats.issues)
 
     updated_open = (
         _to_dt_naive(safe_open["updated"])
@@ -554,7 +539,7 @@ def build_session_delta_lines(
             candidates.append(
                 (
                     magnitude,
-                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if d > 0 else ''}{d*100.0:.1f} pp).",
+                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if d > 0 else ''}{d * 100.0:.1f} pp).",
                 )
             )
         else:

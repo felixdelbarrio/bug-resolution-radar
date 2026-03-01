@@ -16,6 +16,7 @@ class NormalizedIssue(BaseModel):
 
     key: str
     summary: str
+    description: str = ""
     status: str
     type: str
     priority: str
