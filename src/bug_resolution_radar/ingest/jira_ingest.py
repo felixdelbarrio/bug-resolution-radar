@@ -6,7 +6,7 @@ import os
 import re
 import time
 from html import unescape
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import requests
@@ -48,6 +48,22 @@ _RE_HTML_LI_CLOSE = re.compile(r"</li\s*>", flags=re.IGNORECASE)
 _RE_HTML_STYLE_BLOCK = re.compile(r"<style.*?>.*?</style>", flags=re.IGNORECASE | re.DOTALL)
 _RE_HTML_SCRIPT_BLOCK = re.compile(r"<script.*?>.*?</script>", flags=re.IGNORECASE | re.DOTALL)
 _RE_HTML_TAG = re.compile(r"<[^>]+>", flags=re.DOTALL)
+_JIRA_SEARCH_EXPAND: tuple[str, ...] = ("renderedFields",)
+_JIRA_SEARCH_FIELDS: tuple[str, ...] = (
+    "summary",
+    "description",
+    "status",
+    "issuetype",
+    "priority",
+    "created",
+    "updated",
+    "resolutiondate",
+    "assignee",
+    "reporter",
+    "labels",
+    "components",
+    "resolution",
+)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
@@ -245,6 +261,58 @@ def _jira_html_to_text(value: str) -> str:
     return _normalize_multiline_text(txt)
 
 
+def _dict_text(value: object, *, key: str = "name") -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get(key) or "").strip()
+
+
+def _components_names(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item.get("name", "")) for item in value if isinstance(item, dict)]
+
+
+def _jira_issue_to_normalized(
+    issue_payload: Dict[str, Any],
+    *,
+    base_url: str,
+    country: str,
+    alias: str,
+    source_id: str,
+) -> NormalizedIssue:
+    fields = issue_payload.get("fields") or {}
+    rendered_fields = issue_payload.get("renderedFields") or {}
+
+    resolution = _dict_text(fields.get("resolution"), key="name")
+    desc_text = _jira_description_to_text(fields.get("description"))
+    if not desc_text:
+        desc_text = _jira_description_to_text(rendered_fields.get("description"))
+
+    return NormalizedIssue(
+        key=str(issue_payload.get("key") or ""),
+        summary=str(fields.get("summary") or ""),
+        description=desc_text,
+        status=_dict_text(fields.get("status"), key="name"),
+        type=_dict_text(fields.get("issuetype"), key="name"),
+        priority=_dict_text(fields.get("priority"), key="name"),
+        created=fields.get("created"),
+        updated=fields.get("updated"),
+        resolved=fields.get("resolutiondate"),
+        assignee=_dict_text(fields.get("assignee"), key="displayName"),
+        reporter=_dict_text(fields.get("reporter"), key="displayName"),
+        labels=fields.get("labels") or [],
+        components=_components_names(fields.get("components") or []),
+        resolution=resolution,
+        resolution_type=resolution,
+        url=f"{base_url}/browse/{issue_payload.get('key', '')}",
+        country=country,
+        source_type="jira",
+        source_alias=alias,
+        source_id=source_id,
+    )
+
+
 def _bootstrap_jira_cookie_from_browser(
     *,
     browser: str,
@@ -402,6 +470,13 @@ def ingest_jira(
     start_at = 0
     max_results = 100
     issues: List[NormalizedIssue] = []
+    payload_base: Dict[str, Any] = {
+        "jql": jql,
+        "maxResults": max_results,
+        # Jira DC/Server REST v2 expects expand as array in POST payload.
+        "expand": list(_JIRA_SEARCH_EXPAND),
+        "fields": list(_JIRA_SEARCH_FIELDS),
+    }
 
     api_base: Optional[str] = None
     while True:
@@ -409,28 +484,8 @@ def ingest_jira(
             # Autodetect the working API base on first request.
             api_base = api_candidates[0] if api_candidates else f"{base}/rest/api/3"
 
-        payload = {
-            "jql": jql,
-            "startAt": start_at,
-            "maxResults": max_results,
-            # Jira DC/Server REST v2 expects expand as array in POST payload.
-            "expand": ["renderedFields"],
-            "fields": [
-                "summary",
-                "description",
-                "status",
-                "issuetype",
-                "priority",
-                "created",
-                "updated",
-                "resolutiondate",
-                "assignee",
-                "reporter",
-                "labels",
-                "components",
-                "resolution",
-            ],
-        }
+        payload = dict(payload_base)
+        payload["startAt"] = start_at
         r = _jira_search_request(session, api_base, payload)
         if r.status_code == 404:
             # Try alternate API versions and/or /jira context path.
@@ -453,54 +508,17 @@ def ingest_jira(
             )
         data = r.json()
 
-        for it in data.get("issues", []):
-            fields = it.get("fields") or {}
-            rendered_fields = it.get("renderedFields") or {}
-            priority = (
-                (fields.get("priority") or {}).get("name", "") if fields.get("priority") else ""
-            ).strip()
-            labels = fields.get("labels") or []
-            components = [c.get("name", "") for c in (fields.get("components") or [])]
-            resolution = (
-                (fields.get("resolution") or {}).get("name", "") if fields.get("resolution") else ""
+        issues.extend(
+            _jira_issue_to_normalized(
+                cast(Dict[str, Any], it if isinstance(it, dict) else {}),
+                base_url=base,
+                country=country,
+                alias=alias,
+                source_id=source_id,
             )
-            res_type = resolution
-            desc_text = _jira_description_to_text(fields.get("description"))
-            if not desc_text:
-                desc_text = _jira_description_to_text(rendered_fields.get("description"))
-
-            issues.append(
-                NormalizedIssue(
-                    key=it.get("key", ""),
-                    summary=fields.get("summary", ""),
-                    description=desc_text,
-                    status=((fields.get("status") or {}).get("name", "") or "").strip(),
-                    type=((fields.get("issuetype") or {}).get("name", "") or "").strip(),
-                    priority=priority,
-                    created=fields.get("created"),
-                    updated=fields.get("updated"),
-                    resolved=fields.get("resolutiondate"),
-                    assignee=(
-                        (fields.get("assignee") or {}).get("displayName", "")
-                        if fields.get("assignee")
-                        else ""
-                    ),
-                    reporter=(
-                        (fields.get("reporter") or {}).get("displayName", "")
-                        if fields.get("reporter")
-                        else ""
-                    ),
-                    labels=labels,
-                    components=components,
-                    resolution=resolution,
-                    resolution_type=res_type,
-                    url=f"{base}/browse/{it.get('key', '')}",
-                    country=country,
-                    source_type="jira",
-                    source_alias=alias,
-                    source_id=source_id,
-                )
-            )
+            for it in data.get("issues", [])
+            if isinstance(it, dict)
+        )
 
         start_at += max_results
         if start_at >= int(data.get("total", 0)):
