@@ -187,25 +187,41 @@ def _apply_action(
     st.session_state["__jump_to_tab"] = str(target_section or "issues")
 
 
-def _chips_html(values: List[str], *, color_fn: Callable[[str], str]) -> str:
+def _chip_style_for_banner(hex_color: str, *, dark_mode: bool) -> str:
+    tone = str(hex_color or "").strip()
+    if not dark_mode:
+        return chip_style_from_color(tone)
+    return (
+        "color:var(--bbva-nba-ink-primary); "
+        f"border:1px solid color-mix(in srgb, {tone} 66%, var(--bbva-border-strong)); "
+        f"background:color-mix(in srgb, {tone} 20%, var(--bbva-surface)); "
+        "border-radius:999px; padding:2px 10px; font-weight:700; font-size:0.80rem;"
+    )
+
+
+def _chips_html(values: List[str], *, color_fn: Callable[[str], str], dark_mode: bool) -> str:
     chips: List[str] = []
     for raw in list(values or []):
         txt = str(raw or "").strip()
         if not txt:
             continue
-        style = chip_style_from_color(color_fn(txt))
+        style = _chip_style_for_banner(color_fn(txt), dark_mode=dark_mode)
         chips.append(f'<span class="nba-inline-chip" style="{style}">{html.escape(txt)}</span>')
     return "".join(chips)
 
 
 def _filters_markup(
-    *, status_filters: List[str], priority_filters: List[str], assignee_filters: List[str]
+    *,
+    status_filters: List[str],
+    priority_filters: List[str],
+    assignee_filters: List[str],
+    dark_mode: bool,
 ) -> str:
     del (
         assignee_filters
     )  # Owner is intentionally omitted: it is already implicit in the insight context.
-    status_chips = _chips_html(status_filters, color_fn=status_color)
-    priority_chips = _chips_html(priority_filters, color_fn=priority_color)
+    status_chips = _chips_html(status_filters, color_fn=status_color, dark_mode=dark_mode)
+    priority_chips = _chips_html(priority_filters, color_fn=priority_color, dark_mode=dark_mode)
     if not status_chips and not priority_chips:
         return '<div class="nba-tgt">Sin filtro adicional</div>'
     return (
@@ -354,6 +370,7 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
 
     snapshot = build_operational_snapshot(dff=dff, open_df=open_df)
     section_norm = str(section or "").strip().lower()
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     primary_target = "kanban" if section_norm == "kanban" else "issues"
     scope_key = _scope_key()
 
@@ -657,6 +674,7 @@ def render_next_best_banner(*, df_all: pd.DataFrame, section: str) -> None:
                     status_filters=status_filters,
                     priority_filters=priority_filters,
                     assignee_filters=assignee_filters,
+                    dark_mode=dark_mode,
                 ),
                 unsafe_allow_html=True,
             )

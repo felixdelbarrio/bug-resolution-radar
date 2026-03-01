@@ -169,6 +169,19 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
         )
+        # Keep dark NBA banner in cool BBVA surfaces; warm tones are accents only.
+        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 90%, var(--bbva-midnight) 10%)"
+        nba_banner_border = (
+            "color-mix(in srgb, var(--bbva-signal-orange) 34%, var(--bbva-border-strong) 66%)"
+        )
+        nba_banner_shadow = "color-mix(in srgb, var(--bbva-shadow-deep) 90%, transparent)"
+        nba_ink_primary = "color-mix(in srgb, var(--bbva-text) 98%, transparent)"
+        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 82%, transparent)"
+        nba_accent_a = "color-mix(in srgb, var(--bbva-signal-orange) 90%, var(--bbva-signal-red-soft) 10%)"
+        nba_accent_b = "color-mix(in srgb, var(--bbva-signal-red-soft) 68%, var(--bbva-signal-orange) 32%)"
+        nba_kicker_border = "color-mix(in srgb, var(--bbva-signal-red-soft) 64%, transparent)"
+        nba_kicker_bg = "color-mix(in srgb, var(--bbva-signal-red-soft) 22%, var(--bbva-surface) 78%)"
+        nba_kicker_text = "color-mix(in srgb, var(--bbva-signal-red-soft) 84%, var(--bbva-text) 16%)"
     else:
         surface_base = palette.white
         surface_soft = hex_to_rgba(palette.white, 0.62, fallback=BBVA_LIGHT.white)
@@ -206,6 +219,18 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
         )
+        nba_banner_bg = "color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-signal-orange) 28%)"
+        nba_banner_border = (
+            "color-mix(in srgb, var(--bbva-border-strong) 38%, var(--bbva-signal-orange) 62%)"
+        )
+        nba_banner_shadow = "color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent)"
+        nba_ink_primary = "color-mix(in srgb, var(--bbva-text) 96%, transparent)"
+        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 78%, transparent)"
+        nba_accent_a = "color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight))"
+        nba_accent_b = "color-mix(in srgb, var(--bbva-signal-orange) 54%, var(--bbva-signal-red-soft))"
+        nba_kicker_border = "color-mix(in srgb, var(--bbva-signal-red) 74%, transparent)"
+        nba_kicker_bg = "color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-signal-red-soft) 16%)"
+        nba_kicker_text = "color-mix(in srgb, var(--bbva-signal-red-strong) 88%, var(--bbva-text) 12%)"
 
     css_vars = f"""
       :root {{
@@ -238,16 +263,16 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-focus-tone-flow: color-mix(in srgb, var(--bbva-signal-green) 78%, var(--bbva-midnight) 22%);
         --bbva-focus-tone-quality: color-mix(in srgb, var(--bbva-primary) 84%, var(--bbva-midnight) 16%);
         --bbva-focus-tone-opportunity: var(--bbva-signal-green);
-        --bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-signal-orange) 28%);
-        --bbva-nba-banner-border: color-mix(in srgb, var(--bbva-border-strong) 38%, var(--bbva-signal-orange) 62%);
-        --bbva-nba-banner-shadow: color-mix(in srgb, var(--bbva-shadow-strong) 76%, transparent);
-        --bbva-nba-ink-primary: color-mix(in srgb, var(--bbva-text) 96%, transparent);
-        --bbva-nba-ink-muted: color-mix(in srgb, var(--bbva-text) 78%, transparent);
-        --bbva-nba-accent-a: color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight));
-        --bbva-nba-accent-b: color-mix(in srgb, var(--bbva-signal-orange) 54%, var(--bbva-signal-red-soft));
-        --bbva-nba-kicker-border: color-mix(in srgb, var(--bbva-signal-red) 74%, transparent);
-        --bbva-nba-kicker-bg: color-mix(in srgb, var(--bbva-surface) 84%, var(--bbva-signal-red-soft) 16%);
-        --bbva-nba-kicker-text: color-mix(in srgb, var(--bbva-signal-red-strong) 88%, var(--bbva-text) 12%);
+        --bbva-nba-banner-bg: {nba_banner_bg};
+        --bbva-nba-banner-border: {nba_banner_border};
+        --bbva-nba-banner-shadow: {nba_banner_shadow};
+        --bbva-nba-ink-primary: {nba_ink_primary};
+        --bbva-nba-ink-muted: {nba_ink_muted};
+        --bbva-nba-accent-a: {nba_accent_a};
+        --bbva-nba-accent-b: {nba_accent_b};
+        --bbva-nba-kicker-border: {nba_kicker_border};
+        --bbva-nba-kicker-bg: {nba_kicker_bg};
+        --bbva-nba-kicker-text: {nba_kicker_text};
         --bbva-shadow-deep: {hex_to_rgba(palette.midnight, 0.48, fallback=BBVA_LIGHT.midnight)};
         --bbva-shadow-strong: {hex_to_rgba(palette.midnight, 0.42, fallback=BBVA_LIGHT.midnight)};
         --bbva-shadow-soft: {hex_to_rgba(palette.midnight, 0.22, fallback=BBVA_LIGHT.midnight)};
