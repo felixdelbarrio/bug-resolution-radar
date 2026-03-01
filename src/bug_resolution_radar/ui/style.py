@@ -1746,6 +1746,36 @@ def render_hero(app_title: str) -> None:
     )
 
 
+@lru_cache(maxsize=2)
+def _plotly_template_without_scattermapbox(*, dark_mode: bool) -> Any:
+    """
+    Return a Plotly base template with deprecated `scattermapbox` defaults removed.
+
+    Plotly keeps `scattermapbox` in built-in template data for backward compatibility,
+    but newer versions emit a DeprecationWarning for that trace type. We strip only
+    that entry and preserve the rest of the template.
+    """
+    template_name = "plotly_dark" if dark_mode else "plotly_white"
+    try:
+        import plotly.io as pio
+
+        template_payload: dict[str, Any] = dict(pio.templates[template_name].to_plotly_json())
+    except Exception:
+        return template_name
+
+    data_payload = template_payload.get("data")
+    if not isinstance(data_payload, dict):
+        return template_payload
+
+    if "scattermapbox" not in data_payload:
+        return template_payload
+
+    cleaned_data = dict(data_payload)
+    cleaned_data.pop("scattermapbox", None)
+    template_payload["data"] = cleaned_data
+    return template_payload
+
+
 def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
     """Apply a consistent Plotly style aligned with app design tokens."""
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
@@ -1793,7 +1823,7 @@ def apply_plotly_bbva(fig: Any, *, showlegend: bool = False) -> Any:
         return es_label_map.get(clean.strip().lower(), clean)
 
     fig.update_layout(
-        template="plotly_dark" if dark_mode else "plotly_white",
+        template=_plotly_template_without_scattermapbox(dark_mode=dark_mode),
         paper_bgcolor=transparent_bg,
         plot_bgcolor=transparent_bg,
         font=dict(
