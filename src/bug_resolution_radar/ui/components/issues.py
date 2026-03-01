@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import re
+from functools import lru_cache
 from typing import List, Tuple
 from urllib.parse import quote, unquote
 
@@ -29,8 +30,17 @@ _ISSUE_OPEN_URL_QP = "br_open_issue_url"
 _ISSUE_OPEN_SOURCE_QP = "br_open_issue_source"
 _ISSUE_OPEN_KEY_QP = "br_open_issue_key"
 _SUMMARY_SPLIT_TOKENS = (" - ", " — ", " – ", ": ")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_MD_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 MAX_TABLE_HTML_ROWS = 3000
 MAX_TABLE_NATIVE_ROWS = 2500
+# Keep styled rendering for the full native table range shown to users.
+# Fast path remains only as an emergency fallback for oversized direct calls.
+MAX_TABLE_STYLED_ROWS = MAX_TABLE_NATIVE_ROWS
+MAX_CARD_TITLE_CHARS = 220
+MAX_CARD_DESCRIPTION_CHARS = 420
 _NEUTRAL_TOKEN = BBVA_NEUTRAL_SOFT.upper()
 _NEUTRAL_BORDER = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[1]
 _NEUTRAL_BG = chip_palette_for_color(BBVA_NEUTRAL_SOFT)[2]
@@ -77,7 +87,9 @@ def build_issue_open_href(url: str, source_type: str, *, key_label: str = "") ->
 
 
 def handle_issue_link_open_request(*, settings: Settings | None) -> None:
-    qp = st.query_params
+    qp = getattr(st, "query_params", None)
+    if qp is None:
+        return
     raw_url = _extract_query_text(qp.get(_ISSUE_OPEN_URL_QP))
     if not raw_url:
         return
@@ -106,7 +118,7 @@ def handle_issue_link_open_request(*, settings: Settings | None) -> None:
 def _title_and_description_from_row(
     row: dict[str, object] | pd.Series,
 ) -> Tuple[str, str]:
-    summary = _safe_cell_text(row.get("summary"))
+    summary = _normalize_issue_card_text(_safe_cell_text(row.get("summary")))
     description = ""
     for col in (
         "description",
@@ -114,7 +126,7 @@ def _title_and_description_from_row(
         "detailed_description",
         "detailed_decription",
     ):
-        txt = _safe_cell_text(row.get(col))
+        txt = _normalize_issue_card_text(_safe_cell_text(row.get(col)))
         if txt != "—":
             description = txt
             break
@@ -137,6 +149,60 @@ def _title_and_description_from_row(
         if head.strip() and tail:
             return head.strip(), tail
     return txt, ""
+
+
+def _issue_key_link_html(*, url: str, source_type: str, key_label: str) -> str:
+    label = html.escape(str(key_label or "").strip() or "—")
+    target_url = str(url or "").strip()
+    if not target_url:
+        return f'<span class="issue-key-anchor issue-key-anchor-disabled">{label}</span>'
+    href = html.escape(
+        build_issue_open_href(target_url, source_type, key_label=key_label),
+        quote=True,
+    )
+    return f'<a class="issue-key-anchor" href="{href}">{label}</a>'
+
+
+def _truncate_issue_card_text(value: str, *, max_chars: int) -> str:
+    txt = str(value or "").strip()
+    if not txt or txt == "—" or len(txt) <= max_chars:
+        return txt
+    trimmed = txt[: max_chars + 1]
+    if " " in trimmed:
+        trimmed = trimmed.rsplit(" ", 1)[0]
+    return trimmed.rstrip(" -–—:;,.") + "…"
+
+
+@lru_cache(maxsize=4096)
+def _normalize_issue_card_text(value: str) -> str:
+    txt = str(value or "").strip()
+    if not txt or txt == "—":
+        return txt or "—"
+
+    txt = html.unescape(txt)
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = _MD_CODE_FENCE_RE.sub(" ", txt)
+    txt = _MD_IMAGE_RE.sub(r"\1", txt)
+    txt = _MD_LINK_RE.sub(r"\1", txt)
+    txt = _HTML_TAG_RE.sub(" ", txt)
+
+    clean_lines: List[str] = []
+    for raw in txt.split("\n"):
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
+        line = re.sub(r"^\s*>\s*", "", line)
+        line = re.sub(r"^\s*[-*+]\s+", "", line)
+        line = re.sub(r"^\s*\d+[.)]\s+", "", line)
+        line = re.sub(r"[*_~`]+", "", line)
+        line = line.strip()
+        if line:
+            clean_lines.append(line)
+
+    normalized = " ".join(clean_lines) if clean_lines else txt
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized or "—"
 
 
 def _safe_cell_text(value: object) -> str:
@@ -343,7 +409,7 @@ def _render_issue_table_native(
     sort_state_prefix: str | None = None,
 ) -> None:
     """Render large datasets with Streamlit's virtualized table to reduce DOM pressure."""
-    df_show = display_df[show_cols].copy(deep=False).copy().reset_index(drop=True)
+    df_show = display_df[show_cols].copy(deep=False).reset_index(drop=True)
     col_cfg = {}
     origin_header = _origin_link_header(display_df)
     key_display_col = "__jira_key_display__"
@@ -373,30 +439,34 @@ def _render_issue_table_native(
     if "priority" in df_show.columns:
         col_cfg["priority"] = st.column_config.TextColumn("priority", width="small")
 
-    styler = df_show.style
-    try:
-        styler = styler.hide(axis="index")
-    except Exception:
-        pass
-    if "status" in df_show.columns:
-        styler = styler.map(
-            lambda x: _native_signal_cell_style(x, for_priority=False),
-            subset=["status"],
-        )
-    if "priority" in df_show.columns:
-        styler = styler.map(
-            lambda x: _native_signal_cell_style(x, for_priority=True),
-            subset=["priority"],
-        )
-    if key_display_col in df_show.columns:
-        dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
-        styler = styler.map(
-            lambda value: _native_link_cell_style(value, dark_mode=dark_mode),
-            subset=[key_display_col],
-        )
+    render_payload: object = df_show
+    use_styler = len(df_show) <= MAX_TABLE_STYLED_ROWS
+    if use_styler:
+        styler = df_show.style
+        try:
+            styler = styler.hide(axis="index")
+        except Exception:
+            pass
+        if "status" in df_show.columns:
+            styler = styler.map(
+                lambda x: _native_signal_cell_style(x, for_priority=False),
+                subset=["status"],
+            )
+        if "priority" in df_show.columns:
+            styler = styler.map(
+                lambda x: _native_signal_cell_style(x, for_priority=True),
+                subset=["priority"],
+            )
+        if key_display_col in df_show.columns:
+            dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+            styler = styler.map(
+                lambda value: _native_link_cell_style(value, dark_mode=dark_mode),
+                subset=[key_display_col],
+            )
+        render_payload = styler
 
     event = st.dataframe(
-        styler,
+        render_payload,
         width="stretch",
         hide_index=True,
         column_config=col_cfg or None,
@@ -529,94 +599,6 @@ def render_issue_cards(
         else prepare_issue_cards_df(dff, max_cards=max_cards)
     )
 
-    st.markdown(
-        """
-        <style>
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] {
-            border: 1px solid var(--bbva-issue-card-border) !important;
-            border-radius: var(--bbva-radius-xl) !important;
-            padding: 14px 16px 12px 16px !important;
-            margin: 0 0 12px 0 !important;
-            background: linear-gradient(
-              180deg,
-              var(--bbva-issue-card-bg-start) 0%,
-              var(--bbva-issue-card-bg-end) 100%
-            ) !important;
-            box-shadow: var(--bbva-issue-card-shadow),
-                        inset 0 0 0 1px var(--bbva-issue-card-inset) !important;
-            overflow: visible !important;
-          }
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"]:hover {
-            border-color: var(--bbva-issue-card-border-hover) !important;
-            box-shadow: var(--bbva-issue-card-shadow-hover),
-                        inset 0 0 0 1px var(--bbva-issue-card-inset-hover) !important;
-          }
-          .st-key-issues_tab_issues_shell [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] {
-            gap: 0 !important;
-          }
-          [class*="st-key-issue_card_shell_"] [data-testid="stHorizontalBlock"] {
-            align-items: baseline !important;
-          }
-          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
-            margin-bottom: 0.22rem !important;
-          }
-          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"]:last-child {
-            margin-bottom: 0 !important;
-          }
-          [class*="st-key-issue_open_btn_"] [data-testid="stButton"] {
-            margin: 0 !important;
-          }
-          [class*="st-key-issue_open_btn_"] button {
-            border: 0 !important;
-            background: transparent !important;
-            color: var(--bbva-action-link) !important;
-            text-decoration: underline !important;
-            font-weight: 800 !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            min-height: auto !important;
-            height: auto !important;
-            line-height: 1.08 !important;
-            white-space: nowrap !important;
-            box-shadow: none !important;
-            width: auto !important;
-            min-width: 0 !important;
-            border-radius: 0 !important;
-          }
-          [class*="st-key-issue_open_btn_"] button:hover {
-            color: var(--bbva-action-link-hover) !important;
-            background: transparent !important;
-          }
-          [class*="st-key-issue_open_btn_"] button:focus,
-          [class*="st-key-issue_open_btn_"] button:focus-visible {
-            outline: none !important;
-            box-shadow: none !important;
-          }
-          [class*="st-key-issue_open_btn_"] button > div,
-          [class*="st-key-issue_open_btn_"] button > div > p {
-            margin: 0 !important;
-            padding: 0 !important;
-            line-height: 1.08 !important;
-          }
-          .issue-title-inline {
-            font-weight: 700;
-            color: var(--bbva-text);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-top: 1px;
-          }
-          .issue-card-badges {
-            margin-top: 11px !important;
-            margin-bottom: 2px !important;
-            padding-bottom: 8px !important;
-            row-gap: 8px !important;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     with st.container():
         for idx_card, row in enumerate(cards_df.to_dict(orient="records")):
             key_txt = _safe_cell_text(row.get("key"))
@@ -624,8 +606,12 @@ def render_issue_cards(
             url_raw = str(row.get("url") or "").strip()
             source_type = _normalize_source_type(row.get("source_type"))
             title_txt, desc_txt = _title_and_description_from_row(row)
-            issue_title = html.escape(title_txt)
-            issue_desc = html.escape(desc_txt)
+            issue_title = html.escape(
+                _truncate_issue_card_text(title_txt, max_chars=MAX_CARD_TITLE_CHARS)
+            )
+            issue_desc = html.escape(
+                _truncate_issue_card_text(desc_txt, max_chars=MAX_CARD_DESCRIPTION_CHARS)
+            )
             issue_desc_html = (
                 f'<div class="issue-description">{issue_desc}</div>' if issue_desc else ""
             )
@@ -659,23 +645,14 @@ def render_issue_cards(
             with st.container(key=f"issue_card_shell_{idx_card}"):
                 c_key, c_title = st.columns([1.8, 10.2], gap="small")
                 with c_key:
-                    if st.button(
-                        key_label,
-                        key=f"issue_open_btn_{idx_card}",
-                        type="tertiary",
-                        width="content",
-                    ):
-                        browser = _browser_for_source_type(settings, source_type)
-                        opened = open_url_in_configured_browser(
-                            url_raw,
-                            browser,
-                            allow_system_default_fallback=False,
-                        )
-                        if not opened:
-                            st.warning(
-                                f"No se pudo abrir la incidencia en el navegador configurado ({browser}). "
-                                "Revisa la configuración de navegador."
-                            )
+                    st.markdown(
+                        _issue_key_link_html(
+                            url=url_raw,
+                            source_type=source_type,
+                            key_label=key_label,
+                        ),
+                        unsafe_allow_html=True,
+                    )
                 with c_title:
                     st.markdown(
                         f'<div class="issue-title-inline">{issue_title}</div>',

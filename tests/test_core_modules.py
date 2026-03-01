@@ -20,6 +20,7 @@ from bug_resolution_radar.ui.common import (
     semantic_popover_css_rules,
     status_color,
 )
+from bug_resolution_radar.ui.dashboard import layout as dashboard_layout
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.style import inject_bbva_css
 
@@ -201,7 +202,7 @@ def test_config_restore_env_from_example_raises_when_example_missing(
     try:
         cfg.restore_env_from_example()
     except FileNotFoundError as exc:
-        assert "No se encontró `.env.example`" in str(exc)
+        assert "No se encontró la plantilla de configuración" in str(exc)
     else:
         raise AssertionError("Expected FileNotFoundError when .env.example does not exist")
 
@@ -317,6 +318,52 @@ def test_nba_banner_base_uses_alert_tokens_by_theme() -> None:
     for css in [css_dark, css_light]:
         assert "--bbva-signal-yellow: #FBBF24;" in css
         assert "--bbva-nba-ink-primary: var(--bbva-text);" in css
+
+
+def test_select_popover_rows_keep_compact_single_line_layout() -> None:
+    css = _captured_injected_css(dark_mode=False)
+    assert 'div[data-baseweb="popover"] [role="option"],' in css
+    assert 'div[data-baseweb="popover"] li[role="option"]' in css
+    assert 'div[data-baseweb="popover"] [role="listbox"] > *,' in css
+    assert 'div[data-baseweb="popover"] ul > li,' in css
+    assert 'div[data-baseweb="popover"] [role="listbox"] > div > *,' in css
+    assert "min-height: 1.92rem !important;" in css
+    assert "height: 1.92rem !important;" in css
+    assert "display: flex !important;" in css
+    assert "height: auto !important;" in css
+    assert "padding: 0.34rem 0.72rem !important;" in css
+    assert "overflow: hidden !important;" in css
+    assert "text-overflow: ellipsis !important;" in css
+    assert '[role="option"]:is([aria-label*="new" i], [title*="new" i])' in css
+    assert "border-left: 2px solid color-mix(in srgb, #E85D63 72%, transparent);" in css
+    assert (
+        '[role="option"][data-bbva-semantic="1"] {\n            position: relative !important;'
+        not in css
+    )
+    assert "background-image: radial-gradient(" in css
+    assert "background-position: 0.80rem 50% !important;" in css
+    assert 'div[data-baseweb="popover"] [role="option"] p,' in css
+
+
+def test_global_css_avoids_expensive_layout_selectors() -> None:
+    css = _captured_injected_css(dark_mode=False)
+    assert ":has(" not in css
+    assert '[data-testid="stDataFrame"] *,' not in css
+
+
+def test_dashboard_layout_css_avoids_backdrop_filter(monkeypatch: Any) -> None:
+    captured: list[str] = []
+
+    def _fake_markdown(body: str, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        captured.append(str(body))
+
+    monkeypatch.setattr(dashboard_layout.st, "set_page_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard_layout.st, "markdown", _fake_markdown)
+    dashboard_layout.apply_dashboard_layout()
+
+    css = "\n".join(captured)
+    assert "backdrop-filter:" not in css
 
 
 def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:

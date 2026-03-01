@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
+from time import perf_counter
 
 import pandas as pd
 import streamlit as st
@@ -23,6 +25,7 @@ from bug_resolution_radar.ui.dashboard.constants import canonical_status_rank_ma
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     CsvDownloadSpec,
     build_download_filename,
+    df_to_excel_bytes,
     dfs_to_excel_bytes,
     download_button_for_df,
     make_table_export_df,
@@ -30,8 +33,29 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
 from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
     build_helix_official_export_frames,
 )
+from bug_resolution_radar.ui.dashboard.performance import (
+    detect_budget_overruns,
+    elapsed_ms,
+    render_perf_footer,
+    resolve_budget,
+)
 
-MAX_CARDS_RENDER = 250
+MAX_CARDS_RENDER = 120
+CARDS_PAGE_SIZE = 30
+_ISSUES_PERF_BUDGETS_MS: dict[str, dict[str, float]] = {
+    "Cards": {
+        "filters": 95.0,
+        "exports": 45.0,
+        "cards": 210.0,
+        "total": 380.0,
+    },
+    "Tabla": {
+        "filters": 95.0,
+        "exports": 45.0,
+        "table": 235.0,
+        "total": 420.0,
+    },
+}
 ISSUES_TABLE_PREFERRED_COLS: list[str] = [
     "key",
     "summary",
@@ -60,6 +84,50 @@ _SORT_LABELS: dict[str, str] = {
     "country": "Country",
     "source_type": "Origen",
 }
+
+
+def _issues_perf_budget(view: str) -> dict[str, float]:
+    return resolve_budget(
+        view=view,
+        budgets_by_view=_ISSUES_PERF_BUDGETS_MS,
+        default_view="Cards",
+    )
+
+
+def _elapsed_ms(start_ts: float) -> float:
+    return elapsed_ms(start_ts)
+
+
+def _issues_perf_budget_overruns(
+    *,
+    view: str,
+    metrics_ms: dict[str, float],
+) -> list[str]:
+    budgets = _issues_perf_budget(view)
+    ordered = ["filters", "cards" if view == "Cards" else "table", "exports", "total"]
+    return detect_budget_overruns(
+        ordered_blocks=ordered,
+        metrics_ms=metrics_ms,
+        budgets_ms=budgets,
+    )
+
+
+def _render_issues_perf_footer(
+    *,
+    key_prefix: str,
+    view: str,
+    metrics_ms: dict[str, float],
+) -> None:
+    budgets = _issues_perf_budget(view)
+    ordered = ["filters", "cards" if view == "Cards" else "table", "exports", "total"]
+    render_perf_footer(
+        snapshot_key=f"{key_prefix}::perf_snapshot",
+        view=view,
+        ordered_blocks=ordered,
+        metrics_ms=metrics_ms,
+        budgets_ms=budgets,
+        caption_prefix="Perf",
+    )
 
 
 def _sorted_for_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -153,18 +221,79 @@ def _render_shared_sort_controls(df: pd.DataFrame, *, key_prefix: str) -> None:
 
 def _render_sort_direction_control(*, key_prefix: str) -> None:
     sort_asc_key = f"{key_prefix}::sort_asc"
-    st.toggle("Ascendente", key=sort_asc_key, width="content")
+    st.toggle("Ascendente", key=sort_asc_key, width="stretch")
 
 
-def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
-    """Apply a lightweight literal-like filter over the selected sort column."""
+def _cards_pagination_window(
+    *, total_rows: int, page_size: int, page: int
+) -> tuple[int, int, int, int]:
+    total = max(0, int(total_rows))
+    size = max(1, int(page_size))
+    total_pages = max(1, int(math.ceil(total / size)) if total else 1)
+    current_page = min(max(1, int(page)), total_pages)
+    start = (current_page - 1) * size
+    end = min(total, start + size)
+    return current_page, start, end, total_pages
+
+
+def _set_cards_page(page_key: str, value: int) -> None:
+    st.session_state[page_key] = max(1, int(value))
+
+
+def _render_pager_shell(
+    *,
+    shell_key: str,
+    page_key: str,
+    page: int,
+    total_pages: int,
+    start_idx: int,
+    end_idx: int,
+    total_rows: int,
+    prev_button_key: str,
+    next_button_key: str,
+) -> None:
+    with st.container(border=True, key=shell_key):
+        nav_prev, nav_info, nav_next = st.columns([0.85, 1.3, 0.85], gap="small")
+        nav_prev.button(
+            "◀ Anterior",
+            key=prev_button_key,
+            width="stretch",
+            disabled=(page <= 1),
+            on_click=_set_cards_page,
+            args=(page_key, page - 1),
+        )
+        nav_info.markdown(
+            (
+                "<div style='text-align:center; opacity:0.92; "
+                "line-height:1.25; padding-top:0.18rem;'>"
+                f"<strong>Página {page} de {total_pages}</strong><br/>"
+                f"Mostrando {start_idx + 1:,}-{end_idx:,} de {total_rows:,}"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        nav_next.button(
+            "Siguiente ▶",
+            key=next_button_key,
+            width="stretch",
+            disabled=(page >= total_pages),
+            on_click=_set_cards_page,
+            args=(page_key, page + 1),
+        )
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_apply_shared_like_filter(
+    df: pd.DataFrame, *, sort_col: str, query: str
+) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df
     if sort_col not in df.columns:
         return df
-
-    query_key = f"{key_prefix}::sort_like_query"
-    query = str(st.session_state.get(query_key) or "").strip()
     if not query:
         return df
 
@@ -186,13 +315,33 @@ def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: st
     return df.loc[mask]
 
 
+def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: str) -> pd.DataFrame:
+    """Apply a lightweight literal-like filter over the selected sort column."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    if sort_col not in df.columns:
+        return df
+
+    query_key = f"{key_prefix}::sort_like_query"
+    query = str(st.session_state.get(query_key) or "").strip()
+    if not query:
+        return df
+
+    return _cached_apply_shared_like_filter(df, sort_col=sort_col, query=query)
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
 def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df
     if sort_col not in df.columns:
         return df
 
-    out = df.copy(deep=False).copy()
+    out = df.copy()
     sort_col_norm = str(sort_col).strip().lower()
     key_col = "__sort_shared_key"
     tie_col = "__sort_shared_updated"
@@ -219,6 +368,17 @@ def _apply_shared_sort(df: pd.DataFrame, *, sort_col: str, sort_asc: bool) -> pd
 
     out = out.sort_values(by=sort_cols, ascending=asc, kind="mergesort", na_position="last")
     return out.drop(columns=[key_col, tie_col], errors="ignore")
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_prepare_cards_df(
+    dff: pd.DataFrame, *, max_cards: int, preserve_order: bool
+) -> pd.DataFrame:
+    return prepare_issue_cards_df(dff, max_cards=max_cards, preserve_order=preserve_order)
 
 
 @lru_cache(maxsize=8)
@@ -315,40 +475,62 @@ def _inject_helix_descriptions(
     if "source_type" not in dff.columns or "key" not in dff.columns:
         return dff
 
-    stype = dff["source_type"].astype(str).str.strip().str.lower()
-    helix_mask = stype.eq("helix")
-    if not bool(helix_mask.any()):
-        return dff
-
     helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
     if not helix_path:
         return dff
     desc_map = _load_helix_descriptions_cached(helix_path, helix_mtime_ns)
     if not desc_map:
         return dff
+    return _inject_helix_descriptions_from_desc_map(dff, desc_map=desc_map)
 
-    out = dff.copy(deep=False).copy()
+
+def _inject_helix_descriptions_from_desc_map(
+    dff: pd.DataFrame,
+    *,
+    desc_map: dict[str, str],
+) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    if not desc_map:
+        return dff
+    if "source_type" not in dff.columns or "key" not in dff.columns:
+        return dff
+
+    stype = dff["source_type"].astype(str).str.strip().str.lower()
+    helix_mask = stype.eq("helix")
+    if not bool(helix_mask.any()):
+        return dff
+
+    out = dff.copy()
     if "description" not in out.columns:
         out["description"] = ""
+    key_upper = out["key"].fillna("").astype(str).str.strip().str.upper()
+    if "source_id" in out.columns:
+        source_id = out["source_id"].fillna("").astype(str).str.strip().str.lower()
+        merge_key = source_id + "::" + key_upper
+        merge_key = merge_key.where(source_id.ne(""), key_upper)
+    else:
+        merge_key = key_upper
 
-    for idx in out.index[helix_mask]:
-        key = str(out.at[idx, "key"] or "").strip().upper()
-        if not key:
-            continue
-        source_id = (
-            str(out.at[idx, "source_id"] or "").strip().lower()
-            if "source_id" in out.columns
-            else ""
+    desc_from_merge = merge_key.map(desc_map)
+    desc_from_key = key_upper.map(desc_map)
+    resolved_desc = desc_from_merge.fillna(desc_from_key).fillna("").astype(str).str.strip()
+    has_desc = resolved_desc.ne("")
+
+    current_desc = out["description"].fillna("").astype(str).str.strip()
+    summary_txt = (
+        out["summary"].fillna("").astype(str).str.strip() if "summary" in out.columns else ""
+    )
+    keep_current = (
+        current_desc.ne("")
+        & current_desc.ne("—")
+        & current_desc.str.casefold().ne(
+            summary_txt.str.casefold() if isinstance(summary_txt, pd.Series) else ""
         )
-        merge_key = f"{source_id}::{key}" if source_id else key
-        desc = str(desc_map.get(merge_key) or desc_map.get(key) or "").strip()
-        if not desc:
-            continue
-        curr = str(out.at[idx, "description"] or "").strip()
-        summary = str(out.at[idx, "summary"] or "").strip()
-        if curr and curr != "—" and curr.lower() != summary.lower():
-            continue
-        out.at[idx, "description"] = desc
+    )
+    replace_mask = helix_mask & has_desc & ~keep_current
+    if bool(replace_mask.any()):
+        out.loc[replace_mask, "description"] = resolved_desc.loc[replace_mask]
     return out
 
 
@@ -363,11 +545,50 @@ def _inject_missing_jira_descriptions_from_summary(dff: pd.DataFrame) -> pd.Data
         return pd.DataFrame() if dff is None else dff
     if "source_type" not in dff.columns:
         return dff
-
+    if "description" in dff.columns:
+        return dff
     out = dff.copy(deep=False).copy()
-    if "description" not in out.columns:
-        out["description"] = ""
+    out["description"] = ""
     return out
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_prepare_issues_base_df(
+    dff: pd.DataFrame,
+    *,
+    helix_path: str,
+    helix_mtime_ns: int,
+) -> pd.DataFrame:
+    if dff is None or dff.empty:
+        return pd.DataFrame() if dff is None else dff
+    out = _sorted_for_display(dff)
+    desc_map = _load_helix_descriptions_cached(helix_path, helix_mtime_ns) if helix_path else {}
+    out = _inject_helix_descriptions_from_desc_map(out, desc_map=desc_map)
+    return _inject_missing_jira_descriptions_from_summary(out)
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=48,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_make_table_export_df(dff: pd.DataFrame) -> pd.DataFrame:
+    return make_table_export_df(dff, preferred_cols=ISSUES_TABLE_PREFERRED_COLS)
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=24,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_standard_issues_export_xlsx(export_df: pd.DataFrame) -> bytes | None:
+    if export_df is None or export_df.empty:
+        return None
+    return df_to_excel_bytes(export_df, include_index=False, sheet_name="Issues")
 
 
 @st.cache_data(
@@ -426,19 +647,56 @@ def _render_issues_download_button(
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
             disabled=True,
-            width="content",
+            width="stretch",
         )
         return
 
     if not helix_only:
-        download_button_for_df(
-            export_df,
+        export_sig = _issues_export_signature(export_df, helix_path="", helix_mtime_ns=-1)
+        sig_key = f"{key_prefix}::jira_export_sig"
+        prepared_key = f"{key_prefix}::jira_export_prepared"
+        if str(st.session_state.get(sig_key) or "") != export_sig:
+            st.session_state[sig_key] = export_sig
+            st.session_state[prepared_key] = False
+
+        if not bool(st.session_state.get(prepared_key, False)):
+            if st.button(
+                "Preparar Excel",
+                key=f"{key_prefix}::prepare_excel_jira",
+                type="secondary",
+                width="stretch",
+                help=(
+                    "Genera el Excel bajo demanda para mantener la vista de Issues "
+                    "fluida en alcance Jira."
+                ),
+            ):
+                xlsx_probe = _cached_standard_issues_export_xlsx(export_df)
+                st.session_state[prepared_key] = bool(xlsx_probe)
+                st.rerun()
+            return
+
+        xlsx_bytes = _cached_standard_issues_export_xlsx(export_df)
+        if xlsx_bytes is None:
+            download_button_for_df(
+                export_df,
+                label="Excel",
+                key=f"{key_prefix}::download_csv",
+                spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
+                suffix="issues",
+                disabled=False,
+                width="stretch",
+            )
+            return
+
+        st.download_button(
             label="Excel",
+            data=xlsx_bytes,
+            file_name=build_download_filename("issues_filtradas", suffix="issues", ext="xlsx"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{key_prefix}::download_csv",
-            spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
-            suffix="issues",
             disabled=False,
-            width="content",
+            width="stretch",
+            help="Exporta el dataset filtrado completo (Jira/mixto) en formato Excel.",
         )
         return
 
@@ -456,9 +714,9 @@ def _render_issues_download_button(
     if not bool(st.session_state.get(prepared_key, False)):
         if st.button(
             "Preparar Excel",
-            key=f"{key_prefix}::prepare_excel",
+            key=f"{key_prefix}::prepare_excel_helix",
             type="secondary",
-            width="content",
+            width="stretch",
             help="Genera el Excel oficial Helix bajo demanda para acelerar la carga de la pantalla.",
         ):
             xlsx_probe = _cached_helix_issues_export_xlsx(
@@ -487,7 +745,7 @@ def _render_issues_download_button(
             spec=CsvDownloadSpec(filename_prefix="issues_filtradas"),
             suffix="issues",
             disabled=False,
-            width="content",
+            width="stretch",
         )
         return
 
@@ -498,7 +756,7 @@ def _render_issues_download_button(
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"{key_prefix}::download_csv",
         disabled=False,
-        width="content",
+        width="stretch",
         help="Incluye hoja oficial (columnas estilo Excel de referencia) y hoja raw Helix.",
     )
 
@@ -506,6 +764,16 @@ def _render_issues_download_button(
 def _issues_export_signature(
     export_df: pd.DataFrame, *, helix_path: str, helix_mtime_ns: int
 ) -> str:
+    digest = _cached_export_df_digest(export_df)
+    return f"{helix_path}|{helix_mtime_ns}|{len(export_df) if isinstance(export_df, pd.DataFrame) else 0}|{digest}"
+
+
+@st.cache_data(
+    show_spinner=False,
+    max_entries=64,
+    hash_funcs={pd.DataFrame: streamlit_cache_df_hash},
+)
+def _cached_export_df_digest(export_df: pd.DataFrame) -> str:
     if export_df is None or export_df.empty:
         return "empty"
     # Table export shape is flat (no nested lists), so pandas hashing is cheap and stable enough.
@@ -514,7 +782,7 @@ def _issues_export_signature(
         digest = str(int(hashed.sum()))
     except Exception:
         digest = str(abs(hash(export_df.to_json(date_format="iso", orient="split"))))
-    return f"{helix_path}|{helix_mtime_ns}|{len(export_df)}|{digest}"
+    return digest
 
 
 def _is_helix_only_scope(df: pd.DataFrame) -> bool:
@@ -546,63 +814,67 @@ def _official_export_input_df(export_df: pd.DataFrame) -> pd.DataFrame:
     return export_df[cols].copy(deep=False)
 
 
+@lru_cache(maxsize=8)
+def _issues_view_toggle_css(scope_key: str) -> str:
+    return f"""
+    <style>
+      .st-key-{scope_key} .stButton > button {{
+        min-height: 2.15rem !important;
+        padding: 0.35rem 0.78rem !important;
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+        border: 1px solid var(--bbva-tab-soft-border) !important;
+        background: var(--bbva-tab-soft-bg) !important;
+        color: var(--bbva-tab-soft-text) !important;
+      }}
+      .st-key-{scope_key} .stButton > button[kind="primary"] {{
+        border-color: var(--bbva-tab-active-border) !important;
+        background: var(--bbva-tab-active-bg) !important;
+        color: var(--bbva-tab-active-text) !important;
+      }}
+      .st-key-{scope_key} .stButton > button * {{
+        color: inherit !important;
+        fill: currentColor !important;
+      }}
+    </style>
+    """
+
+
 def _inject_issues_view_toggle_css(*, scope_key: str) -> None:
     """Scoped style for Issues Cards/Tabla toggle buttons."""
-    st.markdown(
-        f"""
-        <style>
-          .st-key-{scope_key} .stButton > button {{
-            min-height: 2.15rem !important;
-            padding: 0.35rem 0.78rem !important;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
-            border: 1px solid var(--bbva-tab-soft-border) !important;
-            background: var(--bbva-tab-soft-bg) !important;
-            color: var(--bbva-tab-soft-text) !important;
-          }}
-          .st-key-{scope_key} .stButton > button[kind="primary"] {{
-            border-color: var(--bbva-tab-active-border) !important;
-            background: var(--bbva-tab-active-bg) !important;
-            color: var(--bbva-tab-active-text) !important;
-          }}
-          .st-key-{scope_key} .stButton > button * {{
-            color: inherit !important;
-            fill: currentColor !important;
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(_issues_view_toggle_css(scope_key), unsafe_allow_html=True)
+
+
+@lru_cache(maxsize=8)
+def _issues_sort_export_css(scope_key: str) -> str:
+    return f"""
+    <style>
+      .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
+        gap: 0.72rem !important;
+        align-items: end !important;
+      }}
+      .st-key-{scope_key} .stDownloadButton {{
+        width: 100% !important;
+        display: flex;
+        justify-content: flex-end;
+        padding-right: 0.28rem;
+        box-sizing: border-box;
+      }}
+      .st-key-{scope_key} .stDownloadButton > button {{
+        margin-left: auto !important;
+      }}
+      .st-key-{scope_key} [class*="st-key-"] [data-testid="stToggle"] {{
+        display: flex;
+        justify-content: flex-end;
+        margin-right: 0.12rem;
+      }}
+    </style>
+    """
 
 
 def _inject_issues_sort_export_css(*, scope_key: str) -> None:
     """Scoped style for sort/export container alignment."""
-    st.markdown(
-        f"""
-        <style>
-          .st-key-{scope_key} [data-testid="stHorizontalBlock"] {{
-            gap: 0.72rem !important;
-            align-items: end !important;
-          }}
-          .st-key-{scope_key} .stDownloadButton {{
-            width: 100% !important;
-            display: flex;
-            justify-content: flex-end;
-            padding-right: 0.28rem;
-            box-sizing: border-box;
-          }}
-          .st-key-{scope_key} .stDownloadButton > button {{
-            margin-left: auto !important;
-          }}
-          .st-key-{scope_key} [class*="st-key-"] [data-testid="stToggle"] {{
-            display: flex;
-            justify-content: flex-end;
-            margin-right: 0.12rem;
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(_issues_sort_export_css(scope_key), unsafe_allow_html=True)
 
 
 def render_issues_section(
@@ -622,15 +894,24 @@ def render_issues_section(
         st.markdown(f"### {title}")
 
     with st.container(border=True, key=f"{key_prefix}_issues_shell"):
-        dff_show_raw = _inject_helix_descriptions(_sorted_for_display(dff), settings=settings)
-        dff_show_raw = _inject_missing_jira_descriptions_from_summary(dff_show_raw)
+        section_start_ts = perf_counter()
+        perf_ms: dict[str, float] = {}
+
+        filters_start_ts = perf_counter()
+        helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
+        dff_show_raw = _cached_prepare_issues_base_df(
+            dff,
+            helix_path=helix_path,
+            helix_mtime_ns=helix_mtime_ns,
+        )
         sort_col, sort_asc = _ensure_shared_sort_state(dff_show_raw, key_prefix=key_prefix)
         dff_like = _apply_shared_like_filter(dff_show_raw, sort_col=sort_col, key_prefix=key_prefix)
         dff_show = _apply_shared_sort(dff_like, sort_col=sort_col, sort_asc=sort_asc)
 
         # Tabla visible puede incluir descripción; Excel se mantiene liviano sin ese campo.
-        table_df = make_table_export_df(dff_show, preferred_cols=ISSUES_TABLE_PREFERRED_COLS)
+        table_df = _cached_make_table_export_df(dff_show)
         export_df = table_df.copy(deep=False)
+        perf_ms["filters"] = _elapsed_ms(filters_start_ts)
 
         # Compact toolbar: top row for view toggle + count.
         view_key = f"{key_prefix}::view_mode"
@@ -638,20 +919,53 @@ def render_issues_section(
             st.session_state[view_key] = "Cards"
         view = str(st.session_state.get(view_key) or "Cards")
         total_filtered = 0 if table_df is None else int(len(table_df))
-        max_cards = min(int(len(dff_show)), MAX_CARDS_RENDER)
-        cards_df = (
-            prepare_issue_cards_df(dff_show, max_cards=max_cards, preserve_order=True)
+        page_size = min(CARDS_PAGE_SIZE, MAX_CARDS_RENDER)
+
+        cards_page_key = f"{key_prefix}::cards_page"
+        cards_page = int(st.session_state.get(cards_page_key, 1) or 1)
+        cards_page, cards_start_idx, cards_end_idx, cards_total_pages = _cards_pagination_window(
+            total_rows=int(len(dff_show)),
+            page_size=page_size,
+            page=cards_page,
+        )
+        st.session_state[cards_page_key] = cards_page
+        cards_slice = (
+            dff_show.iloc[cards_start_idx:cards_end_idx].copy(deep=False)
             if view == "Cards"
             else pd.DataFrame()
         )
-        shown_in_cards = int(len(cards_df)) if view == "Cards" else total_filtered
+        cards_df = (
+            _cached_prepare_cards_df(cards_slice, max_cards=page_size, preserve_order=True)
+            if view == "Cards"
+            else pd.DataFrame()
+        )
+
+        table_page_key = f"{key_prefix}::table_page"
+        table_page = int(st.session_state.get(table_page_key, 1) or 1)
+        table_page, table_start_idx, table_end_idx, table_total_pages = _cards_pagination_window(
+            total_rows=total_filtered,
+            page_size=page_size,
+            page=table_page,
+        )
+        st.session_state[table_page_key] = table_page
+        table_slice = (
+            table_df.iloc[table_start_idx:table_end_idx].copy(deep=False)
+            if view == "Tabla"
+            else pd.DataFrame()
+        )
 
         top_left, top_right = st.columns([2.2, 1.0], gap="small")
         with top_left:
-            if view == "Cards" and shown_in_cards != total_filtered:
-                st.caption(f"{shown_in_cards:,}/{total_filtered:,} issues filtradas")
+            if view == "Cards" and total_filtered > 0:
+                st.caption(
+                    f"Mostrando {cards_start_idx + 1:,}-{cards_end_idx:,} de {total_filtered:,} issues filtradas"
+                )
+            elif view == "Tabla" and total_filtered > 0:
+                st.caption(
+                    f"Mostrando {table_start_idx + 1:,}-{table_end_idx:,} de {total_filtered:,} issues filtradas"
+                )
             else:
-                st.caption(f"{shown_in_cards:,} issues filtradas")
+                st.caption(f"{total_filtered:,} issues filtradas")
         with top_right:
             toggle_scope = f"{key_prefix}_view_toggle"
             _inject_issues_view_toggle_css(scope_key=toggle_scope)
@@ -677,6 +991,7 @@ def render_issues_section(
         # Independent bar below Cards/Tabla: sort controls (left) + Asc/Excel (right), aligned.
         sort_export_scope = f"{key_prefix}_sort_export"
         _inject_issues_sort_export_css(scope_key=sort_export_scope)
+        exports_start_ts = perf_counter()
         with st.container(border=True, key=sort_export_scope):
             left, right = st.columns([2.2, 1.25], gap="small")
             with left:
@@ -694,32 +1009,72 @@ def render_issues_section(
                             settings=settings,
                             helix_only=_is_helix_only_scope(dff_show),
                         )
+        perf_ms["exports"] = _elapsed_ms(exports_start_ts)
 
         if dff_show.empty:
+            perf_ms["total"] = _elapsed_ms(section_start_ts)
+            _render_issues_perf_footer(
+                key_prefix=key_prefix,
+                view=view,
+                metrics_ms=perf_ms,
+            )
             st.info("No hay issues para mostrar con los filtros actuales.")
             return
 
         if view == "Cards":
-            if len(dff_show) > MAX_CARDS_RENDER:
-                st.caption(
-                    f"Vista Cards mostrando {max_cards}/{len(dff_show)}. "
-                    "Usa Tabla para ver todos los resultados."
-                )
+            cards_start_ts = perf_counter()
             render_issue_cards(
-                dff_show,
+                cards_slice,
                 max_cards=len(cards_df),
                 title="",
                 settings=settings,
                 prepared_df=cards_df,
             )
+            _render_pager_shell(
+                shell_key=f"{key_prefix}_cards_pager_shell",
+                page_key=cards_page_key,
+                page=cards_page,
+                total_pages=cards_total_pages,
+                start_idx=cards_start_idx,
+                end_idx=cards_end_idx,
+                total_rows=total_filtered,
+                prev_button_key=f"{key_prefix}::cards_prev",
+                next_button_key=f"{key_prefix}::cards_next",
+            )
+            perf_ms["cards"] = _elapsed_ms(cards_start_ts)
+            perf_ms["total"] = _elapsed_ms(section_start_ts)
+            _render_issues_perf_footer(
+                key_prefix=key_prefix,
+                view=view,
+                metrics_ms=perf_ms,
+            )
             return
 
+        table_start_ts = perf_counter()
         render_issue_table(
-            table_df,
+            table_slice,
             settings=settings,
             table_key=f"{key_prefix}::issues_table_grid",
             preserve_order=True,
             sort_state_prefix=key_prefix,
+        )
+        _render_pager_shell(
+            shell_key=f"{key_prefix}_table_pager_shell",
+            page_key=table_page_key,
+            page=table_page,
+            total_pages=table_total_pages,
+            start_idx=table_start_idx,
+            end_idx=table_end_idx,
+            total_rows=total_filtered,
+            prev_button_key=f"{key_prefix}::table_prev",
+            next_button_key=f"{key_prefix}::table_next",
+        )
+        perf_ms["table"] = _elapsed_ms(table_start_ts)
+        perf_ms["total"] = _elapsed_ms(section_start_ts)
+        _render_issues_perf_footer(
+            key_prefix=key_prefix,
+            view=view,
+            metrics_ms=perf_ms,
         )
 
 

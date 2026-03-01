@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -15,8 +16,50 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
     figures_to_html_bytes,
     render_minimal_export_actions,
 )
+from bug_resolution_radar.ui.dashboard.performance import (
+    elapsed_ms,
+    render_perf_footer,
+    resolve_budget,
+)
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
 from bug_resolution_radar.ui.insights.engine import top_non_other_theme
+
+_OVERVIEW_PERF_BUDGETS_MS: dict[str, dict[str, float]] = {
+    "KPIs": {
+        "kpis": 280.0,
+        "focus_cards": 220.0,
+        "total": 520.0,
+    },
+    "Summary": {
+        "summary_charts": 280.0,
+        "summary_exports": 70.0,
+        "total": 420.0,
+    },
+    "Overview": {
+        "kpis": 280.0,
+        "focus_cards": 220.0,
+        "summary_charts": 280.0,
+        "summary_exports": 70.0,
+        "total": 880.0,
+    },
+}
+_OVERVIEW_PERF_ORDERS: dict[str, list[str]] = {
+    "KPIs": ["kpis", "focus_cards", "total"],
+    "Summary": ["summary_charts", "summary_exports", "total"],
+    "Overview": ["kpis", "focus_cards", "summary_charts", "summary_exports", "total"],
+}
+
+
+def _overview_perf_budget(view: str) -> dict[str, float]:
+    return resolve_budget(
+        view=view,
+        budgets_by_view=_OVERVIEW_PERF_BUDGETS_MS,
+        default_view="Overview",
+    )
+
+
+def _overview_perf_order(view: str) -> list[str]:
+    return list(_OVERVIEW_PERF_ORDERS.get(str(view or ""), _OVERVIEW_PERF_ORDERS["Overview"]))
 
 
 def _parse_summary_charts(settings: Settings, registry_ids: List[str]) -> List[str]:
@@ -68,8 +111,10 @@ def _exit_funnel_counts_from_filtered(status_df: pd.DataFrame) -> tuple[int, int
     return (accepted_count, ready_deploy_count, accepted_count + ready_deploy_count)
 
 
-def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
-    """Render the three selected summary charts and compact export actions."""
+def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> dict[str, float]:
+    """Render the three selected summary charts, export actions and perf timings."""
+    perf_ms: dict[str, float] = {"summary_charts": 0.0, "summary_exports": 0.0}
+    charts_build_start_ts = perf_counter()
     registry = build_trends_registry()
     registry_ids = list(registry.keys())
     chosen = _parse_summary_charts(settings, registry_ids)
@@ -98,6 +143,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
             figures_for_export.append(fig)
             titles_for_export.append(spec.title)
         prepared.append((chart_id, spec.title, fig))
+    charts_build_ms = elapsed_ms(charts_build_start_ts)
 
     st.markdown(
         """
@@ -120,6 +166,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
     with st.container(border=True, key="overview_summary_shell"):
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
         export_df = ctx.dff[[c for c in export_cols if c in ctx.dff.columns]].copy(deep=False)
+        exports_start_ts = perf_counter()
         render_minimal_export_actions(
             key_prefix="overview::summary",
             filename_prefix="resumen_visual",
@@ -130,7 +177,9 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
                 figures_for_export, title="Resumen visual", subtitles=titles_for_export
             ),
         )
+        perf_ms["summary_exports"] = elapsed_ms(exports_start_ts)
 
+        charts_render_start_ts = perf_counter()
         cols = st.columns(3, gap="medium")
 
         for idx, (col, (chart_id, chart_title, fig)) in enumerate(zip(cols, prepared)):
@@ -148,6 +197,8 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> None:
 
                     st.caption(chart_title or chart_id)
                     st.plotly_chart(fig, use_container_width=True)
+        perf_ms["summary_charts"] = charts_build_ms + elapsed_ms(charts_render_start_ts)
+    return perf_ms
 
 
 def render_overview_tab(
@@ -158,12 +209,48 @@ def render_overview_tab(
     open_df: pd.DataFrame,
 ) -> None:
     """Render overview chart section using filtered context data."""
+    section_start_ts = perf_counter()
     dff = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
     open_df = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
     kpis = kpis if isinstance(kpis, dict) else {}
 
     ctx = ChartContext(dff=dff, open_df=open_df, kpis=kpis)
-    _render_summary_charts(settings=settings, ctx=ctx)
+    perf_ms = _render_summary_charts(settings=settings, ctx=ctx)
+    perf_ms["total"] = elapsed_ms(section_start_ts)
+
+    summary_view = "Summary"
+    render_perf_footer(
+        snapshot_key="overview::summary::perf_snapshot",
+        view=summary_view,
+        ordered_blocks=_overview_perf_order(summary_view),
+        metrics_ms=perf_ms,
+        budgets_ms=_overview_perf_budget(summary_view),
+    )
+
+    # End-to-end snapshot aggregates KPI + Summary timings for overview tab control.
+    kpi_snapshot = st.session_state.get("overview::kpis::perf_snapshot")
+    if isinstance(kpi_snapshot, dict):
+        kpi_metrics = kpi_snapshot.get("metrics_ms")
+        if isinstance(kpi_metrics, dict):
+            overview_metrics: dict[str, float] = {
+                "kpis": float(kpi_metrics.get("kpis", 0.0) or 0.0),
+                "focus_cards": float(kpi_metrics.get("focus_cards", 0.0) or 0.0),
+                "summary_charts": float(perf_ms.get("summary_charts", 0.0) or 0.0),
+                "summary_exports": float(perf_ms.get("summary_exports", 0.0) or 0.0),
+            }
+            overview_metrics["total"] = sum(
+                float(overview_metrics.get(block, 0.0) or 0.0)
+                for block in ("kpis", "focus_cards", "summary_charts", "summary_exports")
+            )
+            overview_view = "Overview"
+            render_perf_footer(
+                snapshot_key="overview::perf_snapshot",
+                view=overview_view,
+                ordered_blocks=_overview_perf_order(overview_view),
+                metrics_ms=overview_metrics,
+                budgets_ms=_overview_perf_budget(overview_view),
+                caption_prefix="Perf E2E",
+            )
 
 
 def render_overview_kpis(
@@ -173,6 +260,9 @@ def render_overview_kpis(
     open_df: pd.DataFrame,
 ) -> None:
     """Render compact executive KPIs plus dynamic actionable focus cards."""
+    section_start_ts = perf_counter()
+    perf_ms: dict[str, float] = {}
+    kpis_start_ts = perf_counter()
     dff = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
     open_df = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
     kpis = kpis if isinstance(kpis, dict) else {}
@@ -427,6 +517,8 @@ def render_overview_kpis(
         unsafe_allow_html=True,
     )
 
+    perf_ms["kpis"] = elapsed_ms(kpis_start_ts)
+    focus_cards_start_ts = perf_counter()
     st.markdown('<div class="exec-focus-title">Focos accionables</div>', unsafe_allow_html=True)
 
     trend_target_labels = {
@@ -670,6 +762,13 @@ def render_overview_kpis(
                             "insights_tab": focus.insights_tab,
                         },
                     )
-
-    # 👉 Si tu Overview tenía secciones (“Nuevas”, “Top X”, etc),
-    # pégalas aquí debajo tal cual y NO cambia nada más.
+    perf_ms["focus_cards"] = elapsed_ms(focus_cards_start_ts)
+    perf_ms["total"] = elapsed_ms(section_start_ts)
+    kpis_view = "KPIs"
+    render_perf_footer(
+        snapshot_key="overview::kpis::perf_snapshot",
+        view=kpis_view,
+        ordered_blocks=_overview_perf_order(kpis_view),
+        metrics_ms=perf_ms,
+        budgets_ms=_overview_perf_budget(kpis_view),
+    )

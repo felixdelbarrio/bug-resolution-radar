@@ -48,8 +48,7 @@ def apply_dashboard_layout(*, title: str = "Cuadro de mando de incidencias") -> 
             border: 1px solid var(--bbva-border);
             border-radius: 14px;
             padding: 18px 18px;
-            box-shadow: 0 8px 28px color-mix(in srgb, var(--bbva-text) 8%, transparent);
-            backdrop-filter: blur(6px);
+            box-shadow: 0 6px 18px color-mix(in srgb, var(--bbva-text) 7%, transparent);
           }
 
           .br-card + .br-card { margin-top: 14px; }

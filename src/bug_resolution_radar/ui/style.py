@@ -131,8 +131,9 @@ def _font_face_css() -> str:
     return "\n".join(blocks)
 
 
-def inject_bbva_css(*, dark_mode: bool = False) -> None:
-    """Inject global CSS tokens and components for light/dark runtime themes."""
+@lru_cache(maxsize=2)
+def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
+    """Compile global CSS tokens/components for light/dark runtime themes."""
     palette = BBVA_DARK if dark_mode else BBVA_LIGHT
     if dark_mode:
         surface_base = BBVA_DARK_SURFACE
@@ -508,20 +509,6 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             letter-spacing: -0.01em;
           }
 
-          /* Consistent breathing room between headings and following containers */
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h1),
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h2),
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h3),
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h4) {
-            margin-bottom: 0.28rem !important;
-          }
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h1) + [data-testid="element-container"],
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h2) + [data-testid="element-container"],
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h3) + [data-testid="element-container"],
-          [data-testid="element-container"]:has([data-testid="stMarkdownContainer"] h4) + [data-testid="element-container"] {
-            margin-top: var(--bbva-section-gap) !important;
-          }
-
           /* App background + content width */
           [data-testid="stAppViewContainer"] {
             background: var(--bbva-surface-2);
@@ -737,43 +724,122 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             color: var(--bbva-text) !important;
             list-style: none !important;
             margin: 0 !important;
+            padding: 0.24rem 0 !important;
             padding-inline-start: 0 !important;
+            gap: 0 !important;
+            row-gap: 0 !important;
+            column-gap: 0 !important;
           }
-          div[data-baseweb="popover"] [role="option"],
+          /* BaseWeb may wrap options in virtualized row nodes. Keep wrappers neutral (no fixed height). */
+          div[data-baseweb="popover"] [role="listbox"] > *,
+          div[data-baseweb="popover"] [role="menu"] > *,
+          div[data-baseweb="popover"] ul > li,
+          div[data-baseweb="popover"] ul > * {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            height: auto !important;
+            max-height: none !important;
+            box-sizing: border-box !important;
+          }
+          /* Extra virtualized wrapper level used by BaseWeb in some Streamlit versions. */
+          div[data-baseweb="popover"] [role="listbox"] > div > *,
+          div[data-baseweb="popover"] [role="menu"] > div > * {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            height: auto !important;
+            max-height: none !important;
+            box-sizing: border-box !important;
+          }
           div[data-baseweb="popover"] li {
-            color: var(--bbva-text) !important;
-            background: transparent !important;
-            position: relative;
-            padding-left: 0.66rem !important;
-            --bbva-opt-dot: transparent;
             list-style: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
           div[data-baseweb="popover"] li::marker {
             content: "" !important;
           }
-          div[data-baseweb="popover"] [role="option"]::before,
-          div[data-baseweb="popover"] li::before {
-            content: none;
-            width: 0.54rem;
-            height: 0.54rem;
-            border-radius: 999px;
-            background: var(--bbva-opt-dot);
-            position: absolute;
-            left: 0.66rem;
-            top: 50%;
-            transform: translateY(-50%);
-            pointer-events: none;
+          div[data-baseweb="popover"] [role="option"],
+          div[data-baseweb="popover"] li[role="option"] {
+            color: var(--bbva-text) !important;
+            background: transparent !important;
+            margin: 0 !important;
+            min-height: 1.92rem !important;
+            height: 1.92rem !important;
+            max-height: 1.92rem !important;
+            line-height: 1.18 !important;
+            padding: 0.34rem 0.72rem !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            align-items: center !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            --bbva-opt-dot: transparent;
+          }
+          div[data-baseweb="popover"] [role="option"] > div,
+          div[data-baseweb="popover"] li[role="option"] > div {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 0 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+          }
+          __SEMANTIC_POPOVER_RULES__
+          div[data-baseweb="popover"] [role="option"][data-bbva-semantic="1"],
+          div[data-baseweb="popover"] li[role="option"][data-bbva-semantic="1"] {
+            padding-left: 1.62rem !important;
+            background-image: radial-gradient(
+              circle at 0.80rem center,
+              var(--bbva-opt-dot) 0.24rem,
+              transparent 0.25rem
+            ) !important;
+            background-position: 0.80rem 50% !important;
+            background-size: 0.50rem 0.50rem !important;
+            background-repeat: no-repeat !important;
+          }
+          div[data-baseweb="popover"] [role="option"] > *,
+          div[data-baseweb="popover"] li[role="option"] > * {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            line-height: inherit !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+          }
+          div[data-baseweb="popover"] [role="option"] span,
+          div[data-baseweb="popover"] li[role="option"] span {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1.18 !important;
+          }
+          div[data-baseweb="popover"] [role="option"] p,
+          div[data-baseweb="popover"] li[role="option"] p,
+          div[data-baseweb="popover"] [role="option"] [data-testid="stMarkdownContainer"] p,
+          div[data-baseweb="popover"] li[role="option"] [data-testid="stMarkdownContainer"] p {
+            margin: 0 !important;
+            padding: 0 !important;
+            display: inline !important;
+            line-height: 1.18 !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
           }
           div[data-baseweb="popover"] [role="option"]:hover,
-          div[data-baseweb="popover"] li:hover {
-            background: color-mix(in srgb, var(--bbva-primary) 14%, transparent) !important;
+          div[data-baseweb="popover"] li[role="option"]:hover {
+            background-color: color-mix(in srgb, var(--bbva-primary) 14%, transparent) !important;
           }
           div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
-            background: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
+            background-color: color-mix(in srgb, var(--bbva-primary) 20%, transparent) !important;
             color: var(--bbva-text) !important;
           }
-          /* Option semáforo en listados (status/priority) desde token map central. */
-          __SEMANTIC_POPOVER_CSS__
           .stTextInput input::placeholder,
           .stTextArea textarea::placeholder {
             color: color-mix(in srgb, var(--bbva-text) 45%, transparent) !important;
@@ -1378,6 +1444,57 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             padding: 12px 14px;
             background: var(--bbva-surface);
           }
+          [class*="st-key-issue_card_shell_"] {
+            border: 1px solid var(--bbva-border-strong) !important;
+            border-radius: var(--bbva-radius-xl) !important;
+            padding: 12px 14px 10px 14px !important;
+            margin: 0 0 10px 0 !important;
+            background: var(--bbva-surface-elevated) !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+          }
+          [class*="st-key-issue_card_shell_"]:hover {
+            border-color: var(--bbva-accent-border-soft) !important;
+            box-shadow: none !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] {
+            gap: 0 !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stHorizontalBlock"] {
+            align-items: baseline !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"] {
+            margin-bottom: 0.22rem !important;
+          }
+          [class*="st-key-issue_card_shell_"] [data-testid="stVerticalBlock"] > [data-testid="element-container"]:last-child {
+            margin-bottom: 0 !important;
+          }
+          .issue-key-anchor {
+            display: inline-block;
+            color: var(--bbva-action-link) !important;
+            text-decoration: underline !important;
+            font-weight: 800 !important;
+            line-height: 1.08 !important;
+            white-space: nowrap !important;
+          }
+          .issue-key-anchor:hover {
+            color: var(--bbva-action-link-hover) !important;
+          }
+          .issue-key-anchor-disabled,
+          .issue-key-anchor-disabled:hover {
+            color: var(--bbva-text-muted) !important;
+            text-decoration: none !important;
+            font-weight: 700 !important;
+            cursor: default !important;
+          }
+          .issue-title-inline {
+            font-weight: 700;
+            color: var(--bbva-text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 1px;
+          }
           .issue-top {
             display: flex;
             gap: 10px;
@@ -1417,11 +1534,40 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             text-overflow: ellipsis;
             word-break: break-word;
           }
+          .issue-description h1,
+          .issue-description h2,
+          .issue-description h3,
+          .issue-description h4,
+          .issue-description p,
+          .issue-description li,
+          .issue-description div,
+          .issue-description span,
+          .issue-description strong,
+          .issue-description em {
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: inherit !important;
+            line-height: inherit !important;
+            font-family: inherit !important;
+            font-weight: inherit !important;
+            letter-spacing: normal !important;
+            text-transform: none !important;
+            display: inline !important;
+          }
+          .issue-description li::marker {
+            content: "" !important;
+          }
           .badges {
             margin-top: 8px;
             display: flex;
             gap: 6px;
             flex-wrap: wrap;
+          }
+          .issue-card-badges {
+            margin-top: 11px !important;
+            margin-bottom: 2px !important;
+            padding-bottom: 8px !important;
+            row-gap: 8px !important;
           }
           .badge {
             display: inline-block;
@@ -1450,26 +1596,6 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
             border-radius: 12px !important;
             overflow: hidden !important;
             background: var(--bbva-surface-elevated) !important;
-            --gdg-accent-color: var(--bbva-primary) !important;
-            --gdg-accent-fg: var(--bbva-on-primary) !important;
-            --gdg-accent-light: color-mix(in srgb, var(--bbva-primary) 22%, transparent) !important;
-            --gdg-text-dark: var(--bbva-text) !important;
-            --gdg-text-medium: color-mix(in srgb, var(--bbva-text) 78%, transparent) !important;
-            --gdg-text-light: color-mix(in srgb, var(--bbva-text) 60%, transparent) !important;
-            --gdg-text-header: color-mix(in srgb, var(--bbva-text) 86%, transparent) !important;
-            --gdg-text-group-header: color-mix(in srgb, var(--bbva-text) 86%, transparent) !important;
-            --gdg-bg-cell: color-mix(in srgb, var(--bbva-surface) 95%, var(--bbva-surface-2)) !important;
-            --gdg-bg-cell-medium: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)) !important;
-            --gdg-bg-header: color-mix(in srgb, var(--bbva-surface) 72%, var(--bbva-surface-2)) !important;
-            --gdg-bg-header-has-focus: color-mix(in srgb, var(--bbva-primary) 16%, var(--bbva-surface)) !important;
-            --gdg-bg-header-hovered: color-mix(in srgb, var(--bbva-primary) 10%, var(--bbva-surface)) !important;
-            --gdg-bg-search-result: color-mix(in srgb, var(--bbva-primary) 14%, var(--bbva-surface)) !important;
-            --gdg-border-color: var(--bbva-border) !important;
-            --gdg-horizontal-border-color: var(--bbva-border) !important;
-            --gdg-link-color: {action_link} !important;
-          }
-          [data-testid="stDataFrame"] *,
-          [data-testid="stDataEditor"] * {
             --gdg-accent-color: var(--bbva-primary) !important;
             --gdg-accent-fg: var(--bbva-on-primary) !important;
             --gdg-accent-light: color-mix(in srgb, var(--bbva-primary) 22%, transparent) !important;
@@ -1585,10 +1711,10 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
           }
         </style>
         """
-    st.markdown(
+    return (
         css_template.replace("__CSS_VARS__", css_vars)
+        .replace("__SEMANTIC_POPOVER_RULES__", semantic_popover_css_rules())
         .replace("__FONT_FACE_CSS__", _font_face_css())
-        .replace("__SEMANTIC_POPOVER_CSS__", semantic_popover_css_rules())
         .replace("__ICON_REPORT__", icon_report)
         .replace("__ICON_INGEST__", icon_ingest)
         .replace("__ICON_THEME__", icon_theme)
@@ -1598,9 +1724,13 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         .replace("__ICON_REINGEST__", icon_reingest)
         .replace("__ICON_RECYCLE__", icon_recycle)
         .replace("__ICON_SEARCH__", icon_search)
-        .replace("__ICON_XML__", icon_xml),
-        unsafe_allow_html=True,
+        .replace("__ICON_XML__", icon_xml)
     )
+
+
+def inject_bbva_css(*, dark_mode: bool = False) -> None:
+    """Inject global CSS tokens and components for light/dark runtime themes."""
+    st.markdown(_compiled_bbva_css(dark_mode=bool(dark_mode)), unsafe_allow_html=True)
 
 
 def render_hero(app_title: str) -> None:

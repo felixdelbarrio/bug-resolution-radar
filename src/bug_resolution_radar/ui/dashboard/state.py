@@ -78,7 +78,7 @@ def filters_from_settings(settings: Settings) -> FilterState:
 
 
 def bootstrap_filters_from_env(settings: Settings) -> None:
-    """Hydrate canonical filter session keys from persisted .env once per session."""
+    """Hydrate canonical filter session keys from persisted settings once per session."""
     if bool(st.session_state.get(FILTERS_BOOTSTRAPPED_KEY, False)):
         return
 
@@ -108,7 +108,7 @@ def bootstrap_filters_from_env(settings: Settings) -> None:
 
 
 def persist_filters_in_env(settings: Settings) -> bool:
-    """Persist canonical filter state into .env when it changes."""
+    """Persist canonical filter state into settings when it changes."""
     current = get_filter_state()
     persisted = filters_from_settings(settings)
     if current == persisted:

@@ -285,7 +285,7 @@ def _render_status(scope_key: str) -> None:
                 link_label,
                 key=f"btn_open_saved_report::{scope_key}::{saved_path_value}",
                 type="secondary",
-                width="content",
+                width="stretch",
                 help=f"Abrir carpeta del informe\n{saved_path_value}",
             ):
                 _reveal_in_file_manager(saved_path)
@@ -385,7 +385,7 @@ def render(settings: Settings) -> None:
             "Guardar en disco",
             key=f"btn_save_scope_ppt::{scope_key}",
             type="primary",
-            width="content",
+            width="stretch",
             disabled=phase != "ready",
             help=(
                 "Se habilita cuando finalice la generación automática. "
