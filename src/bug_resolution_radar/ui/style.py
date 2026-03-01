@@ -22,10 +22,12 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_RADIUS_INNER_PX,
     BBVA_RADIUS_OUTER_PX,
     BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_ORANGE_1,
     BBVA_SIGNAL_ORANGE_2,
     BBVA_SIGNAL_RED_1,
     BBVA_SIGNAL_RED_2,
     BBVA_SIGNAL_RED_3,
+    BBVA_SIGNAL_YELLOW_1,
     hex_to_rgba,
 )
 from bug_resolution_radar.ui.common import flow_signal_color_map, semantic_popover_css_rules
@@ -169,17 +171,17 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.serene_blue, 0.26, fallback=BBVA_LIGHT.serene_blue
         )
-        # Banner base stays on neutral app surface; severity remains only in accents.
-        nba_banner_bg = "var(--bbva-surface-elevated)"
-        nba_banner_border = "var(--bbva-accent-border-soft)"
+        # Next Best Action is an alert container: orange in dark mode for semantic separation from cards.
+        nba_banner_bg = "color-mix(in srgb, var(--bbva-signal-orange) 20%, var(--bbva-surface-elevated) 80%)"
+        nba_banner_border = "color-mix(in srgb, var(--bbva-signal-orange) 70%, var(--bbva-border) 30%)"
         nba_banner_shadow = "var(--bbva-shadow-strong)"
         nba_ink_primary = "var(--bbva-text)"
-        nba_ink_muted = "var(--bbva-text-muted)"
-        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.92, fallback=BBVA_SIGNAL_ORANGE_2)
-        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.82, fallback=BBVA_SIGNAL_RED_3)
-        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.66, fallback=BBVA_SIGNAL_RED_3)
-        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.22, fallback=BBVA_SIGNAL_RED_3)
-        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.92, fallback=BBVA_SIGNAL_RED_3)
+        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 78%, var(--bbva-midnight) 22%)"
+        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.98, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.90, fallback=BBVA_SIGNAL_ORANGE_1)
+        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.74, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.24, fallback=BBVA_SIGNAL_ORANGE_1)
+        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.98, fallback=BBVA_SIGNAL_ORANGE_2)
     else:
         surface_base = palette.white
         surface_soft = hex_to_rgba(palette.white, 0.62, fallback=BBVA_LIGHT.white)
@@ -217,16 +219,17 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         issue_card_inset_hover = hex_to_rgba(
             palette.electric_blue, 0.14, fallback=BBVA_LIGHT.electric_blue
         )
-        nba_banner_bg = "var(--bbva-surface-elevated)"
-        nba_banner_border = "var(--bbva-accent-border-soft)"
+        # Next Best Action is an alert container: yellow in light mode for semantic separation from cards.
+        nba_banner_bg = "color-mix(in srgb, var(--bbva-signal-yellow) 22%, var(--bbva-surface-elevated) 78%)"
+        nba_banner_border = "color-mix(in srgb, var(--bbva-signal-orange) 58%, var(--bbva-border) 42%)"
         nba_banner_shadow = "var(--bbva-shadow-soft)"
         nba_ink_primary = "var(--bbva-text)"
-        nba_ink_muted = "var(--bbva-text-muted)"
-        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.86, fallback=BBVA_SIGNAL_ORANGE_2)
-        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.74, fallback=BBVA_SIGNAL_RED_3)
-        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_RED_2, 0.74, fallback=BBVA_SIGNAL_RED_2)
-        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_RED_3, 0.16, fallback=BBVA_SIGNAL_RED_3)
-        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_RED_1, 0.88, fallback=BBVA_SIGNAL_RED_1)
+        nba_ink_muted = "color-mix(in srgb, var(--bbva-text) 74%, transparent)"
+        nba_accent_a = hex_to_rgba(BBVA_SIGNAL_YELLOW_1, 0.98, fallback=BBVA_SIGNAL_YELLOW_1)
+        nba_accent_b = hex_to_rgba(BBVA_SIGNAL_ORANGE_2, 0.90, fallback=BBVA_SIGNAL_ORANGE_2)
+        nba_kicker_border = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.76, fallback=BBVA_SIGNAL_ORANGE_1)
+        nba_kicker_bg = hex_to_rgba(BBVA_SIGNAL_YELLOW_1, 0.24, fallback=BBVA_SIGNAL_YELLOW_1)
+        nba_kicker_text = hex_to_rgba(BBVA_SIGNAL_ORANGE_1, 0.96, fallback=BBVA_SIGNAL_ORANGE_1)
 
     css_vars = f"""
       :root {{
@@ -253,6 +256,7 @@ def inject_bbva_css(*, dark_mode: bool = False) -> None:
         --bbva-signal-red: {BBVA_SIGNAL_RED_2};
         --bbva-signal-red-soft: {BBVA_SIGNAL_RED_3};
         --bbva-signal-orange: {BBVA_SIGNAL_ORANGE_2};
+        --bbva-signal-yellow: {BBVA_SIGNAL_YELLOW_1};
         --bbva-signal-green: {BBVA_SIGNAL_GREEN_2};
         --bbva-focus-tone-risk: var(--bbva-signal-red);
         --bbva-focus-tone-warning: color-mix(in srgb, var(--bbva-signal-orange) 82%, var(--bbva-midnight) 18%);

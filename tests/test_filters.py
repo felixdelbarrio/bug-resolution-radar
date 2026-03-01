@@ -7,6 +7,7 @@ import pandas as pd
 from bug_resolution_radar.ui.common import status_color
 from bug_resolution_radar.ui.components.filters import (
     _active_context_label,
+    _inject_semantic_option_runtime_bridge,
     _matrix_header_button_css,
     _semantic_label_tone_map,
     apply_filters,
@@ -102,3 +103,33 @@ def test_semantic_label_tone_map_groups_equivalent_statuses() -> None:
         == tones["ready to verify"]["color"]
     )
     assert tones["accepted"]["color"] == tones["ready to deploy"]["color"]
+
+
+def test_semantic_runtime_bridge_injects_token_payload(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_components_html(html: str, height: int, width: int) -> None:
+        captured["html"] = html
+        captured["height"] = height
+        captured["width"] = width
+
+    monkeypatch.setattr(
+        "bug_resolution_radar.ui.components.filters.components_html",
+        _fake_components_html,
+    )
+
+    _inject_semantic_option_runtime_bridge(
+        status_labels=["New", "Analysing", "Blocked", "En progreso", "Ready to Deploy"],
+        priority_labels=["Highest", "High", "Medium", "Low"],
+    )
+
+    payload = str(captured.get("html", ""))
+    assert "window.parent" in payload
+    assert 'setAttribute("data-bbva-semantic", "1")' in payload
+    assert '"new"' in payload
+    assert '"analysing"' in payload
+    assert '"blocked"' in payload
+    assert '"en progreso"' in payload
+    assert '"ready to deploy"' in payload
+    assert captured.get("height") == 0
+    assert captured.get("width") == 0

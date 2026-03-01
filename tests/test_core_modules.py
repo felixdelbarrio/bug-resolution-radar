@@ -295,14 +295,28 @@ def _captured_injected_css(*, dark_mode: bool) -> str:
     return "\n".join(captured)
 
 
-def test_nba_banner_base_uses_neutral_surface_tokens_in_both_themes() -> None:
+def test_nba_banner_base_uses_alert_tokens_by_theme() -> None:
     css_dark = _captured_injected_css(dark_mode=True)
     css_light = _captured_injected_css(dark_mode=False)
+    assert (
+        "--bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-signal-orange) 20%, "
+        "var(--bbva-surface-elevated) 80%);" in css_dark
+    )
+    assert (
+        "--bbva-nba-banner-border: color-mix(in srgb, var(--bbva-signal-orange) 70%, "
+        "var(--bbva-border) 30%);" in css_dark
+    )
+    assert (
+        "--bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-signal-yellow) 22%, "
+        "var(--bbva-surface-elevated) 78%);" in css_light
+    )
+    assert (
+        "--bbva-nba-banner-border: color-mix(in srgb, var(--bbva-signal-orange) 58%, "
+        "var(--bbva-border) 42%);" in css_light
+    )
     for css in [css_dark, css_light]:
-        assert "--bbva-nba-banner-bg: var(--bbva-surface-elevated);" in css
-        assert "--bbva-nba-banner-border: var(--bbva-accent-border-soft);" in css
+        assert "--bbva-signal-yellow: #FBBF24;" in css
         assert "--bbva-nba-ink-primary: var(--bbva-text);" in css
-        assert "--bbva-nba-ink-muted: var(--bbva-text-muted);" in css
 
 
 def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:

@@ -145,9 +145,23 @@ def _inject_filters_panel_css() -> None:
             transform: translateY(-50%) !important;
           }
           [data-baseweb="tag"][data-bbva-semantic="1"] {
+            position: relative !important;
+            padding-left: 1.42rem !important;
             background: var(--bbva-opt-bg) !important;
             border: 1px solid var(--bbva-opt-border) !important;
             color: var(--bbva-opt-dot) !important;
+          }
+          [data-baseweb="tag"][data-bbva-semantic="1"]::before {
+            content: "" !important;
+            width: 0.48rem !important;
+            height: 0.48rem !important;
+            border-radius: 999px !important;
+            background: var(--bbva-opt-dot) !important;
+            position: absolute !important;
+            left: 0.56rem !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+            pointer-events: none !important;
           }
           [data-baseweb="tag"][data-bbva-semantic="1"] * {
             color: var(--bbva-opt-dot) !important;
@@ -161,111 +175,6 @@ def _inject_filters_panel_css() -> None:
         .replace("__CHIP_LABEL__", chip_lbl)
     )
     st.markdown(css, unsafe_allow_html=True)
-
-
-def _css_attr_value(txt: str) -> str:
-    return (txt or "").replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _inject_colored_multiselect_css(
-    *, status_labels: List[str], priority_labels: List[str]
-) -> None:
-    rules: List[str] = []
-
-    def _opt_sel(v: str) -> str:
-        return (
-            f'[role="option"][aria-label*="{v}" i], '
-            f'[role="option"][title*="{v}" i], '
-            f'[role="option"]:has([title*="{v}" i])'
-        )
-
-    def _tag_sel(v: str) -> str:
-        return f'[data-baseweb="tag"][title*="{v}" i], [data-baseweb="tag"]:has([title*="{v}" i])'
-
-    for label in status_labels:
-        raw = (label or "").strip()
-        c = status_color(raw)
-        bg = _hex_with_alpha(c, 24)
-        border = _hex_with_alpha(c, 120)
-        v = _css_attr_value(label)
-        option_selector = _opt_sel(v)
-        tag_selector = _tag_sel(v)
-        rules.append(
-            f"""
-            {option_selector} {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            {option_selector}::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            {tag_selector} {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            {tag_selector} * {{
-              color: {c} !important;
-            }}
-            """
-        )
-
-    for label in priority_labels:
-        raw = (label or "").strip()
-        c = priority_color(raw)
-        bg = _hex_with_alpha(c, 24)
-        border = _hex_with_alpha(c, 120)
-        v = _css_attr_value(label)
-        option_selector = _opt_sel(v)
-        tag_selector = _tag_sel(v)
-        rules.append(
-            f"""
-            {option_selector} {{
-              background: {bg} !important;
-              border-left: 3px solid {c} !important;
-              position: relative;
-              padding-left: 1.72rem !important;
-              background-image: radial-gradient(circle at 0.68rem 50%, {c} 0 0.30rem, transparent 0.31rem) !important;
-              background-repeat: no-repeat !important;
-            }}
-            {option_selector}::before {{
-              content: "";
-              width: 0.56rem;
-              height: 0.56rem;
-              border-radius: 999px;
-              background: {c};
-              position: absolute;
-              left: 0.60rem;
-              top: 50%;
-              transform: translateY(-50%);
-            }}
-            {tag_selector} {{
-              background: {bg} !important;
-              border: 1px solid {border} !important;
-              color: {c} !important;
-              background-image: none !important;
-            }}
-            {tag_selector} * {{
-              color: {c} !important;
-            }}
-            """
-        )
-
-    if rules:
-        st.markdown(f"<style>{''.join(rules)}</style>", unsafe_allow_html=True)
 
 
 def _normalize_semantic_label(label: str) -> str:
@@ -461,8 +370,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
         )
         prio_opts_ui = [_priority_combo_label(p) for p in prio_opts]
 
-    # Inject option/tag color styles once to avoid per-column layout jitter.
-    _inject_colored_multiselect_css(status_labels=status_opts_ui, priority_labels=prio_opts_ui)
+    # Bridge semantic tokens to runtime popovers/tags (BaseWeb does not expose label attrs consistently).
     _inject_semantic_option_runtime_bridge(
         status_labels=status_opts_ui,
         priority_labels=prio_opts_ui,
