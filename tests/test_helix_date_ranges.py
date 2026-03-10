@@ -90,7 +90,7 @@ def test_smartit_base_from_dashboard_url_normalizes_ir1_admin_to_smartit() -> No
     assert base == "https://itsmhelixbbva-smartit.onbmc.com/smartit"
 
 
-def test_optimize_create_start_from_cache_uses_recent_tail_even_with_non_final_items() -> None:
+def test_optimize_create_start_from_cache_rewinds_to_oldest_non_final_tail() -> None:
     base_start = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
     base_end = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
     cached_items = [
@@ -121,7 +121,8 @@ def test_optimize_create_start_from_cache_uses_recent_tail_even_with_non_final_i
     )
 
     expected_start = int(
-        (datetime(2026, 1, 20, 0, 0, 0, tzinfo=timezone.utc) - timedelta(days=7)).timestamp() * 1000
+        (datetime(2025, 10, 15, 8, 0, 0, tzinfo=timezone.utc) - timedelta(days=7)).timestamp()
+        * 1000
     )
     assert optimized_start == expected_start
     assert "cache_non_final=1/3" in rule
@@ -157,6 +158,39 @@ def test_cache_pending_refresh_ids_returns_only_non_final_ids_within_window() ->
         base_end_ms=base_end,
     )
     assert pending_ids == ["INC-2"]
+
+
+def test_cache_pending_refresh_ids_can_include_pending_outside_window() -> None:
+    base_start = int(datetime(2025, 10, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    base_end = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
+    cached_items = [
+        HelixWorkItem(
+            id="INC-0",
+            status="Open",
+            source_id="helix:mexico:web",
+            target_date="2025-11-05T08:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-OLD",
+            status="Open",
+            source_id="helix:mexico:web",
+            target_date="2025-03-15T00:00:00+00:00",
+        ),
+        HelixWorkItem(
+            id="INC-NO-ANCHOR",
+            status="Open",
+            source_id="helix:mexico:web",
+        ),
+    ]
+
+    pending_ids = _cache_pending_refresh_ids(
+        cached_items,
+        base_start_ms=base_start,
+        base_end_ms=base_end,
+        include_outside_window=True,
+    )
+
+    assert pending_ids == ["INC-NO-ANCHOR", "INC-OLD"]
 
 
 def test_optimize_create_start_from_cache_all_final_uses_recent_tail_from_last_item() -> None:
