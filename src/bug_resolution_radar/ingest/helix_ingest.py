@@ -22,6 +22,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from ..analytics.status_semantics import is_finalist_status
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
 from ..config import build_source_id
@@ -61,16 +62,6 @@ _ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES: tuple[str, ...] = (
 )
 _ARSQL_OFFICIAL_ENVIRONMENTS: tuple[str, ...] = ("Production",)
 _ARSQL_OFFICIAL_TIME_FIELDS: tuple[str, ...] = ("Submit Date",)
-_HELIX_FINALIST_STATUS_TOKENS: tuple[str, ...] = (
-    "accepted",
-    "ready to deploy",
-    "deployed",
-    "closed",
-    "resolved",
-    "done",
-    "cancelled",
-    "canceled",
-)
 _INSECURE_TLS_WARNING_SUPPRESSED = False
 _RE_SPACES = re.compile(r"\s+")
 
@@ -221,10 +212,7 @@ def _iso_to_epoch_ms(value: Any) -> Optional[int]:
 
 
 def _is_helix_finalist_status(value: Any) -> bool:
-    token = _normalize_space_token(str(value or "").replace("_", " ").replace("-", " "))
-    if not token:
-        return False
-    return any(part in token for part in _HELIX_FINALIST_STATUS_TOKENS)
+    return bool(is_finalist_status(value))
 
 
 def _source_item_matches(
@@ -308,16 +296,20 @@ def _optimize_create_start_from_cache(
 
     tail_days = max(1, _coerce_int(all_final_tail_days, 7))
     tail_ms = int(tail_days * 24 * 60 * 60 * 1000)
-    latest_ms = max(anchor_ms for _, anchor_ms in in_window)
-    optimized_start = max(start_ms, latest_ms - tail_ms)
-    non_final_count = sum(
-        1 for item, _ in in_window if not _is_helix_finalist_status(item.status or item.status_raw)
-    )
-    if non_final_count > 0:
+    non_final_anchors = [
+        anchor_ms
+        for item, anchor_ms in in_window
+        if not _is_helix_finalist_status(item.status or item.status_raw)
+    ]
+    if non_final_anchors:
+        oldest_non_final_ms = min(non_final_anchors)
+        optimized_start = max(start_ms, oldest_non_final_ms - tail_ms)
         return (
             optimized_start,
-            f"cache_non_final={non_final_count}/{len(in_window)}; tail_days={tail_days}",
+            f"cache_non_final={len(non_final_anchors)}/{len(in_window)}; tail_days={tail_days}",
         )
+    latest_ms = max(anchor_ms for _, anchor_ms in in_window)
+    optimized_start = max(start_ms, latest_ms - tail_ms)
     return optimized_start, f"cache_all_final={len(in_window)}; tail_days={tail_days}"
 
 
@@ -327,26 +319,40 @@ def _cache_pending_refresh_ids(
     base_start_ms: int,
     base_end_ms: int,
     max_ids: Any = 200,
+    include_outside_window: bool = False,
 ) -> List[str]:
     start_ms = int(max(0, base_start_ms))
     end_ms = int(max(start_ms, base_end_ms))
     max_ids_int = max(1, _coerce_int(max_ids, 200))
     out: List[str] = []
     seen: set[str] = set()
+    outside_candidates: List[Tuple[int, int, str]] = []
 
     for item in cached_items:
-        anchor_ms = _item_anchor_epoch_ms(item)
-        if anchor_ms is None or anchor_ms < start_ms or anchor_ms > end_ms:
-            continue
         if _is_helix_finalist_status(item.status or item.status_raw):
             continue
         incident_id = str(item.id or "").strip()
         if not incident_id or incident_id in seen:
             continue
+        anchor_ms = _item_anchor_epoch_ms(item)
+        if include_outside_window:
+            if anchor_ms is not None and start_ms <= anchor_ms <= end_ms:
+                continue
+            seen.add(incident_id)
+            # Unknown anchors are prioritized first; then oldest pending anchors.
+            priority = 0 if anchor_ms is None else 1
+            sort_anchor = anchor_ms if anchor_ms is not None else -1
+            outside_candidates.append((priority, sort_anchor, incident_id))
+            continue
+        if anchor_ms is None or anchor_ms < start_ms or anchor_ms > end_ms:
+            continue
         seen.add(incident_id)
         out.append(incident_id)
         if len(out) >= max_ids_int:
             break
+    if include_outside_window:
+        outside_candidates.sort(key=lambda row: (row[0], row[1], row[2]))
+        out = [incident_id for _, _, incident_id in outside_candidates[:max_ids_int]]
     return out
 
 
@@ -1765,14 +1771,15 @@ def ingest_helix(
         base_start_ms=create_start_ms,
         base_end_ms=create_end_ms,
     )
+    create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
     pending_ids_max = _coerce_int(os.getenv("HELIX_ARSQL_PENDING_IDS_MAX", "200"), 200)
     arsql_pending_incident_ids = _cache_pending_refresh_ids(
         source_cached_items,
         base_start_ms=create_start_ms,
         base_end_ms=create_end_ms,
         max_ids=pending_ids_max,
+        include_outside_window=True,
     )
-    create_start_ms = int(max(0, min(optimized_start_ms, create_end_ms)))
     create_window_rule = (
         f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )
