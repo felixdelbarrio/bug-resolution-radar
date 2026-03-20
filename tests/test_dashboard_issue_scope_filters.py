@@ -118,3 +118,32 @@ def test_dashboard_data_cache_signature_ignores_section_label_when_shape_and_fla
     )
 
     assert sig_overview == sig_trends
+
+
+def test_apply_workspace_source_scope_uses_country_rollup_in_country_mode(monkeypatch: Any) -> None:
+    fake_state = _FakeStreamlitState(
+        {
+            "workspace_country": "México",
+            "workspace_source_id": "jira:mexico:core",
+            "workspace_scope_mode": "country",
+        }
+    )
+    monkeypatch.setattr(dashboard_page, "st", fake_state)
+
+    settings = Settings(
+        JIRA_SOURCES_JSON=(
+            '[{"country":"México","alias":"Core","jql":"project = CORE"},'
+            '{"country":"México","alias":"Retail","jql":"project = RET"}]'
+        ),
+        COUNTRY_ROLLUP_SOURCES_JSON='[{"country":"México","source_ids":["jira:mexico:retail"]}]',
+    )
+    df = pd.DataFrame(
+        [
+            {"key": "A-1", "country": "México", "source_id": "jira:mexico:core"},
+            {"key": "A-2", "country": "México", "source_id": "jira:mexico:retail"},
+        ]
+    )
+
+    out = dashboard_page._apply_workspace_source_scope(df, settings=settings)
+
+    assert out["key"].tolist() == ["A-2"]

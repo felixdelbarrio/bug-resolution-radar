@@ -47,6 +47,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 bug_resolution_radar = [
+  "reports/templates/*.pptx",
   "ui/assets/icons/bbva/*.svg",
   "ui/assets/fonts/bbva/*.ttf",
   "ui/assets/fonts/bbva/*.otf",

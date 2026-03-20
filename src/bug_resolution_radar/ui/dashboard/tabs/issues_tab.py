@@ -30,8 +30,8 @@ from bug_resolution_radar.ui.dashboard.exports.downloads import (
     download_button_for_df,
     make_table_export_df,
 )
-from bug_resolution_radar.ui.dashboard.exports.helix_official_export import (
-    build_helix_official_export_frames,
+from bug_resolution_radar.ui.dashboard.exports.helix_raw_export import (
+    build_helix_raw_export_frame,
 )
 from bug_resolution_radar.ui.dashboard.performance import (
     detect_budget_overruns,
@@ -611,23 +611,15 @@ def _cached_helix_issues_export_xlsx(
     if not helix_map:
         return None
 
-    official_frames = build_helix_official_export_frames(
-        export_df, helix_items_by_merge_key=helix_map
-    )
-    if official_frames is None:
+    raw_df = build_helix_raw_export_frame(export_df, helix_items_by_merge_key=helix_map)
+    if raw_df is None or raw_df.empty:
         return None
 
-    official_df, raw_df = official_frames
-    sheets: list[tuple[str, pd.DataFrame]] = [("Issues oficial", official_df)]
-    if isinstance(raw_df, pd.DataFrame) and not raw_df.empty:
-        sheets.append(("Helix raw", raw_df))
-
     return dfs_to_excel_bytes(
-        sheets,
+        [("Helix Raw", raw_df)],
         include_index=False,
         hyperlink_columns_by_sheet={
-            "Issues oficial": [("ID de la Incidencia", "__item_url__")],
-            "Helix raw": [("ID de la Incidencia", "__item_url__")],
+            "Helix Raw": [("ID de la Incidencia", "__item_url__")],
         },
     )
 
@@ -701,9 +693,9 @@ def _render_issues_download_button(
         return
 
     helix_path, helix_mtime_ns = _helix_data_path_and_mtime(settings)
-    official_input_df = _official_export_input_df(export_df)
+    raw_input_df = _helix_raw_export_input_df(export_df)
     export_sig = _issues_export_signature(
-        official_input_df, helix_path=helix_path, helix_mtime_ns=helix_mtime_ns
+        raw_input_df, helix_path=helix_path, helix_mtime_ns=helix_mtime_ns
     )
     sig_key = f"{key_prefix}::helix_export_sig"
     prepared_key = f"{key_prefix}::helix_export_prepared"
@@ -717,15 +709,14 @@ def _render_issues_download_button(
             key=f"{key_prefix}::prepare_excel_helix",
             type="secondary",
             width="stretch",
-            help="Genera el Excel oficial Helix bajo demanda para acelerar la carga de la pantalla.",
+            help="Genera el Excel Helix Raw bajo demanda para acelerar la carga de la pantalla.",
         ):
             xlsx_probe = _cached_helix_issues_export_xlsx(
-                official_input_df,
+                raw_input_df,
                 helix_path=helix_path,
                 helix_mtime_ns=helix_mtime_ns,
             )
             if xlsx_probe is None:
-                # Fallback path (non-official export) stays immediate.
                 st.session_state[prepared_key] = False
             else:
                 st.session_state[prepared_key] = True
@@ -733,7 +724,7 @@ def _render_issues_download_button(
         return
 
     xlsx_bytes = _cached_helix_issues_export_xlsx(
-        official_input_df,
+        raw_input_df,
         helix_path=helix_path,
         helix_mtime_ns=helix_mtime_ns,
     )
@@ -757,7 +748,7 @@ def _render_issues_download_button(
         key=f"{key_prefix}::download_csv",
         disabled=False,
         width="stretch",
-        help="Incluye hoja oficial (columnas estilo Excel de referencia) y hoja raw Helix.",
+        help="Incluye únicamente la hoja Helix Raw.",
     )
 
 
@@ -793,20 +784,12 @@ def _is_helix_only_scope(df: pd.DataFrame) -> bool:
     return bool(vals) and all(v == "helix" for v in vals)
 
 
-def _official_export_input_df(export_df: pd.DataFrame) -> pd.DataFrame:
+def _helix_raw_export_input_df(export_df: pd.DataFrame) -> pd.DataFrame:
     if export_df is None or export_df.empty:
         return pd.DataFrame()
     needed = [
         "key",
-        "summary",
-        "status",
-        "type",
-        "priority",
-        "created",
-        "updated",
-        "resolved",
         "url",
-        "country",
         "source_type",
         "source_id",
     ]

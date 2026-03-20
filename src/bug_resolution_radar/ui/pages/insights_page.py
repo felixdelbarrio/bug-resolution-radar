@@ -11,6 +11,7 @@ from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.insights.backlog_people import render_backlog_people_tab
 from bug_resolution_radar.ui.insights.duplicates import render_duplicates_tab
 from bug_resolution_radar.ui.insights.ops_health import render_ops_health_tab
+from bug_resolution_radar.ui.insights.period_summary import render_period_summary_tab
 from bug_resolution_radar.ui.insights.top_topics import render_top_topics_tab
 
 
@@ -27,10 +28,11 @@ def render(
     """
     Insights page (tab):
       - Tabs para modularizar:
-          1) Por funcionalidad (Top 10 problemas/funcionalidades)
-          2) Duplicados (clusters similares)
-          3) Personas (concentración + modo acción)
-          4) Salud operativa (KPIs + top antiguas)
+          1) Resumen quincenal
+          2) Por funcionalidad (Top 10 problemas/funcionalidades)
+          3) Duplicados (clusters similares)
+          4) Personas (concentración + modo acción)
+          5) Salud operativa (KPIs + top antiguas)
     """
     dff = _safe_df(dff_filtered)
     if dff.empty:
@@ -61,7 +63,12 @@ def render(
     )
 
     with st.container(key="insights_shell"):
-        t1, t2, t3, t4 = st.tabs(["Por funcionalidad", "Duplicados", "Personas", "Salud operativa"])
+        t0, t1, t2, t3, t4 = st.tabs(
+            ["Resumen quincenal", "Por funcionalidad", "Duplicados", "Personas", "Salud operativa"]
+        )
+
+        with t0:
+            render_period_summary_tab(settings=settings, dff_filtered=dff)
 
         with t1:
             render_top_topics_tab(settings=settings, dff_filtered=dff, kpis=kpis)

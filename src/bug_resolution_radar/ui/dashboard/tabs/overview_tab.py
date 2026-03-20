@@ -13,6 +13,10 @@ import streamlit as st
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.components.executive_kpis import (
+    ExecutiveKpiItem,
+    render_executive_kpi_grid,
+)
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     figures_to_html_bytes,
     render_minimal_export_actions,
@@ -358,43 +362,6 @@ def render_overview_kpis(
     st.markdown(
         """
         <style>
-          .exec-wrap {
-            border: 1px solid var(--bbva-border);
-            border-radius: 16px;
-            background: var(--bbva-surface-elevated);
-            padding: 0.46rem 0.62rem;
-          }
-          .exec-kpi-grid {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 0.42rem;
-            margin-bottom: 0.40rem;
-          }
-          .exec-kpi {
-            border: 1px solid var(--bbva-border);
-            border-radius: 12px;
-            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2));
-            padding: 0.40rem 0.52rem;
-          }
-          .exec-kpi-lbl {
-            color: var(--bbva-text-muted);
-            font-size: 0.76rem;
-            font-weight: 700;
-            line-height: 1.15;
-          }
-          .exec-kpi-val {
-            margin-top: 0.08rem;
-            color: var(--bbva-text);
-            font-size: 1.44rem;
-            font-weight: 800;
-            line-height: 1.04;
-          }
-          .exec-kpi-hint {
-            margin-top: 0.14rem;
-            color: var(--bbva-text-muted);
-            font-size: 0.72rem;
-            line-height: 1.1;
-          }
           .exec-focus-title {
             margin: 0.06rem 0 0.34rem 0;
             font-weight: 800;
@@ -474,45 +441,35 @@ def render_overview_kpis(
           [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] > div {
             padding-top: 0 !important;
           }
-          @media (max-width: 1020px) {
-            .exec-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          }
-          @media (max-width: 680px) {
-            .exec-kpi-grid { grid-template-columns: 1fr; }
-          }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        (
-            '<section class="exec-wrap">'
-            '<div class="exec-kpi-grid">'
-            '<article class="exec-kpi">'
-            '<div class="exec-kpi-lbl">Issues filtradas</div>'
-            f'<div class="exec-kpi-val">{total_issues:,}</div>'
-            '<div class="exec-kpi-hint">Base de análisis actual</div>'
-            "</article>"
-            '<article class="exec-kpi">'
-            '<div class="exec-kpi-lbl">Backlog abierto</div>'
-            f'<div class="exec-kpi-val">{open_issues:,}</div>'
-            f'<div class="exec-kpi-hint">{open_pct:.1f}% del total</div>'
-            "</article>"
-            '<article class="exec-kpi">'
-            '<div class="exec-kpi-lbl">En cola > 30 días</div>'
-            f'<div class="exec-kpi-val">{aged_30_count:,}</div>'
-            f'<div class="exec-kpi-hint">{aged_30_pct:.1f}% de abiertas</div>'
-            "</article>"
-            '<article class="exec-kpi">'
-            '<div class="exec-kpi-lbl">Prioridad dominante</div>'
-            f'<div class="exec-kpi-val">{dominant_priority}</div>'
-            f'<div class="exec-kpi-hint">{dominant_priority_count:,} incidencias</div>'
-            "</article>"
-            "</div>"
-            "</section>"
-        ),
-        unsafe_allow_html=True,
+    render_executive_kpi_grid(
+        [
+            ExecutiveKpiItem(
+                label="Issues filtradas",
+                value=f"{total_issues:,}",
+                hint="Base de análisis actual",
+            ),
+            ExecutiveKpiItem(
+                label="Backlog abierto",
+                value=f"{open_issues:,}",
+                hint=f"{open_pct:.1f}% del total",
+            ),
+            ExecutiveKpiItem(
+                label="En cola > 30 días",
+                value=f"{aged_30_count:,}",
+                hint=f"{aged_30_pct:.1f}% de abiertas",
+            ),
+            ExecutiveKpiItem(
+                label="Prioridad dominante",
+                value=dominant_priority,
+                hint=f"{dominant_priority_count:,} incidencias",
+            ),
+        ],
+        columns=4,
     )
 
     perf_ms["kpis"] = elapsed_ms(kpis_start_ts)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -153,6 +154,79 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
     assert "LIMIT 75 OFFSET 0" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
+
+
+def test_ingest_helix_rewinds_window_for_non_final_cache_and_adds_outside_pending_ids(
+    monkeypatch: Any,
+) -> None:
+    captured_sql: list[str] = []
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        body = kwargs.get("json") or {}
+        captured_sql.append(str(body.get("sql") or ""))
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}
+        )
+
+    def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
+        return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
+
+    base_start_ms = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    base_end_ms = int(datetime(2026, 2, 28, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def fake_resolve_range(**_: Any) -> tuple[int, int, str]:
+        return base_start_ms, base_end_ms, "fixed_window"
+
+    monkeypatch.setattr(helix_mod, "_request", fake_request)
+    monkeypatch.setattr(helix_mod, "_resolve_create_date_range_ms", fake_resolve_range)
+    monkeypatch.setattr(
+        helix_mod,
+        "get_helix_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; XSRF-TOKEN=xyz; loginId=test-user",
+    )
+    monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
+
+    source_id = "helix:mexico:web"
+    cache_doc = helix_mod.HelixDocument(
+        items=[
+            helix_mod.HelixWorkItem(
+                id="INC-IN-WINDOW",
+                status="Open",
+                source_id=source_id,
+                target_date="2025-10-15T08:00:00+00:00",
+            ),
+            helix_mod.HelixWorkItem(
+                id="INC-OLD-PENDING",
+                status="Open",
+                source_id=source_id,
+                target_date="2024-03-10T00:00:00+00:00",
+            ),
+        ]
+    )
+
+    ok, msg, doc = helix_mod.ingest_helix(
+        browser="chrome",
+        country="México",
+        source_alias="WEB",
+        source_id=source_id,
+        chunk_size=75,
+        dry_run=False,
+        cache_doc=cache_doc,
+    )
+
+    assert ok is True
+    assert "ingesta Helix OK" in msg
+    assert captured_sql
+    sql = captured_sql[0]
+
+    expected_start_sec = int(
+        (datetime(2025, 10, 15, 8, 0, 0, tzinfo=timezone.utc) - timedelta(days=7)).timestamp()
+    )
+    assert f"BETWEEN {expected_start_sec} AND " in sql
+    assert "'INC-OLD-PENDING'" in sql
+    assert "'INC-IN-WINDOW'" not in sql
+    assert doc is not None
+    assert "pending_ids=1" in str(doc.query)
 
 
 def test_ingest_helix_paginates_when_batch_is_smaller_than_requested_chunk(

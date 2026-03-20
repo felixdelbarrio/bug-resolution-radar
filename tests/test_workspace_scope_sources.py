@@ -102,3 +102,81 @@ def test_reset_scope_filters_clears_canonical_and_ui_keys(monkeypatch: Any) -> N
     assert "filter_priority_ui" not in fake_state
     assert "filter_assignee_ui" not in fake_state
     assert fake_state["other_key"] == "keep"
+
+
+def test_configured_rollup_source_ids_for_country_filters_by_available_source_ids() -> None:
+    mx_core_id = build_source_id("jira", "México", "MX Core")
+    mx_bex_id = build_source_id("jira", "México", "MX BEX")
+    settings = Settings(
+        SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
+        JIRA_SOURCES_JSON=(
+            '[{"country":"México","alias":"MX Core","jql":"project = 1"},'
+            '{"country":"México","alias":"MX BEX","jql":"project = 2"}]'
+        ),
+        COUNTRY_ROLLUP_SOURCES_JSON=(
+            f'[{{"country":"México","source_ids":["{mx_core_id}","{mx_bex_id}"]}}]'
+        ),
+    )
+
+    selected = app._configured_rollup_source_ids_for_country(
+        settings,
+        country="México",
+        available_source_ids=[mx_core_id],
+    )
+
+    assert selected == [mx_core_id]
+
+
+def test_configured_rollup_source_ids_for_country_returns_empty_when_not_configured() -> None:
+    settings = _settings_with_jira_sources()
+    mx_core_id = build_source_id("jira", "México", "MX Core")
+
+    selected = app._configured_rollup_source_ids_for_country(
+        settings,
+        country="México",
+        available_source_ids=[mx_core_id],
+    )
+
+    assert selected == []
+
+
+def test_has_country_rollup_scope_true_when_country_has_configured_rollup(monkeypatch: Any) -> None:
+    mx_core_id = build_source_id("jira", "México", "MX Core")
+    settings = Settings(
+        SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
+        JIRA_SOURCES_JSON='[{"country":"México","alias":"MX Core","jql":"project = 1"}]',
+        COUNTRY_ROLLUP_SOURCES_JSON=(f'[{{"country":"México","source_ids":["{mx_core_id}"]}}]'),
+    )
+    fake_state = {"workspace_country": "México"}
+    monkeypatch.setattr(app, "st", SimpleNamespace(session_state=fake_state))
+
+    has_rollup = app._has_country_rollup_scope(
+        settings,
+        sources_by_country={
+            "México": [{"source_id": mx_core_id, "country": "México", "alias": "MX Core"}]
+        },
+    )
+
+    assert has_rollup is True
+
+
+def test_has_country_rollup_scope_false_when_country_has_no_configured_rollup(
+    monkeypatch: Any,
+) -> None:
+    mx_core_id = build_source_id("jira", "México", "MX Core")
+    settings = Settings(
+        SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
+        JIRA_SOURCES_JSON='[{"country":"México","alias":"MX Core","jql":"project = 1"}]',
+        COUNTRY_ROLLUP_SOURCES_JSON="[]",
+    )
+    fake_state = {"workspace_country": "México"}
+    monkeypatch.setattr(app, "st", SimpleNamespace(session_state=fake_state))
+
+    has_rollup = app._has_country_rollup_scope(
+        settings,
+        sources_by_country={
+            "México": [{"source_id": mx_core_id, "country": "México", "alias": "MX Core"}]
+        },
+    )
+
+    assert has_rollup is False

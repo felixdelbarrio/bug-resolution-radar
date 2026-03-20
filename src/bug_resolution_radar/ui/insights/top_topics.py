@@ -19,7 +19,7 @@ from bug_resolution_radar.ui.dashboard.state import (
 )
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
-    issue_card_html,
+    issue_cards_html_from_df,
     neutral_chip_html,
     priority_chip_html,
     status_chip_html,
@@ -256,33 +256,18 @@ def render_top_topics_tab(
                 tail = _rotate_topic_tail(tail, topic=topic, total_open=total_open)
             sub_view = pd.concat([anchor, tail], axis=0).head(20)
 
-            cards: list[str] = []
-            for _, ir in sub_view.iterrows():
-                k = str(ir.get("key", "") or "").strip()
-                if not k:
-                    continue
-
-                status, prio, _ = key_to_meta.get(k, ("(sin estado)", "(sin priority)", ""))
-                url = key_to_url.get(k, "")
-                age_raw = ir.get("__age_days", pd.NA)
-                age_days = float(age_raw) if pd.notna(age_raw) else None
-                assignee = str(ir.get("assignee", "") or "").strip() or "(sin asignar)"
-                summ_txt = str(ir.get("summary", "") or "").strip()
-                if len(summ_txt) > 160:
-                    summ_txt = summ_txt[:157] + "..."
-                card = issue_card_html(
-                    key=k,
-                    url=url,
-                    status=status,
-                    priority=prio,
-                    age_days=age_days,
-                    assignee=assignee,
-                    summary=summ_txt,
-                )
-                if card:
-                    cards.append(card)
-            if cards:
-                st.markdown("".join(cards), unsafe_allow_html=True)
+            cards_html = issue_cards_html_from_df(
+                sub_view,
+                key_to_url=key_to_url,
+                key_to_meta=key_to_meta,
+                summary_col="summary",
+                assignee_col="assignee",
+                age_days_col="__age_days",
+                summary_max_chars=160,
+                limit=20,
+            )
+            if cards_html:
+                st.markdown(cards_html, unsafe_allow_html=True)
 
     st.caption(
         "Tip: el % indica el peso real de cada tema y el orden de casos se ajusta segun filtros e interacciones."
