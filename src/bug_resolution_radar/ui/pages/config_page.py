@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 import pandas as pd
 import streamlit as st
@@ -18,12 +18,14 @@ from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
     build_source_id,
+    country_rollup_sources,
     helix_sources,
     jira_sources,
     normalize_analysis_lookback_months,
     restore_env_from_example,
     rollup_source_ids,
     save_settings,
+    suggested_period_ppt_template_path,
     supported_countries,
     to_env_json,
 )
@@ -893,7 +895,7 @@ def _rollup_sources_to_env_json(selection_by_country: Dict[str, List[str]]) -> s
         if not source_ids:
             continue
         rows.append({"country": country, "source_ids": source_ids})
-    return to_env_json(rows)
+    return cast(str, to_env_json(rows))
 
 
 def render(settings: Settings) -> None:
@@ -913,13 +915,13 @@ def render(settings: Settings) -> None:
     st.subheader("Configuración")
 
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
-    tab_labels = ["Preferencias", "Jira", "Helix", "Caches"]
+    tab_labels = ["Preferencias", "Jira", "Helix", "Agregados", "Cache"]
     active_tab = str(st.session_state.get("__cfg_active_tab", "Preferencias") or "").strip()
     if active_tab not in tab_labels:
         active_tab = "Preferencias"
     st.session_state["__cfg_active_tab"] = active_tab
     with st.container(key="cfg_tabs_shell"):
-        t_prefs, t_jira, t_helix, t_caches = st.tabs(tab_labels, default=active_tab)
+        t_prefs, t_jira, t_helix, t_agg, t_caches = st.tabs(tab_labels, default=active_tab)
 
     with t_jira:
         st.markdown("### Jira global")
@@ -1290,13 +1292,18 @@ def render(settings: Settings) -> None:
                     )
                 else:
                     st.session_state.pop("cfg_analysis_depth_months_single", None)
-                    analysis_selected_months = st.select_slider(
+                    selected_months = st.select_slider(
                         "Meses analizados en backlog",
                         options=month_options,
                         value=_nearest_option(analysis_selected_months, options=month_options),
                         key="cfg_analysis_depth_months",
                         format_func=lambda m: f"{int(m)} mes" if int(m) == 1 else f"{int(m)} meses",
                         help="Filtro global aplicado en dashboard, insights e informe PPT.",
+                    )
+                    analysis_selected_months = int(
+                        selected_months[0]
+                        if isinstance(selected_months, tuple)
+                        else selected_months
                     )
                 st.caption(
                     f"Estado: últimos {int(analysis_selected_months)} "
@@ -1319,81 +1326,25 @@ def render(settings: Settings) -> None:
                     placeholder=default_download_dir,
                 )
                 st.markdown("**Plantilla informe seguimiento**")
-                period_template_default = (
-                    str(getattr(settings, "PERIOD_PPT_TEMPLATE_PATH", "") or "").strip()
-                    or str(
-                        (
-                            Path.home()
-                            / "Downloads"
-                            / "Seguimiento de incidencias del periodo.pptx"
-                        ).expanduser()
-                    )
-                )
+                period_template_default = str(
+                    getattr(settings, "PERIOD_PPT_TEMPLATE_PATH", "") or ""
+                ).strip() or str(suggested_period_ppt_template_path(settings))
                 period_ppt_template_path = st.text_input(
                     "Ruta de plantilla PPT seguimiento",
                     value=period_template_default,
                     key="cfg_period_ppt_template_path",
                     label_visibility="collapsed",
                 )
-                template_exists = Path(str(period_ppt_template_path or "").strip()).expanduser().exists()
+                template_exists = (
+                    Path(str(period_ppt_template_path or "").strip()).expanduser().exists()
+                )
                 if template_exists:
                     st.caption("Plantilla detectada y lista para el informe de seguimiento.")
                 else:
                     st.caption(
-                        "La ruta de plantilla no existe todavía. El informe de seguimiento "
-                        "mostrará error hasta configurarla."
+                        "La ruta no existe. Si no defines una propia, la app usará la "
+                        "plantilla corporativa integrada durante la generación."
                     )
-
-            with st.container(border=True, key="cfg_prefs_card_country_rollup"):
-                st.markdown("#### Orígenes agregados por país")
-                st.caption(
-                    "Esta selección se usa en Vista País (agregada), Insights quincenal y "
-                    "el informe Seguimiento del periodo. Se recomienda 2 orígenes por país."
-                )
-                rollup_selection_by_country: Dict[str, List[str]] = {}
-                for idx, country in enumerate(countries):
-                    source_rows = all_configured_sources(settings, country=country)
-                    options: List[str] = []
-                    label_by_id: Dict[str, str] = {}
-                    for src in source_rows:
-                        sid = str(src.get("source_id") or "").strip()
-                        if not sid:
-                            continue
-                        alias = str(src.get("alias") or "").strip() or sid
-                        source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
-                        options.append(sid)
-                        label_by_id[sid] = f"{alias} · {source_type}"
-
-                    if not options:
-                        st.markdown(f"**{country}**")
-                        st.caption("Sin orígenes configurados para este país.")
-                        continue
-
-                    default_ids = rollup_source_ids(
-                        settings,
-                        country=country,
-                        available_source_ids=options,
-                    )
-                    if default_ids:
-                        default_ids = default_ids[:2]
-                    else:
-                        default_ids = options[:2]
-
-                    selected_ids = st.multiselect(
-                        f"{country}",
-                        options=options,
-                        default=default_ids,
-                        key=f"cfg_rollup_sources_{idx}",
-                        format_func=lambda sid, _labels=label_by_id: _labels.get(
-                            str(sid), str(sid)
-                        ),
-                        max_selections=2,
-                    )
-                    selected_clean = [
-                        sid for sid in selected_ids if str(sid).strip() in set(options)
-                    ]
-                    if selected_clean:
-                        rollup_selection_by_country[country] = selected_clean
 
             with st.container(border=True, key="cfg_prefs_card_favs"):
                 st.markdown("#### Define los 3 gráficos favoritos")
@@ -1488,9 +1439,6 @@ def render(settings: Settings) -> None:
                             analysis_selected_months,
                             default=12,
                         ),
-                        "COUNTRY_ROLLUP_SOURCES_JSON": _rollup_sources_to_env_json(
-                            rollup_selection_by_country
-                        ),
                     },
                 )
                 _save_settings_with_migrations(new_settings)
@@ -1507,6 +1455,72 @@ def render(settings: Settings) -> None:
                     st.session_state["__cfg_flash_success"] = "Preferencias guardadas."
                 st.session_state["__cfg_active_tab"] = "Preferencias"
                 st.rerun()
+
+    with t_agg:
+        st.markdown("### Orígenes agregados por país")
+        st.caption(
+            "Esta selección se usa en Vista País (agregada), Insights quincenal y "
+            "el informe Seguimiento del periodo. Se recomienda 2 orígenes por país."
+        )
+        configured_rollup_by_country = country_rollup_sources(settings)
+        rollup_selection_by_country: Dict[str, List[str]] = {}
+        with st.container(border=True, key="cfg_agg_card_country_rollup"):
+            for idx, country in enumerate(countries):
+                source_rows = all_configured_sources(settings, country=country)
+                options: List[str] = []
+                label_by_id: Dict[str, str] = {}
+                for src in source_rows:
+                    sid = str(src.get("source_id") or "").strip()
+                    if not sid:
+                        continue
+                    alias = str(src.get("alias") or "").strip() or sid
+                    source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
+                    options.append(sid)
+                    label_by_id[sid] = f"{alias} · {source_type}"
+
+                if not options:
+                    st.markdown(f"**{country}**")
+                    st.caption("Sin orígenes configurados para este país.")
+                    continue
+
+                configured_ids = [
+                    sid
+                    for sid in configured_rollup_by_country.get(country, [])[:2]
+                    if sid in set(options)
+                ]
+
+                def _format_rollup_source_id(
+                    source_id: str,
+                    *,
+                    labels: Dict[str, str] = label_by_id,
+                ) -> str:
+                    return labels.get(str(source_id), str(source_id))
+
+                selected_ids = st.multiselect(
+                    f"{country}",
+                    options=options,
+                    default=configured_ids,
+                    key=f"cfg_rollup_sources_{idx}",
+                    format_func=_format_rollup_source_id,
+                    max_selections=2,
+                )
+                selected_clean = [sid for sid in selected_ids if str(sid).strip() in set(options)]
+                if selected_clean:
+                    rollup_selection_by_country[country] = selected_clean
+
+        if st.button("Guardar configuración", key="cfg_save_rollup_btn"):
+            new_settings = _safe_update_settings(
+                settings,
+                {
+                    "COUNTRY_ROLLUP_SOURCES_JSON": _rollup_sources_to_env_json(
+                        rollup_selection_by_country
+                    )
+                },
+            )
+            _save_settings_with_migrations(new_settings)
+            st.session_state["__cfg_flash_success"] = "Agregados guardados."
+            st.session_state["__cfg_active_tab"] = "Agregados"
+            st.rerun()
 
     with t_caches:
         st.markdown("### Caches")

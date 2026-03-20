@@ -271,21 +271,29 @@ def _issue_listing(
         safe["summary"].fillna("").astype(str).str.strip() if "summary" in safe.columns else ""
     )
     out["status"] = safe["status"].fillna("").astype(str) if "status" in safe.columns else ""
-    out["priority"] = (
-        safe["priority"].fillna("").astype(str) if "priority" in safe.columns else ""
-    )
+    out["priority"] = safe["priority"].fillna("").astype(str) if "priority" in safe.columns else ""
     out["assignee"] = (
         safe["assignee"].fillna("").astype(str).replace("", "(sin asignar)")
         if "assignee" in safe.columns
         else "(sin asignar)"
     )
     source_ids = (
-        safe["source_id"].fillna("").astype(str).str.strip() if "source_id" in safe.columns else ""
+        safe["source_id"].fillna("").astype(str).str.strip()
+        if "source_id" in safe.columns
+        else pd.Series("", index=safe.index, dtype=str)
     )
     out["source"] = source_ids.map(lambda sid: source_label_by_id.get(str(sid), str(sid)))
 
-    created = _to_dt_naive(safe["created"]) if "created" in safe.columns else pd.Series(pd.NaT)
-    resolved = _to_dt_naive(safe["resolved"]) if "resolved" in safe.columns else pd.Series(pd.NaT)
+    created = (
+        _to_dt_naive(safe["created"])
+        if "created" in safe.columns
+        else pd.Series(pd.NaT, index=safe.index, dtype="datetime64[ns]")
+    )
+    resolved = (
+        _to_dt_naive(safe["resolved"])
+        if "resolved" in safe.columns
+        else pd.Series(pd.NaT, index=safe.index, dtype="datetime64[ns]")
+    )
     out["created"] = created.dt.strftime("%Y-%m-%d")
     out["resolved"] = resolved.dt.strftime("%Y-%m-%d")
     out["created"] = out["created"].fillna("")
@@ -373,9 +381,7 @@ def _scope_result(
         resolved_before = pd.DataFrame()
     else:
         resolution_source["resolution_days"] = (
-            (
-                resolution_source["__finalized"] - resolution_source["__created"]
-            ).dt.total_seconds()
+            (resolution_source["__finalized"] - resolution_source["__created"]).dt.total_seconds()
             / 86400.0
         ).clip(lower=0.0)
         finalized_norm = resolution_source["__finalized"].dt.normalize()

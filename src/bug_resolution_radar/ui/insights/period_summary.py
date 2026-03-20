@@ -13,6 +13,18 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ui.components.executive_kpis import (
+    ExecutiveKpiItem,
+    render_executive_kpi_grid,
+)
+from bug_resolution_radar.ui.insights.chips import (
+    inject_insights_chip_css,
+    issue_cards_html_from_df,
+    neutral_chip_html,
+    priority_chip_html,
+    status_chip_html,
+)
+from bug_resolution_radar.ui.insights.helpers import build_issue_lookup
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -33,6 +45,15 @@ def _fmt_days(value: float | None) -> str:
     return f"{max(0.0, float(value)):.1f} d"
 
 
+def _fmt_delta_hint(value: float | None) -> str:
+    delta = _fmt_delta(value)
+    return (
+        f"Δ {delta} vs quincena previa"
+        if delta != "sin referencia"
+        else "Sin referencia en quincena previa"
+    )
+
+
 def _visible_columns(df: pd.DataFrame) -> List[str]:
     preferred = [
         "key",
@@ -48,20 +69,65 @@ def _visible_columns(df: pd.DataFrame) -> List[str]:
     return [c for c in preferred if c in df.columns]
 
 
-def _render_issue_group(title: str, count: int, df: pd.DataFrame, *, help_text: str = "") -> None:
+def _render_issue_group(
+    title: str,
+    count: int,
+    df: pd.DataFrame,
+    *,
+    key_to_url: Dict[str, str],
+    key_to_meta: Dict[str, tuple[str, str, str]],
+    help_text: str = "",
+    source_col: str | None = "source",
+) -> None:
     suffix = f" ({help_text})" if help_text else ""
     with st.expander(f"{title}: {count}{suffix}", expanded=False):
         if df is None or df.empty:
             st.caption("Sin incidencias en este bloque.")
             return
-        st.dataframe(
-            df.loc[:, _visible_columns(df)].copy(deep=False),
-            hide_index=True,
-            width="stretch",
+        rows_total = int(len(df))
+        top_status = (
+            str(df["status"].fillna("").astype(str).value_counts().index[0]).strip()
+            if "status" in df.columns and rows_total > 0
+            else "(sin estado)"
         )
+        top_priority = (
+            str(df["priority"].fillna("").astype(str).value_counts().index[0]).strip()
+            if "priority" in df.columns and rows_total > 0
+            else "(sin priority)"
+        )
+        chips = [
+            neutral_chip_html(f"{rows_total} incidencias"),
+            status_chip_html(top_status),
+            priority_chip_html(top_priority),
+        ]
+        if help_text:
+            chips.insert(1, neutral_chip_html(help_text))
+        st.markdown(f'<div class="ins-meta-row">{"".join(chips)}</div>', unsafe_allow_html=True)
+
+        cards_html = issue_cards_html_from_df(
+            df,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+            summary_col="summary",
+            assignee_col="assignee",
+            source_col=source_col,
+            summary_max_chars=180,
+            limit=60,
+        )
+        if cards_html:
+            st.markdown(cards_html, unsafe_allow_html=True)
+        else:
+            st.dataframe(
+                df.loc[:, _visible_columns(df)].copy(deep=False),
+                hide_index=True,
+                width="stretch",
+            )
+        if rows_total > 60:
+            st.caption(f"Mostrando 60 de {rows_total} incidencias.")
 
 
 def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> None:
+    inject_insights_chip_css()
     dff = _safe_df(dff_filtered)
     if dff.empty:
         st.info("No hay datos en el scope actual para resumen quincenal.")
@@ -82,11 +148,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             source_ids = [selected_source]
     if not source_ids and "source_id" in dff.columns:
         source_ids = sorted(
-            {
-                sid
-                for sid in dff["source_id"].fillna("").astype(str).str.strip().tolist()
-                if sid
-            }
+            {sid for sid in dff["source_id"].fillna("").astype(str).str.strip().tolist() if sid}
         )
 
     labels = source_label_map(settings, country=selected_country, source_ids=source_ids)
@@ -97,58 +159,102 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         source_ids=source_ids,
         source_label_by_id=labels,
     )
+    key_to_url, key_to_meta = build_issue_lookup(dff, settings=settings)
 
     summary = result.aggregate.summary
     groups = result.aggregate.groups
-    st.caption(
-        f"{summary.scope_label or selected_country} · {format_window_label(summary.window)}"
+    st.caption(f"{summary.scope_label or selected_country} · {format_window_label(summary.window)}")
+
+    render_executive_kpi_grid(
+        [
+            ExecutiveKpiItem(
+                label="Nuevas (ahora)",
+                value=f"{int(summary.new_now):,}",
+                hint=_fmt_delta_hint(summary.new_delta_pct),
+            ),
+            ExecutiveKpiItem(
+                label="Cerradas (ahora)",
+                value=f"{int(summary.closed_now):,}",
+                hint=_fmt_delta_hint(summary.closed_delta_pct),
+            ),
+            ExecutiveKpiItem(
+                label="Días resolución (ahora)",
+                value=_fmt_days(summary.resolution_days_now),
+                hint=_fmt_delta_hint(summary.resolution_delta_pct),
+            ),
+            ExecutiveKpiItem(
+                label="Abiertas totales",
+                value=f"{int(summary.open_total):,}",
+                hint="Backlog abierto en el scope actual",
+            ),
+            ExecutiveKpiItem(
+                label="Maestras",
+                value=f"{int(summary.maestras_total):,}",
+                hint="Abiertas marcadas como maestras",
+            ),
+            ExecutiveKpiItem(
+                label="Otras",
+                value=f"{int(summary.others_total):,}",
+                hint="Abiertas no maestras",
+            ),
+        ],
+        columns=3,
     )
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Nuevas (ahora)", summary.new_now, delta=_fmt_delta(summary.new_delta_pct))
-    c2.metric("Cerradas (ahora)", summary.closed_now, delta=_fmt_delta(summary.closed_delta_pct))
-    c3.metric(
-        "Días resolución (ahora)",
-        _fmt_days(summary.resolution_days_now),
-        delta=_fmt_delta(summary.resolution_delta_pct),
+    _render_issue_group(
+        "Maestras abiertas",
+        summary.maestras_total,
+        groups.maestras_open,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
     )
-
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Abiertas totales", summary.open_total)
-    c5.metric("Maestras", summary.maestras_total)
-    c6.metric("Otras", summary.others_total)
-
-    _render_issue_group("Maestras abiertas", summary.maestras_total, groups.maestras_open)
-    _render_issue_group("Otras abiertas", summary.others_total, groups.others_open)
+    _render_issue_group(
+        "Otras abiertas",
+        summary.others_total,
+        groups.others_open,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
+    )
     _render_issue_group(
         "Nuevas (antes)",
         summary.new_before,
         groups.new_before,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
         help_text="quincena previa",
     )
     _render_issue_group(
         "Nuevas (ahora)",
         summary.new_now,
         groups.new_now,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
         help_text="quincena actual",
     )
     _render_issue_group(
         "Nuevas acumulado",
         summary.new_accumulated,
         groups.new_accumulated,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
         help_text="mes actual",
     )
     _render_issue_group(
         "Cerradas (ahora)",
         summary.closed_now,
         groups.closed_now,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
         help_text="quincena actual",
     )
     _render_issue_group(
         "Días de resolución (detalle)",
         len(groups.resolved_now),
         groups.resolved_now,
+        key_to_url=key_to_url,
+        key_to_meta=key_to_meta,
         help_text="cerradas quincena actual",
+        source_col=None,
     )
 
     if scope_mode == "country" and result.by_source:

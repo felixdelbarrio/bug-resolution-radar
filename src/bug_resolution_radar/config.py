@@ -105,6 +105,11 @@ DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
+_PERIOD_TEMPLATE_PRIMARY_FILENAME = "Seguimiento de incidencias del periodo.pptx"
+_PERIOD_TEMPLATE_ALTERNATE_FILENAMES = (
+    _PERIOD_TEMPLATE_PRIMARY_FILENAME,
+    "Seguimiento incidencias del periodo.pptx",
+)
 _PATH_SETTING_KEYS = {
     "DATA_PATH",
     "NOTES_PATH",
@@ -176,6 +181,77 @@ def _to_storable_path(raw: str) -> str:
         return str(rel)
     except Exception:
         return str(path.resolve())
+
+
+def bundled_period_ppt_template_path() -> Path:
+    """
+    Return the bundled corporate PPT template path.
+
+    This file is shipped with the app so report generation works without manual setup.
+    """
+    return (
+        Path(__file__).resolve().parent
+        / "reports"
+        / "templates"
+        / _PERIOD_TEMPLATE_PRIMARY_FILENAME
+    ).resolve()
+
+
+def period_ppt_template_candidates(
+    settings: Settings, *, explicit_path: str | None = None
+) -> List[Path]:
+    """Collect ordered candidate paths for the period follow-up PPT template."""
+    candidates: List[Path] = []
+    if explicit_path:
+        candidates.append(Path(str(explicit_path).strip()).expanduser())
+
+    configured = str(getattr(settings, "PERIOD_PPT_TEMPLATE_PATH", "") or "").strip()
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    candidates.append(bundled_period_ppt_template_path())
+
+    downloads_dir = (Path.home() / "Downloads").expanduser()
+    for name in _PERIOD_TEMPLATE_ALTERNATE_FILENAMES:
+        candidates.append(downloads_dir / name)
+    if downloads_dir.exists():
+        for file_path in sorted(downloads_dir.glob("*.pptx")):
+            name = file_path.name.lower()
+            if "seguimiento" in name and "periodo" in name:
+                candidates.append(file_path)
+
+    out: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+    return out
+
+
+def resolve_period_ppt_template_path(settings: Settings, *, explicit_path: str | None = None) -> Path:
+    """Resolve the first existing period follow-up PPT template candidate."""
+    for candidate in period_ppt_template_candidates(settings, explicit_path=explicit_path):
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    raise FileNotFoundError(
+        "No se encontró la plantilla del informe de seguimiento. "
+        "Se buscó la ruta configurada, la plantilla corporativa integrada y Descargas."
+    )
+
+
+def suggested_period_ppt_template_path(settings: Settings) -> Path:
+    """
+    Return the best template path suggestion for UI defaults.
+
+    Prefers an existing candidate, otherwise returns the bundled corporate path.
+    """
+    for candidate in period_ppt_template_candidates(settings):
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    return bundled_period_ppt_template_path()
 
 
 def _ascii_fold(value: str) -> str:

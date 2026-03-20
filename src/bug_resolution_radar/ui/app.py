@@ -12,9 +12,9 @@ from streamlit import config as st_config
 from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
+    country_rollup_sources,
     ensure_env,
     load_settings,
-    rollup_source_ids,
     save_settings,
 )
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
@@ -142,6 +142,31 @@ def _sources_with_results_by_country(settings: Settings) -> Dict[str, List[Dict[
             continue
         grouped.setdefault(country, []).append(src)
     return grouped
+
+
+def _configured_rollup_source_ids_for_country(
+    settings: Settings,
+    *,
+    country: str,
+    available_source_ids: List[str] | None = None,
+) -> List[str]:
+    """Return explicitly configured rollup source ids for a country."""
+    country_txt = str(country or "").strip()
+    if not country_txt:
+        return []
+
+    configured = [
+        str(sid).strip()
+        for sid in country_rollup_sources(settings).get(country_txt, [])
+        if str(sid).strip()
+    ]
+    if not configured:
+        return []
+    if available_source_ids is None:
+        return configured
+
+    allowed = {str(sid).strip() for sid in available_source_ids if str(sid).strip()}
+    return [sid for sid in configured if sid in allowed]
 
 
 def _ensure_scope_state(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
@@ -381,7 +406,7 @@ def _render_workspace_scope(
     if not countries:
         return
 
-    c_country, c_mode, c_source = st.columns([1.0, 1.3, 2.0], gap="small")
+    c_country, c_right = st.columns([1.0, 3.3], gap="small")
     with c_country:
         selected_country = st.selectbox(
             "País",
@@ -389,21 +414,6 @@ def _render_workspace_scope(
             key="workspace_country",
             on_change=_on_workspace_scope_change,
         )
-    with c_mode:
-        st.radio(
-            "Vista",
-            options=["country", "source"],
-            index=0 if str(st.session_state.get("workspace_scope_mode")) == "country" else 1,
-            format_func=lambda mode: "País" if mode == "country" else "Origen",
-            horizontal=True,
-            key="workspace_scope_mode",
-            on_change=_on_workspace_scope_change,
-        )
-
-    scope_mode = str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
-    if scope_mode not in {"country", "source"}:
-        scope_mode = "source"
-        st.session_state["workspace_scope_mode"] = scope_mode
 
     source_rows = scoped_sources.get(selected_country, [])
     source_ids = [
@@ -417,11 +427,70 @@ def _render_workspace_scope(
         if sid:
             source_label_by_id[sid] = f"{alias} · {source_type}"
 
-    with c_source:
-        if source_ids:
-            if str(st.session_state.get("workspace_source_id") or "") not in source_ids:
-                st.session_state["workspace_source_id"] = source_ids[0]
-            if scope_mode == "source":
+    if source_ids and str(st.session_state.get("workspace_source_id") or "") not in source_ids:
+        st.session_state["workspace_source_id"] = source_ids[0]
+    if not source_ids:
+        st.session_state["workspace_source_id"] = ""
+
+    configured_rollup = _configured_rollup_source_ids_for_country(
+        settings,
+        country=selected_country,
+        available_source_ids=source_ids,
+    )
+    has_configured_rollup = bool(configured_rollup)
+
+    with c_right:
+        if has_configured_rollup:
+            c_mode, c_source = st.columns([1.3, 2.0], gap="small")
+            with c_mode:
+                st.radio(
+                    "Vista",
+                    options=["country", "source"],
+                    index=0
+                    if str(st.session_state.get("workspace_scope_mode")) == "country"
+                    else 1,
+                    format_func=lambda mode: "País" if mode == "country" else "Origen",
+                    horizontal=True,
+                    key="workspace_scope_mode",
+                    on_change=_on_workspace_scope_change,
+                )
+            scope_mode = (
+                str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
+            )
+            if scope_mode not in {"country", "source"}:
+                scope_mode = "source"
+                st.session_state["workspace_scope_mode"] = scope_mode
+
+            with c_source:
+                if scope_mode == "source":
+                    if source_ids:
+                        st.selectbox(
+                            "Origen",
+                            options=source_ids,
+                            key="workspace_source_id",
+                            format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+                            on_change=_on_workspace_scope_change,
+                        )
+                    else:
+                        st.selectbox(
+                            "Origen",
+                            options=["__none__"],
+                            key="workspace_source_id_aux",
+                            format_func=lambda _: "Sin orígenes con resultados",
+                            disabled=True,
+                        )
+                else:
+                    labels = [
+                        source_label_by_id.get(str(sid), str(sid)) for sid in configured_rollup[:2]
+                    ]
+                    if labels:
+                        st.caption(f"Agregado país activo: {' · '.join(labels)}")
+        else:
+            previous_mode = str(st.session_state.get("workspace_scope_mode") or "").strip().lower()
+            st.session_state["workspace_scope_mode"] = "source"
+            if previous_mode == "country":
+                _on_workspace_scope_change()
+            if source_ids:
                 st.selectbox(
                     "Origen",
                     options=source_ids,
@@ -430,32 +499,13 @@ def _render_workspace_scope(
                     on_change=_on_workspace_scope_change,
                 )
             else:
-                selected_rollup = rollup_source_ids(
-                    settings,
-                    country=selected_country,
-                    available_source_ids=source_ids,
-                )
-                labels = [
-                    source_label_by_id.get(str(sid), str(sid)) for sid in selected_rollup[:2]
-                ]
                 st.selectbox(
                     "Origen",
-                    options=[st.session_state["workspace_source_id"]],
-                    format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
-                    disabled=True,
+                    options=["__none__"],
                     key="workspace_source_id_aux",
-                    help="En vista País, la app agrega los orígenes configurados en Preferencias.",
+                    format_func=lambda _: "Sin orígenes con resultados",
+                    disabled=True,
                 )
-                if labels:
-                    st.caption(f"Agregado país activo: {' · '.join(labels)}")
-        else:
-            st.selectbox(
-                "Origen",
-                options=["__none__"],
-                key="workspace_source_id_aux",
-                format_func=lambda _: "Sin orígenes con resultados",
-                disabled=True,
-            )
 
 
 def _page_favicon() -> str:

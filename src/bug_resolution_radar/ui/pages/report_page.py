@@ -131,7 +131,9 @@ def _scope_df(df: pd.DataFrame, *, country: str, source_id: str) -> pd.DataFrame
     return df.loc[mask].copy(deep=False)
 
 
-def _scope_country_sources(df: pd.DataFrame, *, country: str, source_ids: list[str]) -> pd.DataFrame:
+def _scope_country_sources(
+    df: pd.DataFrame, *, country: str, source_ids: list[str]
+) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -552,7 +554,9 @@ def _render_period_status(scope_key: str) -> None:
     else:
         st.info(message or "Estado actualizado.")
 
-    saved_path_value = str(st.session_state.get(_period_saved_path_state_key(scope_key)) or "").strip()
+    saved_path_value = str(
+        st.session_state.get(_period_saved_path_state_key(scope_key)) or ""
+    ).strip()
     if saved_path_value:
         saved_path = Path(saved_path_value)
         label = saved_path.name or saved_path_value
@@ -625,7 +629,7 @@ def _render_period_followup_report(settings: Settings) -> None:
     )
     if len(selected_source_ids) < 2:
         st.warning(
-            "Configura dos orígenes en Configuración → Preferencias → Orígenes agregados por país."
+            "Configura dos orígenes en Configuración → Agregados → Orígenes agregados por país."
         )
         return
     selected_source_ids = list(selected_source_ids[:2])

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, List, Sequence
 
 import pandas as pd
 from pptx import Presentation
@@ -18,13 +18,14 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.period_summary import (
+    QuincenalScopeResult,
     build_country_quincenal_result,
     format_window_label,
     scope_country_sources,
     source_label_map,
 )
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
-from bug_resolution_radar.config import Settings
+from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
@@ -75,39 +76,16 @@ def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
 
 
 def _resolve_template_path(settings: Settings, explicit_path: str | None = None) -> Path:
-    candidates: List[Path] = []
-    if explicit_path:
-        candidates.append(Path(str(explicit_path).strip()).expanduser())
-
-    configured = str(getattr(settings, "PERIOD_PPT_TEMPLATE_PATH", "") or "").strip()
-    if configured:
-        candidates.append(Path(configured).expanduser())
-
-    home_downloads = Path.home() / "Downloads"
-    candidates.append(home_downloads / "Seguimiento de incidencias del periodo.pptx")
-    candidates.append(home_downloads / "Seguimiento incidencias del periodo.pptx")
-
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = str(candidate)
-        if key in seen:
-            continue
-        seen.add(key)
-        if candidate.exists():
-            return candidate.resolve()
-    raise FileNotFoundError(
-        "No se encontró la plantilla del informe de seguimiento. "
-        "Configura PERIOD_PPT_TEMPLATE_PATH en Preferencias."
-    )
+    return resolve_period_ppt_template_path(settings, explicit_path=explicit_path)
 
 
-def _remove_slide(prs: Presentation, index: int) -> None:
+def _remove_slide(prs: Any, index: int) -> None:
     sld_id = prs.slides._sldIdLst[index]
     prs.part.drop_rel(sld_id.rId)
     del prs.slides._sldIdLst[index]
 
 
-def _copy_slide_content(prs: Presentation, *, source_index: int, target_index: int) -> None:
+def _copy_slide_content(prs: Any, *, source_index: int, target_index: int) -> None:
     source = prs.slides[source_index]
     target = prs.slides[target_index]
 
@@ -140,7 +118,7 @@ def _copy_slide_content(prs: Presentation, *, source_index: int, target_index: i
         target.shapes._spTree.insert_element_before(clone, "p:extLst")
 
 
-def _append_slide_clone(prs: Presentation, *, source_index: int) -> None:
+def _append_slide_clone(prs: Any, *, source_index: int) -> None:
     source = prs.slides[source_index]
     dest = prs.slides.add_slide(source.slide_layout)
 
@@ -168,14 +146,14 @@ def _append_slide_clone(prs: Presentation, *, source_index: int) -> None:
         dest.shapes._spTree.insert_element_before(clone, "p:extLst")
 
 
-def _shape_or_none(slide: object, index_1_based: int) -> object | None:
+def _shape_or_none(slide: Any, index_1_based: int) -> Any | None:
     idx = int(index_1_based) - 1
     if idx < 0 or idx >= len(slide.shapes):
         return None
     return slide.shapes[idx]
 
 
-def _set_shape_text(slide: object, index_1_based: int, text: str) -> None:
+def _set_shape_text(slide: Any, index_1_based: int, text: str) -> None:
     shape = _shape_or_none(slide, index_1_based)
     if shape is None or not getattr(shape, "has_text_frame", False):
         return
@@ -183,7 +161,7 @@ def _set_shape_text(slide: object, index_1_based: int, text: str) -> None:
 
 
 def _set_run_text(
-    slide: object,
+    slide: Any,
     *,
     shape_index: int,
     paragraph_index: int,
@@ -202,7 +180,7 @@ def _set_run_text(
     runs[run_index].text = str(text or "")
 
 
-def _overlay_picture(slide: object, *, anchor_shape_index: int, payload: bytes) -> None:
+def _overlay_picture(slide: Any, *, anchor_shape_index: int, payload: bytes) -> None:
     anchor = _shape_or_none(slide, anchor_shape_index)
     if anchor is None:
         return
@@ -217,7 +195,7 @@ def _overlay_picture(slide: object, *, anchor_shape_index: int, payload: bytes) 
     )
 
 
-def _blank_shape_area(slide: object, *, anchor_shape_index: int) -> None:
+def _blank_shape_area(slide: Any, *, anchor_shape_index: int) -> None:
     anchor = _shape_or_none(slide, anchor_shape_index)
     if anchor is None:
         return
@@ -233,7 +211,9 @@ def _blank_shape_area(slide: object, *, anchor_shape_index: int) -> None:
     blank.line.fill.background()
 
 
-def _chart_png(settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, chart_id: str) -> bytes:
+def _chart_png(
+    settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, chart_id: str
+) -> bytes:
     registry = build_trends_registry()
     spec = registry.get(chart_id)
     if spec is None:
@@ -247,11 +227,13 @@ def _chart_png(settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, 
     return payload or b""
 
 
-def _populate_summary_slide(slide: object, *, title: str, scope_result: object) -> None:
+def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     _set_shape_text(slide, 3, title)
 
-    _set_run_text(slide, shape_index=4, paragraph_index=0, run_index=0, text=str(summary.open_total))
+    _set_run_text(
+        slide, shape_index=4, paragraph_index=0, run_index=0, text=str(summary.open_total)
+    )
     _set_run_text(
         slide,
         shape_index=5,
@@ -318,7 +300,7 @@ def _populate_summary_slide(slide: object, *, title: str, scope_result: object) 
 
 
 def _populate_evolution_slide(
-    slide: object,
+    slide: Any,
     *,
     title: str,
     backlog_png: bytes,
@@ -336,7 +318,7 @@ def _populate_evolution_slide(
     _blank_shape_area(slide, anchor_shape_index=8)
 
 
-def _update_cover_period(slide: object, *, period_label: str) -> None:
+def _update_cover_period(slide: Any, *, period_label: str) -> None:
     for shape in slide.shapes:
         if not getattr(shape, "has_text_frame", False):
             continue
@@ -445,17 +427,23 @@ def generate_country_period_followup_ppt(
     _overlay_picture(
         prs.slides[2],
         anchor_shape_index=20,
-        payload=_chart_png(settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="open_priority_pie"),
+        payload=_chart_png(
+            settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="open_priority_pie"
+        ),
     )
     _overlay_picture(
         prs.slides[3],
         anchor_shape_index=20,
-        payload=_chart_png(settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="open_priority_pie"),
+        payload=_chart_png(
+            settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="open_priority_pie"
+        ),
     )
     _overlay_picture(
         prs.slides[4],
         anchor_shape_index=20,
-        payload=_chart_png(settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="open_priority_pie"),
+        payload=_chart_png(
+            settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="open_priority_pie"
+        ),
     )
 
     _populate_evolution_slide(
