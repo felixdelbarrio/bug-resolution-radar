@@ -46,6 +46,112 @@ class PeriodFollowupReportResult:
     applied_filter_summary: str
 
 
+def _slide_text_blob(slide: Any) -> str:
+    """Collect lower-cased text from all text-capable shapes in a slide."""
+    chunks: list[str] = []
+    for shape in getattr(slide, "shapes", []):
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        txt = str(getattr(shape, "text", "") or "").strip()
+        if txt:
+            chunks.append(txt.lower())
+    return " ".join(chunks).strip()
+
+
+def _looks_like_explanatory_helper_slide(slide: Any) -> bool:
+    """Heuristic to detect optional helper/instruction slide in position 2."""
+    blob = _slide_text_blob(slide)
+    if not blob:
+        return True
+
+    production_tokens = (
+        "dashboard",
+        "seguimiento de incidencias",
+        "seguimiento de kpis",
+        "gráficos de evolución",
+        "graficos de evolucion",
+    )
+    if any(tok in blob for tok in production_tokens):
+        return False
+
+    helper_tokens = (
+        "instrucci",
+        "comentario",
+        "comentarios",
+        "helper",
+        "ayuda",
+        "ejemplo",
+        "plantilla",
+        "template",
+        "no editar",
+        "borrar",
+        "delete",
+    )
+    return any(tok in blob for tok in helper_tokens)
+
+
+def _ensure_slide_index(prs: Any, *, index: int, role: str) -> None:
+    if int(index) < len(prs.slides):
+        return
+    raise ValueError(
+        "Plantilla de seguimiento inválida: falta la slide "
+        f"{int(index) + 1} ({role}). Revisa PERIOD_PPT_TEMPLATE_PATH."
+    )
+
+
+def _normalize_period_template(prs: Any) -> None:
+    """
+    Normalize user-provided template into the 8-slide structure expected by renderer.
+
+    Target structure:
+      1) Portada
+      2) Dashboard header
+      3) Resumen país
+      4) Resumen origen A
+      5) Resumen origen B
+      6) Header evolución
+      7) Evolución origen A
+      8) Evolución origen B
+    """
+    if len(prs.slides) < 7:
+        raise ValueError(
+            "La plantilla de seguimiento debe tener al menos 7 slides base "
+            "(portada, dashboard, 3 resúmenes, cabecera evolución y 1 evolución). "
+            f"Slides detectadas: {len(prs.slides)}."
+        )
+
+    # Optional helper slide used in earlier corporate templates.
+    if len(prs.slides) > 1 and _looks_like_explanatory_helper_slide(prs.slides[1]):
+        _remove_slide(prs, 1)
+
+    if len(prs.slides) < 7:
+        raise ValueError(
+            "La plantilla de seguimiento quedó incompleta tras eliminar la slide de ayuda. "
+            f"Slides detectadas: {len(prs.slides)}."
+        )
+
+    # Ensure we always have two evolution slides based on the same visual template.
+    if len(prs.slides) >= 8:
+        _copy_slide_content(prs, source_index=6, target_index=7)
+    else:
+        _append_slide_clone(prs, source_index=6)
+
+    # Keep exactly 8 slides, preserving canonical order.
+    while len(prs.slides) > 8:
+        _remove_slide(prs, 8)
+
+    required_roles = {
+        0: "Portada",
+        2: "Resumen país",
+        3: "Resumen origen A",
+        4: "Resumen origen B",
+        6: "Evolución origen A",
+        7: "Evolución origen B",
+    }
+    for idx, role in required_roles.items():
+        _ensure_slide_index(prs, index=idx, role=role)
+
+
 def _slug(value: str) -> str:
     txt = str(value or "").strip().lower()
     txt = re.sub(r"[^a-z0-9]+", "-", txt).strip("-")
@@ -391,14 +497,8 @@ def generate_country_period_followup_ppt(
     template = _resolve_template_path(settings, explicit_path=template_path)
     prs = Presentation(str(template))
 
-    # Keep only: cover + dashboard header + 3 resumen slides + evolución header + 2 evolución slides.
-    _remove_slide(prs, 1)  # Remove explanatory helper slide.
-    if len(prs.slides) >= 8:
-        _copy_slide_content(prs, source_index=6, target_index=7)
-    else:
-        _append_slide_clone(prs, source_index=6)
-    while len(prs.slides) > 8:
-        _remove_slide(prs, 8)
+    # Normalize user template into canonical 8-slide structure.
+    _normalize_period_template(prs)
 
     aggregate = quincenal.aggregate
     source_a_id, source_b_id = clean_source_ids[0], clean_source_ids[1]
