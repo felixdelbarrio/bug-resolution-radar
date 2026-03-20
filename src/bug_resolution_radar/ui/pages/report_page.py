@@ -15,8 +15,11 @@ from bug_resolution_radar.analytics.analysis_window import (
     max_available_backlog_months,
     parse_analysis_lookback_months,
 )
-from bug_resolution_radar.config import Settings
-from bug_resolution_radar.reports import generate_scope_executive_ppt
+from bug_resolution_radar.config import Settings, all_configured_sources, rollup_source_ids
+from bug_resolution_radar.reports import (
+    generate_country_period_followup_ppt,
+    generate_scope_executive_ppt,
+)
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.dashboard.state import (
@@ -30,6 +33,8 @@ _REPORT_SAVED_PATH_KEY_PREFIX = "workspace_report_saved_path"
 _REPORT_PHASE_KEY_PREFIX = "workspace_report_phase"
 _REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
 _REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
+_PERIOD_REPORT_STATUS_KEY = "workspace_period_report_status"
+_PERIOD_REPORT_SAVED_PATH_KEY_PREFIX = "workspace_period_report_saved_path"
 
 
 def _configured_export_path(settings: Settings) -> Path | None:
@@ -126,6 +131,20 @@ def _scope_df(df: pd.DataFrame, *, country: str, source_id: str) -> pd.DataFrame
     return df.loc[mask].copy(deep=False)
 
 
+def _scope_country_sources(df: pd.DataFrame, *, country: str, source_ids: list[str]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    mask = pd.Series(True, index=df.index)
+    country_txt = str(country or "").strip()
+    source_tokens = [str(sid).strip() for sid in list(source_ids or []) if str(sid).strip()]
+    if country_txt and "country" in df.columns:
+        mask &= df["country"].fillna("").astype(str).eq(country_txt)
+    if source_tokens and "source_id" in df.columns:
+        mask &= df["source_id"].fillna("").astype(str).isin(source_tokens)
+    return df.loc[mask].copy(deep=False)
+
+
 def _analysis_window_label(settings: Settings, *, scoped_df: pd.DataFrame) -> str:
     if scoped_df is None or scoped_df.empty:
         configured = parse_analysis_lookback_months(settings)
@@ -163,6 +182,10 @@ def _request_sig_state_key(scope_key: str) -> str:
 
 def _artifact_state_key(scope_key: str) -> str:
     return f"{_REPORT_ARTIFACT_KEY_PREFIX}::{scope_key}"
+
+
+def _period_saved_path_state_key(scope_key: str) -> str:
+    return f"{_PERIOD_REPORT_SAVED_PATH_KEY_PREFIX}::{scope_key}"
 
 
 def _normalize_filter_values(values: list[str]) -> list[str]:
@@ -291,7 +314,7 @@ def _render_status(scope_key: str) -> None:
                 _reveal_in_file_manager(saved_path)
 
 
-def render(settings: Settings) -> None:
+def _render_executive_report(settings: Settings) -> None:
     """Render one-click executive report generation for selected scope + active filters."""
     country, source_id = _current_scope()
     st.subheader("Informe PPT")
@@ -503,3 +526,181 @@ def render(settings: Settings) -> None:
 
     with status_slot:
         _render_status(scope_key)
+
+
+def _store_period_status(*, scope_key: str, kind: str, message: str) -> None:
+    st.session_state[_PERIOD_REPORT_STATUS_KEY] = {
+        "scope_key": str(scope_key or "").strip(),
+        "kind": str(kind or "info").strip().lower(),
+        "message": str(message or "").strip(),
+    }
+
+
+def _render_period_status(scope_key: str) -> None:
+    payload = st.session_state.get(_PERIOD_REPORT_STATUS_KEY)
+    if not isinstance(payload, dict):
+        return
+    if str(payload.get("scope_key") or "") != str(scope_key or "").strip():
+        return
+
+    level = str(payload.get("kind") or "info").strip().lower()
+    message = str(payload.get("message") or "").strip()
+    if level == "success":
+        st.success(message or "Informe guardado.")
+    elif level == "error":
+        st.error(message or "No se pudo guardar el informe.")
+    else:
+        st.info(message or "Estado actualizado.")
+
+    saved_path_value = str(st.session_state.get(_period_saved_path_state_key(scope_key)) or "").strip()
+    if saved_path_value:
+        saved_path = Path(saved_path_value)
+        label = saved_path.name or saved_path_value
+        if st.button(
+            label,
+            key=f"btn_open_period_report::{scope_key}::{saved_path_value}",
+            type="secondary",
+            width="stretch",
+            help=f"Abrir carpeta del informe\n{saved_path_value}",
+        ):
+            _reveal_in_file_manager(saved_path)
+
+
+def _render_period_followup_report(settings: Settings) -> None:
+    country = str(st.session_state.get("workspace_country") or "").strip()
+    st.subheader("Informe Seguimiento del periodo")
+    st.caption(
+        "Plantilla corporativa con resumen quincenal agregado por país y láminas por origen."
+    )
+
+    if not country:
+        st.warning("Selecciona un país en el scope superior para generar el informe.")
+        return
+
+    status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
+    priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
+    assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
+
+    try:
+        df_all = load_issues_df(settings.DATA_PATH)
+    except Exception as exc:
+        st.error(f"No se pudieron cargar incidencias para el informe de seguimiento: {exc}")
+        return
+
+    if df_all.empty:
+        st.warning("No hay incidencias disponibles para generar el informe.")
+        return
+
+    country_rows = all_configured_sources(settings, country=country)
+    source_label_by_id: dict[str, str] = {}
+    for src in country_rows:
+        sid = str(src.get("source_id") or "").strip()
+        if not sid:
+            continue
+        alias = str(src.get("alias") or "").strip() or sid
+        source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
+        source_label_by_id[sid] = f"{alias} · {source_type}"
+
+    if "country" in df_all.columns and "source_id" in df_all.columns:
+        source_series = (
+            df_all.loc[
+                df_all["country"].fillna("").astype(str).eq(country),
+                "source_id",
+            ]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+        available_source_ids = sorted({sid for sid in source_series.tolist() if sid})
+    else:
+        available_source_ids = []
+    if not available_source_ids:
+        st.warning("No hay orígenes con datos para el país seleccionado.")
+        return
+
+    selected_source_ids = rollup_source_ids(
+        settings,
+        country=country,
+        available_source_ids=available_source_ids,
+    )
+    if len(selected_source_ids) < 2:
+        st.warning(
+            "Configura dos orígenes en Configuración → Preferencias → Orígenes agregados por país."
+        )
+        return
+    selected_source_ids = list(selected_source_ids[:2])
+    source_labels = [source_label_by_id.get(sid, sid) for sid in selected_source_ids]
+    st.info(f"Orígenes seleccionados: {source_labels[0]} · {source_labels[1]}")
+
+    scoped_df = _scope_country_sources(df_all, country=country, source_ids=selected_source_ids)
+    if scoped_df.empty:
+        st.warning("No hay datos para los orígenes seleccionados.")
+        return
+
+    ctx = build_dashboard_data_context(
+        df_all=scoped_df,
+        settings=settings,
+        include_kpis=False,
+        include_timeseries_chart=False,
+    )
+    if ctx.dff.empty:
+        st.warning(
+            "No hay incidencias en la ventana de análisis y filtros actuales para el informe."
+        )
+        return
+
+    filters_summary = [
+        _analysis_window_label(settings, scoped_df=scoped_df),
+        _visible_filter_label(status_filters, name="Estado"),
+        _visible_filter_label(priority_filters, name="Prioridad"),
+        _visible_filter_label(assignee_filters, name="Responsable"),
+    ]
+    st.caption(f"Filtros aplicados: {' | '.join(filters_summary)}")
+
+    scope_key = f"{country}::{','.join(selected_source_ids)}"
+    export_dir = _default_report_export_dir(settings)
+    if st.button(
+        "Generar y guardar en disco",
+        key=f"btn_generate_period_report::{scope_key}",
+        type="primary",
+        width="stretch",
+        help=f"Guardará el PPT en: {export_dir}",
+    ):
+        try:
+            result = generate_country_period_followup_ppt(
+                settings,
+                country=country,
+                source_ids=selected_source_ids,
+                dff_override=ctx.dff,
+                open_df_override=ctx.open_df,
+                applied_filter_summary=" | ".join(filters_summary),
+            )
+            export_path = _unique_export_path(export_dir, file_name=result.file_name)
+            export_path.write_bytes(bytes(result.content or b""))
+            st.session_state[_period_saved_path_state_key(scope_key)] = str(export_path)
+            _store_period_status(
+                scope_key=scope_key,
+                kind="success",
+                message=(
+                    f"Informe generado y guardado: {export_path.name} · "
+                    f"{result.slide_count} slides · {result.total_issues} issues."
+                ),
+            )
+            st.rerun()
+        except Exception as exc:
+            _store_period_status(
+                scope_key=scope_key,
+                kind="error",
+                message=f"No se pudo generar el informe de seguimiento: {exc}",
+            )
+
+    _render_period_status(scope_key)
+
+
+def render(settings: Settings) -> None:
+    with st.container(key="report_tabs_shell"):
+        t_exec, t_period = st.tabs(["Ejecutivo", "Seguimiento periodo"])
+    with t_exec:
+        _render_executive_report(settings)
+    with t_period:
+        _render_period_followup_report(settings)

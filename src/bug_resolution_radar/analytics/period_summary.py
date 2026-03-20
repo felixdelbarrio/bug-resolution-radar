@@ -1,0 +1,556 @@
+"""Centralized fortnight summary metrics shared by Insights and PPT reports."""
+
+from __future__ import annotations
+
+import unicodedata
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, Sequence
+
+import pandas as pd
+
+from bug_resolution_radar.analytics.status_semantics import (
+    effective_closed_mask,
+    effective_finalized_at,
+)
+from bug_resolution_radar.config import Settings, all_configured_sources
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
+
+_WINDOW_DAYS = 14
+_MAESTRA_FLAG_KEYS = (
+    "BBVA_SEL_GIM_Maestra",
+    "BBVA_MasterIncident",
+)
+_MAESTRA_TRUE_TOKENS = {"1", "si", "yes", "true", "x", "maestra", "master"}
+
+
+@dataclass(frozen=True)
+class QuincenalWindow:
+    current_start: pd.Timestamp
+    current_end: pd.Timestamp
+    previous_start: pd.Timestamp
+    previous_end: pd.Timestamp
+    month_start: pd.Timestamp
+
+
+@dataclass(frozen=True)
+class QuincenalGroups:
+    maestras_open: pd.DataFrame
+    others_open: pd.DataFrame
+    new_now: pd.DataFrame
+    new_before: pd.DataFrame
+    new_accumulated: pd.DataFrame
+    closed_now: pd.DataFrame
+    closed_before: pd.DataFrame
+    resolved_now: pd.DataFrame
+    resolved_before: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class QuincenalSummary:
+    scope_id: str
+    scope_label: str
+    window: QuincenalWindow
+    total_issues: int
+    open_total: int
+    maestras_total: int
+    others_total: int
+    new_now: int
+    new_before: int
+    new_accumulated: int
+    new_delta_pct: float | None
+    closed_now: int
+    closed_before: int
+    closed_delta_pct: float | None
+    resolution_days_now: float | None
+    resolution_days_before: float | None
+    resolution_delta_pct: float | None
+
+
+@dataclass(frozen=True)
+class QuincenalScopeResult:
+    summary: QuincenalSummary
+    groups: QuincenalGroups
+    dff: pd.DataFrame
+    open_df: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class QuincenalCountryResult:
+    country: str
+    source_ids: tuple[str, ...]
+    source_label_by_id: Dict[str, str]
+    aggregate: QuincenalScopeResult
+    by_source: Dict[str, QuincenalScopeResult]
+
+
+def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
+    return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+
+def _to_dt_naive(series: pd.Series | None) -> pd.Series:
+    if series is None:
+        return pd.Series([], dtype="datetime64[ns]")
+    out = pd.to_datetime(series, errors="coerce", utc=True)
+    try:
+        return out.dt.tz_convert(None)
+    except Exception:
+        try:
+            return out.dt.tz_localize(None)
+        except Exception:
+            return out
+
+
+def _normalize_flag_token(value: object) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return ""
+    token = unicodedata.normalize("NFKD", token)
+    token = "".join(ch for ch in token if not unicodedata.combining(ch))
+    return token.strip()
+
+
+def _is_truthy_flag(value: object) -> bool:
+    token = _normalize_flag_token(value)
+    if not token:
+        return False
+    if token in _MAESTRA_TRUE_TOKENS:
+        return True
+    # Some Helix tenants persist flags as verbose labels (e.g. "Si (maestra)").
+    return any(flag in token for flag in ("si", "yes", "true", "maestra", "master"))
+
+
+def _extract_raw_flag(raw_fields: Mapping[str, object]) -> object:
+    if not isinstance(raw_fields, Mapping):
+        return ""
+    for key in _MAESTRA_FLAG_KEYS:
+        if key in raw_fields:
+            return raw_fields.get(key, "")
+    folded = {str(k).strip().lower(): v for k, v in raw_fields.items()}
+    for key in _MAESTRA_FLAG_KEYS:
+        value = folded.get(str(key).strip().lower())
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+@lru_cache(maxsize=8)
+def _load_maestra_merge_keys_cached(helix_path: str, mtime_ns: int) -> frozenset[str]:
+    del mtime_ns  # cache invalidation key only
+    path = Path(str(helix_path or "").strip())
+    if not path.exists():
+        return frozenset()
+
+    try:
+        doc = HelixRepo(path).load()
+    except Exception:
+        return frozenset()
+    if doc is None or not doc.items:
+        return frozenset()
+
+    out: set[str] = set()
+    for item in doc.items:
+        flag_value = _extract_raw_flag(item.raw_fields or {})
+        if not _is_truthy_flag(flag_value):
+            continue
+        item_id = str(item.id or "").strip().upper()
+        source_id = str(item.source_id or "").strip().lower()
+        if not item_id:
+            continue
+        out.add(item_id)
+        if source_id:
+            out.add(f"{source_id}::{item_id}")
+    return frozenset(out)
+
+
+def maestra_merge_keys(settings: Settings) -> frozenset[str]:
+    path = Path(str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip()).expanduser()
+    if not path.exists():
+        return frozenset()
+    try:
+        mtime_ns = int(path.stat().st_mtime_ns)
+    except Exception:
+        mtime_ns = -1
+    return _load_maestra_merge_keys_cached(str(path.resolve()), mtime_ns)
+
+
+def mark_maestra_rows(df: pd.DataFrame, *, settings: Settings) -> pd.Series:
+    safe = _safe_df(df)
+    if safe.empty or "key" not in safe.columns:
+        return pd.Series(False, index=safe.index, dtype=bool)
+
+    maestra_keys = maestra_merge_keys(settings)
+    if not maestra_keys:
+        return pd.Series(False, index=safe.index, dtype=bool)
+
+    keys = safe["key"].fillna("").astype(str).str.strip().str.upper()
+    source_ids = (
+        safe["source_id"].fillna("").astype(str).str.strip().str.lower()
+        if "source_id" in safe.columns
+        else pd.Series("", index=safe.index, dtype=str)
+    )
+    merge_keys = source_ids + "::" + keys
+    merge_keys = merge_keys.where(source_ids.ne(""), keys)
+    is_maestra = merge_keys.isin(maestra_keys) | keys.isin(maestra_keys)
+
+    if "source_type" in safe.columns:
+        source_type = safe["source_type"].fillna("").astype(str).str.strip().str.lower()
+        is_maestra &= source_type.eq("helix")
+    return is_maestra.fillna(False).astype(bool)
+
+
+def _scope_reference_day(df: pd.DataFrame) -> pd.Timestamp:
+    safe = _safe_df(df)
+    if safe.empty:
+        return pd.Timestamp.utcnow().tz_localize(None).normalize()
+
+    candidates: List[pd.Timestamp] = []
+    for col in ("updated", "resolved", "created"):
+        if col not in safe.columns:
+            continue
+        parsed = _to_dt_naive(safe[col]).dropna()
+        if parsed.empty:
+            continue
+        candidates.append(pd.Timestamp(parsed.max()).normalize())
+    if not candidates:
+        return pd.Timestamp.utcnow().tz_localize(None).normalize()
+    return max(candidates)
+
+
+def _window_from_reference(reference_day: pd.Timestamp) -> QuincenalWindow:
+    end = pd.Timestamp(reference_day).normalize()
+    current_start = end - pd.Timedelta(days=_WINDOW_DAYS - 1)
+    previous_end = current_start - pd.Timedelta(days=1)
+    previous_start = previous_end - pd.Timedelta(days=_WINDOW_DAYS - 1)
+    month_start = end.replace(day=1)
+    return QuincenalWindow(
+        current_start=current_start,
+        current_end=end,
+        previous_start=previous_start,
+        previous_end=previous_end,
+        month_start=month_start,
+    )
+
+
+def _delta_pct(now_value: float | int, before_value: float | int) -> float | None:
+    now_val = float(now_value or 0.0)
+    before_val = float(before_value or 0.0)
+    if before_val <= 0:
+        if now_val <= 0:
+            return 0.0
+        return None
+    return (now_val - before_val) / before_val
+
+
+def _issue_listing(
+    df: pd.DataFrame,
+    *,
+    source_label_by_id: Mapping[str, str],
+    resolution_col: str | None = None,
+) -> pd.DataFrame:
+    safe = _safe_df(df)
+    if safe.empty:
+        cols = [
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "assignee",
+            "source",
+            "created",
+            "resolved",
+        ]
+        if resolution_col:
+            cols.append("resolution_days")
+        return pd.DataFrame(columns=cols)
+
+    out = pd.DataFrame(index=safe.index)
+    out["key"] = safe["key"].fillna("").astype(str) if "key" in safe.columns else ""
+    out["summary"] = (
+        safe["summary"].fillna("").astype(str).str.strip() if "summary" in safe.columns else ""
+    )
+    out["status"] = safe["status"].fillna("").astype(str) if "status" in safe.columns else ""
+    out["priority"] = (
+        safe["priority"].fillna("").astype(str) if "priority" in safe.columns else ""
+    )
+    out["assignee"] = (
+        safe["assignee"].fillna("").astype(str).replace("", "(sin asignar)")
+        if "assignee" in safe.columns
+        else "(sin asignar)"
+    )
+    source_ids = (
+        safe["source_id"].fillna("").astype(str).str.strip() if "source_id" in safe.columns else ""
+    )
+    out["source"] = source_ids.map(lambda sid: source_label_by_id.get(str(sid), str(sid)))
+
+    created = _to_dt_naive(safe["created"]) if "created" in safe.columns else pd.Series(pd.NaT)
+    resolved = _to_dt_naive(safe["resolved"]) if "resolved" in safe.columns else pd.Series(pd.NaT)
+    out["created"] = created.dt.strftime("%Y-%m-%d")
+    out["resolved"] = resolved.dt.strftime("%Y-%m-%d")
+    out["created"] = out["created"].fillna("")
+    out["resolved"] = out["resolved"].fillna("")
+
+    if resolution_col and resolution_col in safe.columns:
+        out["resolution_days"] = pd.to_numeric(safe[resolution_col], errors="coerce").round(1)
+
+    sort_cols: List[str] = []
+    ascending: List[bool] = []
+    if "created" in out.columns:
+        sort_cols.append("created")
+        ascending.append(False)
+    sort_cols.append("key")
+    ascending.append(True)
+    out = out.sort_values(by=sort_cols, ascending=ascending, na_position="last", kind="mergesort")
+    return out.reset_index(drop=True)
+
+
+def _scope_df(df: pd.DataFrame, *, country: str, source_ids: Sequence[str]) -> pd.DataFrame:
+    safe = _safe_df(df)
+    if safe.empty:
+        return safe
+
+    mask = pd.Series(True, index=safe.index)
+    country_txt = str(country or "").strip()
+    if country_txt and "country" in safe.columns:
+        mask &= safe["country"].fillna("").astype(str).eq(country_txt)
+
+    source_tokens = [str(sid or "").strip() for sid in list(source_ids or []) if str(sid).strip()]
+    if source_tokens and "source_id" in safe.columns:
+        mask &= safe["source_id"].fillna("").astype(str).isin(source_tokens)
+
+    return safe.loc[mask].copy(deep=False)
+
+
+def _scope_result(
+    *,
+    df: pd.DataFrame,
+    settings: Settings,
+    scope_id: str,
+    scope_label: str,
+    source_label_by_id: Mapping[str, str],
+    reference_day: pd.Timestamp,
+) -> QuincenalScopeResult:
+    safe = _safe_df(df)
+    window = _window_from_reference(reference_day)
+
+    closed_mask = effective_closed_mask(safe)
+    open_df = safe.loc[~closed_mask].copy(deep=False) if not safe.empty else pd.DataFrame()
+    maestras_mask = mark_maestra_rows(open_df, settings=settings)
+    maestras_open = open_df.loc[maestras_mask].copy(deep=False)
+    others_open = open_df.loc[~maestras_mask].copy(deep=False)
+
+    created = _to_dt_naive(safe["created"]) if "created" in safe.columns else pd.Series(pd.NaT)
+    created_day = created.dt.normalize()
+    new_now_mask = created_day.between(window.current_start, window.current_end, inclusive="both")
+    new_before_mask = created_day.between(
+        window.previous_start, window.previous_end, inclusive="both"
+    )
+    new_accumulated_mask = created_day.between(
+        window.month_start, window.current_end, inclusive="both"
+    )
+
+    finalized = _to_dt_naive(effective_finalized_at(safe))
+    finalized_day = finalized.dt.normalize()
+    closed_now_mask = finalized_day.between(
+        window.current_start, window.current_end, inclusive="both"
+    )
+    closed_before_mask = finalized_day.between(
+        window.previous_start, window.previous_end, inclusive="both"
+    )
+
+    closed_now = safe.loc[closed_now_mask].copy(deep=False)
+    closed_before = safe.loc[closed_before_mask].copy(deep=False)
+
+    resolution_source = safe.copy(deep=False)
+    resolution_source["__created"] = created
+    resolution_source["__finalized"] = finalized
+    resolution_source = resolution_source[
+        resolution_source["__created"].notna() & resolution_source["__finalized"].notna()
+    ].copy(deep=False)
+    if resolution_source.empty:
+        resolved_now = pd.DataFrame()
+        resolved_before = pd.DataFrame()
+    else:
+        resolution_source["resolution_days"] = (
+            (
+                resolution_source["__finalized"] - resolution_source["__created"]
+            ).dt.total_seconds()
+            / 86400.0
+        ).clip(lower=0.0)
+        finalized_norm = resolution_source["__finalized"].dt.normalize()
+        resolved_now = resolution_source.loc[
+            finalized_norm.between(window.current_start, window.current_end, inclusive="both")
+        ].copy(deep=False)
+        resolved_before = resolution_source.loc[
+            finalized_norm.between(window.previous_start, window.previous_end, inclusive="both")
+        ].copy(deep=False)
+
+    resolution_now_days = (
+        float(pd.to_numeric(resolved_now["resolution_days"], errors="coerce").mean())
+        if not resolved_now.empty
+        else None
+    )
+    resolution_before_days = (
+        float(pd.to_numeric(resolved_before["resolution_days"], errors="coerce").mean())
+        if not resolved_before.empty
+        else None
+    )
+    resolution_delta_pct = (
+        _delta_pct(resolution_now_days, resolution_before_days)
+        if resolution_now_days is not None and resolution_before_days is not None
+        else None
+    )
+
+    groups = QuincenalGroups(
+        maestras_open=_issue_listing(maestras_open, source_label_by_id=source_label_by_id),
+        others_open=_issue_listing(others_open, source_label_by_id=source_label_by_id),
+        new_now=_issue_listing(
+            safe.loc[new_now_mask].copy(deep=False),
+            source_label_by_id=source_label_by_id,
+        ),
+        new_before=_issue_listing(
+            safe.loc[new_before_mask].copy(deep=False),
+            source_label_by_id=source_label_by_id,
+        ),
+        new_accumulated=_issue_listing(
+            safe.loc[new_accumulated_mask].copy(deep=False),
+            source_label_by_id=source_label_by_id,
+        ),
+        closed_now=_issue_listing(closed_now, source_label_by_id=source_label_by_id),
+        closed_before=_issue_listing(closed_before, source_label_by_id=source_label_by_id),
+        resolved_now=_issue_listing(
+            resolved_now,
+            source_label_by_id=source_label_by_id,
+            resolution_col="resolution_days",
+        ),
+        resolved_before=_issue_listing(
+            resolved_before,
+            source_label_by_id=source_label_by_id,
+            resolution_col="resolution_days",
+        ),
+    )
+
+    summary = QuincenalSummary(
+        scope_id=str(scope_id or "").strip(),
+        scope_label=str(scope_label or "").strip() or str(scope_id or "").strip(),
+        window=window,
+        total_issues=int(len(safe)),
+        open_total=int(len(open_df)),
+        maestras_total=int(len(maestras_open)),
+        others_total=int(len(others_open)),
+        new_now=int(new_now_mask.sum()),
+        new_before=int(new_before_mask.sum()),
+        new_accumulated=int(new_accumulated_mask.sum()),
+        new_delta_pct=_delta_pct(int(new_now_mask.sum()), int(new_before_mask.sum())),
+        closed_now=int(closed_now_mask.sum()),
+        closed_before=int(closed_before_mask.sum()),
+        closed_delta_pct=_delta_pct(int(closed_now_mask.sum()), int(closed_before_mask.sum())),
+        resolution_days_now=resolution_now_days,
+        resolution_days_before=resolution_before_days,
+        resolution_delta_pct=resolution_delta_pct,
+    )
+    return QuincenalScopeResult(summary=summary, groups=groups, dff=safe, open_df=open_df)
+
+
+def source_label_map(
+    settings: Settings,
+    *,
+    country: str | None = None,
+    source_ids: Sequence[str] | None = None,
+) -> Dict[str, str]:
+    selected_source_ids = {
+        str(sid or "").strip() for sid in list(source_ids or []) if str(sid or "").strip()
+    }
+    out: Dict[str, str] = {}
+    for src in all_configured_sources(settings, country=country):
+        sid = str(src.get("source_id") or "").strip()
+        if not sid:
+            continue
+        if selected_source_ids and sid not in selected_source_ids:
+            continue
+        alias = str(src.get("alias") or "").strip() or sid
+        source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
+        out[sid] = f"{alias} · {source_type}"
+    for sid in selected_source_ids:
+        out.setdefault(sid, sid)
+    return out
+
+
+def scope_country_sources(
+    df: pd.DataFrame,
+    *,
+    country: str,
+    source_ids: Sequence[str],
+) -> pd.DataFrame:
+    return _scope_df(df, country=country, source_ids=source_ids)
+
+
+def build_country_quincenal_result(
+    *,
+    df: pd.DataFrame,
+    settings: Settings,
+    country: str,
+    source_ids: Sequence[str],
+    source_label_by_id: Mapping[str, str] | None = None,
+) -> QuincenalCountryResult:
+    country_txt = str(country or "").strip()
+    selected_source_ids = tuple(
+        str(sid or "").strip() for sid in list(source_ids or []) if str(sid or "").strip()
+    )
+    labels = dict(source_label_by_id or source_label_map(settings, country=country_txt))
+    scoped = _scope_df(df, country=country_txt, source_ids=selected_source_ids)
+    reference_day = _scope_reference_day(scoped)
+
+    aggregate = _scope_result(
+        df=scoped,
+        settings=settings,
+        scope_id=country_txt,
+        scope_label=country_txt or "País",
+        source_label_by_id=labels,
+        reference_day=reference_day,
+    )
+
+    by_source: Dict[str, QuincenalScopeResult] = {}
+    for sid in selected_source_ids:
+        source_df = (
+            scoped.loc[scoped["source_id"].fillna("").astype(str).eq(sid)].copy(deep=False)
+            if "source_id" in scoped.columns
+            else pd.DataFrame()
+        )
+        by_source[sid] = _scope_result(
+            df=source_df,
+            settings=settings,
+            scope_id=sid,
+            scope_label=labels.get(sid, sid),
+            source_label_by_id=labels,
+            reference_day=reference_day,
+        )
+
+    return QuincenalCountryResult(
+        country=country_txt,
+        source_ids=selected_source_ids,
+        source_label_by_id=labels,
+        aggregate=aggregate,
+        by_source=by_source,
+    )
+
+
+def format_window_label(window: QuincenalWindow) -> str:
+    start = window.current_start.strftime("%d/%m")
+    end = window.current_end.strftime("%d/%m/%Y")
+    return f"Periodo {start} - {end}"
+
+
+def ordered_country_sources(
+    source_ids: Iterable[str], *, source_label_by_id: Mapping[str, str]
+) -> List[str]:
+    unique: List[str] = []
+    seen: set[str] = set()
+    for sid in source_ids:
+        token = str(sid or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        unique.append(token)
+    return sorted(unique, key=lambda sid: source_label_by_id.get(sid, sid).lower())

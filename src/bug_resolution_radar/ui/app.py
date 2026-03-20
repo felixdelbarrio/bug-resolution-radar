@@ -14,6 +14,7 @@ from bug_resolution_radar.config import (
     all_configured_sources,
     ensure_env,
     load_settings,
+    rollup_source_ids,
     save_settings,
 )
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
@@ -152,7 +153,12 @@ def _ensure_scope_state(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     if not countries:
         st.session_state["workspace_country"] = ""
         st.session_state["workspace_source_id"] = ""
+        st.session_state["workspace_scope_mode"] = "source"
         return {}
+
+    mode = str(st.session_state.get("workspace_scope_mode") or "").strip().lower()
+    if mode not in {"country", "source"}:
+        st.session_state["workspace_scope_mode"] = "source"
 
     if "workspace_country" not in st.session_state:
         st.session_state["workspace_country"] = default_country
@@ -375,7 +381,7 @@ def _render_workspace_scope(
     if not countries:
         return
 
-    c_country, c_source = st.columns([1.0, 2.0], gap="small")
+    c_country, c_mode, c_source = st.columns([1.0, 1.3, 2.0], gap="small")
     with c_country:
         selected_country = st.selectbox(
             "País",
@@ -383,6 +389,22 @@ def _render_workspace_scope(
             key="workspace_country",
             on_change=_on_workspace_scope_change,
         )
+    with c_mode:
+        st.radio(
+            "Vista",
+            options=["country", "source"],
+            index=0 if str(st.session_state.get("workspace_scope_mode")) == "country" else 1,
+            format_func=lambda mode: "País" if mode == "country" else "Origen",
+            horizontal=True,
+            key="workspace_scope_mode",
+            on_change=_on_workspace_scope_change,
+        )
+
+    scope_mode = str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
+    if scope_mode not in {"country", "source"}:
+        scope_mode = "source"
+        st.session_state["workspace_scope_mode"] = scope_mode
+
     source_rows = scoped_sources.get(selected_country, [])
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
@@ -399,13 +421,33 @@ def _render_workspace_scope(
         if source_ids:
             if str(st.session_state.get("workspace_source_id") or "") not in source_ids:
                 st.session_state["workspace_source_id"] = source_ids[0]
-            st.selectbox(
-                "Origen",
-                options=source_ids,
-                key="workspace_source_id",
-                format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
-                on_change=_on_workspace_scope_change,
-            )
+            if scope_mode == "source":
+                st.selectbox(
+                    "Origen",
+                    options=source_ids,
+                    key="workspace_source_id",
+                    format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+                    on_change=_on_workspace_scope_change,
+                )
+            else:
+                selected_rollup = rollup_source_ids(
+                    settings,
+                    country=selected_country,
+                    available_source_ids=source_ids,
+                )
+                labels = [
+                    source_label_by_id.get(str(sid), str(sid)) for sid in selected_rollup[:2]
+                ]
+                st.selectbox(
+                    "Origen",
+                    options=[st.session_state["workspace_source_id"]],
+                    format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+                    disabled=True,
+                    key="workspace_source_id_aux",
+                    help="En vista País, la app agrega los orígenes configurados en Preferencias.",
+                )
+                if labels:
+                    st.caption(f"Agregado país activo: {' · '.join(labels)}")
         else:
             st.selectbox(
                 "Origen",
