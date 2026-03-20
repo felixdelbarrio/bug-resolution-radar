@@ -34,7 +34,7 @@ def test_resolve_period_ppt_template_path_raises_when_no_candidate_exists(
 
     try:
         config_mod.resolve_period_ppt_template_path(Settings())
-        assert False, "expected FileNotFoundError"
+        raise AssertionError("expected FileNotFoundError")
     except FileNotFoundError as exc:
         msg = str(exc)
         assert "plantilla del informe de seguimiento" in msg.lower()

@@ -231,7 +231,9 @@ def period_ppt_template_candidates(
     return out
 
 
-def resolve_period_ppt_template_path(settings: Settings, *, explicit_path: str | None = None) -> Path:
+def resolve_period_ppt_template_path(
+    settings: Settings, *, explicit_path: str | None = None
+) -> Path:
     """Resolve the first existing period follow-up PPT template candidate."""
     for candidate in period_ppt_template_candidates(settings, explicit_path=explicit_path):
         if candidate.exists() and candidate.is_file():
