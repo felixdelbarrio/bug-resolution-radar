@@ -29,6 +29,14 @@ from bug_resolution_radar.ui.pages import config_page, dashboard_page, ingest_pa
 from bug_resolution_radar.ui.style import inject_bbva_css, render_hero
 
 
+def _normalize_workspace_mode(mode: str) -> str:
+    """Normalize workspace mode aliases to canonical values."""
+    mode_txt = str(mode or "").strip().lower()
+    if mode_txt == "report":
+        return "report_exec"
+    return mode_txt
+
+
 def _sync_settings_to_process_env(settings: Settings) -> None:
     """
     Keep runtime `os.environ` aligned with values already parsed into Settings.
@@ -47,19 +55,24 @@ def _sync_settings_to_process_env(settings: Settings) -> None:
 
 def _set_workspace_mode(mode: str) -> None:
     """Switch top-level workspace mode and reset transient dashboard picker state."""
-    mode_txt = str(mode or "").strip().lower()
-    previous_mode = str(st.session_state.get("workspace_mode") or "").strip().lower()
-    if mode_txt == "report" and previous_mode != "report":
+    mode_txt = _normalize_workspace_mode(mode)
+    previous_mode = _normalize_workspace_mode(str(st.session_state.get("workspace_mode") or ""))
+    report_modes = {"report_exec", "report_period"}
+    if mode_txt in report_modes and previous_mode not in report_modes:
         report_state_prefixes = (
             "workspace_report_save_done::",  # legacy
             "workspace_report_saved_path::",
             "workspace_report_phase::",
             "workspace_report_request_sig::",
             "workspace_report_artifact::",
+            "workspace_period_report_saved_path::",
         )
         for key in list(st.session_state.keys()):
             key_txt = str(key or "")
-            if key_txt == "workspace_report_status" or key_txt.startswith(report_state_prefixes):
+            if key_txt in {
+                "workspace_report_status",
+                "workspace_period_report_status",
+            } or key_txt.startswith(report_state_prefixes):
                 st.session_state.pop(key, None)
     st.session_state["workspace_mode"] = mode_txt
 
@@ -205,17 +218,44 @@ def _ensure_scope_state(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     return sources_by_country
 
 
+def _has_country_rollup_scope(
+    settings: Settings,
+    *,
+    sources_by_country: Dict[str, List[Dict[str, str]]] | None = None,
+) -> bool:
+    """Return whether the selected country has explicit rollup configuration."""
+    scoped_sources = sources_by_country or _sources_with_results_by_country(settings)
+    countries = list(scoped_sources.keys())
+    if not countries:
+        return False
+
+    selected_country = str(st.session_state.get("workspace_country") or "").strip()
+    if selected_country not in countries:
+        selected_country = countries[0]
+
+    source_rows = scoped_sources.get(selected_country, [])
+    source_ids = [
+        str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
+    ]
+    configured_rollup = _configured_rollup_source_ids_for_country(
+        settings,
+        country=selected_country,
+        available_source_ids=source_ids,
+    )
+    return bool(configured_rollup)
+
+
 def _ensure_nav_state() -> None:
     """Initialize and keep navigation state consistent across reruns and jumps."""
     labels = _dashboard_labels()
     name_by_label = {label: name for name, label in labels.items()}
     section_names: List[str] = dashboard_page.dashboard_sections()
     default_section = "overview" if "overview" in section_names else section_names[0]
-    allowed_modes = {"dashboard", "report", "ingest", "config"}
+    allowed_modes = {"dashboard", "report_exec", "report_period", "ingest", "config"}
 
     if "workspace_mode" not in st.session_state:
         st.session_state["workspace_mode"] = "dashboard"
-    mode = str(st.session_state.get("workspace_mode") or "dashboard").strip().lower()
+    mode = _normalize_workspace_mode(str(st.session_state.get("workspace_mode") or "dashboard"))
     st.session_state["workspace_mode"] = mode if mode in allowed_modes else "dashboard"
 
     section = str(st.session_state.get("workspace_section") or default_section).strip().lower()
@@ -312,20 +352,29 @@ def _set_workspace_section(section: str) -> None:
     )
 
 
-def _render_workspace_header() -> None:
+def _render_workspace_header(
+    settings: Settings,
+    *,
+    sources_by_country: Dict[str, List[Dict[str, str]]] | None = None,
+) -> None:
     """Render top navigation bar and action icons."""
     labels = _dashboard_labels()
     name_by_label = {v: k for k, v in labels.items()}
     section_options = [labels[s] for s in dashboard_page.dashboard_sections()]
     if not section_options:
         return
-    mode = str(st.session_state.get("workspace_mode") or "dashboard")
+    mode = _normalize_workspace_mode(str(st.session_state.get("workspace_mode") or "dashboard"))
     current_section = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
     is_dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
 
-    left, right = st.columns([5.0, 1.3], gap="small")
+    has_period_report = _has_country_rollup_scope(
+        settings,
+        sources_by_country=sources_by_country,
+    )
+
+    left, right = st.columns([5.0, 1.6 if has_period_report else 1.3], gap="small")
 
     with left:
         with st.container(key="workspace_nav_tabs"):
@@ -347,21 +396,36 @@ def _render_workspace_header() -> None:
 
     with right:
         with st.container(key="workspace_nav_actions"):
-            b_rep, b_ing, b_theme, b_cfg = st.columns(4, gap="small")
+            action_cols = st.columns(5 if has_period_report else 4, gap="small")
             # Keep labels visually empty: icons are injected via CSS and tooltips provide semantics.
             icon_label = "\u00a0"
-            with b_rep:
-                with st.container(key="workspace_btn_slot_report"):
+            idx = 0
+            with action_cols[idx]:
+                with st.container(key="workspace_btn_slot_report_exec"):
                     st.button(
                         icon_label,
-                        key="workspace_btn_report",
-                        type="primary" if mode == "report" else "secondary",
+                        key="workspace_btn_report_exec",
+                        type="primary" if mode == "report_exec" else "secondary",
                         width="stretch",
-                        help="Informe PPT",
+                        help="Informe PPT ejecutivo",
                         on_click=_set_workspace_mode,
-                        args=("report",),
+                        args=("report_exec",),
                     )
-            with b_ing:
+            idx += 1
+            if has_period_report:
+                with action_cols[idx]:
+                    with st.container(key="workspace_btn_slot_report_period"):
+                        st.button(
+                            icon_label,
+                            key="workspace_btn_report_period",
+                            type="primary" if mode == "report_period" else "secondary",
+                            width="stretch",
+                            help="Informe seguimiento del periodo",
+                            on_click=_set_workspace_mode,
+                            args=("report_period",),
+                        )
+                idx += 1
+            with action_cols[idx]:
                 with st.container(key="workspace_btn_slot_ingest"):
                     st.button(
                         icon_label,
@@ -372,7 +436,8 @@ def _render_workspace_header() -> None:
                         on_click=_set_workspace_mode,
                         args=("ingest",),
                     )
-            with b_theme:
+            idx += 1
+            with action_cols[idx]:
                 with st.container(key="workspace_btn_slot_theme"):
                     st.button(
                         icon_label,
@@ -382,7 +447,8 @@ def _render_workspace_header() -> None:
                         help="Cambiar a tema claro" if is_dark_mode else "Cambiar a tema oscuro",
                         on_click=_toggle_dark_mode,
                     )
-            with b_cfg:
+            idx += 1
+            with action_cols[idx]:
                 with st.container(key="workspace_btn_slot_config"):
                     st.button(
                         icon_label,
@@ -560,15 +626,21 @@ def main() -> None:
     render_hero(hero_title)
     sources_by_country = _ensure_scope_state(settings)
     _ensure_nav_state()
+    if _normalize_workspace_mode(
+        str(st.session_state.get("workspace_mode") or "")
+    ) == "report_period" and not _has_country_rollup_scope(
+        settings, sources_by_country=sources_by_country
+    ):
+        st.session_state["workspace_mode"] = "report_exec"
     section_before_header = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
     with st.container(key="workspace_scope_bar"):
         _render_workspace_scope(settings, sources_by_country=sources_by_country)
     with st.container(key=f"workspace_nav_bar_{section_before_header}"):
-        _render_workspace_header()
+        _render_workspace_header(settings, sources_by_country=sources_by_country)
 
-    mode = str(st.session_state.get("workspace_mode") or "dashboard")
+    mode = _normalize_workspace_mode(str(st.session_state.get("workspace_mode") or "dashboard"))
     section = dashboard_page.normalize_dashboard_section(
         str(st.session_state.get("workspace_section") or "overview")
     )
@@ -577,8 +649,14 @@ def main() -> None:
 
     if mode == "ingest":
         ingest_page.render(settings)
-    elif mode == "report":
-        report_page.render(settings)
+    elif mode == "report_exec":
+        report_page.render_executive(settings)
+    elif mode == "report_period":
+        if _has_country_rollup_scope(settings, sources_by_country=sources_by_country):
+            report_page.render_period_followup(settings)
+        else:
+            st.session_state["workspace_mode"] = "report_exec"
+            report_page.render_executive(settings)
     elif mode == "config":
         config_page.render(settings)
     else:

@@ -701,10 +701,14 @@ def _render_period_followup_report(settings: Settings) -> None:
     _render_period_status(scope_key)
 
 
+def render_executive(settings: Settings) -> None:
+    _render_executive_report(settings)
+
+
+def render_period_followup(settings: Settings) -> None:
+    _render_period_followup_report(settings)
+
+
 def render(settings: Settings) -> None:
-    with st.container(key="report_tabs_shell"):
-        t_exec, t_period = st.tabs(["Ejecutivo", "Seguimiento periodo"])
-    with t_exec:
-        _render_executive_report(settings)
-    with t_period:
-        _render_period_followup_report(settings)
+    """Backward-compatible entrypoint: defaults to the executive report."""
+    render_executive(settings)
