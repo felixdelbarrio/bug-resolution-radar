@@ -31,6 +31,26 @@ def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 
 
+def _inject_period_summary_layout_css() -> None:
+    """Fine-tune spacing between KPI totals and expandable detail sections."""
+    st.markdown(
+        """
+        <style>
+          .period-summary-gap {
+            height: 0.52rem;
+          }
+          .st-key-period_summary_groups [data-testid="stExpander"] {
+            margin-top: 0.18rem;
+          }
+          .st-key-period_summary_groups [data-testid="stExpander"]:first-of-type {
+            margin-top: 0;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _fmt_delta(value: float | None) -> str:
     if value is None or pd.isna(value):
         return "sin referencia"
@@ -128,6 +148,7 @@ def _render_issue_group(
 
 def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> None:
     inject_insights_chip_css()
+    _inject_period_summary_layout_css()
     dff = _safe_df(dff_filtered)
     if dff.empty:
         st.info("No hay datos en el scope actual para resumen quincenal.")
@@ -200,62 +221,63 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         ],
         columns=3,
     )
-
-    _render_issue_group(
-        "Maestras abiertas",
-        summary.maestras_total,
-        groups.maestras_open,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-    )
-    _render_issue_group(
-        "Otras abiertas",
-        summary.others_total,
-        groups.others_open,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-    )
-    _render_issue_group(
-        "Nuevas (antes)",
-        summary.new_before,
-        groups.new_before,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-        help_text="quincena previa",
-    )
-    _render_issue_group(
-        "Nuevas (ahora)",
-        summary.new_now,
-        groups.new_now,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-        help_text="quincena actual",
-    )
-    _render_issue_group(
-        "Nuevas acumulado",
-        summary.new_accumulated,
-        groups.new_accumulated,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-        help_text="mes actual",
-    )
-    _render_issue_group(
-        "Cerradas (ahora)",
-        summary.closed_now,
-        groups.closed_now,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-        help_text="quincena actual",
-    )
-    _render_issue_group(
-        "Días de resolución (detalle)",
-        len(groups.resolved_now),
-        groups.resolved_now,
-        key_to_url=key_to_url,
-        key_to_meta=key_to_meta,
-        help_text="cerradas quincena actual",
-        source_col=None,
-    )
+    st.markdown('<div class="period-summary-gap"></div>', unsafe_allow_html=True)
+    with st.container(key="period_summary_groups"):
+        _render_issue_group(
+            "Maestras abiertas",
+            summary.maestras_total,
+            groups.maestras_open,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+        )
+        _render_issue_group(
+            "Otras abiertas",
+            summary.others_total,
+            groups.others_open,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+        )
+        _render_issue_group(
+            "Nuevas (antes)",
+            summary.new_before,
+            groups.new_before,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+            help_text="quincena previa",
+        )
+        _render_issue_group(
+            "Nuevas (ahora)",
+            summary.new_now,
+            groups.new_now,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+            help_text="quincena actual",
+        )
+        _render_issue_group(
+            "Nuevas acumulado",
+            summary.new_accumulated,
+            groups.new_accumulated,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+            help_text="mes actual",
+        )
+        _render_issue_group(
+            "Cerradas (ahora)",
+            summary.closed_now,
+            groups.closed_now,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+            help_text="quincena actual",
+        )
+        _render_issue_group(
+            "Días de resolución (detalle)",
+            len(groups.resolved_now),
+            groups.resolved_now,
+            key_to_url=key_to_url,
+            key_to_meta=key_to_meta,
+            help_text="cerradas quincena actual",
+            source_col=None,
+        )
 
     if scope_mode == "country" and result.by_source:
         st.markdown("##### Corte por origen seleccionado")

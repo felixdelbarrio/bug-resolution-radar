@@ -80,7 +80,7 @@ endef
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup CI all-github-actions test run clean build \
+.PHONY: help setup CI all-github-actions test run kill clean build \
 	_ensure-build-tools _ensure-desktop-runtime-deps _sync-build-env \
 	_test-ppt-regression _build-macos _build-linux _verify-macos-app _clean-build
 
@@ -91,6 +91,7 @@ help:
 	@echo "  make setup       Prepara/actualiza el entorno completo (venv + deps dev)"
 	@echo "  make CI          Ejecuta la cadena CI (ruff+black/lint/typecheck/tests/docs/deadcode)"
 	@echo "  make run         Arranca la UI (Streamlit) en localhost"
+	@echo "  make kill        Busca y mata instancias activas de la app (incluye puerto 8501)"
 	@echo "  make test        Ejecuta tests del repo (pytest)"
 	@echo "  make build       Flujo único de build: limpia + sync entorno + regresión PPT + build OS (macOS incluye verify)"
 	@echo "  make clean       Borra venv y cachés"
@@ -375,6 +376,43 @@ _verify-macos-app:
 
 run:
 	$(PYTHON) run_streamlit.py
+
+kill:
+	@set -e; \
+	pids=""; \
+	patterns=( \
+		"run_streamlit.py" \
+		"streamlit run .*run_streamlit.py" \
+		"streamlit run .*app.py" \
+		"bug-resolution-radar.app/Contents/MacOS/bug-resolution-radar" \
+		"dist/bug-resolution-radar" \
+	); \
+	for pat in "$${patterns[@]}"; do \
+		found="$$(pgrep -u "$$USER" -f "$$pat" 2>/dev/null || true)"; \
+		if [ -n "$$found" ]; then \
+			pids="$$pids $$found"; \
+		fi; \
+	done; \
+	if command -v lsof >/dev/null 2>&1; then \
+		port_pids="$$(lsof -ti tcp:8501 -sTCP:LISTEN 2>/dev/null || true)"; \
+		if [ -n "$$port_pids" ]; then \
+			pids="$$pids $$port_pids"; \
+		fi; \
+	fi; \
+	pids="$$(echo "$$pids" | tr ' ' '\n' | sed '/^$$/d' | sort -u | tr '\n' ' ')"; \
+	if [ -z "$$pids" ]; then \
+		echo "No se encontraron instancias activas de Bug Resolution Radar."; \
+		exit 0; \
+	fi; \
+	echo "Enviando SIGTERM a: $$pids"; \
+	kill $$pids 2>/dev/null || true; \
+	sleep 1; \
+	alive="$$(for pid in $$pids; do kill -0 "$$pid" 2>/dev/null && echo "$$pid"; done | tr '\n' ' ')"; \
+	if [ -n "$$alive" ]; then \
+		echo "Persisten procesos; enviando SIGKILL a: $$alive"; \
+		kill -9 $$alive 2>/dev/null || true; \
+	fi; \
+	echo "Instancias detenidas."
 
 _clean-build:
 	@$(call rm_rf_retry,dist dist_app build build_app build_bundle bug-resolution-radar-macos.zip bug-resolution-radar.pkg)

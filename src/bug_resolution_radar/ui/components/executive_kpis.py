@@ -8,8 +8,6 @@ from typing import Sequence
 
 import streamlit as st
 
-_EXEC_KPI_CSS_KEY = "__exec_kpi_css_injected"
-
 
 @dataclass(frozen=True)
 class ExecutiveKpiItem:
@@ -19,9 +17,6 @@ class ExecutiveKpiItem:
 
 
 def _inject_exec_kpi_css() -> None:
-    if bool(st.session_state.get(_EXEC_KPI_CSS_KEY, False)):
-        return
-    st.session_state[_EXEC_KPI_CSS_KEY] = True
     st.markdown(
         """
         <style>
@@ -34,7 +29,7 @@ def _inject_exec_kpi_css() -> None:
           .exec-kpi-grid {
             display: grid;
             gap: 0.42rem;
-            margin-bottom: 0.08rem;
+            margin-bottom: 0.40rem;
           }
           .exec-kpi {
             border: 1px solid var(--bbva-border);
@@ -60,7 +55,6 @@ def _inject_exec_kpi_css() -> None:
             color: var(--bbva-text-muted);
             font-size: 0.72rem;
             line-height: 1.1;
-            min-height: 0.96rem;
           }
           @media (max-width: 1020px) {
             .exec-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }

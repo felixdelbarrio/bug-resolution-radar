@@ -572,10 +572,15 @@ def _render_period_status(scope_key: str) -> None:
 
 def _render_period_followup_report(settings: Settings) -> None:
     country = str(st.session_state.get("workspace_country") or "").strip()
+    scope_mode = str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
     st.subheader("Informe Seguimiento del periodo")
     st.caption(
         "Plantilla corporativa con resumen quincenal agregado por país y láminas por origen."
     )
+
+    if scope_mode != "country":
+        st.info("Activa `Vista agregada` en el scope superior para habilitar este informe.")
+        return
 
     if not country:
         st.warning("Selecciona un país en el scope superior para generar el informe.")

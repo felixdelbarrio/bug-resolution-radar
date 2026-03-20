@@ -108,6 +108,13 @@ def _on_workspace_scope_change() -> None:
     _reset_scope_filters()
 
 
+def _on_workspace_aggregate_scope_change() -> None:
+    """Handle aggregate-scope checkbox changes."""
+    aggregate_enabled = bool(st.session_state.get("workspace_scope_country_enabled", False))
+    st.session_state["workspace_scope_mode"] = "country" if aggregate_enabled else "source"
+    _on_workspace_scope_change()
+
+
 def _sources_with_results(
     settings: Settings,
     *,
@@ -245,6 +252,18 @@ def _has_country_rollup_scope(
     return bool(configured_rollup)
 
 
+def _is_country_rollup_view_active(
+    settings: Settings,
+    *,
+    sources_by_country: Dict[str, List[Dict[str, str]]] | None = None,
+) -> bool:
+    """Return whether aggregate country view is available and currently active."""
+    if not _has_country_rollup_scope(settings, sources_by_country=sources_by_country):
+        return False
+    mode = str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
+    return mode == "country"
+
+
 def _ensure_nav_state() -> None:
     """Initialize and keep navigation state consistent across reruns and jumps."""
     labels = _dashboard_labels()
@@ -369,7 +388,7 @@ def _render_workspace_header(
     )
     is_dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
 
-    has_period_report = _has_country_rollup_scope(
+    has_period_report = _is_country_rollup_view_active(
         settings,
         sources_by_country=sources_by_country,
     )
@@ -508,43 +527,47 @@ def _render_workspace_scope(
     with c_right:
         if has_configured_rollup:
             c_mode, c_source = st.columns([1.3, 2.0], gap="small")
-            with c_mode:
-                st.radio(
-                    "Vista",
-                    options=["country", "source"],
-                    index=0
-                    if str(st.session_state.get("workspace_scope_mode")) == "country"
-                    else 1,
-                    format_func=lambda mode: "País" if mode == "country" else "Origen",
-                    horizontal=True,
-                    key="workspace_scope_mode",
-                    on_change=_on_workspace_scope_change,
-                )
             scope_mode = (
                 str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
             )
             if scope_mode not in {"country", "source"}:
                 scope_mode = "source"
                 st.session_state["workspace_scope_mode"] = scope_mode
+            with c_mode:
+                checkbox_key = "workspace_scope_country_enabled"
+                current_checked = scope_mode == "country"
+                if bool(st.session_state.get(checkbox_key, current_checked)) != current_checked:
+                    st.session_state[checkbox_key] = current_checked
+                st.checkbox(
+                    "Vista agregada",
+                    key=checkbox_key,
+                    on_change=_on_workspace_aggregate_scope_change,
+                    help=(
+                        "Activa la vista país agregada con los orígenes configurados. "
+                        "Desactívala para volver al trabajo por origen."
+                    ),
+                )
+                scope_mode = (
+                    "country" if bool(st.session_state.get(checkbox_key, False)) else "source"
+                )
 
             with c_source:
-                if scope_mode == "source":
-                    if source_ids:
-                        st.selectbox(
-                            "Origen",
-                            options=source_ids,
-                            key="workspace_source_id",
-                            format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
-                            on_change=_on_workspace_scope_change,
-                        )
-                    else:
-                        st.selectbox(
-                            "Origen",
-                            options=["__none__"],
-                            key="workspace_source_id_aux",
-                            format_func=lambda _: "Sin orígenes con resultados",
-                            disabled=True,
-                        )
+                if scope_mode == "source" and source_ids:
+                    st.selectbox(
+                        "Origen",
+                        options=source_ids,
+                        key="workspace_source_id",
+                        format_func=lambda sid: source_label_by_id.get(str(sid), str(sid)),
+                        on_change=_on_workspace_scope_change,
+                    )
+                elif scope_mode == "source":
+                    st.selectbox(
+                        "Origen",
+                        options=["__none__"],
+                        key="workspace_source_id_aux",
+                        format_func=lambda _: "Sin orígenes con resultados",
+                        disabled=True,
+                    )
                 else:
                     labels = [
                         source_label_by_id.get(str(sid), str(sid)) for sid in configured_rollup[:2]
@@ -554,6 +577,7 @@ def _render_workspace_scope(
         else:
             previous_mode = str(st.session_state.get("workspace_scope_mode") or "").strip().lower()
             st.session_state["workspace_scope_mode"] = "source"
+            st.session_state["workspace_scope_country_enabled"] = False
             if previous_mode == "country":
                 _on_workspace_scope_change()
             if source_ids:
@@ -628,7 +652,7 @@ def main() -> None:
     _ensure_nav_state()
     if _normalize_workspace_mode(
         str(st.session_state.get("workspace_mode") or "")
-    ) == "report_period" and not _has_country_rollup_scope(
+    ) == "report_period" and not _is_country_rollup_view_active(
         settings, sources_by_country=sources_by_country
     ):
         st.session_state["workspace_mode"] = "report_exec"
@@ -652,7 +676,7 @@ def main() -> None:
     elif mode == "report_exec":
         report_page.render_executive(settings)
     elif mode == "report_period":
-        if _has_country_rollup_scope(settings, sources_by_country=sources_by_country):
+        if _is_country_rollup_view_active(settings, sources_by_country=sources_by_country):
             report_page.render_period_followup(settings)
         else:
             st.session_state["workspace_mode"] = "report_exec"
