@@ -337,6 +337,17 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             "</svg>"
         ),
     )
+    icon_report_period = _svg_data_uri(
+        file_name="presentation.svg",
+        fallback_svg=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<rect x="4" y="4" width="16" height="11" rx="2" fill="none" '
+            'stroke="currentColor" stroke-width="2"/>'
+            '<path d="M12 15v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M8 20h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+            "</svg>"
+        ),
+    )
     icon_ingest = _svg_data_uri(
         file_name="spherica-down-cloud.svg",
         fallback_svg=(
@@ -999,10 +1010,14 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
           }
           /* Keep top-right actions icon-only (avoid label text bleed/overlap). */
           .st-key-workspace_btn_slot_report button,
+          .st-key-workspace_btn_slot_report_exec button,
+          .st-key-workspace_btn_slot_report_period button,
           .st-key-workspace_btn_slot_ingest button,
           .st-key-workspace_btn_slot_theme button,
           .st-key-workspace_btn_slot_config button,
           .st-key-workspace_btn_report button,
+          .st-key-workspace_btn_report_exec button,
+          .st-key-workspace_btn_report_period button,
           .st-key-workspace_btn_ingest button,
           .st-key-workspace_btn_theme button,
           .st-key-workspace_btn_config button {
@@ -1015,20 +1030,28 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             color: inherit !important;
           }
           .st-key-workspace_btn_slot_report button > *,
+          .st-key-workspace_btn_slot_report_exec button > *,
+          .st-key-workspace_btn_slot_report_period button > *,
           .st-key-workspace_btn_slot_ingest button > *,
           .st-key-workspace_btn_slot_theme button > *,
           .st-key-workspace_btn_slot_config button > *,
           .st-key-workspace_btn_report button > *,
+          .st-key-workspace_btn_report_exec button > *,
+          .st-key-workspace_btn_report_period button > *,
           .st-key-workspace_btn_ingest button > *,
           .st-key-workspace_btn_theme button > *,
           .st-key-workspace_btn_config button > * {
             opacity: 0 !important;
           }
           .st-key-workspace_btn_slot_report button::before,
+          .st-key-workspace_btn_slot_report_exec button::before,
+          .st-key-workspace_btn_slot_report_period button::before,
           .st-key-workspace_btn_slot_ingest button::before,
           .st-key-workspace_btn_slot_theme button::before,
           .st-key-workspace_btn_slot_config button::before,
           .st-key-workspace_btn_report button::before,
+          .st-key-workspace_btn_report_exec button::before,
+          .st-key-workspace_btn_report_period button::before,
           .st-key-workspace_btn_ingest button::before,
           .st-key-workspace_btn_theme button::before,
           .st-key-workspace_btn_config button::before {
@@ -1053,7 +1076,13 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
             opacity: 1 !important;
           }
           .st-key-workspace_btn_slot_report button,
-          .st-key-workspace_btn_report button { --bbva-btn-icon: url("__ICON_REPORT__"); }
+          .st-key-workspace_btn_slot_report_exec button,
+          .st-key-workspace_btn_report button,
+          .st-key-workspace_btn_report_exec button { --bbva-btn-icon: url("__ICON_REPORT__"); }
+          .st-key-workspace_btn_slot_report_period button,
+          .st-key-workspace_btn_report_period button {
+            --bbva-btn-icon: url("__ICON_REPORT_PERIOD__");
+          }
           .st-key-workspace_btn_slot_ingest button,
           .st-key-workspace_btn_ingest button { --bbva-btn-icon: url("__ICON_INGEST__"); }
           .st-key-workspace_btn_slot_theme button,
@@ -1722,6 +1751,7 @@ def _compiled_bbva_css(*, dark_mode: bool = False) -> str:
         .replace("__SEMANTIC_POPOVER_RULES__", semantic_popover_css_rules())
         .replace("__FONT_FACE_CSS__", _font_face_css())
         .replace("__ICON_REPORT__", icon_report)
+        .replace("__ICON_REPORT_PERIOD__", icon_report_period)
         .replace("__ICON_INGEST__", icon_ingest)
         .replace("__ICON_THEME__", icon_theme)
         .replace("__ICON_CONFIG__", icon_config)

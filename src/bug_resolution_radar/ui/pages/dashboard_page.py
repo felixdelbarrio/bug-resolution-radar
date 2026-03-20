@@ -8,7 +8,7 @@ from typing import Final, List
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.config import Settings
+from bug_resolution_radar.config import Settings, rollup_source_ids
 from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.ui.cache import cached_by_signature
 from bug_resolution_radar.ui.common import load_issues_df
@@ -54,21 +54,50 @@ def normalize_dashboard_section(section: str | None) -> str:
     return s if s in DASHBOARD_SECTIONS else "overview"
 
 
-def _apply_workspace_source_scope(df: pd.DataFrame) -> pd.DataFrame:
+def _workspace_scope_mode() -> str:
+    mode = str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
+    return mode if mode in {"country", "source"} else "source"
+
+
+def _country_source_ids_in_df(df: pd.DataFrame, *, country: str) -> List[str]:
+    if df is None or df.empty or "source_id" not in df.columns:
+        return []
+    source_series = df["source_id"].fillna("").astype(str).str.strip()
+    if "country" in df.columns and str(country or "").strip():
+        source_series = source_series[
+            df["country"].fillna("").astype(str).eq(str(country or "").strip())
+        ]
+    out = sorted({sid for sid in source_series.tolist() if sid})
+    return out
+
+
+def _apply_workspace_source_scope(df: pd.DataFrame, *, settings: Settings) -> pd.DataFrame:
     """Scope dataframe by currently selected country/source when columns are available."""
     if df is None or df.empty:
         return pd.DataFrame()
 
     selected_country = str(st.session_state.get("workspace_country") or "").strip()
     selected_source_id = str(st.session_state.get("workspace_source_id") or "").strip()
+    scope_mode = _workspace_scope_mode()
     if not selected_country and not selected_source_id:
         return df
 
     mask = pd.Series(True, index=df.index)
     if selected_country and "country" in df.columns:
         mask &= df["country"].fillna("").astype(str).eq(selected_country)
-    if selected_source_id and "source_id" in df.columns:
-        mask &= df["source_id"].fillna("").astype(str).eq(selected_source_id)
+    if "source_id" in df.columns:
+        if scope_mode == "source":
+            if selected_source_id:
+                mask &= df["source_id"].fillna("").astype(str).eq(selected_source_id)
+        else:
+            available_source_ids = _country_source_ids_in_df(df, country=selected_country)
+            selected_rollup = rollup_source_ids(
+                settings,
+                country=selected_country,
+                available_source_ids=available_source_ids,
+            )
+            if selected_rollup:
+                mask &= df["source_id"].fillna("").astype(str).isin(selected_rollup)
     if bool(mask.all()):
         return df.copy(deep=False)
     return df.loc[mask].copy(deep=False)
@@ -96,6 +125,12 @@ def _dashboard_data_cache_signature(
 
     selected_country = str(st.session_state.get("workspace_country") or "").strip()
     selected_source = str(st.session_state.get("workspace_source_id") or "").strip()
+    scope_mode = _workspace_scope_mode()
+    scoped_sources = (
+        tuple(_country_source_ids_in_df(scoped_df, country=selected_country))
+        if "source_id" in scoped_df.columns
+        else tuple()
+    )
     filters_sig = (
         _cache_filter_values(FILTER_STATUS_KEY),
         _cache_filter_values(FILTER_PRIORITY_KEY),
@@ -115,6 +150,8 @@ def _dashboard_data_cache_signature(
             data_rev,
             selected_country,
             selected_source,
+            scope_mode,
+            str(scoped_sources),
             "kpis=1" if include_kpis else "kpis=0",
             "ts=1" if include_timeseries_chart else "ts=0",
             f"lookback_m={getattr(settings, 'ANALYSIS_LOOKBACK_MONTHS', 0)}",
@@ -139,7 +176,7 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
         )
         st.caption(f"Detalle técnico: {exc}")
         return section
-    scoped_df = _apply_workspace_source_scope(df)
+    scoped_df = _apply_workspace_source_scope(df, settings=settings)
     if scoped_df.empty:
         st.warning("No hay datos todavía. Usa la opción Ingesta de la barra superior.")
         return section
