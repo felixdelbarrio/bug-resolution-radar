@@ -1418,6 +1418,18 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             txt = f"{value:,.1f}"
             return txt.replace(",", "X").replace(".", ",").replace("X", ".")
 
+        def _to_datetime_values(values: Sequence[object]) -> pd.Series:
+            if not values:
+                return pd.Series([], dtype="datetime64[ns]")
+            parsed = pd.to_datetime(list(values), errors="coerce", utc=True)
+            parsed = pd.Series(parsed).dropna()
+            if parsed.empty:
+                return pd.Series([], dtype="datetime64[ns]")
+            try:
+                return parsed.dt.tz_localize(None)
+            except Exception:
+                return parsed
+
         export_fig = go.Figure(fig)
         traces = list(getattr(export_fig, "data", []) or [])
         bar_category_keys: set[str] = set()
@@ -1453,7 +1465,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
         legend_ref_size = max(len(named_traces), len(set(pie_labels)))
         legend_font, max_name_len = _legend_profile(export_fig, legend_ref_size)
-        legend_render_font = max(16.2, legend_font + 2.8)
+        legend_render_font = max(17.2, legend_font + 3.0)
         legend_item_count = 0
         if showlegend:
             legend_names: List[str] = []
@@ -1488,8 +1500,8 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             rows = _estimate_legend_rows(
                 legend_names, font_size=legend_render_font, width_px=export_width
             )
-            while rows > 2 and legend_render_font > 10.0:
-                legend_render_font = max(10.0, legend_render_font - 0.5)
+            while rows > 3 and legend_render_font > 14.0:
+                legend_render_font = max(14.0, legend_render_font - 0.5)
                 rows = _estimate_legend_rows(
                     legend_names, font_size=legend_render_font, width_px=export_width
                 )
@@ -1498,8 +1510,12 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
         dense_chart = max(len(bar_category_keys), legend_item_count, len(set(pie_labels))) >= 8
         if dense_chart:
-            legend_render_font = min(17.4, legend_render_font + 1.5)
-        legend_render_font = max(16.2, legend_render_font)
+            legend_render_font = min(19.0, legend_render_font + 0.8)
+        legend_render_font = max(16.6, legend_render_font)
+        if showlegend:
+            rows = _estimate_legend_rows(
+                legend_names, font_size=legend_render_font, width_px=export_width
+            )
 
         is_stacked_layout = str(
             getattr(getattr(export_fig, "layout", None), "barmode", "") or ""
@@ -1518,19 +1534,25 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         }
         has_pie = "pie" in chart_types
         has_scatter_only = bool(chart_types) and chart_types.issubset({"scatter", "scattergl"})
+        scatter_x_values: List[object] = []
+        for trace in traces:
+            trace_type = str(getattr(trace, "type", "") or "").strip().lower()
+            if trace_type not in {"scatter", "scattergl"}:
+                continue
+            scatter_x_values.extend(_trace_values(trace, "x"))
+        parsed_scatter_x = _to_datetime_values(scatter_x_values)
+        is_timeseries_board = bool(
+            has_scatter_only and (not parsed_scatter_x.empty) and (len(parsed_scatter_x) >= 6)
+        )
         legend_orientation = "h"
         legend_xanchor = "center"
         legend_x = 0.5
-        if has_scatter_only:
-            legend_yanchor = "bottom"
-            legend_y = 1.02
-            legend_margin_bottom = 28
-            legend_margin_top = 96
-        else:
-            legend_yanchor = "top"
-            legend_y = -(0.14 + (max(1, rows) - 1) * 0.09)
-            legend_margin_bottom = 136 + (max(1, rows) * 32)
-            legend_margin_top = 56
+        legend_yanchor = "top"
+        legend_y = -(0.12 + (max(1, rows) - 1) * 0.105)
+        legend_margin_bottom = 132 + (max(1, rows) * 36)
+        legend_margin_top = 56
+        if is_timeseries_board:
+            legend_margin_bottom += 18
         if has_pie:
             legend_margin_bottom += 20
 
@@ -1693,6 +1715,47 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
         axis_tick_size = 24 if dense_chart else 22
         axis_title_size = 26 if dense_chart else 24
+        if is_timeseries_board:
+            span_days = max(
+                1,
+                int((parsed_scatter_x.max() - parsed_scatter_x.min()).total_seconds() / 86400.0),
+            )
+            if span_days <= 45:
+                dtick_ms = 3 * 24 * 60 * 60 * 1000
+                x_tick_format = "%d %b"
+            elif span_days <= 120:
+                dtick_ms = 7 * 24 * 60 * 60 * 1000
+                x_tick_format = "%d %b"
+            else:
+                dtick_ms = 14 * 24 * 60 * 60 * 1000
+                x_tick_format = "%b %Y"
+            axis_tick_size = 22 if dense_chart else 21
+            axis_title_size = 24 if dense_chart else 23
+            export_fig.update_layout(hovermode="x unified")
+            export_fig.update_xaxes(
+                showgrid=True,
+                tickformat=x_tick_format,
+                dtick=dtick_ms,
+                ticks="outside",
+                ticklen=7,
+                tickwidth=1.4,
+                tickangle=0,
+                automargin=True,
+                nticks=7,
+                title_standoff=16,
+            )
+            export_fig.update_yaxes(
+                rangemode="tozero",
+                ticks="outside",
+                ticklen=6,
+                tickwidth=1.2,
+                tickformat=",d",
+                separatethousands=True,
+                gridwidth=1,
+                automargin=True,
+                nticks=5,
+                title_standoff=18,
+            )
         export_fig.update_xaxes(
             tickfont=dict(family=FONT_BODY_BOOK, size=axis_tick_size, color=f"#{PALETTE['ink']}"),
             title_font=dict(
@@ -1728,7 +1791,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 if hasattr(trace, "textfont"):
                     trace.textfont = dict(
                         family=FONT_BODY_MEDIUM,
-                        size=28 if dense_chart else 26,
+                        size=30 if dense_chart else 28,
                         color=f"#{PALETTE['ink']}",
                     )
                 continue
@@ -1740,20 +1803,26 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     point_count = len(_trace_values(trace, "x"))
                 except Exception:
                     point_count = 0
-                if hasattr(trace, "line"):
+                mode_raw = str(getattr(trace, "mode", "") or "").strip().lower()
+                mode_tokens = {token.strip() for token in mode_raw.split("+") if token.strip()}
+                has_lines_mode = (not mode_tokens) or ("lines" in mode_tokens)
+                has_markers_mode = "markers" in mode_tokens
+                if is_timeseries_board and has_lines_mode and hasattr(trace, "line"):
                     line_obj = getattr(trace, "line", None)
                     line_color = getattr(line_obj, "color", None)
-                    trace.line = dict(color=line_color, width=4.0 if dense_chart else 3.2)
-                if point_count and point_count <= 140:
-                    trace.mode = "lines+markers"
-                    if hasattr(trace, "marker"):
-                        marker_obj = getattr(trace, "marker", None)
-                        marker_color = getattr(marker_obj, "color", None)
-                        trace.marker = dict(
-                            color=marker_color,
-                            size=7 if dense_chart else 6,
-                            line=dict(color=f"#{PALETTE['panel']}", width=1),
-                        )
+                    line_width = 4.4 if dense_chart else 3.8
+                    trace.line = dict(color=line_color, width=line_width, dash="solid")
+                if has_markers_mode and hasattr(trace, "marker"):
+                    marker_obj = getattr(trace, "marker", None)
+                    marker_color = getattr(marker_obj, "color", None)
+                    marker_size = 8 if dense_chart else 7
+                    if is_timeseries_board and point_count > 0 and point_count > 120:
+                        marker_size = 6 if dense_chart else 5
+                    trace.marker = dict(
+                        color=marker_color,
+                        size=marker_size,
+                        line=dict(color=f"#{PALETTE['panel']}", width=1),
+                    )
             if trace_type == "bar":
                 if allow_segment_labels:
                     # Smaller font for inside stacked labels.

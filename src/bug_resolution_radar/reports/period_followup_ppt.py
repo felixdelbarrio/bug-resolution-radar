@@ -15,6 +15,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.util import Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.kpis import compute_kpis
@@ -415,6 +416,34 @@ def _set_label_run(slide: Any, *, shape_index: int, paragraph_index: int, text: 
     _set_shape_text_fit(shape)
 
 
+def _set_shape_font_size(
+    slide: Any,
+    *,
+    shape_index: int,
+    font_size_pt: float,
+    bold: bool | None = None,
+    disable_autofit: bool = False,
+) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    if disable_autofit:
+        try:
+            tf.auto_size = MSO_AUTO_SIZE.NONE
+        except Exception:
+            pass
+        try:
+            tf.word_wrap = False
+        except Exception:
+            pass
+    for paragraph in list(tf.paragraphs):
+        for run in list(paragraph.runs):
+            run.font.size = Pt(float(font_size_pt))
+            if bold is not None:
+                run.font.bold = bool(bold)
+
+
 def _overlay_picture(
     slide: Any,
     *,
@@ -551,6 +580,9 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
     _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
     _set_shape_text(slide, 19, _fmt_delta_pct(summary.new_delta_pct))
+    _set_shape_font_size(slide, shape_index=10, font_size_pt=21.0, bold=True, disable_autofit=True)
+    _set_shape_font_size(slide, shape_index=13, font_size_pt=21.0, bold=True, disable_autofit=True)
+    _set_shape_font_size(slide, shape_index=19, font_size_pt=21.0, bold=True, disable_autofit=True)
 
 
 def _populate_evolution_slide(
