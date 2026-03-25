@@ -33,6 +33,7 @@ from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trend
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
+_FIRST_NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 
 @dataclass(frozen=True)
@@ -311,24 +312,62 @@ def _set_shape_text(slide: Any, index_1_based: int, text: str) -> None:
     shape = _shape_or_none(slide, index_1_based)
     if shape is None or not getattr(shape, "has_text_frame", False):
         return
-    shape.text = str(text or "")
-    _set_shape_text_fit(shape)
+    _set_shape_text_by_shape(shape, text)
 
 
 def _set_shape_text_by_shape(shape: Any, text: str) -> None:
     if shape is None or not getattr(shape, "has_text_frame", False):
         return
-    shape.text = str(text or "")
+    target_lines = str(text or "").splitlines() or [""]
+    tf = shape.text_frame
+    paragraphs = list(tf.paragraphs)
+    while len(paragraphs) < len(target_lines):
+        tf.add_paragraph()
+        paragraphs = list(tf.paragraphs)
+
+    for idx, line in enumerate(target_lines):
+        p = paragraphs[idx]
+        runs = list(p.runs)
+        if not runs:
+            p.add_run()
+            runs = list(p.runs)
+        runs[0].text = str(line)
+        for run in runs[1:]:
+            run.text = ""
+
+    for idx in range(len(target_lines), len(paragraphs)):
+        p = paragraphs[idx]
+        runs = list(p.runs)
+        if not runs:
+            p.add_run()
+            runs = list(p.runs)
+        runs[0].text = ""
+        for run in runs[1:]:
+            run.text = ""
+
     _set_shape_text_fit(shape)
 
 
-def _set_run_text(
-    slide: Any,
-    *,
-    shape_index: int,
-    paragraph_index: int,
-    run_index: int,
-    text: str,
+def _set_first_number(slide: Any, *, shape_index: int, value: int) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    replacement = str(int(value))
+    for paragraph in list(shape.text_frame.paragraphs):
+        for run in list(paragraph.runs):
+            src = str(getattr(run, "text", "") or "")
+            if not _FIRST_NUMBER_RE.search(src):
+                continue
+            run.text = _FIRST_NUMBER_RE.sub(replacement, src, count=1)
+            _set_shape_text_fit(shape)
+            return
+    source = str(getattr(shape, "text", "") or "")
+    if _FIRST_NUMBER_RE.search(source):
+        _set_shape_text_by_shape(shape, _FIRST_NUMBER_RE.sub(replacement, source, count=1))
+
+
+def _set_paragraph_value_after_colon(
+    slide: Any, *, shape_index: int, paragraph_index: int, value: int
 ) -> None:
     shape = _shape_or_none(slide, shape_index)
     if shape is None or not getattr(shape, "has_text_frame", False):
@@ -336,10 +375,43 @@ def _set_run_text(
     paragraphs = list(shape.text_frame.paragraphs)
     if paragraph_index >= len(paragraphs):
         return
-    runs = list(paragraphs[paragraph_index].runs)
-    if run_index >= len(runs):
+    paragraph = paragraphs[paragraph_index]
+    runs = list(paragraph.runs)
+    if not runs:
+        paragraph.add_run()
+        runs = list(paragraph.runs)
+    target = runs[1] if len(runs) > 1 else runs[0]
+    src = str(getattr(target, "text", "") or "")
+    trail_match = re.search(r"\s+$", src)
+    trailing = trail_match.group(0) if trail_match is not None else ""
+    target.text = f": {int(value)}{trailing}"
+    for run in runs[2:]:
+        run.text = ""
+    _set_shape_text_fit(shape)
+
+
+def _set_label_run(slide: Any, *, shape_index: int, paragraph_index: int, text: str) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
         return
-    runs[run_index].text = str(text or "")
+    paragraphs = list(shape.text_frame.paragraphs)
+    if paragraph_index >= len(paragraphs):
+        return
+    paragraph = paragraphs[paragraph_index]
+    runs = list(paragraph.runs)
+    if len(runs) < 2:
+        _set_shape_text_by_shape(shape, str(text or ""))
+        return
+    label_txt = str(text or "")
+    if len(runs) >= 3 and not str(getattr(runs[1], "text", "") or "").strip():
+        runs[1].text = " "
+        runs[2].text = label_txt
+        for run in runs[3:]:
+            run.text = ""
+    else:
+        runs[1].text = label_txt
+        for run in runs[2:]:
+            run.text = ""
     _set_shape_text_fit(shape)
 
 
@@ -371,7 +443,11 @@ def _overlay_picture(
 
 
 def _blank_shape_area(
-    slide: Any, *, anchor_shape: Any | None = None, anchor_shape_index: int | None = None
+    slide: Any,
+    *,
+    anchor_shape: Any | None = None,
+    anchor_shape_index: int | None = None,
+    replace_anchor: bool = False,
 ) -> None:
     anchor = anchor_shape
     if anchor is None and anchor_shape_index is not None:
@@ -388,6 +464,8 @@ def _blank_shape_area(
     blank.fill.solid()
     blank.fill.fore_color.rgb = RGBColor(255, 255, 255)
     blank.line.fill.background()
+    if replace_anchor:
+        _remove_shape(anchor)
 
 
 def _resolve_summary_chart_anchor(slide: Any) -> Any | None:
@@ -399,7 +477,9 @@ def _resolve_summary_chart_anchor(slide: Any) -> Any | None:
     return _shape_or_none(slide, 20)
 
 
-def _resolve_evolution_chart_anchors(slide: Any) -> tuple[Any | None, Any | None, Any | None, List[Any]]:
+def _resolve_evolution_chart_anchors(
+    slide: Any,
+) -> tuple[Any | None, Any | None, Any | None, List[Any]]:
     """
     Resolve anchors for (backlog, resolution, priority, extras) robustly.
 
@@ -430,7 +510,7 @@ def _chart_png(
     if spec is None:
         return b""
 
-    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=False)
+    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=(chart_id == "timeseries"))
     fig = spec.render(ChartContext(dff=dff, open_df=open_df, kpis=kpis))
     if fig is None:
         return b""
@@ -441,36 +521,35 @@ def _chart_png(
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     _set_shape_text(slide, 3, title)
-
-    open_label = "INCIDENCIA ABIERTA EN TOTAL" if int(summary.open_total) == 1 else "INCIDENCIAS ABIERTAS EN TOTAL"
-    maestras_label = "INCIDENCIA MAESTRA" if int(summary.maestras_total) == 1 else "INCIDENCIAS MAESTRAS"
-    others_label = "OTRA INCIDENCIA" if int(summary.others_total) == 1 else "OTRAS INCIDENCIAS"
-    _set_shape_text(slide, 4, f"{summary.open_total}\n{open_label}")
-    _set_shape_text(slide, 5, f"{summary.maestras_total}\n{maestras_label}")
-    _set_shape_text(slide, 6, f"{summary.others_total}\n{others_label}")
-
-    closed_label = "INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS"
-    _set_shape_text(slide, 9, f"{summary.closed_now} {closed_label}")
-    _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
-
-    days_now = _fmt_days(summary.resolution_days_now)
-    day_label = "DÍA DE RESOLUCIÓN" if days_now == 1 else "DÍAS DE RESOLUCIÓN"
-    _set_shape_text(slide, 12, f"{days_now} {day_label} (EN PROMEDIO)")
-    _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
-
-    new_label = "NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS"
-    _set_shape_text(slide, 15, f"{summary.new_now} {new_label}")
-    _set_shape_text(
+    _set_first_number(slide, shape_index=4, value=int(summary.open_total))
+    _set_first_number(slide, shape_index=5, value=int(summary.maestras_total))
+    _set_first_number(slide, shape_index=6, value=int(summary.others_total))
+    _set_first_number(slide, shape_index=9, value=int(summary.closed_now))
+    _set_first_number(slide, shape_index=12, value=_fmt_days(summary.resolution_days_now))
+    _set_first_number(slide, shape_index=15, value=int(summary.new_now))
+    _set_label_run(
         slide,
-        16,
-        "\n".join(
-            [
-                f"ANTES: {summary.new_before}",
-                f"AHORA: {summary.new_now}",
-                f"ACUMULADO: {summary.new_accumulated}",
-            ]
-        ),
+        shape_index=9,
+        paragraph_index=0,
+        text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
     )
+    _set_label_run(
+        slide,
+        shape_index=15,
+        paragraph_index=0,
+        text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
+    )
+    _set_paragraph_value_after_colon(
+        slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
+    )
+    _set_paragraph_value_after_colon(
+        slide, shape_index=16, paragraph_index=1, value=int(summary.new_now)
+    )
+    _set_paragraph_value_after_colon(
+        slide, shape_index=16, paragraph_index=2, value=int(summary.new_accumulated)
+    )
+    _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
+    _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
     _set_shape_text(slide, 19, _fmt_delta_pct(summary.new_delta_pct))
 
 
@@ -483,8 +562,8 @@ def _populate_evolution_slide(
     priority_png: bytes,
 ) -> None:
     _set_shape_text(slide, 2, title)
-    backlog_anchor, resolution_anchor, priority_anchor, extra_anchors = _resolve_evolution_chart_anchors(
-        slide
+    backlog_anchor, resolution_anchor, priority_anchor, extra_anchors = (
+        _resolve_evolution_chart_anchors(slide)
     )
     _overlay_picture(slide, anchor_shape=backlog_anchor, payload=backlog_png, replace_anchor=True)
     _overlay_picture(
@@ -494,7 +573,7 @@ def _populate_evolution_slide(
 
     # If template includes extra chart slots, blank them for now.
     for extra in extra_anchors:
-        _blank_shape_area(slide, anchor_shape=extra)
+        _blank_shape_area(slide, anchor_shape=extra, replace_anchor=True)
 
 
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
@@ -504,8 +583,7 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
         text = str(getattr(shape, "text", "") or "")
         if "Periodo" not in text and "periodo" not in text:
             continue
-        shape.text = str(period_label or "").strip()
-        _set_shape_text_fit(shape)
+        _set_shape_text_by_shape(shape, str(period_label or "").strip())
         return
 
 
@@ -602,7 +680,7 @@ def generate_country_period_followup_ppt(
         prs.slides[2],
         anchor_shape=_resolve_summary_chart_anchor(prs.slides[2]),
         payload=_chart_png(
-            settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="open_priority_pie"
+            settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="timeseries"
         ),
         replace_anchor=True,
     )
@@ -610,7 +688,7 @@ def generate_country_period_followup_ppt(
         prs.slides[3],
         anchor_shape=_resolve_summary_chart_anchor(prs.slides[3]),
         payload=_chart_png(
-            settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="open_priority_pie"
+            settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="timeseries"
         ),
         replace_anchor=True,
     )
@@ -618,7 +696,7 @@ def generate_country_period_followup_ppt(
         prs.slides[4],
         anchor_shape=_resolve_summary_chart_anchor(prs.slides[4]),
         payload=_chart_png(
-            settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="open_priority_pie"
+            settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="timeseries"
         ),
         replace_anchor=True,
     )

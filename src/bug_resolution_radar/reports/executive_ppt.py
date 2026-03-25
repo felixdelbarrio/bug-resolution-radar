@@ -490,13 +490,13 @@ def _legend_profile(fig: go.Figure, trace_count: int) -> Tuple[float, int]:
         for trace in list(getattr(fig, "data", []) or [])
     }
     if "pie" in types:
-        font_size, max_len = 10.4, 20
+        font_size, max_len = 12.6, 22
     elif "bar" in types:
-        font_size, max_len = (10.2, 22) if trace_count <= 5 else (9.4, 18)
+        font_size, max_len = (11.8, 24) if trace_count <= 5 else (10.8, 20)
     elif "scatter" in types:
-        font_size, max_len = 11.2, 24
+        font_size, max_len = 12.4, 26
     else:
-        font_size, max_len = 10.4, 21
+        font_size, max_len = 11.6, 23
 
     if trace_count >= 8:
         font_size -= 0.8
@@ -1453,7 +1453,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
 
         legend_ref_size = max(len(named_traces), len(set(pie_labels)))
         legend_font, max_name_len = _legend_profile(export_fig, legend_ref_size)
-        legend_render_font = max(14.2, legend_font + 2.4)
+        legend_render_font = max(16.2, legend_font + 2.8)
         legend_item_count = 0
         if showlegend:
             legend_names: List[str] = []
@@ -1499,6 +1499,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         dense_chart = max(len(bar_category_keys), legend_item_count, len(set(pie_labels))) >= 8
         if dense_chart:
             legend_render_font = min(17.4, legend_render_font + 1.5)
+        legend_render_font = max(16.2, legend_render_font)
 
         is_stacked_layout = str(
             getattr(getattr(export_fig, "layout", None), "barmode", "") or ""
@@ -1510,6 +1511,28 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             and len(bar_category_keys) <= 12
             and len(vertical_bar_traces) <= 6
         )
+        chart_types = {
+            str(getattr(trace, "type", "") or "").strip().lower()
+            for trace in traces
+            if str(getattr(trace, "type", "") or "").strip()
+        }
+        has_pie = "pie" in chart_types
+        has_scatter_only = bool(chart_types) and chart_types.issubset({"scatter", "scattergl"})
+        legend_orientation = "h"
+        legend_xanchor = "center"
+        legend_x = 0.5
+        if has_scatter_only:
+            legend_yanchor = "bottom"
+            legend_y = 1.02
+            legend_margin_bottom = 28
+            legend_margin_top = 96
+        else:
+            legend_yanchor = "top"
+            legend_y = -(0.14 + (max(1, rows) - 1) * 0.09)
+            legend_margin_bottom = 136 + (max(1, rows) * 32)
+            legend_margin_top = 56
+        if has_pie:
+            legend_margin_bottom += 20
 
         export_fig.update_layout(
             template="plotly_white",
@@ -1525,34 +1548,40 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             paper_bgcolor=f"#{PALETTE['panel']}",
             plot_bgcolor=f"#{PALETTE['panel']}",
             legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-(0.16 + (max(1, rows) - 1) * 0.10),
-                xanchor="left",
-                x=0.0,
+                orientation=legend_orientation,
+                yanchor=legend_yanchor,
+                y=legend_y,
+                xanchor=legend_xanchor,
+                x=legend_x,
                 font=dict(
                     family=FONT_BODY_MEDIUM,
                     size=legend_render_font,
                     color=f"#{PALETTE['ink']}",
                 ),
-                bgcolor=hex_to_rgba(BBVA_LIGHT.white, 0.98, fallback=BBVA_LIGHT.white),
+                bgcolor=hex_to_rgba(BBVA_LIGHT.white, 0.985, fallback=BBVA_LIGHT.white),
                 bordercolor=f"#{PALETTE['line']}",
-                borderwidth=1,
+                borderwidth=2,
                 title=dict(text=""),
             ),
             margin=dict(
                 l=max(24, int(getattr(getattr(export_fig.layout, "margin", None), "l", 24) or 24)),
                 r=max(24, int(getattr(getattr(export_fig.layout, "margin", None), "r", 24) or 24)),
-                t=max(52, int(getattr(getattr(export_fig.layout, "margin", None), "t", 52) or 52)),
+                t=max(
+                    legend_margin_top,
+                    int(
+                        getattr(getattr(export_fig.layout, "margin", None), "t", legend_margin_top)
+                        or legend_margin_top
+                    ),
+                ),
                 b=max(
-                    (106 + (max(1, rows) * 28)) if showlegend else 24,
+                    legend_margin_bottom if showlegend else 24,
                     int(
                         getattr(
                             getattr(export_fig.layout, "margin", None),
                             "b",
-                            (106 + (max(1, rows) * 28)) if showlegend else 24,
+                            legend_margin_bottom if showlegend else 24,
                         )
-                        or ((106 + (max(1, rows) * 28)) if showlegend else 24)
+                        or (legend_margin_bottom if showlegend else 24)
                     ),
                 ),
             ),
@@ -1699,13 +1728,32 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 if hasattr(trace, "textfont"):
                     trace.textfont = dict(
                         family=FONT_BODY_MEDIUM,
-                        size=26 if dense_chart else 24,
+                        size=28 if dense_chart else 26,
                         color=f"#{PALETTE['ink']}",
                     )
                 continue
 
             if str(getattr(trace, "name", "") or "").strip():
                 trace.showlegend = bool(showlegend)
+            if trace_type in {"scatter", "scattergl"}:
+                try:
+                    point_count = len(_trace_values(trace, "x"))
+                except Exception:
+                    point_count = 0
+                if hasattr(trace, "line"):
+                    line_obj = getattr(trace, "line", None)
+                    line_color = getattr(line_obj, "color", None)
+                    trace.line = dict(color=line_color, width=4.0 if dense_chart else 3.2)
+                if point_count and point_count <= 140:
+                    trace.mode = "lines+markers"
+                    if hasattr(trace, "marker"):
+                        marker_obj = getattr(trace, "marker", None)
+                        marker_color = getattr(marker_obj, "color", None)
+                        trace.marker = dict(
+                            color=marker_color,
+                            size=7 if dense_chart else 6,
+                            line=dict(color=f"#{PALETTE['panel']}", width=1),
+                        )
             if trace_type == "bar":
                 if allow_segment_labels:
                     # Smaller font for inside stacked labels.
