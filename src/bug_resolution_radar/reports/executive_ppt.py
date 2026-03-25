@@ -1418,6 +1418,23 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             txt = f"{value:,.1f}"
             return txt.replace(",", "X").replace(".", ",").replace("X", ".")
 
+        def _to_float(value: object) -> Optional[float]:
+            if value is None:
+                return None
+            if isinstance(value, (int, float)):
+                out = float(value)
+            else:
+                txt = str(value).strip()
+                if not txt:
+                    return None
+                try:
+                    out = float(txt)
+                except ValueError:
+                    return None
+            if pd.isna(out):
+                return None
+            return out
+
         def _to_datetime_values(values: Sequence[object]) -> pd.Series:
             if not values:
                 return pd.Series([], dtype="datetime64[ns]")
@@ -1560,7 +1577,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
             template="plotly_white",
             showlegend=showlegend,
             uniformtext=dict(
-                minsize=12 if allow_segment_labels else (18 if dense_chart else 16), mode="hide"
+                minsize=18 if allow_segment_labels else (19 if dense_chart else 18), mode="hide"
             ),
             font=dict(
                 family=FONT_BODY_BOOK,
@@ -1650,25 +1667,22 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 if allow_segment_labels:
                     # Keep per-segment labels inside each stacked block (readable).
                     for trace in bar_traces:
+                        xs = _trace_values(trace, "x")
                         ys = _trace_values(trace, "y")
                         seg_text: List[str] = []
-                        for y_raw in ys:
-                            if y_raw is None:
+                        for idx, y_raw in enumerate(ys):
+                            y_val = _to_float(y_raw)
+                            if y_val is None or y_val <= 0:
                                 seg_text.append("")
                                 continue
-                            if isinstance(y_raw, (int, float)):
-                                y_val = float(y_raw)
-                            else:
-                                y_txt = str(y_raw).strip()
-                                if not y_txt:
-                                    seg_text.append("")
-                                    continue
-                                try:
-                                    y_val = float(y_txt)
-                                except Exception:
-                                    seg_text.append("")
-                                    continue
-                            seg_text.append(f"{int(round(y_val))}" if y_val > 0 else "")
+                            x_key = str(xs[idx]) if idx < len(xs) else ""
+                            col_total = float(totals.get(x_key, 0.0))
+                            share = (y_val / col_total) if col_total > 0 else 0.0
+                            # Hide tiny blocks: avoid illegible micro labels.
+                            if share < 0.085 and y_val < 80.0:
+                                seg_text.append("")
+                                continue
+                            seg_text.append(_fmt_total(y_val))
                         if hasattr(trace, "text"):
                             trace.text = seg_text
                         if hasattr(trace, "texttemplate"):
@@ -1791,8 +1805,32 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                 if hasattr(trace, "textfont"):
                     trace.textfont = dict(
                         family=FONT_BODY_MEDIUM,
-                        size=30 if dense_chart else 28,
+                        size=32 if dense_chart else 30,
                         color=f"#{PALETTE['ink']}",
+                    )
+                pie_values = [_to_float(v) for v in _trace_values(trace, "values")]
+                pie_values = [v for v in pie_values if v is not None and v > 0]
+                total_pie = float(sum(pie_values)) if pie_values else 0.0
+                if total_pie > 0 and hasattr(trace, "text") and hasattr(trace, "textinfo"):
+                    raw_values = _trace_values(trace, "values")
+                    text_values: List[str] = []
+                    for raw in raw_values:
+                        val = _to_float(raw) or 0.0
+                        share = val / total_pie if total_pie > 0 else 0.0
+                        if share < 0.045:
+                            text_values.append("")
+                        elif share >= 0.20:
+                            text_values.append(f"{share * 100:.0f}%")
+                        else:
+                            text_values.append(f"{share * 100:.1f}%")
+                    trace.text = text_values
+                    trace.textinfo = "text"
+                if hasattr(trace, "marker"):
+                    marker_obj = getattr(trace, "marker", None)
+                    marker_colors = getattr(marker_obj, "colors", None) if marker_obj else None
+                    trace.marker = dict(
+                        colors=marker_colors,
+                        line=dict(color=f"#{PALETTE['panel']}", width=3),
                     )
                 continue
 
@@ -1829,7 +1867,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     if hasattr(trace, "textfont"):
                         trace.textfont = dict(
                             family=FONT_BODY_MEDIUM,
-                            size=16 if dense_chart else 18,
+                            size=20 if dense_chart else 22,
                             color=f"#{PALETTE['panel']}",
                         )
                     if hasattr(trace, "textposition"):

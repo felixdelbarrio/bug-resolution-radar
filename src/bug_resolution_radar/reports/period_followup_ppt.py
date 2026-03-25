@@ -172,8 +172,9 @@ def _fmt_delta_pct(value: float | None) -> str:
     if value is None or pd.isna(value):
         return "—"
     pct = float(value) * 100.0
-    sign = "+" if pct > 0 else ""
-    return f"{sign}{pct:.0f}%"
+    # Direction is already represented by template arrows/colors; keep compact
+    # absolute percentage text to avoid overflow in tiny delta placeholders.
+    return f"{abs(pct):.0f}%"
 
 
 def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
@@ -580,9 +581,9 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
     _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
     _set_shape_text(slide, 19, _fmt_delta_pct(summary.new_delta_pct))
-    _set_shape_font_size(slide, shape_index=10, font_size_pt=21.0, bold=True, disable_autofit=True)
-    _set_shape_font_size(slide, shape_index=13, font_size_pt=21.0, bold=True, disable_autofit=True)
-    _set_shape_font_size(slide, shape_index=19, font_size_pt=21.0, bold=True, disable_autofit=True)
+    _set_shape_font_size(slide, shape_index=10, font_size_pt=14.0, bold=True)
+    _set_shape_font_size(slide, shape_index=13, font_size_pt=14.0, bold=True)
+    _set_shape_font_size(slide, shape_index=19, font_size_pt=14.0, bold=True)
 
 
 def _populate_evolution_slide(
