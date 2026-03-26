@@ -17,7 +17,7 @@ from bug_resolution_radar.analytics.status_semantics import (
 from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 
-_WINDOW_DAYS = 14
+_DEFAULT_QUINCENA_LAST_FINISHED_ONLY = False
 _MAESTRA_FLAG_KEYS = (
     "BBVA_SEL_GIM_Maestra",
     "BBVA_MasterIncident",
@@ -200,36 +200,81 @@ def mark_maestra_rows(df: pd.DataFrame, *, settings: Settings) -> pd.Series:
     return is_maestra.fillna(False).astype(bool)
 
 
-def _scope_reference_day(df: pd.DataFrame) -> pd.Timestamp:
-    safe = _safe_df(df)
-    if safe.empty:
-        return pd.Timestamp.utcnow().tz_localize(None).normalize()
-
-    candidates: List[pd.Timestamp] = []
-    for col in ("updated", "resolved", "created"):
-        if col not in safe.columns:
-            continue
-        parsed = _to_dt_naive(safe[col]).dropna()
-        if parsed.empty:
-            continue
-        candidates.append(pd.Timestamp(parsed.max()).normalize())
-    if not candidates:
-        return pd.Timestamp.utcnow().tz_localize(None).normalize()
-    return max(candidates)
+def _parse_bool_flag(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    if not token:
+        return bool(default)
+    if token in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if token in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
 
 
-def _window_from_reference(reference_day: pd.Timestamp) -> QuincenalWindow:
-    end = pd.Timestamp(reference_day).normalize()
-    current_start = end - pd.Timedelta(days=_WINDOW_DAYS - 1)
-    previous_end = current_start - pd.Timedelta(days=1)
-    previous_start = previous_end - pd.Timedelta(days=_WINDOW_DAYS - 1)
-    month_start = end.replace(day=1)
+def _quincena_last_finished_only(settings: Settings) -> bool:
+    return _parse_bool_flag(
+        getattr(settings, "QUINCENA_LAST_FINISHED_ONLY", _DEFAULT_QUINCENA_LAST_FINISHED_ONLY),
+        default=_DEFAULT_QUINCENA_LAST_FINISHED_ONLY,
+    )
+
+
+def _analysis_reference_day(*, reference_day: pd.Timestamp | None = None) -> pd.Timestamp:
+    if reference_day is not None:
+        ts = pd.Timestamp(reference_day)
+        try:
+            ts = ts.tz_convert(None)
+        except Exception:
+            try:
+                ts = ts.tz_localize(None)
+            except Exception:
+                pass
+        return ts.normalize()
+    return pd.Timestamp.now().normalize()
+
+
+def _window_from_reference(
+    reference_day: pd.Timestamp,
+    *,
+    last_finished_only: bool,
+) -> QuincenalWindow:
+    anchor = pd.Timestamp(reference_day).normalize()
+    month_start = anchor.replace(day=1)
+    month_end = (month_start + pd.offsets.MonthBegin(1) - pd.Timedelta(days=1)).normalize()
+
+    if last_finished_only:
+        if int(anchor.day) <= 15:
+            previous_month_end = month_start - pd.Timedelta(days=1)
+            current_start = previous_month_end.replace(day=16)
+            current_end = previous_month_end
+        else:
+            current_start = month_start
+            current_end = month_start + pd.Timedelta(days=14)
+    else:
+        if int(anchor.day) <= 15:
+            current_start = month_start
+            current_end = month_start + pd.Timedelta(days=14)
+        else:
+            current_start = month_start + pd.Timedelta(days=15)
+            current_end = month_end
+
+    if int(current_start.day) == 1:
+        previous_end = current_start - pd.Timedelta(days=1)
+        previous_start = previous_end.replace(day=16)
+    else:
+        previous_start = current_start.replace(day=1)
+        previous_end = current_start - pd.Timedelta(days=1)
+    accumulated_month_start = current_start.replace(day=1)
+
     return QuincenalWindow(
         current_start=current_start,
-        current_end=end,
+        current_end=current_end,
         previous_start=previous_start,
         previous_end=previous_end,
-        month_start=month_start,
+        month_start=accumulated_month_start,
     )
 
 
@@ -340,7 +385,10 @@ def _scope_result(
     reference_day: pd.Timestamp,
 ) -> QuincenalScopeResult:
     safe = _safe_df(df)
-    window = _window_from_reference(reference_day)
+    window = _window_from_reference(
+        reference_day,
+        last_finished_only=_quincena_last_finished_only(settings),
+    )
 
     closed_mask = effective_closed_mask(safe)
     open_df = safe.loc[~closed_mask].copy(deep=False) if not safe.empty else pd.DataFrame()
@@ -499,6 +547,7 @@ def build_country_quincenal_result(
     country: str,
     source_ids: Sequence[str],
     source_label_by_id: Mapping[str, str] | None = None,
+    reference_day: pd.Timestamp | None = None,
 ) -> QuincenalCountryResult:
     country_txt = str(country or "").strip()
     selected_source_ids = tuple(
@@ -506,7 +555,7 @@ def build_country_quincenal_result(
     )
     labels = dict(source_label_by_id or source_label_map(settings, country=country_txt))
     scoped = _scope_df(df, country=country_txt, source_ids=selected_source_ids)
-    reference_day = _scope_reference_day(scoped)
+    normalized_reference_day = _analysis_reference_day(reference_day=reference_day)
 
     aggregate = _scope_result(
         df=scoped,
@@ -514,7 +563,7 @@ def build_country_quincenal_result(
         scope_id=country_txt,
         scope_label=country_txt or "País",
         source_label_by_id=labels,
-        reference_day=reference_day,
+        reference_day=normalized_reference_day,
     )
 
     by_source: Dict[str, QuincenalScopeResult] = {}
@@ -530,7 +579,7 @@ def build_country_quincenal_result(
             scope_id=sid,
             scope_label=labels.get(sid, sid),
             source_label_by_id=labels,
-            reference_day=reference_day,
+            reference_day=normalized_reference_day,
         )
 
     return QuincenalCountryResult(

@@ -368,6 +368,7 @@ class Settings(BaseModel):
     REPORT_PPT_DOWNLOAD_DIR: str = ""
     PERIOD_PPT_TEMPLATE_PATH: str = ""
     ANALYSIS_LOOKBACK_MONTHS: int = 12
+    QUINCENA_LAST_FINISHED_ONLY: str = "false"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
 
 
