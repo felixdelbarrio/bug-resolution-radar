@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -20,6 +20,8 @@ FILTERS_BOOTSTRAPPED_KEY = "__filters_bootstrapped_from_env"
 ISSUES_SCOPE_SORT_COL_KEY = "issues_tab::sort_col"
 ISSUES_SCOPE_SORT_ASC_KEY = "issues_tab::sort_asc"
 ISSUES_SCOPE_LIKE_QUERY_KEY = "issues_tab::sort_like_query"
+ISSUES_SCOPE_KEYS_KEY = "issues_tab::scope_keys"
+ISSUES_SCOPE_LABEL_KEY = "issues_tab::scope_label"
 
 FILTER_STATUS_ENV_KEY = "DASHBOARD_FILTER_STATUS_JSON"
 FILTER_PRIORITY_ENV_KEY = "DASHBOARD_FILTER_PRIORITY_JSON"
@@ -156,8 +158,60 @@ def clear_all_filters() -> None:
     st.session_state[FILTER_STATUS_KEY] = []
     st.session_state[FILTER_PRIORITY_KEY] = []
     st.session_state[FILTER_ASSIGNEE_KEY] = []
-    for key in (ISSUES_SCOPE_SORT_COL_KEY, ISSUES_SCOPE_SORT_ASC_KEY, ISSUES_SCOPE_LIKE_QUERY_KEY):
+    for key in (
+        ISSUES_SCOPE_SORT_COL_KEY,
+        ISSUES_SCOPE_SORT_ASC_KEY,
+        ISSUES_SCOPE_LIKE_QUERY_KEY,
+        ISSUES_SCOPE_KEYS_KEY,
+        ISSUES_SCOPE_LABEL_KEY,
+    ):
         st.session_state.pop(key, None)
+
+
+def _normalize_issue_keys(values: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in list(values or []):
+        token = str(raw or "").strip().upper()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def issue_scope_keys() -> List[str]:
+    """Return active zoom scope keys (if any)."""
+    return _normalize_issue_keys(list(st.session_state.get(ISSUES_SCOPE_KEYS_KEY) or []))
+
+
+def issue_scope_label() -> str:
+    """Return human-readable label for current zoom scope."""
+    return str(st.session_state.get(ISSUES_SCOPE_LABEL_KEY) or "").strip()
+
+
+def set_issue_scope(
+    *,
+    keys: Sequence[str],
+    label: str = "",
+    sort_col: str = "key",
+) -> None:
+    """Set zoom scope that narrows dashboard data to an explicit issue-key subset."""
+    normalized_keys = _normalize_issue_keys(keys)
+    if normalized_keys:
+        st.session_state[ISSUES_SCOPE_KEYS_KEY] = normalized_keys
+        st.session_state[ISSUES_SCOPE_LABEL_KEY] = str(label or "").strip()
+    else:
+        st.session_state.pop(ISSUES_SCOPE_KEYS_KEY, None)
+        st.session_state.pop(ISSUES_SCOPE_LABEL_KEY, None)
+    st.session_state[ISSUES_SCOPE_SORT_COL_KEY] = str(sort_col or "key").strip() or "key"
+    st.session_state.pop(ISSUES_SCOPE_LIKE_QUERY_KEY, None)
+
+
+def clear_issue_scope() -> None:
+    """Clear zoom scope subset while preserving global status/priority/assignee filters."""
+    st.session_state.pop(ISSUES_SCOPE_KEYS_KEY, None)
+    st.session_state.pop(ISSUES_SCOPE_LABEL_KEY, None)
 
 
 def apply_text_like_filter(
@@ -196,9 +250,21 @@ def apply_text_like_filter(
 
 def apply_issue_scope_like_filter(df: pd.DataFrame) -> pd.DataFrame:
     """Apply issues scope like-filter from session state (shared across dashboard tabs)."""
+    scoped = df
+    scoped_keys = issue_scope_keys()
+    if (
+        scoped_keys
+        and isinstance(scoped, pd.DataFrame)
+        and not scoped.empty
+        and "key" in scoped.columns
+    ):
+        allowed = set(scoped_keys)
+        mask = scoped["key"].fillna("").astype(str).str.strip().str.upper().isin(allowed)
+        scoped = scoped.loc[mask].copy(deep=False)
+
     sort_col = str(st.session_state.get(ISSUES_SCOPE_SORT_COL_KEY) or "").strip()
     like_query = str(st.session_state.get(ISSUES_SCOPE_LIKE_QUERY_KEY) or "").strip()
-    return apply_text_like_filter(df, column=sort_col, query=like_query)
+    return apply_text_like_filter(scoped, column=sort_col, query=like_query)
 
 
 # -------------------------

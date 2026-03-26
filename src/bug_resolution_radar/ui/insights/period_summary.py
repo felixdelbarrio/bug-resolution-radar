@@ -17,6 +17,7 @@ from bug_resolution_radar.ui.components.executive_kpis import (
     ExecutiveKpiItem,
     render_executive_kpi_grid,
 )
+from bug_resolution_radar.ui.dashboard.state import set_issue_scope
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
     issue_cards_html_from_df,
@@ -37,13 +38,28 @@ def _inject_period_summary_layout_css() -> None:
         """
         <style>
           .period-summary-gap {
-            height: 0.52rem;
+            height: 0.94rem;
           }
           .st-key-period_summary_groups [data-testid="stExpander"] {
-            margin-top: 0.18rem;
+            margin-top: 0.44rem;
           }
           .st-key-period_summary_groups [data-testid="stExpander"]:first-of-type {
-            margin-top: 0;
+            margin-top: 0.12rem;
+          }
+          [class*="st-key-period_summary_group_open_"] div[data-testid="stButton"] > button {
+            border: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            color: var(--bbva-action-link) !important;
+            font-weight: 700 !important;
+            text-align: right !important;
+            justify-content: flex-end !important;
+            padding: 0.06rem 0.04rem !important;
+            min-height: 1.72rem !important;
+          }
+          [class*="st-key-period_summary_group_open_"] div[data-testid="stButton"] > button:hover {
+            color: var(--bbva-action-link-hover) !important;
+            transform: translateX(1px);
           }
         </style>
         """,
@@ -89,6 +105,47 @@ def _visible_columns(df: pd.DataFrame) -> List[str]:
     return [c for c in preferred if c in df.columns]
 
 
+def _issue_keys(df: pd.DataFrame | None) -> List[str]:
+    safe = _safe_df(df)
+    if safe.empty or "key" not in safe.columns:
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in safe["key"].fillna("").astype(str).tolist():
+        key = str(raw or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _slug_for_key(raw: object) -> str:
+    txt = str(raw or "").strip().lower()
+    if not txt:
+        return "scope"
+    out = []
+    for ch in txt:
+        if ch.isalnum():
+            out.append(ch)
+        elif ch in {" ", "-", "_", "."}:
+            out.append("_")
+    slug = "".join(out).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug or "scope"
+
+
+def _jump_to_issues_with_scope(*, label: str, df: pd.DataFrame | None) -> None:
+    keys = _issue_keys(df)
+    if not keys:
+        st.info("No hay incidencias en este bloque para abrir en Issues.")
+        return
+    set_issue_scope(keys=keys, label=label, sort_col="key")
+    st.session_state["__jump_to_tab"] = "issues"
+    st.rerun()
+
+
 def _render_issue_group(
     title: str,
     count: int,
@@ -98,6 +155,7 @@ def _render_issue_group(
     key_to_meta: Dict[str, tuple[str, str, str]],
     help_text: str = "",
     source_col: str | None = "source",
+    zoom_label: str | None = None,
 ) -> None:
     suffix = f" ({help_text})" if help_text else ""
     with st.expander(f"{title}: {count}{suffix}", expanded=False):
@@ -122,7 +180,18 @@ def _render_issue_group(
         ]
         if help_text:
             chips.insert(1, neutral_chip_html(help_text))
-        st.markdown(f'<div class="ins-meta-row">{"".join(chips)}</div>', unsafe_allow_html=True)
+        meta_col, action_col = st.columns([4.25, 1.2], gap="small")
+        with meta_col:
+            st.markdown(f'<div class="ins-meta-row">{"".join(chips)}</div>', unsafe_allow_html=True)
+        scope_label = str(zoom_label or title or "").strip() or title
+        with action_col:
+            with st.container(key=f"period_summary_group_open_{_slug_for_key(scope_label)}"):
+                if st.button(
+                    "Abrir en Issues ↗",
+                    key=f"period_summary_group_open_btn::{_slug_for_key(scope_label)}",
+                    width="stretch",
+                ):
+                    _jump_to_issues_with_scope(label=scope_label, df=df)
 
         cards_html = issue_cards_html_from_df(
             df,
@@ -229,6 +298,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             groups.maestras_open,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
+            zoom_label="Maestras abiertas",
         )
         _render_issue_group(
             "Otras abiertas",
@@ -236,6 +306,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             groups.others_open,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
+            zoom_label="Otras abiertas",
         )
         _render_issue_group(
             "Nuevas (antes)",
@@ -244,6 +315,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="quincena previa",
+            zoom_label="Nuevas (quincena previa)",
         )
         _render_issue_group(
             "Nuevas (ahora)",
@@ -252,6 +324,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="quincena actual",
+            zoom_label="Nuevas (quincena actual)",
         )
         _render_issue_group(
             "Nuevas acumulado",
@@ -260,6 +333,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="mes actual",
+            zoom_label="Nuevas (acumulado)",
         )
         _render_issue_group(
             "Cerradas (ahora)",
@@ -268,6 +342,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="quincena actual",
+            zoom_label="Cerradas (quincena actual)",
         )
         _render_issue_group(
             "Días de resolución (detalle)",
@@ -277,6 +352,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             key_to_meta=key_to_meta,
             help_text="cerradas quincena actual",
             source_col=None,
+            zoom_label="Resolución (cerradas ahora)",
         )
 
     if scope_mode == "country" and result.by_source:

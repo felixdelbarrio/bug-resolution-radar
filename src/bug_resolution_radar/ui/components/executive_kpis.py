@@ -14,6 +14,7 @@ class ExecutiveKpiItem:
     label: str
     value: str
     hint: str = ""
+    tone: str = "neutral"
 
 
 def _inject_exec_kpi_css() -> None:
@@ -37,6 +38,18 @@ def _inject_exec_kpi_css() -> None:
             background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2));
             padding: 0.40rem 0.52rem;
           }
+          .exec-kpi.exec-kpi--red {
+            border-color: color-mix(in srgb, var(--bbva-signal-red) 52%, var(--bbva-border));
+            background: color-mix(in srgb, var(--bbva-signal-red-soft) 28%, var(--bbva-surface) 72%);
+          }
+          .exec-kpi.exec-kpi--green {
+            border-color: color-mix(in srgb, var(--bbva-signal-green) 50%, var(--bbva-border));
+            background: color-mix(in srgb, var(--bbva-signal-green) 20%, var(--bbva-surface) 80%);
+          }
+          .exec-kpi.exec-kpi--amber {
+            border-color: color-mix(in srgb, var(--bbva-signal-yellow) 58%, var(--bbva-border));
+            background: color-mix(in srgb, var(--bbva-signal-yellow) 22%, var(--bbva-surface) 78%);
+          }
           .exec-kpi-lbl {
             color: var(--bbva-text-muted);
             font-size: 0.76rem;
@@ -56,6 +69,9 @@ def _inject_exec_kpi_css() -> None:
             font-size: 0.72rem;
             line-height: 1.1;
           }
+          .exec-kpi.exec-kpi--red .exec-kpi-val { color: var(--bbva-signal-red-strong); }
+          .exec-kpi.exec-kpi--green .exec-kpi-val { color: var(--bbva-goal-green); }
+          .exec-kpi.exec-kpi--amber .exec-kpi-val { color: color-mix(in srgb, var(--bbva-signal-yellow) 86%, var(--bbva-midnight) 14%); }
           @media (max-width: 1020px) {
             .exec-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           }
@@ -79,10 +95,14 @@ def render_executive_kpi_grid(
     _inject_exec_kpi_css()
     cols = max(1, int(columns))
     cards_html = []
+    allowed_tones = {"neutral", "red", "green", "amber"}
     for item in items:
+        tone = str(getattr(item, "tone", "neutral") or "neutral").strip().lower()
+        if tone not in allowed_tones:
+            tone = "neutral"
         cards_html.append(
             (
-                '<article class="exec-kpi">'
+                f'<article class="exec-kpi exec-kpi--{tone}">'
                 f'<div class="exec-kpi-lbl">{html.escape(str(item.label))}</div>'
                 f'<div class="exec-kpi-val">{html.escape(str(item.value))}</div>'
                 f'<div class="exec-kpi-hint">{html.escape(str(item.hint or ""))}</div>'

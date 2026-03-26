@@ -37,6 +37,31 @@ def test_apply_issue_scope_like_filter_uses_dashboard_scope_keys(monkeypatch: An
     assert out["key"].tolist() == ["MEXBMI1-283490"]
 
 
+def test_apply_issue_scope_like_filter_applies_explicit_issue_key_subset(
+    monkeypatch: Any,
+) -> None:
+    fake_state = _FakeStreamlitState(
+        {
+            dashboard_state.ISSUES_SCOPE_KEYS_KEY: ["mexbmi1-2", "MEXBMI1-3", "MEXBMI1-3"],
+            dashboard_state.ISSUES_SCOPE_SORT_COL_KEY: "summary",
+            dashboard_state.ISSUES_SCOPE_LIKE_QUERY_KEY: "",
+        }
+    )
+    monkeypatch.setattr(dashboard_state, "st", fake_state)
+
+    df = pd.DataFrame(
+        [
+            {"key": "MEXBMI1-1", "summary": "uno"},
+            {"key": "MEXBMI1-2", "summary": "dos"},
+            {"key": "MEXBMI1-3", "summary": "tres"},
+        ]
+    )
+
+    out = dashboard_state.apply_issue_scope_like_filter(df)
+
+    assert out["key"].tolist() == ["MEXBMI1-2", "MEXBMI1-3"]
+
+
 def test_build_dashboard_data_context_applies_issue_scope_like_filter(monkeypatch: Any) -> None:
     now = pd.Timestamp.now(tz=timezone.utc)
     fake_state = _FakeStreamlitState(
@@ -76,6 +101,29 @@ def test_build_dashboard_data_context_applies_issue_scope_like_filter(monkeypatc
     )
 
     assert ctx.dff["key"].tolist() == ["MEXBMI1-283490"]
+
+
+def test_clear_all_filters_clears_issue_zoom_scope(monkeypatch: Any) -> None:
+    fake_state = _FakeStreamlitState(
+        {
+            dashboard_state.FILTER_STATUS_KEY: ["New"],
+            dashboard_state.FILTER_PRIORITY_KEY: ["High"],
+            dashboard_state.FILTER_ASSIGNEE_KEY: ["Ana"],
+            dashboard_state.ISSUES_SCOPE_KEYS_KEY: ["A-1"],
+            dashboard_state.ISSUES_SCOPE_LABEL_KEY: "Maestras",
+            dashboard_state.ISSUES_SCOPE_SORT_COL_KEY: "key",
+            dashboard_state.ISSUES_SCOPE_LIKE_QUERY_KEY: "a-1",
+        }
+    )
+    monkeypatch.setattr(dashboard_state, "st", fake_state)
+
+    dashboard_state.clear_all_filters()
+
+    assert fake_state.session_state[dashboard_state.FILTER_STATUS_KEY] == []
+    assert fake_state.session_state[dashboard_state.FILTER_PRIORITY_KEY] == []
+    assert fake_state.session_state[dashboard_state.FILTER_ASSIGNEE_KEY] == []
+    assert dashboard_state.ISSUES_SCOPE_KEYS_KEY not in fake_state.session_state
+    assert dashboard_state.ISSUES_SCOPE_LABEL_KEY not in fake_state.session_state
 
 
 def test_dashboard_data_cache_signature_ignores_section_label_when_shape_and_flags_match(

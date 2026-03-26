@@ -11,6 +11,10 @@ from time import perf_counter
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.analytics.period_summary import (
+    build_country_quincenal_result,
+    source_label_map,
+)
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
@@ -38,6 +42,11 @@ from bug_resolution_radar.ui.dashboard.performance import (
     elapsed_ms,
     render_perf_footer,
     resolve_budget,
+)
+from bug_resolution_radar.ui.dashboard.state import (
+    clear_issue_scope,
+    issue_scope_keys,
+    issue_scope_label,
 )
 
 MAX_CARDS_RENDER = 120
@@ -328,6 +337,64 @@ def _apply_shared_like_filter(df: pd.DataFrame, *, sort_col: str, key_prefix: st
         return df
 
     return _cached_apply_shared_like_filter(df, sort_col=sort_col, query=query)
+
+
+def _issue_keys(df: pd.DataFrame | None) -> list[str]:
+    if df is None or df.empty or "key" not in df.columns:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in df["key"].fillna("").astype(str).tolist():
+        key = str(raw or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _quincenal_scope_options(
+    df: pd.DataFrame, *, settings: Settings | None
+) -> dict[str, list[str]]:
+    if settings is None or df is None or df.empty:
+        return {}
+
+    country = str(st.session_state.get("workspace_country") or "").strip()
+    if not country and "country" in df.columns:
+        country = str(df["country"].fillna("").astype(str).iloc[0]).strip()
+
+    source_ids: list[str] = []
+    mode = str(st.session_state.get("workspace_scope_mode") or "source").strip().lower()
+    if mode == "source":
+        selected_source = str(st.session_state.get("workspace_source_id") or "").strip()
+        if selected_source:
+            source_ids = [selected_source]
+    if not source_ids and "source_id" in df.columns:
+        source_ids = sorted({sid for sid in df["source_id"].fillna("").astype(str).tolist() if sid})
+
+    labels = source_label_map(settings, country=country, source_ids=source_ids)
+    result = build_country_quincenal_result(
+        df=df,
+        settings=settings,
+        country=country,
+        source_ids=source_ids,
+        source_label_by_id=labels,
+    )
+    groups = result.aggregate.groups
+    open_total_df = pd.concat([groups.maestras_open, groups.others_open], ignore_index=True).copy(
+        deep=False
+    )
+    options: dict[str, list[str]] = {
+        "Todas": [],
+        "Nuevas (quincena actual)": _issue_keys(groups.new_now),
+        "Nuevas (quincena previa)": _issue_keys(groups.new_before),
+        "Cerradas (quincena actual)": _issue_keys(groups.closed_now),
+        "Resolución (cerradas ahora)": _issue_keys(groups.resolved_now),
+        "Maestras abiertas": _issue_keys(groups.maestras_open),
+        "Otras abiertas": _issue_keys(groups.others_open),
+        "Abiertas totales": _issue_keys(open_total_df),
+    }
+    return {label: keys for label, keys in options.items() if label == "Todas" or keys}
 
 
 @st.cache_data(
@@ -896,6 +963,34 @@ def render_issues_section(
         export_df = table_df.copy(deep=False)
         perf_ms["filters"] = _elapsed_ms(filters_start_ts)
 
+        quincenal_options = _quincenal_scope_options(dff_show_raw, settings=settings)
+        if len(quincenal_options) > 1:
+            quincenal_key = f"{key_prefix}::quincenal_scope"
+            selected_quincenal = st.selectbox(
+                "Filtro quincenal",
+                options=list(quincenal_options.keys()),
+                key=quincenal_key,
+                help=(
+                    "Filtro adicional para zoom operativo en bloques de resumen "
+                    "(nuevas/cerradas/maestras/otras)."
+                ),
+            )
+            selected_keys = quincenal_options.get(str(selected_quincenal), [])
+            if selected_keys:
+                allowed = set(selected_keys)
+                mask = (
+                    dff_show_raw["key"].fillna("").astype(str).str.strip().str.upper().isin(allowed)
+                    if "key" in dff_show_raw.columns
+                    else pd.Series(False, index=dff_show_raw.index, dtype=bool)
+                )
+                dff_show_raw = dff_show_raw.loc[mask].copy(deep=False)
+                dff_like = _apply_shared_like_filter(
+                    dff_show_raw, sort_col=sort_col, key_prefix=key_prefix
+                )
+                dff_show = _apply_shared_sort(dff_like, sort_col=sort_col, sort_asc=sort_asc)
+                table_df = _cached_make_table_export_df(dff_show)
+                export_df = table_df.copy(deep=False)
+
         # Compact toolbar: top row for view toggle + count.
         view_key = f"{key_prefix}::view_mode"
         if str(st.session_state.get(view_key) or "").strip() not in {"Cards", "Tabla"}:
@@ -939,6 +1034,10 @@ def render_issues_section(
 
         top_left, top_right = st.columns([2.2, 1.0], gap="small")
         with top_left:
+            scoped_keys = issue_scope_keys()
+            if scoped_keys:
+                label = issue_scope_label() or "Zoom"
+                st.caption(f"Zoom activo: {label} · {len(scoped_keys):,} incidencias.")
             if view == "Cards" and total_filtered > 0:
                 st.caption(
                     f"Mostrando {cards_start_idx + 1:,}-{cards_end_idx:,} de {total_filtered:,} issues filtradas"
@@ -953,6 +1052,15 @@ def render_issues_section(
             toggle_scope = f"{key_prefix}_view_toggle"
             _inject_issues_view_toggle_css(scope_key=toggle_scope)
             with st.container(key=toggle_scope):
+                scoped_keys = issue_scope_keys()
+                if scoped_keys:
+                    st.button(
+                        "Limpiar zoom",
+                        key=f"{key_prefix}::clear_issue_zoom",
+                        type="secondary",
+                        width="stretch",
+                        on_click=clear_issue_scope,
+                    )
                 c_cards, c_table = st.columns(2, gap="small")
                 c_cards.button(
                     "Cards",

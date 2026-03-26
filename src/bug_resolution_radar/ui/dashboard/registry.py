@@ -12,6 +12,7 @@ import streamlit as st
 
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import (
+    flow_signal_color_map,
     normalize_text_col,
     priority_color_map,
     priority_rank,
@@ -148,7 +149,34 @@ def _render_timeseries(ctx: ChartContext) -> Optional[go.Figure]:
     if fig is None:
         return None
     # Already a plotly Figure produced by compute_kpis
-    return apply_plotly_bbva(fig, showlegend=True)
+    out = apply_plotly_bbva(fig, showlegend=True)
+    color_map = flow_signal_color_map()
+    name_map = {
+        "created": "Creadas",
+        "closed": "Cerradas",
+        "open_backlog_proxy": "Backlog abierto",
+    }
+    for trace in list(getattr(out, "data", []) or []):
+        name_raw = str(getattr(trace, "name", "") or "").strip()
+        token = name_raw.lower()
+        display_name = name_map.get(token)
+        if display_name:
+            trace.name = display_name
+        color = color_map.get(token)
+        if color and hasattr(trace, "line"):
+            line_obj = getattr(trace, "line", None)
+            line_width = float(getattr(line_obj, "width", 2.5) or 2.5)
+            trace.line = dict(color=color, width=max(2.5, line_width))
+        if color and hasattr(trace, "marker"):
+            marker_obj = getattr(trace, "marker", None)
+            raw_marker_size = getattr(marker_obj, "size", 0) if marker_obj is not None else 0
+            try:
+                marker_size = float(raw_marker_size or 0)
+            except Exception:
+                marker_size = 0.0
+            trace.marker = dict(color=color, size=marker_size if marker_size > 0 else 6)
+    out.update_layout(legend_title_text="")
+    return out
 
 
 def _insights_timeseries(ctx: ChartContext) -> List[str]:
