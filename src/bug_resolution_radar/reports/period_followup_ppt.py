@@ -13,7 +13,9 @@ from typing import Any, List, Sequence
 import pandas as pd
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
+from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, MSO_SHAPE_TYPE
+from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.util import Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.kpis import compute_kpis
@@ -31,6 +33,8 @@ from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_EMU_PER_INCH = 914400.0
+_FIRST_NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 
 @dataclass(frozen=True)
@@ -168,8 +172,9 @@ def _fmt_delta_pct(value: float | None) -> str:
     if value is None or pd.isna(value):
         return "—"
     pct = float(value) * 100.0
-    sign = "+" if pct > 0 else ""
-    return f"{sign}{pct:.0f}%"
+    # Direction is already represented by template arrows/colors; keep compact
+    # absolute percentage text to avoid overflow in tiny delta placeholders.
+    return f"{abs(pct):.0f}%"
 
 
 def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
@@ -259,20 +264,112 @@ def _shape_or_none(slide: Any, index_1_based: int) -> Any | None:
     return slide.shapes[idx]
 
 
+def _shape_area_in2(shape: Any) -> float:
+    return float(shape.width) * float(shape.height) / (_EMU_PER_INCH * _EMU_PER_INCH)
+
+
+def _shape_center(shape: Any) -> tuple[float, float]:
+    cx = float(shape.left) + (float(shape.width) / 2.0)
+    cy = float(shape.top) + (float(shape.height) / 2.0)
+    return cx, cy
+
+
+def _picture_candidates(slide: Any, *, min_area_in2: float = 1.0) -> List[Any]:
+    out: List[Any] = []
+    for shape in slide.shapes:
+        try:
+            if getattr(shape, "shape_type", None) != MSO_SHAPE_TYPE.PICTURE:
+                continue
+        except Exception:
+            continue
+        if _shape_area_in2(shape) < float(min_area_in2):
+            continue
+        out.append(shape)
+    return out
+
+
+def _remove_shape(shape: Any) -> None:
+    try:
+        node = shape.element
+        node.getparent().remove(node)
+    except Exception:
+        return
+
+
+def _set_shape_text_fit(shape: Any) -> None:
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
+
+
 def _set_shape_text(slide: Any, index_1_based: int, text: str) -> None:
     shape = _shape_or_none(slide, index_1_based)
     if shape is None or not getattr(shape, "has_text_frame", False):
         return
-    shape.text = str(text or "")
+    _set_shape_text_by_shape(shape, text)
 
 
-def _set_run_text(
-    slide: Any,
-    *,
-    shape_index: int,
-    paragraph_index: int,
-    run_index: int,
-    text: str,
+def _set_shape_text_by_shape(shape: Any, text: str) -> None:
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    target_lines = str(text or "").splitlines() or [""]
+    tf = shape.text_frame
+    paragraphs = list(tf.paragraphs)
+    while len(paragraphs) < len(target_lines):
+        tf.add_paragraph()
+        paragraphs = list(tf.paragraphs)
+
+    for idx, line in enumerate(target_lines):
+        p = paragraphs[idx]
+        runs = list(p.runs)
+        if not runs:
+            p.add_run()
+            runs = list(p.runs)
+        runs[0].text = str(line)
+        for run in runs[1:]:
+            run.text = ""
+
+    for idx in range(len(target_lines), len(paragraphs)):
+        p = paragraphs[idx]
+        runs = list(p.runs)
+        if not runs:
+            p.add_run()
+            runs = list(p.runs)
+        runs[0].text = ""
+        for run in runs[1:]:
+            run.text = ""
+
+    _set_shape_text_fit(shape)
+
+
+def _set_first_number(slide: Any, *, shape_index: int, value: int) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    replacement = str(int(value))
+    for paragraph in list(shape.text_frame.paragraphs):
+        for run in list(paragraph.runs):
+            src = str(getattr(run, "text", "") or "")
+            if not _FIRST_NUMBER_RE.search(src):
+                continue
+            run.text = _FIRST_NUMBER_RE.sub(replacement, src, count=1)
+            _set_shape_text_fit(shape)
+            return
+    source = str(getattr(shape, "text", "") or "")
+    if _FIRST_NUMBER_RE.search(source):
+        _set_shape_text_by_shape(shape, _FIRST_NUMBER_RE.sub(replacement, source, count=1))
+
+
+def _set_paragraph_value_after_colon(
+    slide: Any, *, shape_index: int, paragraph_index: int, value: int
 ) -> None:
     shape = _shape_or_none(slide, shape_index)
     if shape is None or not getattr(shape, "has_text_frame", False):
@@ -280,29 +377,111 @@ def _set_run_text(
     paragraphs = list(shape.text_frame.paragraphs)
     if paragraph_index >= len(paragraphs):
         return
-    runs = list(paragraphs[paragraph_index].runs)
-    if run_index >= len(runs):
+    paragraph = paragraphs[paragraph_index]
+    runs = list(paragraph.runs)
+    if not runs:
+        paragraph.add_run()
+        runs = list(paragraph.runs)
+    target = runs[1] if len(runs) > 1 else runs[0]
+    src = str(getattr(target, "text", "") or "")
+    trail_match = re.search(r"\s+$", src)
+    trailing = trail_match.group(0) if trail_match is not None else ""
+    target.text = f": {int(value)}{trailing}"
+    for run in runs[2:]:
+        run.text = ""
+    _set_shape_text_fit(shape)
+
+
+def _set_label_run(slide: Any, *, shape_index: int, paragraph_index: int, text: str) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
         return
-    runs[run_index].text = str(text or "")
+    paragraphs = list(shape.text_frame.paragraphs)
+    if paragraph_index >= len(paragraphs):
+        return
+    paragraph = paragraphs[paragraph_index]
+    runs = list(paragraph.runs)
+    if len(runs) < 2:
+        _set_shape_text_by_shape(shape, str(text or ""))
+        return
+    label_txt = str(text or "")
+    if len(runs) >= 3 and not str(getattr(runs[1], "text", "") or "").strip():
+        runs[1].text = " "
+        runs[2].text = label_txt
+        for run in runs[3:]:
+            run.text = ""
+    else:
+        runs[1].text = label_txt
+        for run in runs[2:]:
+            run.text = ""
+    _set_shape_text_fit(shape)
 
 
-def _overlay_picture(slide: Any, *, anchor_shape_index: int, payload: bytes) -> None:
-    anchor = _shape_or_none(slide, anchor_shape_index)
+def _set_shape_font_size(
+    slide: Any,
+    *,
+    shape_index: int,
+    font_size_pt: float,
+    bold: bool | None = None,
+    disable_autofit: bool = False,
+) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    if disable_autofit:
+        try:
+            tf.auto_size = MSO_AUTO_SIZE.NONE
+        except Exception:
+            pass
+        try:
+            tf.word_wrap = False
+        except Exception:
+            pass
+    for paragraph in list(tf.paragraphs):
+        for run in list(paragraph.runs):
+            run.font.size = Pt(float(font_size_pt))
+            if bold is not None:
+                run.font.bold = bool(bold)
+
+
+def _overlay_picture(
+    slide: Any,
+    *,
+    payload: bytes,
+    anchor_shape: Any | None = None,
+    anchor_shape_index: int | None = None,
+    replace_anchor: bool = False,
+) -> Any | None:
+    anchor = anchor_shape
+    if anchor is None and anchor_shape_index is not None:
+        anchor = _shape_or_none(slide, anchor_shape_index)
     if anchor is None:
-        return
+        return None
     if not payload:
-        return
-    slide.shapes.add_picture(
+        return None
+    rendered = slide.shapes.add_picture(
         BytesIO(payload),
         anchor.left,
         anchor.top,
         width=anchor.width,
         height=anchor.height,
     )
+    if replace_anchor:
+        _remove_shape(anchor)
+    return rendered
 
 
-def _blank_shape_area(slide: Any, *, anchor_shape_index: int) -> None:
-    anchor = _shape_or_none(slide, anchor_shape_index)
+def _blank_shape_area(
+    slide: Any,
+    *,
+    anchor_shape: Any | None = None,
+    anchor_shape_index: int | None = None,
+    replace_anchor: bool = False,
+) -> None:
+    anchor = anchor_shape
+    if anchor is None and anchor_shape_index is not None:
+        anchor = _shape_or_none(slide, anchor_shape_index)
     if anchor is None:
         return
     blank = slide.shapes.add_shape(
@@ -315,6 +494,42 @@ def _blank_shape_area(slide: Any, *, anchor_shape_index: int) -> None:
     blank.fill.solid()
     blank.fill.fore_color.rgb = RGBColor(255, 255, 255)
     blank.line.fill.background()
+    if replace_anchor:
+        _remove_shape(anchor)
+
+
+def _resolve_summary_chart_anchor(slide: Any) -> Any | None:
+    # Prefer the main chart placeholder (largest picture in summary slide).
+    picture_shapes = _picture_candidates(slide, min_area_in2=1.0)
+    if picture_shapes:
+        return max(picture_shapes, key=_shape_area_in2)
+    # Backward compatibility with canonical corporate template.
+    return _shape_or_none(slide, 20)
+
+
+def _resolve_evolution_chart_anchors(
+    slide: Any,
+) -> tuple[Any | None, Any | None, Any | None, List[Any]]:
+    """
+    Resolve anchors for (backlog, resolution, priority, extras) robustly.
+
+    Uses geometric placement so the renderer does not depend on mutable shape indexes.
+    """
+    picture_shapes = _picture_candidates(slide, min_area_in2=1.0)
+    if len(picture_shapes) >= 3:
+        priority_shape = max(picture_shapes, key=lambda s: _shape_center(s)[0])
+        remaining = [s for s in picture_shapes if s is not priority_shape]
+        backlog_shape = min(remaining, key=lambda s: _shape_center(s)[1]) if remaining else None
+        resolution_shape = max(remaining, key=lambda s: _shape_center(s)[1]) if remaining else None
+        used = {id(x) for x in (backlog_shape, resolution_shape, priority_shape) if x is not None}
+        extras = [shape for shape in picture_shapes if id(shape) not in used]
+        return backlog_shape, resolution_shape, priority_shape, extras
+
+    # Fallback to legacy index mapping.
+    backlog_shape = _shape_or_none(slide, 7)
+    resolution_shape = _shape_or_none(slide, 4)
+    priority_shape = _shape_or_none(slide, 9)
+    return backlog_shape, resolution_shape, priority_shape, []
 
 
 def _chart_png(
@@ -325,7 +540,7 @@ def _chart_png(
     if spec is None:
         return b""
 
-    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=False)
+    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=(chart_id == "timeseries"))
     fig = spec.render(ChartContext(dff=dff, open_df=open_df, kpis=kpis))
     if fig is None:
         return b""
@@ -336,73 +551,39 @@ def _chart_png(
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     _set_shape_text(slide, 3, title)
-
-    _set_run_text(
-        slide, shape_index=4, paragraph_index=0, run_index=0, text=str(summary.open_total)
-    )
-    _set_run_text(
-        slide,
-        shape_index=5,
-        paragraph_index=0,
-        run_index=0,
-        text=str(summary.maestras_total),
-    )
-    _set_run_text(
-        slide,
-        shape_index=6,
-        paragraph_index=0,
-        run_index=0,
-        text=f"{summary.others_total} ",
-    )
-
-    _set_run_text(
+    _set_first_number(slide, shape_index=4, value=int(summary.open_total))
+    _set_first_number(slide, shape_index=5, value=int(summary.maestras_total))
+    _set_first_number(slide, shape_index=6, value=int(summary.others_total))
+    _set_first_number(slide, shape_index=9, value=int(summary.closed_now))
+    _set_first_number(slide, shape_index=12, value=_fmt_days(summary.resolution_days_now))
+    _set_first_number(slide, shape_index=15, value=int(summary.new_now))
+    _set_label_run(
         slide,
         shape_index=9,
         paragraph_index=0,
-        run_index=0,
-        text=f"{summary.closed_now} ",
+        text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
     )
-    closed_label = "INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS"
-    _set_run_text(slide, shape_index=9, paragraph_index=0, run_index=1, text=closed_label)
-    _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
-
-    days_now = _fmt_days(summary.resolution_days_now)
-    _set_run_text(slide, shape_index=12, paragraph_index=0, run_index=0, text=f"{days_now} ")
-    day_label = "DÍA DE RESOLUCIÓN " if days_now == 1 else "DÍAS DE RESOLUCIÓN "
-    _set_run_text(slide, shape_index=12, paragraph_index=0, run_index=1, text=day_label)
-    _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
-
-    _set_run_text(
+    _set_label_run(
         slide,
         shape_index=15,
         paragraph_index=0,
-        run_index=0,
-        text=f"{summary.new_now} ",
+        text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
     )
-    new_label = "NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS"
-    _set_run_text(slide, shape_index=15, paragraph_index=0, run_index=1, text=new_label)
-    _set_run_text(
-        slide,
-        shape_index=16,
-        paragraph_index=0,
-        run_index=1,
-        text=f": {summary.new_before}",
+    _set_paragraph_value_after_colon(
+        slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
     )
-    _set_run_text(
-        slide,
-        shape_index=16,
-        paragraph_index=1,
-        run_index=1,
-        text=f": {summary.new_now}            ",
+    _set_paragraph_value_after_colon(
+        slide, shape_index=16, paragraph_index=1, value=int(summary.new_now)
     )
-    _set_run_text(
-        slide,
-        shape_index=16,
-        paragraph_index=2,
-        run_index=1,
-        text=f": {summary.new_accumulated}",
+    _set_paragraph_value_after_colon(
+        slide, shape_index=16, paragraph_index=2, value=int(summary.new_accumulated)
     )
+    _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
+    _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
     _set_shape_text(slide, 19, _fmt_delta_pct(summary.new_delta_pct))
+    _set_shape_font_size(slide, shape_index=10, font_size_pt=14.0, bold=True)
+    _set_shape_font_size(slide, shape_index=13, font_size_pt=14.0, bold=True)
+    _set_shape_font_size(slide, shape_index=19, font_size_pt=14.0, bold=True)
 
 
 def _populate_evolution_slide(
@@ -414,14 +595,18 @@ def _populate_evolution_slide(
     priority_png: bytes,
 ) -> None:
     _set_shape_text(slide, 2, title)
-    _overlay_picture(slide, anchor_shape_index=7, payload=backlog_png)
-    _overlay_picture(slide, anchor_shape_index=4, payload=resolution_png)
-    _overlay_picture(slide, anchor_shape_index=9, payload=priority_png)
+    backlog_anchor, resolution_anchor, priority_anchor, extra_anchors = (
+        _resolve_evolution_chart_anchors(slide)
+    )
+    _overlay_picture(slide, anchor_shape=backlog_anchor, payload=backlog_png, replace_anchor=True)
+    _overlay_picture(
+        slide, anchor_shape=resolution_anchor, payload=resolution_png, replace_anchor=True
+    )
+    _overlay_picture(slide, anchor_shape=priority_anchor, payload=priority_png, replace_anchor=True)
 
-    # Requested: do not include client-type chart for now.
-    _set_shape_text(slide, 6, "")
-    _blank_shape_area(slide, anchor_shape_index=6)
-    _blank_shape_area(slide, anchor_shape_index=8)
+    # If template includes extra chart slots, blank them for now.
+    for extra in extra_anchors:
+        _blank_shape_area(slide, anchor_shape=extra, replace_anchor=True)
 
 
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
@@ -431,7 +616,7 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
         text = str(getattr(shape, "text", "") or "")
         if "Periodo" not in text and "periodo" not in text:
             continue
-        shape.text = str(period_label or "").strip()
+        _set_shape_text_by_shape(shape, str(period_label or "").strip())
         return
 
 
@@ -526,24 +711,27 @@ def generate_country_period_followup_ppt(
 
     _overlay_picture(
         prs.slides[2],
-        anchor_shape_index=20,
+        anchor_shape=_resolve_summary_chart_anchor(prs.slides[2]),
         payload=_chart_png(
-            settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="open_priority_pie"
+            settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="timeseries"
         ),
+        replace_anchor=True,
     )
     _overlay_picture(
         prs.slides[3],
-        anchor_shape_index=20,
+        anchor_shape=_resolve_summary_chart_anchor(prs.slides[3]),
         payload=_chart_png(
-            settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="open_priority_pie"
+            settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="timeseries"
         ),
+        replace_anchor=True,
     )
     _overlay_picture(
         prs.slides[4],
-        anchor_shape_index=20,
+        anchor_shape=_resolve_summary_chart_anchor(prs.slides[4]),
         payload=_chart_png(
-            settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="open_priority_pie"
+            settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="timeseries"
         ),
+        replace_anchor=True,
     )
 
     _populate_evolution_slide(
