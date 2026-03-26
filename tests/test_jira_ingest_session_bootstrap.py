@@ -18,6 +18,15 @@ class _FakeResponse:
         return dict(self._payload)
 
 
+class _FakeInvalidJSONResponse(_FakeResponse):
+    def __init__(self, status_code: int, *, text: str = "") -> None:
+        super().__init__(status_code=status_code, payload=None, text=text)
+        self.headers = {"Content-Type": "text/html"}
+
+    def json(self) -> dict[str, Any]:
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
 class _FakeSession:
     def __init__(self, statuses: list[int]) -> None:
         self.statuses = list(statuses)
@@ -382,6 +391,76 @@ def test_jira_search_payload_uses_expand_array(monkeypatch: Any) -> None:
     assert doc is not None
     assert seen_expand
     assert seen_expand[0] == ["renderedFields"]
+
+
+def test_jira_dry_run_handles_non_json_myself_response(monkeypatch: Any) -> None:
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = kwargs
+        method = str(args[1]).upper()
+        url = str(args[2])
+        if method == "GET" and url.endswith("/myself"):
+            return _FakeInvalidJSONResponse(200, text="")
+        return _FakeResponse(404, text="<html>dead link</html>")
+
+    monkeypatch.setattr(jira_mod, "_request", fake_request)
+    monkeypatch.setattr(
+        jira_mod,
+        "get_jira_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; atlassian.xsrf.token=xyz",
+    )
+    monkeypatch.setattr(
+        jira_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: True,
+    )
+
+    ok, msg, doc = jira_mod.ingest_jira(
+        settings=Settings(
+            JIRA_BASE_URL="https://jira.globaldevtools.bbva.com",
+            JIRA_BROWSER="chrome",
+        ),
+        dry_run=True,
+        source=_source(),
+    )
+
+    assert ok is False
+    assert doc is None
+    assert "respuesta no JSON" in msg
+
+
+def test_jira_search_handles_http_200_with_invalid_json(monkeypatch: Any) -> None:
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = kwargs
+        method = str(args[1]).upper()
+        url = str(args[2])
+        if method == "POST" and "/search" in url:
+            return _FakeInvalidJSONResponse(200, text="")
+        return _FakeResponse(404, text="<html>dead link</html>")
+
+    monkeypatch.setattr(jira_mod, "_request", fake_request)
+    monkeypatch.setattr(
+        jira_mod,
+        "get_jira_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; atlassian.xsrf.token=xyz",
+    )
+    monkeypatch.setattr(
+        jira_mod,
+        "_is_target_page_open_in_configured_browser",
+        lambda url, browser: True,
+    )
+
+    ok, msg, doc = jira_mod.ingest_jira(
+        settings=Settings(
+            JIRA_BASE_URL="https://jira.globaldevtools.bbva.com",
+            JIRA_BROWSER="chrome",
+        ),
+        dry_run=False,
+        source=_source(),
+    )
+
+    assert ok is False
+    assert doc is None
+    assert "respuesta no JSON" in msg
 
 
 def test_request_retries_transient_502_until_success() -> None:

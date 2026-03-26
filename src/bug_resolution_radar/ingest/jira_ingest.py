@@ -187,6 +187,52 @@ def _has_jira_auth_cookie(cookie_names: List[str]) -> bool:
     return bool({str(x).strip().lower() for x in cookie_names})
 
 
+def _response_content_type(response: requests.Response) -> str:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        if isinstance(headers, dict):
+            return str(headers.get("Content-Type") or headers.get("content-type") or "").strip()
+        return str(headers.get("Content-Type") or headers.get("content-type") or "").strip()
+    except Exception:
+        return ""
+
+
+def _parse_json_object_response(
+    response: requests.Response,
+    *,
+    source_label: str,
+    endpoint_label: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raw = str(getattr(response, "text", "") or "")
+        body = raw.strip()
+        body_preview = (body[:200] + ("..." if len(body) > 200 else "")) if body else "(vacío)"
+        content_type = _response_content_type(response) or "n/a"
+        hint = (
+            " Posible sesión Jira caducada o redirección SSO."
+            if _looks_like_html(body)
+            else (" Jira devolvió cuerpo vacío." if not body else "")
+        )
+        return (
+            None,
+            (
+                f"{source_label}: respuesta no JSON en {endpoint_label} "
+                f"({type(e).__name__}). Content-Type={content_type}. Body: {body_preview}.{hint}"
+            ),
+        )
+    if not isinstance(payload, dict):
+        payload_type = type(payload).__name__
+        return (
+            None,
+            f"{source_label}: respuesta JSON inválida en {endpoint_label} (tipo {payload_type}).",
+        )
+    return payload, None
+
+
 def _normalize_multiline_text(text: str) -> str:
     normalized = _RE_INLINE_WHITESPACE.sub(" ", str(text or ""))
     normalized = _RE_NEWLINE_PADDING.sub("\n", normalized)
@@ -437,21 +483,32 @@ def ingest_jira(
 
     if dry_run:
         attempts: List[str] = []
+        parse_errors: List[str] = []
         for trial_api_base in api_candidates:
             url = f"{trial_api_base}/myself"
             r = _request(session, "GET", url)
             if r.status_code == 200:
-                me = r.json()
+                me, parse_error = _parse_json_object_response(
+                    r,
+                    source_label=source_label,
+                    endpoint_label=f"{trial_api_base}/myself",
+                )
+                if me is None:
+                    if parse_error:
+                        parse_errors.append(parse_error)
+                    attempts.append(f"{trial_api_base} => 200 (body no JSON)")
+                    continue
                 who = me.get("displayName") or me.get("name") or "(unknown)"
                 return True, f"{source_label}: OK Jira autenticado como {who}", None
             attempts.append(f"{trial_api_base} => {r.status_code}")
             # 404 often means wrong API version or missing context path; keep trying.
             if r.status_code == 404:
                 continue
+        parse_hint = f" Detalle parseo: {parse_errors[0]}" if parse_errors else ""
         return (
             False,
             f"{source_label}: error Jira (no se encontró endpoint). Intentos: {', '.join(attempts)}. "
-            f"Detalle: {r.text[:200]}",
+            f"Detalle: {r.text[:200]}.{parse_hint}",
             None,
         )
 
@@ -485,6 +542,34 @@ def ingest_jira(
                     api_base = trial
                     r = rr
                     break
+        data: Optional[Dict[str, Any]] = None
+        search_parse_error: Optional[str] = None
+        if r.status_code == 200:
+            data, search_parse_error = _parse_json_object_response(
+                r,
+                source_label=source_label,
+                endpoint_label=f"{api_base}/search",
+            )
+            if data is None:
+                for trial in api_candidates:
+                    if trial == api_base:
+                        continue
+                    rr = _jira_search_request(session, trial, payload)
+                    if rr.status_code != 200:
+                        continue
+                    parsed_trial, parsed_trial_error = _parse_json_object_response(
+                        rr,
+                        source_label=source_label,
+                        endpoint_label=f"{trial}/search",
+                    )
+                    if parsed_trial is not None:
+                        api_base = trial
+                        r = rr
+                        data = parsed_trial
+                        search_parse_error = None
+                        break
+                    if search_parse_error is None and parsed_trial_error is not None:
+                        search_parse_error = parsed_trial_error
         if r.status_code != 200:
             hint = ""
             if r.status_code == 404 and _looks_like_html(r.text):
@@ -494,7 +579,13 @@ def ingest_jira(
                 f"{source_label}: error Jira search ({r.status_code}): {r.text[:200]}{hint}",
                 None,
             )
-        data = r.json()
+        if data is None:
+            return (
+                False,
+                search_parse_error
+                or f"{source_label}: Jira search devolvió HTTP 200 pero sin payload JSON válido.",
+                None,
+            )
 
         issues.extend(
             _jira_issue_to_normalized(
