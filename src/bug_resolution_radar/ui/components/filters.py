@@ -430,8 +430,8 @@ def render_filters(
             key=lambda p: (priority_rank(p), p),
         )
         prio_opts_ui = [_priority_combo_label(p) for p in prio_opts]
-    quincenal_options = {"Todas": []}
-    quincenal_labels = ["Todas"]
+    quincenal_options: dict[str, List[str]] = {"Todas": []}
+    quincenal_labels: List[str] = ["Todas"]
     if include_quincenal:
         quincenal_options = quincenal_scope_options(df, settings=settings)
         quincenal_labels = list(quincenal_options.keys()) if quincenal_options else ["Todas"]

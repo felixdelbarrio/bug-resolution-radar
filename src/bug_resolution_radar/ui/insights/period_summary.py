@@ -13,9 +13,9 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.ui.components.executive_kpis import (
-    ExecutiveKpiItem,
-    render_executive_kpi_grid,
+from bug_resolution_radar.ui.components.actionable_cards import (
+    ActionableCardItem,
+    render_actionable_card_grid,
 )
 from bug_resolution_radar.ui.dashboard.state import set_issue_scope
 from bug_resolution_radar.ui.insights.chips import (
@@ -136,14 +136,18 @@ def _slug_for_key(raw: object) -> str:
     return slug or "scope"
 
 
-def _jump_to_issues_with_scope(*, label: str, df: pd.DataFrame | None) -> None:
-    keys = _issue_keys(df)
-    if not keys:
+def _jump_to_issues_with_keys(*, label: str, keys: List[str]) -> None:
+    scoped_keys = [str(k or "").strip().upper() for k in list(keys or []) if str(k or "").strip()]
+    if not scoped_keys:
         st.info("No hay incidencias en este bloque para abrir en Issues.")
         return
-    set_issue_scope(keys=keys, label=label, sort_col="key")
+    set_issue_scope(keys=scoped_keys, label=label, sort_col="key")
     st.session_state["__jump_to_tab"] = "issues"
     st.rerun()
+
+
+def _jump_to_issues_with_scope(*, label: str, df: pd.DataFrame | None) -> None:
+    _jump_to_issues_with_keys(label=label, keys=_issue_keys(df))
 
 
 def _render_issue_group(
@@ -255,40 +259,92 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     groups = result.aggregate.groups
     st.caption(f"{summary.scope_label or selected_country} · {format_window_label(summary.window)}")
 
-    render_executive_kpi_grid(
+    open_total_group = pd.concat(
+        [groups.maestras_open, groups.others_open], axis=0, ignore_index=True
+    ).copy(deep=False)
+    render_actionable_card_grid(
         [
-            ExecutiveKpiItem(
-                label="Nuevas (ahora)",
-                value=f"{int(summary.new_now):,}",
-                hint=_fmt_delta_hint(summary.new_delta_pct),
+            ActionableCardItem(
+                card_id="new_now",
+                kicker="Insights · Nuevas",
+                metric=f"{int(summary.new_now):,}",
+                detail=_fmt_delta_hint(summary.new_delta_pct),
+                link_label="Nuevas (quincena actual) ↗",
+                tone="risk",
+                on_click=_jump_to_issues_with_keys,
+                click_kwargs={
+                    "label": "Nuevas (quincena actual)",
+                    "keys": _issue_keys(groups.new_now),
+                },
             ),
-            ExecutiveKpiItem(
-                label="Cerradas (ahora)",
-                value=f"{int(summary.closed_now):,}",
-                hint=_fmt_delta_hint(summary.closed_delta_pct),
+            ActionableCardItem(
+                card_id="closed_now",
+                kicker="Insights · Cerradas",
+                metric=f"{int(summary.closed_now):,}",
+                detail=_fmt_delta_hint(summary.closed_delta_pct),
+                link_label="Cerradas (quincena actual) ↗",
+                tone="flow",
+                on_click=_jump_to_issues_with_keys,
+                click_kwargs={
+                    "label": "Cerradas (quincena actual)",
+                    "keys": _issue_keys(groups.closed_now),
+                },
             ),
-            ExecutiveKpiItem(
-                label="Días resolución (ahora)",
-                value=_fmt_days(summary.resolution_days_now),
-                hint=_fmt_delta_hint(summary.resolution_delta_pct),
+            ActionableCardItem(
+                card_id="resolution_now",
+                kicker="Insights · Resolución",
+                metric=_fmt_days(summary.resolution_days_now),
+                detail=_fmt_delta_hint(summary.resolution_delta_pct),
+                link_label="Resolución (cerradas ahora) ↗",
+                tone="flow",
+                on_click=_jump_to_issues_with_keys,
+                click_kwargs={
+                    "label": "Resolución (cerradas ahora)",
+                    "keys": _issue_keys(groups.resolved_now),
+                },
             ),
-            ExecutiveKpiItem(
-                label="Abiertas totales",
-                value=f"{int(summary.open_total):,}",
-                hint="Backlog abierto en el scope actual",
+            ActionableCardItem(
+                card_id="open_total",
+                kicker="Insights · Abiertas totales",
+                metric=f"{int(summary.open_total):,}",
+                detail="Backlog abierto en el scope actual",
+                link_label="Abiertas totales ↗",
+                tone="warning",
+                on_click=_jump_to_issues_with_keys,
+                click_kwargs={
+                    "label": "Abiertas totales",
+                    "keys": _issue_keys(open_total_group),
+                },
             ),
-            ExecutiveKpiItem(
-                label="Maestras",
-                value=f"{int(summary.maestras_total):,}",
-                hint="Abiertas marcadas como maestras",
+            ActionableCardItem(
+                card_id="maestras",
+                kicker="Insights · Maestras",
+                metric=f"{int(summary.maestras_total):,}",
+                detail="Abiertas marcadas como maestras",
+                link_label="Maestras abiertas ↗",
+                tone="warning",
+                on_click=_jump_to_issues_with_keys,
+                click_kwargs={
+                    "label": "Maestras abiertas",
+                    "keys": _issue_keys(groups.maestras_open),
+                },
             ),
-            ExecutiveKpiItem(
-                label="Otras",
-                value=f"{int(summary.others_total):,}",
-                hint="Abiertas no maestras",
+            ActionableCardItem(
+                card_id="others",
+                kicker="Insights · Otras",
+                metric=f"{int(summary.others_total):,}",
+                detail="Abiertas no maestras",
+                link_label="Otras abiertas ↗",
+                tone="warning",
+                on_click=_jump_to_issues_with_keys,
+                click_kwargs={
+                    "label": "Otras abiertas",
+                    "keys": _issue_keys(groups.others_open),
+                },
             ),
         ],
         columns=3,
+        key_prefix="period_summary_kpi",
     )
     with st.container(key="period_summary_groups"):
         _render_issue_group(
