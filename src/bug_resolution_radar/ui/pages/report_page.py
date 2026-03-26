@@ -57,13 +57,12 @@ def _default_report_export_dir(settings: Settings) -> Path:
         candidates.append(Path(configured).expanduser())
     candidates.append((Path.home() / "Downloads").expanduser())
 
-    seen: set[str] = set()
     for candidate in candidates:
-        key = str(candidate)
-        if key in seen:
+        txt = str(candidate).strip()
+        if not txt:
             continue
-        seen.add(key)
         try:
+            candidate.mkdir(parents=True, exist_ok=True)
             if candidate.is_dir():
                 return candidate
         except Exception:
