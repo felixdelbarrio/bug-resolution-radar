@@ -17,7 +17,10 @@ from bug_resolution_radar.ui.components.actionable_cards import (
     ActionableCardItem,
     render_actionable_card_grid,
 )
-from bug_resolution_radar.ui.dashboard.state import set_issue_scope
+from bug_resolution_radar.ui.dashboard.state import (
+    ISSUES_QUINCENAL_SCOPE_KEY,
+    clear_issue_scope,
+)
 from bug_resolution_radar.ui.insights.chips import (
     inject_insights_chip_css,
     issue_cards_html_from_df,
@@ -141,7 +144,8 @@ def _jump_to_issues_with_keys(*, label: str, keys: List[str]) -> None:
     if not scoped_keys:
         st.info("No hay incidencias en este bloque para abrir en Issues.")
         return
-    set_issue_scope(keys=scoped_keys, label=label, sort_col="key")
+    st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = str(label or "").strip() or "Todas"
+    clear_issue_scope()
     st.session_state["__jump_to_tab"] = "issues"
     st.rerun()
 

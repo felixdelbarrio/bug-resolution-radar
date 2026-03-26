@@ -62,6 +62,7 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         "Todas": [],
         "Nuevas (quincena actual)": _issue_keys(groups.new_now),
         "Nuevas (quincena previa)": _issue_keys(groups.new_before),
+        "Nuevas (acumulado)": _issue_keys(groups.new_accumulated),
         "Cerradas (quincena actual)": _issue_keys(groups.closed_now),
         "Resolución (cerradas ahora)": _issue_keys(groups.resolved_now),
         "Maestras abiertas": _issue_keys(groups.maestras_open),

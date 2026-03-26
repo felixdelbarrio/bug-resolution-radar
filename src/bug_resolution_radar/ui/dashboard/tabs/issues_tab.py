@@ -39,11 +39,6 @@ from bug_resolution_radar.ui.dashboard.performance import (
     render_perf_footer,
     resolve_budget,
 )
-from bug_resolution_radar.ui.dashboard.state import (
-    clear_issue_scope,
-    issue_scope_keys,
-    issue_scope_label,
-)
 
 MAX_CARDS_RENDER = 120
 CARDS_PAGE_SIZE = 30
@@ -944,10 +939,6 @@ def render_issues_section(
 
         top_left, top_right = st.columns([2.2, 1.0], gap="small")
         with top_left:
-            scoped_keys = issue_scope_keys()
-            if scoped_keys:
-                label = issue_scope_label() or "Zoom"
-                st.caption(f"Zoom activo: {label} · {len(scoped_keys):,} incidencias.")
             if view == "Cards" and total_filtered > 0:
                 st.caption(
                     f"Mostrando {cards_start_idx + 1:,}-{cards_end_idx:,} de {total_filtered:,} issues filtradas"
@@ -962,15 +953,6 @@ def render_issues_section(
             toggle_scope = f"{key_prefix}_view_toggle"
             _inject_issues_view_toggle_css(scope_key=toggle_scope)
             with st.container(key=toggle_scope):
-                scoped_keys = issue_scope_keys()
-                if scoped_keys:
-                    st.button(
-                        "Limpiar zoom",
-                        key=f"{key_prefix}::clear_issue_zoom",
-                        type="secondary",
-                        width="stretch",
-                        on_click=clear_issue_scope,
-                    )
                 c_cards, c_table = st.columns(2, gap="small")
                 c_cards.button(
                     "Cards",

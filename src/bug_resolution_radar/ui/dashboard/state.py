@@ -261,6 +261,15 @@ def apply_issue_scope_like_filter(
 ) -> pd.DataFrame:
     """Apply quincenal + zoom + like scopes from session state across dashboard tabs."""
     scoped = df
+    if settings is not None and isinstance(scoped, pd.DataFrame) and not scoped.empty:
+        scoped_label = issue_scope_label()
+        scoped_keys = issue_scope_keys()
+        if scoped_keys and scoped_label:
+            options_for_migration = quincenal_scope_options(scoped, settings=settings)
+            if scoped_label in options_for_migration:
+                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = scoped_label
+                clear_issue_scope()
+
     quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
     quincenal_scope = quincenal_scope or "Todas"
     if (
