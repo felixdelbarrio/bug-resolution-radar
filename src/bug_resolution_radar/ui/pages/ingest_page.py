@@ -50,6 +50,8 @@ class _IngestProgress:
 _INGEST_PROGRESS_LOCK = threading.Lock()
 _INGEST_PROGRESS_BY_CONNECTOR: Dict[str, _IngestProgress] = {}
 _HELIX_AUTO_RESUME_MAX_ATTEMPTS = 3
+_INGEST_SELECTOR_DISABLED_KEY_PREFIX = "ingest_selector_disabled"
+_INGEST_SELECTOR_SIG_KEY_PREFIX = "ingest_selector_source_sig"
 
 
 def _progress_entry(connector: str) -> _IngestProgress:
@@ -786,6 +788,128 @@ def _parse_json_str_list(raw: object) -> List[str]:
     return out
 
 
+def _normalize_source_ids(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in list(values or []):
+        sid = str(raw or "").strip()
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        out.append(sid)
+    return out
+
+
+def _normalize_disabled_source_ids(
+    values: List[str],
+    *,
+    valid_source_ids: List[str],
+) -> List[str]:
+    valid = set(_normalize_source_ids(valid_source_ids))
+    return [sid for sid in _normalize_source_ids(values) if sid in valid]
+
+
+def _to_bool(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    txt = str(value).strip().lower()
+    if txt in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if txt in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
+def _selector_disabled_state_key(connector: str) -> str:
+    return f"{_INGEST_SELECTOR_DISABLED_KEY_PREFIX}::{str(connector or '').strip().lower()}"
+
+
+def _selector_source_sig_key(connector: str) -> str:
+    return f"{_INGEST_SELECTOR_SIG_KEY_PREFIX}::{str(connector or '').strip().lower()}"
+
+
+def _effective_disabled_source_ids(
+    connector: str,
+    *,
+    valid_source_ids: List[str],
+    persisted_disabled_source_ids: List[str],
+) -> List[str]:
+    valid = _normalize_source_ids(valid_source_ids)
+    persisted = _normalize_disabled_source_ids(
+        persisted_disabled_source_ids,
+        valid_source_ids=valid,
+    )
+    state_key = _selector_disabled_state_key(connector)
+    sig_key = _selector_source_sig_key(connector)
+    source_sig = "|".join(valid)
+
+    if str(st.session_state.get(sig_key) or "") != source_sig:
+        st.session_state[sig_key] = source_sig
+        st.session_state[state_key] = list(persisted)
+    elif state_key not in st.session_state:
+        st.session_state[state_key] = list(persisted)
+
+    current = _normalize_disabled_source_ids(
+        list(st.session_state.get(state_key) or []),
+        valid_source_ids=valid,
+    )
+    st.session_state[state_key] = list(current)
+    return current
+
+
+def _set_effective_disabled_source_ids(
+    connector: str,
+    *,
+    valid_source_ids: List[str],
+    disabled_source_ids: List[str],
+) -> List[str]:
+    valid = _normalize_source_ids(valid_source_ids)
+    normalized = _normalize_disabled_source_ids(
+        disabled_source_ids,
+        valid_source_ids=valid,
+    )
+    st.session_state[_selector_source_sig_key(connector)] = "|".join(valid)
+    st.session_state[_selector_disabled_state_key(connector)] = list(normalized)
+    return normalized
+
+
+def _selected_source_ids_from_selector_df(
+    selector_df: pd.DataFrame,
+    *,
+    valid_source_ids: List[str],
+) -> List[str]:
+    valid = _normalize_source_ids(valid_source_ids)
+    valid_set = set(valid)
+    if selector_df is None or selector_df.empty or not valid:
+        return []
+    rows = selector_df.to_dict(orient="records")
+    out: List[str] = []
+    seen: set[str] = set()
+    for idx, row in enumerate(rows):
+        sid = str(row.get("__source_id__", "")).strip()
+        if not sid and idx < len(valid):
+            # Fallback for Streamlit versions that hide non-visible internal columns.
+            sid = valid[idx]
+        if not sid or sid not in valid_set or sid in seen:
+            continue
+        if _to_bool(row.get("__ingest__", False), default=False):
+            out.append(sid)
+            seen.add(sid)
+    return out
+
+
+def _disabled_source_ids_from_selected(
+    *,
+    valid_source_ids: List[str],
+    selected_source_ids: List[str],
+) -> List[str]:
+    valid = _normalize_source_ids(valid_source_ids)
+    selected = set(_normalize_source_ids(selected_source_ids))
+    return [sid for sid in valid if sid not in selected]
+
+
 def _persist_jira_ingest_disabled_sources(
     settings: Settings, disabled_source_ids: List[str]
 ) -> Settings:
@@ -829,13 +953,18 @@ def render(settings: Settings) -> None:
             for src in jira_cfg
             if str(src.get("source_id", "")).strip()
         ]
-        disabled_jira_source_ids = [
+        persisted_disabled_jira_source_ids = [
             sid
             for sid in _parse_json_str_list(
                 getattr(settings, "JIRA_INGEST_DISABLED_SOURCES_JSON", "")
             )
             if sid in valid_jira_source_ids
         ]
+        disabled_jira_source_ids = _effective_disabled_source_ids(
+            "jira",
+            valid_source_ids=valid_jira_source_ids,
+            persisted_disabled_source_ids=persisted_disabled_jira_source_ids,
+        )
         disabled_jira_set = set(disabled_jira_source_ids)
 
         if jira_cfg:
@@ -871,19 +1000,23 @@ def render(settings: Settings) -> None:
                     "jql": st.column_config.TextColumn("jql"),
                 },
             )
-            selected_jira_source_ids = {
-                str(row.get("__source_id__", "")).strip()
-                for row in jira_selector.to_dict(orient="records")
-                if bool(row.get("__ingest__", False)) and str(row.get("__source_id__", "")).strip()
-            }
-            new_disabled_jira_source_ids = [
-                sid for sid in valid_jira_source_ids if sid not in selected_jira_source_ids
-            ]
-            if new_disabled_jira_source_ids != disabled_jira_source_ids:
+            selected_jira_source_ids = _selected_source_ids_from_selector_df(
+                jira_selector,
+                valid_source_ids=valid_jira_source_ids,
+            )
+            new_disabled_jira_source_ids = _disabled_source_ids_from_selected(
+                valid_source_ids=valid_jira_source_ids,
+                selected_source_ids=selected_jira_source_ids,
+            )
+            disabled_jira_source_ids = _set_effective_disabled_source_ids(
+                "jira",
+                valid_source_ids=valid_jira_source_ids,
+                disabled_source_ids=new_disabled_jira_source_ids,
+            )
+            if new_disabled_jira_source_ids != persisted_disabled_jira_source_ids:
                 settings = _persist_jira_ingest_disabled_sources(
                     settings, new_disabled_jira_source_ids
                 )
-                disabled_jira_source_ids = new_disabled_jira_source_ids
             jira_cfg_selected = [
                 src
                 for src in jira_cfg
@@ -966,13 +1099,18 @@ def render(settings: Settings) -> None:
             for src in helix_cfg
             if str(src.get("source_id", "")).strip()
         ]
-        disabled_helix_source_ids = [
+        persisted_disabled_helix_source_ids = [
             sid
             for sid in _parse_json_str_list(
                 getattr(settings, "HELIX_INGEST_DISABLED_SOURCES_JSON", "")
             )
             if sid in valid_helix_source_ids
         ]
+        disabled_helix_source_ids = _effective_disabled_source_ids(
+            "helix",
+            valid_source_ids=valid_helix_source_ids,
+            persisted_disabled_source_ids=persisted_disabled_helix_source_ids,
+        )
         disabled_set = set(disabled_helix_source_ids)
 
         if helix_cfg:
@@ -1025,19 +1163,23 @@ def render(settings: Settings) -> None:
                     "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2"),
                 },
             )
-            selected_helix_source_ids = {
-                str(row.get("__source_id__", "")).strip()
-                for row in helix_selector.to_dict(orient="records")
-                if bool(row.get("__ingest__", False)) and str(row.get("__source_id__", "")).strip()
-            }
-            new_disabled_helix_source_ids = [
-                sid for sid in valid_helix_source_ids if sid not in selected_helix_source_ids
-            ]
-            if new_disabled_helix_source_ids != disabled_helix_source_ids:
+            selected_helix_source_ids = _selected_source_ids_from_selector_df(
+                helix_selector,
+                valid_source_ids=valid_helix_source_ids,
+            )
+            new_disabled_helix_source_ids = _disabled_source_ids_from_selected(
+                valid_source_ids=valid_helix_source_ids,
+                selected_source_ids=selected_helix_source_ids,
+            )
+            disabled_helix_source_ids = _set_effective_disabled_source_ids(
+                "helix",
+                valid_source_ids=valid_helix_source_ids,
+                disabled_source_ids=new_disabled_helix_source_ids,
+            )
+            if new_disabled_helix_source_ids != persisted_disabled_helix_source_ids:
                 settings = _persist_helix_ingest_disabled_sources(
                     settings, new_disabled_helix_source_ids
                 )
-                disabled_helix_source_ids = new_disabled_helix_source_ids
             helix_cfg_selected = [
                 src
                 for src in helix_cfg

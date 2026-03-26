@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import html
-from typing import List
+from typing import Callable, List
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +18,7 @@ from bug_resolution_radar.ui.insights.chips import (
     status_chip_html,
 )
 from bug_resolution_radar.ui.insights.engine import build_people_plan_recommendations
+from bug_resolution_radar.ui.insights.header_actions import render_insights_header_row
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -102,7 +103,12 @@ def _inject_backlog_people_css() -> None:
 # -------------------------
 # Render
 # -------------------------
-def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> None:
+def render_backlog_people_tab(
+    *,
+    settings: Settings,
+    dff_filtered: pd.DataFrame,
+    header_left_render: Callable[[], None] | None = None,
+) -> None:
     """
     Tab: Concentración de backlog por asignado (abiertas)
     - Expander por persona
@@ -138,11 +144,14 @@ def render_backlog_people_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         df2["priority"] = "(sin priority)"
 
     export_cols = ["key", "summary", "assignee", "status", "priority", "created", "updated", "url"]
-    render_minimal_export_actions(
-        key_prefix="insights::personas",
-        filename_prefix="insights_personas",
-        suffix="backlog",
-        csv_df=df2[[c for c in export_cols if c in df2.columns]].copy(deep=False),
+    render_insights_header_row(
+        left_render=header_left_render,
+        right_render=lambda: render_minimal_export_actions(
+            key_prefix="insights::personas",
+            filename_prefix="insights_personas",
+            suffix="backlog",
+            csv_df=df2[[c for c in export_cols if c in df2.columns]].copy(deep=False),
+        ),
     )
 
     has_created = col_exists(df2, "created") and pd.api.types.is_datetime64_any_dtype(

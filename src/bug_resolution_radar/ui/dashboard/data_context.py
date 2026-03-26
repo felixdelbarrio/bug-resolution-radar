@@ -48,7 +48,7 @@ def build_dashboard_data_context(
     safe_all = apply_analysis_depth_filter(_safe_df(df_all), settings=settings)
     fs = get_filter_state()
     dff = apply_filters(safe_all, fs)
-    dff = apply_issue_scope_like_filter(dff)
+    dff = apply_issue_scope_like_filter(dff, settings=settings)
     open_df = open_only(dff)
     kpis = (
         compute_kpis(dff, settings=settings, include_timeseries_chart=include_timeseries_chart)

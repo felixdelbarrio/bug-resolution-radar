@@ -25,6 +25,7 @@ def _inject_exec_kpi_css() -> None:
             border-radius: 16px;
             background: var(--bbva-surface-elevated);
             padding: 0.46rem 0.62rem;
+            margin-bottom: 0.62rem;
           }
           .exec-kpi-grid {
             display: grid;
