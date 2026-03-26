@@ -231,6 +231,75 @@ def test_build_dashboard_data_context_applies_quincenal_scope_new_accumulated(
     assert ctx.dff["key"].tolist() == ["A-1", "A-2"]
 
 
+def test_quincenal_scope_options_hide_maestras_and_others_when_split_is_redundant(
+    monkeypatch: Any,
+) -> None:
+    now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    fake_state = _FakeStreamlitState(
+        {
+            "workspace_country": "México",
+            "workspace_scope_mode": "source",
+            "workspace_source_id": "jira:mexico:core",
+        }
+    )
+    monkeypatch.setattr(quincenal_scope_helpers, "st", fake_state)
+
+    df = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Abierta 1",
+                "status": "New",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+            },
+            {
+                "key": "A-2",
+                "summary": "Abierta 2",
+                "status": "In Progress",
+                "priority": "Medium",
+                "assignee": "Luis",
+                "created": (now - pd.Timedelta(days=3)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+            },
+        ]
+    )
+    settings = Settings(
+        ANALYSIS_LOOKBACK_MONTHS=12,
+        JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+    )
+
+    options = quincenal_scope_helpers.quincenal_scope_options(df, settings=settings)
+
+    assert "Abiertas totales" in options
+    assert "Maestras abiertas" not in options
+    assert "Otras abiertas" not in options
+
+
+def test_should_show_open_split_only_when_maestras_others_are_not_redundant() -> None:
+    assert not quincenal_scope_helpers.should_show_open_split(
+        maestras_total=0,
+        others_total=11,
+        open_total=11,
+    )
+    assert quincenal_scope_helpers.should_show_open_split(
+        maestras_total=1,
+        others_total=10,
+        open_total=11,
+    )
+    assert quincenal_scope_helpers.should_show_open_split(
+        maestras_total=0,
+        others_total=9,
+        open_total=11,
+    )
+
+
 def test_apply_issue_scope_like_filter_migrates_legacy_zoom_to_quincenal_scope(
     monkeypatch: Any,
 ) -> None:

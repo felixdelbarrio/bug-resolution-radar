@@ -28,6 +28,14 @@ def _issue_keys(df: pd.DataFrame | None) -> List[str]:
     return out
 
 
+def should_show_open_split(*, maestras_total: int, others_total: int, open_total: int) -> bool:
+    """Return True when maestra/other open split adds distinct value."""
+    maestras = max(int(maestras_total or 0), 0)
+    others = max(int(others_total or 0), 0)
+    open_total_safe = max(int(open_total or 0), 0)
+    return not (maestras == 0 and others == open_total_safe)
+
+
 def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> Dict[str, List[str]]:
     """Return quincenal issue subsets for the current workspace scope."""
     if settings is None or df is None or df.empty:
@@ -55,8 +63,14 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         source_label_by_id=labels,
     )
     groups = result.aggregate.groups
+    summary = result.aggregate.summary
     open_total_df = pd.concat([groups.maestras_open, groups.others_open], ignore_index=True).copy(
         deep=False
+    )
+    show_open_split = should_show_open_split(
+        maestras_total=int(summary.maestras_total),
+        others_total=int(summary.others_total),
+        open_total=int(summary.open_total),
     )
     options: Dict[str, List[str]] = {
         "Todas": [],
@@ -65,10 +79,11 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         "Nuevas (acumulado)": _issue_keys(groups.new_accumulated),
         "Cerradas (quincena actual)": _issue_keys(groups.closed_now),
         "Resolución (cerradas ahora)": _issue_keys(groups.resolved_now),
-        "Maestras abiertas": _issue_keys(groups.maestras_open),
-        "Otras abiertas": _issue_keys(groups.others_open),
         "Abiertas totales": _issue_keys(open_total_df),
     }
+    if show_open_split:
+        options["Maestras abiertas"] = _issue_keys(groups.maestras_open)
+        options["Otras abiertas"] = _issue_keys(groups.others_open)
     return {label: keys for label, keys in options.items() if label == "Todas" or keys}
 
 

@@ -17,6 +17,7 @@ from bug_resolution_radar.ui.components.actionable_cards import (
     ActionableCardItem,
     render_actionable_card_grid,
 )
+from bug_resolution_radar.ui.dashboard.quincenal_scope import should_show_open_split
 from bug_resolution_radar.ui.dashboard.state import (
     ISSUES_QUINCENAL_SCOPE_KEY,
     clear_issue_scope,
@@ -266,107 +267,121 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     open_total_group = pd.concat(
         [groups.maestras_open, groups.others_open], axis=0, ignore_index=True
     ).copy(deep=False)
+    show_open_split = should_show_open_split(
+        maestras_total=int(summary.maestras_total),
+        others_total=int(summary.others_total),
+        open_total=int(summary.open_total),
+    )
+
+    cards: List[ActionableCardItem] = [
+        ActionableCardItem(
+            card_id="new_now",
+            kicker="Insights · Nuevas",
+            metric=f"{int(summary.new_now):,}",
+            detail=_fmt_delta_hint(summary.new_delta_pct),
+            link_label="Nuevas (quincena actual) ↗",
+            tone="risk",
+            on_click=_jump_to_issues_with_keys,
+            click_kwargs={
+                "label": "Nuevas (quincena actual)",
+                "keys": _issue_keys(groups.new_now),
+            },
+        ),
+        ActionableCardItem(
+            card_id="closed_now",
+            kicker="Insights · Cerradas",
+            metric=f"{int(summary.closed_now):,}",
+            detail=_fmt_delta_hint(summary.closed_delta_pct),
+            link_label="Cerradas (quincena actual) ↗",
+            tone="flow",
+            on_click=_jump_to_issues_with_keys,
+            click_kwargs={
+                "label": "Cerradas (quincena actual)",
+                "keys": _issue_keys(groups.closed_now),
+            },
+        ),
+        ActionableCardItem(
+            card_id="resolution_now",
+            kicker="Insights · Resolución",
+            metric=_fmt_days(summary.resolution_days_now),
+            detail=_fmt_delta_hint(summary.resolution_delta_pct),
+            link_label="Resolución (cerradas ahora) ↗",
+            tone="flow",
+            on_click=_jump_to_issues_with_keys,
+            click_kwargs={
+                "label": "Resolución (cerradas ahora)",
+                "keys": _issue_keys(groups.resolved_now),
+            },
+        ),
+        ActionableCardItem(
+            card_id="open_total",
+            kicker="Insights · Abiertas totales",
+            metric=f"{int(summary.open_total):,}",
+            detail="Backlog abierto en el scope actual",
+            link_label="Abiertas totales ↗",
+            tone="warning",
+            on_click=_jump_to_issues_with_keys,
+            click_kwargs={
+                "label": "Abiertas totales",
+                "keys": _issue_keys(open_total_group),
+            },
+        ),
+    ]
+    if show_open_split:
+        cards.extend(
+            [
+                ActionableCardItem(
+                    card_id="maestras",
+                    kicker="Insights · Maestras",
+                    metric=f"{int(summary.maestras_total):,}",
+                    detail="Abiertas marcadas como maestras",
+                    link_label="Maestras abiertas ↗",
+                    tone="warning",
+                    on_click=_jump_to_issues_with_keys,
+                    click_kwargs={
+                        "label": "Maestras abiertas",
+                        "keys": _issue_keys(groups.maestras_open),
+                    },
+                ),
+                ActionableCardItem(
+                    card_id="others",
+                    kicker="Insights · Otras",
+                    metric=f"{int(summary.others_total):,}",
+                    detail="Abiertas no maestras",
+                    link_label="Otras abiertas ↗",
+                    tone="warning",
+                    on_click=_jump_to_issues_with_keys,
+                    click_kwargs={
+                        "label": "Otras abiertas",
+                        "keys": _issue_keys(groups.others_open),
+                    },
+                ),
+            ]
+        )
+
     render_actionable_card_grid(
-        [
-            ActionableCardItem(
-                card_id="new_now",
-                kicker="Insights · Nuevas",
-                metric=f"{int(summary.new_now):,}",
-                detail=_fmt_delta_hint(summary.new_delta_pct),
-                link_label="Nuevas (quincena actual) ↗",
-                tone="risk",
-                on_click=_jump_to_issues_with_keys,
-                click_kwargs={
-                    "label": "Nuevas (quincena actual)",
-                    "keys": _issue_keys(groups.new_now),
-                },
-            ),
-            ActionableCardItem(
-                card_id="closed_now",
-                kicker="Insights · Cerradas",
-                metric=f"{int(summary.closed_now):,}",
-                detail=_fmt_delta_hint(summary.closed_delta_pct),
-                link_label="Cerradas (quincena actual) ↗",
-                tone="flow",
-                on_click=_jump_to_issues_with_keys,
-                click_kwargs={
-                    "label": "Cerradas (quincena actual)",
-                    "keys": _issue_keys(groups.closed_now),
-                },
-            ),
-            ActionableCardItem(
-                card_id="resolution_now",
-                kicker="Insights · Resolución",
-                metric=_fmt_days(summary.resolution_days_now),
-                detail=_fmt_delta_hint(summary.resolution_delta_pct),
-                link_label="Resolución (cerradas ahora) ↗",
-                tone="flow",
-                on_click=_jump_to_issues_with_keys,
-                click_kwargs={
-                    "label": "Resolución (cerradas ahora)",
-                    "keys": _issue_keys(groups.resolved_now),
-                },
-            ),
-            ActionableCardItem(
-                card_id="open_total",
-                kicker="Insights · Abiertas totales",
-                metric=f"{int(summary.open_total):,}",
-                detail="Backlog abierto en el scope actual",
-                link_label="Abiertas totales ↗",
-                tone="warning",
-                on_click=_jump_to_issues_with_keys,
-                click_kwargs={
-                    "label": "Abiertas totales",
-                    "keys": _issue_keys(open_total_group),
-                },
-            ),
-            ActionableCardItem(
-                card_id="maestras",
-                kicker="Insights · Maestras",
-                metric=f"{int(summary.maestras_total):,}",
-                detail="Abiertas marcadas como maestras",
-                link_label="Maestras abiertas ↗",
-                tone="warning",
-                on_click=_jump_to_issues_with_keys,
-                click_kwargs={
-                    "label": "Maestras abiertas",
-                    "keys": _issue_keys(groups.maestras_open),
-                },
-            ),
-            ActionableCardItem(
-                card_id="others",
-                kicker="Insights · Otras",
-                metric=f"{int(summary.others_total):,}",
-                detail="Abiertas no maestras",
-                link_label="Otras abiertas ↗",
-                tone="warning",
-                on_click=_jump_to_issues_with_keys,
-                click_kwargs={
-                    "label": "Otras abiertas",
-                    "keys": _issue_keys(groups.others_open),
-                },
-            ),
-        ],
-        columns=3,
+        cards,
+        columns=3 if show_open_split else 4,
         key_prefix="period_summary_kpi",
     )
     with st.container(key="period_summary_groups"):
-        _render_issue_group(
-            "Maestras abiertas",
-            summary.maestras_total,
-            groups.maestras_open,
-            key_to_url=key_to_url,
-            key_to_meta=key_to_meta,
-            zoom_label="Maestras abiertas",
-        )
-        _render_issue_group(
-            "Otras abiertas",
-            summary.others_total,
-            groups.others_open,
-            key_to_url=key_to_url,
-            key_to_meta=key_to_meta,
-            zoom_label="Otras abiertas",
-        )
+        if show_open_split:
+            _render_issue_group(
+                "Maestras abiertas",
+                summary.maestras_total,
+                groups.maestras_open,
+                key_to_url=key_to_url,
+                key_to_meta=key_to_meta,
+                zoom_label="Maestras abiertas",
+            )
+            _render_issue_group(
+                "Otras abiertas",
+                summary.others_total,
+                groups.others_open,
+                key_to_url=key_to_url,
+                key_to_meta=key_to_meta,
+                zoom_label="Otras abiertas",
+            )
         _render_issue_group(
             "Nuevas (antes)",
             summary.new_before,

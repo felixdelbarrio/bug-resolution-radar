@@ -289,6 +289,27 @@ def render_duplicates_tab(
     if str(st.session_state.get(view_key) or "") not in {"Por título", "Por heurística"}:
         st.session_state[view_key] = "Por título"
     active_view = str(st.session_state.get(view_key) or "Por título")
+
+    def _render_duplicates_export_actions() -> None:
+        if active_view == "Por título":
+            render_minimal_export_actions(
+                key_prefix="insights::duplicates::title",
+                filename_prefix="insights_duplicados",
+                suffix="por_titulo",
+                csv_df=title_export,
+            )
+            return
+        render_minimal_export_actions(
+            key_prefix="insights::duplicates::heur",
+            filename_prefix="insights_duplicados",
+            suffix="heuristica",
+            csv_df=heur_export,
+        )
+
+    render_insights_header_row(
+        left_render=header_left_render,
+        right_render=_render_duplicates_export_actions,
+    )
     toggle_scope = "insights_duplicates_view_toggle"
     _inject_duplicates_view_toggle_css(scope_key=toggle_scope)
     with st.container(key=toggle_scope):
@@ -316,16 +337,6 @@ def render_duplicates_tab(
         if not (col_exists(df2, "summary") and col_exists(df2, "key")):
             st.info("Faltan columnas `summary`/`key` para agrupar por título.")
         else:
-            render_insights_header_row(
-                left_render=header_left_render,
-                right_render=lambda: render_minimal_export_actions(
-                    key_prefix="insights::duplicates::title",
-                    filename_prefix="insights_duplicados",
-                    suffix="por_titulo",
-                    csv_df=title_export,
-                ),
-            )
-
             if not top_titles:
                 st.info("No se detectaron títulos repetidos con los filtros actuales.")
             else:
@@ -352,15 +363,6 @@ def render_duplicates_tab(
 
     else:
         st.caption("Clusters por similitud de texto en el summary (heurístico).")
-        render_insights_header_row(
-            left_render=header_left_render,
-            right_render=lambda: render_minimal_export_actions(
-                key_prefix="insights::duplicates::heur",
-                filename_prefix="insights_duplicados",
-                suffix="heuristica",
-                csv_df=heur_export,
-            ),
-        )
 
         if not clusters:
             st.info("No se encontraron clusters por heurística con los filtros actuales.")
