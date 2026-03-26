@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, List
+from typing import Any, Callable, List
 
 import pandas as pd
 import streamlit as st
@@ -21,6 +21,7 @@ from bug_resolution_radar.ui.common import normalize_text_col
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.insights.chips import inject_insights_chip_css, render_issue_bullet
 from bug_resolution_radar.ui.insights.engine import build_duplicates_brief
+from bug_resolution_radar.ui.insights.header_actions import render_insights_header_row
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -203,7 +204,12 @@ def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> None:
+def render_duplicates_tab(
+    *,
+    settings: Settings,
+    dff_filtered: pd.DataFrame,
+    header_left_render: Callable[[], None] | None = None,
+) -> None:
     """
     Tab: Incidencias similares (posibles duplicados)
     - Por título: agrupación exacta por summary (repeticiones directas)
@@ -310,11 +316,14 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
         if not (col_exists(df2, "summary") and col_exists(df2, "key")):
             st.info("Faltan columnas `summary`/`key` para agrupar por título.")
         else:
-            render_minimal_export_actions(
-                key_prefix="insights::duplicates::title",
-                filename_prefix="insights_duplicados",
-                suffix="por_titulo",
-                csv_df=title_export,
+            render_insights_header_row(
+                left_render=header_left_render,
+                right_render=lambda: render_minimal_export_actions(
+                    key_prefix="insights::duplicates::title",
+                    filename_prefix="insights_duplicados",
+                    suffix="por_titulo",
+                    csv_df=title_export,
+                ),
             )
 
             if not top_titles:
@@ -343,11 +352,14 @@ def render_duplicates_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
 
     else:
         st.caption("Clusters por similitud de texto en el summary (heurístico).")
-        render_minimal_export_actions(
-            key_prefix="insights::duplicates::heur",
-            filename_prefix="insights_duplicados",
-            suffix="heuristica",
-            csv_df=heur_export,
+        render_insights_header_row(
+            left_render=header_left_render,
+            right_render=lambda: render_minimal_export_actions(
+                key_prefix="insights::duplicates::heur",
+                filename_prefix="insights_duplicados",
+                suffix="heuristica",
+                csv_df=heur_export,
+            ),
         )
 
         if not clusters:
