@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ui.dashboard import quincenal_scope as quincenal_scope_helpers
 from bug_resolution_radar.ui.dashboard import state as dashboard_state
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.pages import dashboard_page
@@ -101,6 +102,63 @@ def test_build_dashboard_data_context_applies_issue_scope_like_filter(monkeypatc
     )
 
     assert ctx.dff["key"].tolist() == ["MEXBMI1-283490"]
+
+
+def test_build_dashboard_data_context_applies_quincenal_scope(monkeypatch: Any) -> None:
+    now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    fake_state = _FakeStreamlitState(
+        {
+            dashboard_state.FILTER_STATUS_KEY: [],
+            dashboard_state.FILTER_PRIORITY_KEY: [],
+            dashboard_state.FILTER_ASSIGNEE_KEY: [],
+            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Nuevas (quincena actual)",
+            "workspace_country": "México",
+            "workspace_scope_mode": "source",
+            "workspace_source_id": "jira:mexico:core",
+        }
+    )
+    monkeypatch.setattr(dashboard_state, "st", fake_state)
+    monkeypatch.setattr(quincenal_scope_helpers, "st", fake_state)
+
+    df = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Nueva actual",
+                "status": "New",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+            },
+            {
+                "key": "A-2",
+                "summary": "Nueva previa",
+                "status": "New",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=20)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+            },
+        ]
+    )
+    settings = Settings(
+        ANALYSIS_LOOKBACK_MONTHS=12,
+        JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+    )
+
+    ctx = build_dashboard_data_context(
+        df_all=df,
+        settings=settings,
+        include_kpis=False,
+        include_timeseries_chart=False,
+    )
+
+    assert ctx.dff["key"].tolist() == ["A-1"]
 
 
 def test_clear_all_filters_clears_issue_zoom_scope(monkeypatch: Any) -> None:

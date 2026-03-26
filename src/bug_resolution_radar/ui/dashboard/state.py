@@ -11,6 +11,10 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings, save_settings
 from bug_resolution_radar.ui.common import open_issues_only
+from bug_resolution_radar.ui.dashboard.quincenal_scope import (
+    apply_issue_key_scope,
+    quincenal_scope_options,
+)
 
 # Canonical keys shared across dashboard modules/components.
 FILTER_STATUS_KEY = "filter_status"
@@ -250,9 +254,28 @@ def apply_text_like_filter(
     return df.loc[mask].copy(deep=False)
 
 
-def apply_issue_scope_like_filter(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply issues scope like-filter from session state (shared across dashboard tabs)."""
+def apply_issue_scope_like_filter(
+    df: pd.DataFrame,
+    *,
+    settings: Settings | None = None,
+) -> pd.DataFrame:
+    """Apply quincenal + zoom + like scopes from session state across dashboard tabs."""
     scoped = df
+    quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
+    quincenal_scope = quincenal_scope or "Todas"
+    if (
+        settings is not None
+        and quincenal_scope != "Todas"
+        and isinstance(scoped, pd.DataFrame)
+        and not scoped.empty
+    ):
+        options = quincenal_scope_options(scoped, settings=settings)
+        if quincenal_scope not in options:
+            quincenal_scope = "Todas"
+            st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = quincenal_scope
+        else:
+            scoped = apply_issue_key_scope(scoped, keys=options.get(quincenal_scope, []))
+
     scoped_keys = issue_scope_keys()
     if (
         scoped_keys

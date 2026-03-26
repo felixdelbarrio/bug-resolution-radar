@@ -39,12 +39,7 @@ from bug_resolution_radar.ui.dashboard.performance import (
     render_perf_footer,
     resolve_budget,
 )
-from bug_resolution_radar.ui.dashboard.quincenal_scope import (
-    apply_issue_key_scope,
-    quincenal_scope_options,
-)
 from bug_resolution_radar.ui.dashboard.state import (
-    ISSUES_QUINCENAL_SCOPE_KEY,
     clear_issue_scope,
     issue_scope_keys,
     issue_scope_label,
@@ -905,23 +900,6 @@ def render_issues_section(
         table_df = _cached_make_table_export_df(dff_show)
         export_df = table_df.copy(deep=False)
         perf_ms["filters"] = _elapsed_ms(filters_start_ts)
-
-        quincenal_options = quincenal_scope_options(dff_show_raw, settings=settings)
-        selected_quincenal = (
-            str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip() or "Todas"
-        )
-        if selected_quincenal not in quincenal_options:
-            selected_quincenal = "Todas"
-            st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = selected_quincenal
-        selected_keys = quincenal_options.get(selected_quincenal, [])
-        if selected_keys:
-            dff_show_raw = apply_issue_key_scope(dff_show_raw, keys=selected_keys)
-            dff_like = _apply_shared_like_filter(
-                dff_show_raw, sort_col=sort_col, key_prefix=key_prefix
-            )
-            dff_show = _apply_shared_sort(dff_like, sort_col=sort_col, sort_asc=sort_asc)
-            table_df = _cached_make_table_export_df(dff_show)
-            export_df = table_df.copy(deep=False)
 
         # Compact toolbar: top row for view toggle + count.
         view_key = f"{key_prefix}::view_mode"

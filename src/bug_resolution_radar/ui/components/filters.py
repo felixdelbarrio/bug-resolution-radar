@@ -379,7 +379,8 @@ def render_filters(
       when the same filters are rendered in multiple tabs.
     - Canonical shared state remains in:
         filter_status, filter_priority, filter_assignee
-      so matrix/kanban/insights can still sync by writing those keys.
+      and (when enabled) issues_tab::quincenal_scope,
+      so matrix/kanban/insights/reportes consumen el mismo scope.
     """
     _inject_filters_panel_css()
 
