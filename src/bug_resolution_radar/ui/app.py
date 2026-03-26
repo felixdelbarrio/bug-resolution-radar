@@ -692,4 +692,7 @@ def main() -> None:
         with st.container(key=f"workspace_dashboard_content_{section}"):
             dashboard_page.render(settings, active_section=section)
 
-    persist_filters_in_env(settings)
+    # Rendered pages can persist settings mid-run (e.g., ingest source selectors).
+    # Reload before persisting filters to avoid stale settings objects overwriting
+    # unrelated keys in `.env`.
+    persist_filters_in_env(load_settings())
