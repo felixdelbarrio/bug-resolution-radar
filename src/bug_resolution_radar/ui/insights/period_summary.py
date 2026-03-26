@@ -37,14 +37,14 @@ def _inject_period_summary_layout_css() -> None:
     st.markdown(
         """
         <style>
-          .period-summary-gap {
-            height: 0.94rem;
+          .st-key-period_summary_groups {
+            margin-top: 0.78rem;
           }
           .st-key-period_summary_groups [data-testid="stExpander"] {
-            margin-top: 0.44rem;
+            margin-top: 0.46rem;
           }
           .st-key-period_summary_groups [data-testid="stExpander"]:first-of-type {
-            margin-top: 0.12rem;
+            margin-top: 0.18rem;
           }
           [class*="st-key-period_summary_group_open_"] div[data-testid="stButton"] > button {
             border: 0 !important;
@@ -290,7 +290,6 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         ],
         columns=3,
     )
-    st.markdown('<div class="period-summary-gap"></div>', unsafe_allow_html=True)
     with st.container(key="period_summary_groups"):
         _render_issue_group(
             "Maestras abiertas",

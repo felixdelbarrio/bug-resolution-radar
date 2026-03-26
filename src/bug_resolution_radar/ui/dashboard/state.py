@@ -22,6 +22,7 @@ ISSUES_SCOPE_SORT_ASC_KEY = "issues_tab::sort_asc"
 ISSUES_SCOPE_LIKE_QUERY_KEY = "issues_tab::sort_like_query"
 ISSUES_SCOPE_KEYS_KEY = "issues_tab::scope_keys"
 ISSUES_SCOPE_LABEL_KEY = "issues_tab::scope_label"
+ISSUES_QUINCENAL_SCOPE_KEY = "issues_tab::quincenal_scope"
 
 FILTER_STATUS_ENV_KEY = "DASHBOARD_FILTER_STATUS_JSON"
 FILTER_PRIORITY_ENV_KEY = "DASHBOARD_FILTER_PRIORITY_JSON"
@@ -164,6 +165,7 @@ def clear_all_filters() -> None:
         ISSUES_SCOPE_LIKE_QUERY_KEY,
         ISSUES_SCOPE_KEYS_KEY,
         ISSUES_SCOPE_LABEL_KEY,
+        ISSUES_QUINCENAL_SCOPE_KEY,
     ):
         st.session_state.pop(key, None)
 

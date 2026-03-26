@@ -215,7 +215,12 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
 
     if section in {"issues", "kanban"}:
         render_next_best_banner(df_all=ctx.df_all, section=section)
-        render_filters(ctx.df_all, key_prefix="dashboard")
+        render_filters(
+            ctx.df_all,
+            key_prefix="dashboard",
+            settings=settings,
+            include_quincenal=(section == "issues"),
+        )
 
     if section == "overview":
         render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)

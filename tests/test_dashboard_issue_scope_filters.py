@@ -113,6 +113,7 @@ def test_clear_all_filters_clears_issue_zoom_scope(monkeypatch: Any) -> None:
             dashboard_state.ISSUES_SCOPE_LABEL_KEY: "Maestras",
             dashboard_state.ISSUES_SCOPE_SORT_COL_KEY: "key",
             dashboard_state.ISSUES_SCOPE_LIKE_QUERY_KEY: "a-1",
+            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Nuevas (quincena actual)",
         }
     )
     monkeypatch.setattr(dashboard_state, "st", fake_state)
@@ -124,6 +125,7 @@ def test_clear_all_filters_clears_issue_zoom_scope(monkeypatch: Any) -> None:
     assert fake_state.session_state[dashboard_state.FILTER_ASSIGNEE_KEY] == []
     assert dashboard_state.ISSUES_SCOPE_KEYS_KEY not in fake_state.session_state
     assert dashboard_state.ISSUES_SCOPE_LABEL_KEY not in fake_state.session_state
+    assert dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY not in fake_state.session_state
 
 
 def test_dashboard_data_cache_signature_ignores_section_label_when_shape_and_flags_match(
