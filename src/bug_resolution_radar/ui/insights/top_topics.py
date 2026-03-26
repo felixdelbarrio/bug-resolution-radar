@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 import pandas as pd
 import streamlit as st
@@ -25,6 +25,7 @@ from bug_resolution_radar.ui.insights.chips import (
     status_chip_html,
 )
 from bug_resolution_radar.ui.insights.engine import build_topic_brief, classify_theme
+from bug_resolution_radar.ui.insights.header_actions import render_insights_header_row
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -161,7 +162,11 @@ def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
 
 
 def render_top_topics_tab(
-    *, settings: Settings, dff_filtered: pd.DataFrame, kpis: Dict[str, Any]
+    *,
+    settings: Settings,
+    dff_filtered: pd.DataFrame,
+    kpis: Dict[str, Any],
+    header_left_render: Callable[[], None] | None = None,
 ) -> None:
     """
     Tab: Top temas funcionales (abiertas)
@@ -206,11 +211,14 @@ def render_top_topics_tab(
         return
 
     key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
-    render_minimal_export_actions(
-        key_prefix="insights::top_topics",
-        filename_prefix="insights_temas",
-        suffix="top_temas",
-        csv_df=top_tbl.copy(deep=False),
+    render_insights_header_row(
+        left_render=header_left_render,
+        right_render=lambda: render_minimal_export_actions(
+            key_prefix="insights::top_topics",
+            filename_prefix="insights_temas",
+            suffix="top_temas",
+            csv_df=top_tbl.copy(deep=False),
+        ),
     )
 
     for _, r in top_tbl.iterrows():

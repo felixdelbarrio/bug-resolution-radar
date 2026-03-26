@@ -1671,10 +1671,11 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                         ys = _trace_values(trace, "y")
                         seg_text: List[str] = []
                         for idx, y_raw in enumerate(ys):
-                            seg_val = _to_float(y_raw)
-                            if seg_val is None or seg_val <= 0:
+                            seg_val_opt = _to_float(y_raw)
+                            if seg_val_opt is None or seg_val_opt <= 0:
                                 seg_text.append("")
                                 continue
+                            seg_val = float(seg_val_opt)
                             x_key = str(xs[idx]) if idx < len(xs) else ""
                             col_total = float(totals.get(x_key, 0.0))
                             share = (seg_val / col_total) if col_total > 0 else 0.0
@@ -1813,7 +1814,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                     parsed_val = _to_float(raw_val)
                     if parsed_val is None or parsed_val <= 0:
                         continue
-                    pie_values.append(parsed_val)
+                    pie_values.append(float(parsed_val))
                 total_pie = float(sum(pie_values)) if pie_values else 0.0
                 if total_pie > 0 and hasattr(trace, "text") and hasattr(trace, "textinfo"):
                     raw_values = _trace_values(trace, "values")

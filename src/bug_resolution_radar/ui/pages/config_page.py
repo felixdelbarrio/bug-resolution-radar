@@ -1310,6 +1310,29 @@ def render(settings: Settings) -> None:
                     f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
                 )
 
+            with st.container(border=True, key="cfg_prefs_card_quincena"):
+                st.markdown("#### Alcance quincenal")
+                quincena_last_finished_default = _boolish(
+                    getattr(settings, "QUINCENA_LAST_FINISHED_ONLY", "false"),
+                    default=False,
+                )
+                st.session_state.setdefault(
+                    "cfg_quincena_last_finished_only",
+                    quincena_last_finished_default,
+                )
+                quincena_last_finished_only = st.checkbox(
+                    "Usar última quincena finalizada",
+                    key="cfg_quincena_last_finished_only",
+                    help=(
+                        "Desmarcado: usa la quincena natural en curso (1-15 o 16-fin de mes). "
+                        "Marcado: usa siempre la última quincena ya cerrada."
+                    ),
+                )
+                st.caption(
+                    "Aplicación transversal en Insights, filtros quincenales y "
+                    "reportes de seguimiento."
+                )
+
             with st.container(border=True, key="cfg_prefs_card_ppt"):
                 st.markdown("#### Descargas del informe PPT")
                 st.markdown("**Carpeta de guardado**")
@@ -1438,6 +1461,9 @@ def render(settings: Settings) -> None:
                         "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
                             analysis_selected_months,
                             default=12,
+                        ),
+                        "QUINCENA_LAST_FINISHED_ONLY": (
+                            "true" if bool(quincena_last_finished_only) else "false"
                         ),
                     },
                 )

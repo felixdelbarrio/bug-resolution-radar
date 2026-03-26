@@ -20,6 +20,8 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
+    ISSUES_QUINCENAL_SCOPE_KEY,
+    ISSUES_SCOPE_KEYS_KEY,
     ISSUES_SCOPE_LIKE_QUERY_KEY,
     ISSUES_SCOPE_SORT_COL_KEY,
 )
@@ -139,6 +141,8 @@ def _dashboard_data_cache_signature(
     issue_scope_sig = (
         str(st.session_state.get(ISSUES_SCOPE_SORT_COL_KEY) or "").strip(),
         str(st.session_state.get(ISSUES_SCOPE_LIKE_QUERY_KEY) or "").strip().casefold(),
+        _cache_filter_values(ISSUES_SCOPE_KEYS_KEY),
+        str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip() or "Todas",
     )
 
     # Scoped dataframe is derived from source/country, but include a tiny shape signature
@@ -215,7 +219,12 @@ def render(settings: Settings, *, active_section: str = "overview") -> str:
 
     if section in {"issues", "kanban"}:
         render_next_best_banner(df_all=ctx.df_all, section=section)
-        render_filters(ctx.df_all, key_prefix="dashboard")
+        render_filters(
+            ctx.df_all,
+            key_prefix="dashboard",
+            settings=settings,
+            include_quincenal=True,
+        )
 
     if section == "overview":
         render_overview_kpis(kpis=ctx.kpis, dff=ctx.dff, open_df=ctx.open_df)

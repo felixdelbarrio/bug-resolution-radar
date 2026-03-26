@@ -26,6 +26,7 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
+    ISSUES_QUINCENAL_SCOPE_KEY,
 )
 
 _REPORT_STATUS_KEY = "workspace_report_status"
@@ -202,6 +203,11 @@ def _visible_filter_label(values: list[str], *, name: str) -> str:
     return f"{name}={', '.join(clean[:3])} (+{len(clean) - 3})"
 
 
+def _visible_quincenal_scope_label(value: object) -> str:
+    token = str(value or "").strip() or "Todas"
+    return f"Quincenal={token}"
+
+
 def _saved_path_state_key(scope_key: str) -> str:
     return f"{_REPORT_SAVED_PATH_KEY_PREFIX}::{scope_key}"
 
@@ -245,6 +251,7 @@ def _report_request_signature(
     status_filters: list[str],
     priority_filters: list[str],
     assignee_filters: list[str],
+    quincenal_scope: str,
 ) -> str:
     payload = {
         "country": str(country or "").strip(),
@@ -252,6 +259,7 @@ def _report_request_signature(
         "status_filters": _normalize_filter_values(status_filters),
         "priority_filters": _normalize_filter_values(priority_filters),
         "assignee_filters": _normalize_filter_values(assignee_filters),
+        "quincenal_scope": str(quincenal_scope or "Todas").strip() or "Todas",
         "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
         "data_path": str(getattr(settings, "DATA_PATH", "") or "").strip(),
         "data_mtime_ns": _data_path_mtime_ns(getattr(settings, "DATA_PATH", "")),
@@ -364,6 +372,8 @@ def _render_executive_report(settings: Settings) -> None:
     status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
+    quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
+    quincenal_scope = quincenal_scope or "Todas"
 
     all_df_for_scope: pd.DataFrame | None = None
     scoped_for_scope = pd.DataFrame()
@@ -378,6 +388,7 @@ def _render_executive_report(settings: Settings) -> None:
         _visible_filter_label(status_filters, name="Estado"),
         _visible_filter_label(priority_filters, name="Prioridad"),
         _visible_filter_label(assignee_filters, name="Responsable"),
+        _visible_quincenal_scope_label(quincenal_scope),
     ]
     st.info(
         f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}"
@@ -394,6 +405,7 @@ def _render_executive_report(settings: Settings) -> None:
         status_filters=status_filters,
         priority_filters=priority_filters,
         assignee_filters=assignee_filters,
+        quincenal_scope=quincenal_scope,
     )
 
     stored_request_sig = str(st.session_state.get(request_sig_key) or "").strip()
@@ -619,6 +631,8 @@ def _render_period_followup_report(settings: Settings) -> None:
     status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
+    quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
+    quincenal_scope = quincenal_scope or "Todas"
 
     try:
         df_all = load_issues_df(settings.DATA_PATH)
@@ -693,6 +707,7 @@ def _render_period_followup_report(settings: Settings) -> None:
         _visible_filter_label(status_filters, name="Estado"),
         _visible_filter_label(priority_filters, name="Prioridad"),
         _visible_filter_label(assignee_filters, name="Responsable"),
+        _visible_quincenal_scope_label(quincenal_scope),
     ]
     st.caption(f"Filtros aplicados: {' | '.join(filters_summary)}")
 

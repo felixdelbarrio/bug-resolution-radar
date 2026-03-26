@@ -93,7 +93,12 @@ def _reset_scope_filters() -> None:
     """Reset dashboard filters whenever workspace scope changes."""
     clear_all_filters()
     st.session_state.pop("__filters_action_context", None)
-    suffixes = ("filter_status_ui", "filter_priority_ui", "filter_assignee_ui")
+    suffixes = (
+        "filter_status_ui",
+        "filter_priority_ui",
+        "filter_assignee_ui",
+        "filter_quincenal_ui",
+    )
     for key in list(st.session_state.keys()):
         key_txt = str(key or "")
         if key_txt in suffixes:
