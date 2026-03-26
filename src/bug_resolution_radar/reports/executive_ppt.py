@@ -1671,18 +1671,18 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                         ys = _trace_values(trace, "y")
                         seg_text: List[str] = []
                         for idx, y_raw in enumerate(ys):
-                            y_val = _to_float(y_raw)
-                            if y_val is None or y_val <= 0:
+                            seg_val = _to_float(y_raw)
+                            if seg_val is None or seg_val <= 0:
                                 seg_text.append("")
                                 continue
                             x_key = str(xs[idx]) if idx < len(xs) else ""
                             col_total = float(totals.get(x_key, 0.0))
-                            share = (y_val / col_total) if col_total > 0 else 0.0
+                            share = (seg_val / col_total) if col_total > 0 else 0.0
                             # Hide tiny blocks: avoid illegible micro labels.
-                            if share < 0.085 and y_val < 80.0:
+                            if share < 0.085 and seg_val < 80.0:
                                 seg_text.append("")
                                 continue
-                            seg_text.append(_fmt_total(y_val))
+                            seg_text.append(_fmt_total(seg_val))
                         if hasattr(trace, "text"):
                             trace.text = seg_text
                         if hasattr(trace, "texttemplate"):
@@ -1808,8 +1808,12 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                         size=32 if dense_chart else 30,
                         color=f"#{PALETTE['ink']}",
                     )
-                pie_values = [_to_float(v) for v in _trace_values(trace, "values")]
-                pie_values = [v for v in pie_values if v is not None and v > 0]
+                pie_values: List[float] = []
+                for raw_val in _trace_values(trace, "values"):
+                    parsed_val = _to_float(raw_val)
+                    if parsed_val is None or parsed_val <= 0:
+                        continue
+                    pie_values.append(parsed_val)
                 total_pie = float(sum(pie_values)) if pie_values else 0.0
                 if total_pie > 0 and hasattr(trace, "text") and hasattr(trace, "textinfo"):
                     raw_values = _trace_values(trace, "values")
