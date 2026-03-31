@@ -539,8 +539,8 @@ def render_filters(
                         "nuevas/cerradas/maestras/otras."
                     ),
                 )
-                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = (
-                    normalize_quincenal_scope_label(st.session_state.get(ui_quincenal_key))
+                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = normalize_quincenal_scope_label(
+                    st.session_state.get(ui_quincenal_key)
                 )
 
     # Return canonical state (single source of truth)

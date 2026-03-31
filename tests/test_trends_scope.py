@@ -242,7 +242,9 @@ def test_age_bucket_open_priority_stacked_has_totals_and_open_axis_wording() -> 
     fig = build_age_buckets_open_priority_stacked(grouped=grouped, bucket_order=AGE_BUCKET_ORDER)
 
     assert fig is not None
-    assert str(getattr(getattr(fig.layout, "xaxis", None), "title", None).text) == "Antigüedad (días)"
+    assert (
+        str(getattr(getattr(fig.layout, "xaxis", None), "title", None).text) == "Antigüedad (días)"
+    )
     assert (
         str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text)
         == "Incidencias abiertas"

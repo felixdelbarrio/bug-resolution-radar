@@ -256,8 +256,8 @@ def build_age_bucket_priority_distribution(
     grouped = grouped.sort_values(["bucket", "__priority_sort", "priority"]).drop(
         columns="__priority_sort"
     )
-    grouped["bucket_label"] = grouped["bucket"].astype(str).map(
-        lambda b: AGE_BUCKET_LABELS_DAYS.get(b, b)
+    grouped["bucket_label"] = (
+        grouped["bucket"].astype(str).map(lambda b: AGE_BUCKET_LABELS_DAYS.get(b, b))
     )
     grouped["count"] = grouped["count"].astype(int)
     return grouped[cols]
@@ -314,8 +314,7 @@ def build_age_buckets_open_priority_stacked(
         return fig
 
     by_bucket_priority = {
-        (str(row.bucket), str(row.priority)): int(row.count)
-        for row in safe.itertuples(index=False)
+        (str(row.bucket), str(row.priority)): int(row.count) for row in safe.itertuples(index=False)
     }
     priorities = sorted(
         safe["priority"].astype(str).unique().tolist(),

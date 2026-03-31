@@ -109,9 +109,7 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
     if show_open_split:
         options[QUINCENAL_SCOPE_MAESTRAS_OPEN] = _issue_keys(groups.maestras_open)
         options[QUINCENAL_SCOPE_OTHERS_OPEN] = _issue_keys(groups.others_open)
-    return {
-        label: keys for label, keys in options.items() if label == QUINCENAL_SCOPE_ALL or keys
-    }
+    return {label: keys for label, keys in options.items() if label == QUINCENAL_SCOPE_ALL or keys}
 
 
 def apply_issue_key_scope(df: pd.DataFrame, *, keys: List[str]) -> pd.DataFrame:
