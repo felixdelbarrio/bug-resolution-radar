@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.insights import _tokenize_summary, find_similar_issue_clusters
+from bug_resolution_radar.analytics.insights import (
+    _tokenize_summary,
+    build_theme_fortnight_trend,
+    find_similar_issue_clusters,
+    order_theme_labels,
+    prepare_open_theme_payload,
+)
 
 
 def test_tokenize_summary_removes_stopwords_and_short_tokens() -> None:
@@ -66,3 +72,60 @@ def test_find_similar_issue_clusters_respects_only_open_flag() -> None:
 
 def test_find_similar_issue_clusters_handles_missing_columns() -> None:
     assert find_similar_issue_clusters(pd.DataFrame({"id": [1, 2]})) == []
+
+
+def test_prepare_open_theme_payload_includes_other_bucket_after_top_themes() -> None:
+    open_df = pd.DataFrame(
+        {
+            "summary": [
+                "Error en pagos con TPV",
+                "Error en pagos con TPV",
+                "Fallo en login con password",
+                "Texto libre sin patron funcional",
+            ]
+        }
+    )
+    payload = prepare_open_theme_payload(open_df, top_n=3)
+    top_tbl = payload["top_tbl"]
+    assert top_tbl["tema"].tolist() == ["Pagos", "Login y acceso", "Otros"]
+    assert top_tbl["open_count"].tolist() == [2, 1, 1]
+
+
+def test_build_theme_fortnight_trend_builds_raw_and_cumulative_series() -> None:
+    df = pd.DataFrame(
+        {
+            "summary": [
+                "Error de pagos",
+                "Error de pagos",
+                "Fallo de login biometria",
+                "Incidencia sin clasificar",
+            ],
+            "created": [
+                "2026-01-03T10:00:00+00:00",
+                "2026-01-19T10:00:00+00:00",
+                "2026-01-23T10:00:00+00:00",
+                "2026-02-02T10:00:00+00:00",
+            ],
+        }
+    )
+    trend = build_theme_fortnight_trend(
+        df,
+        theme_whitelist=["Pagos", "Login y acceso", "Otros"],
+        cumulative=True,
+    )
+    assert trend["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
+    assert trend["quincena_label"].drop_duplicates().tolist() == [
+        "2026-01 \u00b7 1-15",
+        "2026-01 \u00b7 16-31",
+        "2026-02 \u00b7 1-15",
+    ]
+    pagos = trend.loc[trend["tema"] == "Pagos", "issues"].tolist()
+    pagos_acc = trend.loc[trend["tema"] == "Pagos", "issues_cumulative"].tolist()
+    assert pagos == [1, 1, 0]
+    assert pagos_acc == [1, 2, 2]
+    assert trend["issues_value"].equals(trend["issues_cumulative"])
+
+
+def test_order_theme_labels_prioritizes_business_focus_themes() -> None:
+    ordered = order_theme_labels(["Otros", "Softoken", "Pagos", "Monetarias"])
+    assert ordered == ["Pagos", "Monetarias", "Otros", "Softoken"]

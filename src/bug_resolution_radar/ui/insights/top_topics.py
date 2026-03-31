@@ -6,9 +6,27 @@ import hashlib
 from typing import Any, Callable, Dict
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
+from bug_resolution_radar.analytics.insights import (
+    build_theme_fortnight_trend,
+    prepare_open_theme_payload,
+)
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_GOAL_ACCENT_7,
+    BBVA_LIGHT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_GREEN_3,
+    BBVA_SIGNAL_ORANGE_1,
+    BBVA_SIGNAL_ORANGE_2,
+    BBVA_SIGNAL_RED_1,
+    BBVA_SIGNAL_RED_2,
+    BBVA_SIGNAL_YELLOW_1,
+    hex_to_rgba,
+)
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
@@ -24,7 +42,7 @@ from bug_resolution_radar.ui.insights.chips import (
     priority_chip_html,
     status_chip_html,
 )
-from bug_resolution_radar.ui.insights.engine import build_topic_brief, classify_theme
+from bug_resolution_radar.ui.insights.engine import build_topic_brief
 from bug_resolution_radar.ui.insights.header_actions import render_insights_header_row
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
@@ -37,6 +55,47 @@ from bug_resolution_radar.ui.insights.learning_store import (
     LEARNING_INTERACTIONS_KEY,
     ensure_learning_session_loaded,
 )
+from bug_resolution_radar.ui.style import apply_plotly_bbva
+
+
+def _ordered_unique_labels(values: list[object]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in values:
+        label = str(raw or "").strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+    return out
+
+
+def _signal_palette(*, dark_mode: bool) -> tuple[str, ...]:
+    if dark_mode:
+        return (
+            BBVA_SIGNAL_RED_2,
+            BBVA_SIGNAL_ORANGE_2,
+            BBVA_SIGNAL_YELLOW_1,
+            BBVA_SIGNAL_GREEN_2,
+            BBVA_SIGNAL_GREEN_3,
+            BBVA_LIGHT.electric_blue,
+            BBVA_LIGHT.serene_blue,
+            BBVA_GOAL_ACCENT_7,
+            BBVA_LIGHT.aqua,
+            BBVA_LIGHT.white,
+        )
+    return (
+        BBVA_SIGNAL_RED_1,
+        BBVA_SIGNAL_ORANGE_1,
+        BBVA_SIGNAL_ORANGE_2,
+        BBVA_SIGNAL_GREEN_1,
+        BBVA_SIGNAL_GREEN_2,
+        BBVA_LIGHT.electric_blue,
+        BBVA_LIGHT.core_blue,
+        BBVA_GOAL_ACCENT_7,
+        BBVA_LIGHT.serene_dark_blue,
+        BBVA_LIGHT.midnight,
+    )
 
 
 def _topic_selection_token(*, topic: str, total_open: int) -> str:
@@ -102,7 +161,12 @@ def _rotate_topic_tail(df: pd.DataFrame, *, topic: str, total_open: int) -> pd.D
 
 
 def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
-    tmp_open = open_df.copy(deep=False)
+    base_payload = prepare_open_theme_payload(open_df, top_n=10)
+    tmp_open = base_payload.get("tmp_open")
+    if not isinstance(tmp_open, pd.DataFrame):
+        tmp_open = pd.DataFrame()
+    else:
+        tmp_open = tmp_open.copy(deep=False)
     tmp_open["status"] = (
         normalize_text_col(tmp_open["status"], "(sin estado)")
         if col_exists(tmp_open, "status")
@@ -131,41 +195,132 @@ def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
     else:
         tmp_open["__age_days"] = pd.NA
 
-    if not col_exists(tmp_open, "summary"):
-        empty_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
-        return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
-
-    tmp_open["__theme"] = tmp_open["summary"].map(classify_theme)
-    theme_counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
-    non_otros = [t for t in theme_counts.index.tolist() if str(t) != "Otros"]
-    has_otros = "Otros" in theme_counts.index
-    if has_otros:
-        if len(non_otros) >= 9:
-            top_themes = non_otros[:9] + ["Otros"]
-        else:
-            top_themes = non_otros + ["Otros"]
-    else:
-        top_themes = non_otros[:10]
-
-    total_open = int(len(tmp_open))
-    top_tbl = pd.DataFrame(
-        {
-            "tema": top_themes,
-            "open_count": [int(theme_counts[t]) for t in top_themes],
-            "pct_open": [
-                (float(theme_counts[t]) / float(total_open) * 100.0 if total_open else 0.0)
-                for t in top_themes
-            ],
-        }
-    )
+    top_tbl = base_payload.get("top_tbl")
+    if not isinstance(top_tbl, pd.DataFrame):
+        top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
     return {"tmp_open": tmp_open, "top_tbl": top_tbl}
+
+
+def _theme_color_map(*, theme_order: list[str], dark_mode: bool) -> dict[str, str]:
+    out: dict[str, str] = {}
+    palette = _signal_palette(dark_mode=dark_mode)
+    for idx, theme in enumerate(theme_order):
+        out[theme] = palette[idx % len(palette)]
+    return out
+
+
+def _inject_topic_expander_color_css(
+    *,
+    container_key: str,
+    color_hex: str,
+    dark_mode: bool,
+) -> None:
+    tint = hex_to_rgba(color_hex, 0.30 if dark_mode else 0.22, fallback=color_hex)
+    st.markdown(
+        f"""
+        <style>
+          .st-key-{container_key} div[data-testid="stExpander"] {{
+            box-shadow:
+              inset 4px 0 0 {color_hex},
+              inset 0 0 0 1px {tint};
+          }}
+          .st-key-{container_key} div[data-testid="stExpander"] summary p {{
+            color: {color_hex} !important;
+            font-weight: 700 !important;
+          }}
+          .st-key-{container_key} div[data-testid="stExpander"] summary svg {{
+            color: {color_hex} !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_theme_fortnight_chart(
+    *,
+    trend_df: pd.DataFrame,
+    cumulative: bool,
+    theme_order: list[str],
+    theme_color_map: dict[str, str],
+) -> None:
+    if trend_df.empty:
+        return
+
+    axis = (
+        trend_df.loc[:, ["quincena_start", "quincena_label"]]
+        .drop_duplicates(subset=["quincena_start"])
+        .sort_values("quincena_start", ascending=True)
+    )
+    if axis.empty:
+        return
+
+    present = set(trend_df["tema"].astype(str).tolist())
+    theme_order = [t for t in theme_order if t in present]
+    if not theme_order:
+        theme_order = _ordered_unique_labels(trend_df["tema"].tolist())
+    if not theme_order:
+        return
+
+    y_title = "Incidencias acumuladas" if cumulative else "Incidencias"
+    fig = go.Figure()
+    for theme in theme_order:
+        sub = trend_df.loc[trend_df["tema"] == theme].sort_values("quincena_start", ascending=True)
+        if sub.empty:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=sub["quincena_start"],
+                y=sub["issues_value"],
+                mode="lines+markers",
+                name=theme,
+                line=dict(color=theme_color_map.get(theme), width=2.8 if cumulative else 2.3),
+                marker=dict(size=7),
+                customdata=sub[["quincena_label"]],
+                hovertemplate=(
+                    "Tema: %{fullData.name}<br>"
+                    "Quincena: %{customdata[0]}<br>"
+                    f"{y_title}: %{{y}}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        height=380,
+        margin=dict(l=16, r=16, t=18, b=170),
+        xaxis_title="Quincena",
+        yaxis_title=y_title,
+        hovermode="x unified",
+        xaxis_title_standoff=18,
+    )
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=axis["quincena_start"],
+        ticktext=axis["quincena_label"],
+        tickangle=-26,
+    )
+    fig = apply_plotly_bbva(fig, showlegend=True)
+    fig.update_layout(
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.54,
+            xanchor="center",
+            x=0.5,
+            title=dict(text=""),
+        ),
+        margin=dict(l=16, r=16, t=18, b=170),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_top_topics_tab(
     *,
     settings: Settings,
     dff_filtered: pd.DataFrame,
+    dff_history: pd.DataFrame | None = None,
     kpis: Dict[str, Any],
+    use_accumulated_scope: bool = False,
     header_left_render: Callable[[], None] | None = None,
 ) -> None:
     """
@@ -220,12 +375,62 @@ def render_top_topics_tab(
             csv_df=top_tbl.copy(deep=False),
         ),
     )
+    history_source = safe_df(dff_history) if isinstance(dff_history, pd.DataFrame) else dff
+    history_open = open_only(history_source)
+    selected_themes = _ordered_unique_labels(top_tbl["tema"].tolist())
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    topic_color_map = _theme_color_map(theme_order=selected_themes, dark_mode=dark_mode)
+    trend_df = pd.DataFrame(
+        columns=[
+            "quincena_start",
+            "quincena_end",
+            "quincena_label",
+            "tema",
+            "issues",
+            "issues_cumulative",
+            "issues_value",
+        ]
+    )
+    if not history_open.empty and selected_themes:
+        theme_token = "|".join(selected_themes)
+        trend_sig = dataframe_signature(
+            history_open,
+            columns=("summary", "created", "status", "resolved"),
+            salt=(
+                f"insights.top_topics.fortnight.v1:{int(bool(use_accumulated_scope))}:{theme_token}"
+            ),
+        )
+        trend_payload, _ = cached_by_signature(
+            "insights.top_topics.fortnight",
+            trend_sig,
+            lambda: build_theme_fortnight_trend(
+                history_open,
+                theme_whitelist=selected_themes,
+                cumulative=bool(use_accumulated_scope),
+            ),
+            max_entries=12,
+        )
+        if isinstance(trend_payload, pd.DataFrame):
+            trend_df = trend_payload
 
-    for _, r in top_tbl.iterrows():
+    if not trend_df.empty:
+        _render_theme_fortnight_chart(
+            trend_df=trend_df,
+            cumulative=bool(use_accumulated_scope),
+            theme_order=selected_themes,
+            theme_color_map=topic_color_map,
+        )
+    else:
+        st.caption(
+            "No hay histórico suficiente para construir la tendencia quincenal por funcionalidad."
+        )
+
+    for idx, (_, r) in enumerate(top_tbl.iterrows()):
         topic = str(r.get("tema", "") or "").strip()
         cnt = int(r.get("open_count", 0) or 0)
         pct_txt = f"{float(r.get('pct_open', 0.0) or 0.0):.1f}%"
         sub = tmp_open[tmp_open["__theme"] == topic].copy(deep=False)
+        topic_color = topic_color_map.get(topic, BBVA_LIGHT.serene_blue)
 
         st_dom = (
             sub["status"].value_counts().index[0]
@@ -240,42 +445,49 @@ def render_top_topics_tab(
 
         hdr = f"**{cnt} issues** · **{pct_txt}** · {topic}"
 
-        with st.expander(hdr, expanded=False):
-            st.markdown(
-                (
-                    '<div class="ins-meta-row">'
-                    f"{neutral_chip_html(f'{cnt} issues')}"
-                    f"{neutral_chip_html(pct_txt)}"
-                    f"{status_chip_html(st_dom)}"
-                    f"{priority_chip_html(pr_dom)}"
-                    "</div>"
-                ),
-                unsafe_allow_html=True,
+        container_key = f"insights_topic_block_{idx}"
+        with st.container(key=container_key):
+            _inject_topic_expander_color_css(
+                container_key=container_key,
+                color_hex=topic_color,
+                dark_mode=dark_mode,
             )
-            st.caption(build_topic_brief(topic=topic, sub_df=sub, total_open=total_open))
-            if sub.empty or not col_exists(sub, "key"):
-                st.caption("No se han podido mapear issues individuales para este tema.")
-                continue
+            with st.expander(hdr, expanded=False):
+                st.markdown(
+                    (
+                        '<div class="ins-meta-row">'
+                        f"{neutral_chip_html(f'{cnt} issues')}"
+                        f"{neutral_chip_html(pct_txt)}"
+                        f"{status_chip_html(st_dom)}"
+                        f"{priority_chip_html(pr_dom)}"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+                st.caption(build_topic_brief(topic=topic, sub_df=sub, total_open=total_open))
+                if sub.empty or not col_exists(sub, "key"):
+                    st.caption("No se han podido mapear issues individuales para este tema.")
+                    continue
 
-            ranked = _rank_topic_candidates(sub)
-            anchor = ranked.head(8)
-            tail = ranked.iloc[8:]
-            if not tail.empty:
-                tail = _rotate_topic_tail(tail, topic=topic, total_open=total_open)
-            sub_view = pd.concat([anchor, tail], axis=0).head(20)
+                ranked = _rank_topic_candidates(sub)
+                anchor = ranked.head(8)
+                tail = ranked.iloc[8:]
+                if not tail.empty:
+                    tail = _rotate_topic_tail(tail, topic=topic, total_open=total_open)
+                sub_view = pd.concat([anchor, tail], axis=0).head(20)
 
-            cards_html = issue_cards_html_from_df(
-                sub_view,
-                key_to_url=key_to_url,
-                key_to_meta=key_to_meta,
-                summary_col="summary",
-                assignee_col="assignee",
-                age_days_col="__age_days",
-                summary_max_chars=160,
-                limit=20,
-            )
-            if cards_html:
-                st.markdown(cards_html, unsafe_allow_html=True)
+                cards_html = issue_cards_html_from_df(
+                    sub_view,
+                    key_to_url=key_to_url,
+                    key_to_meta=key_to_meta,
+                    summary_col="summary",
+                    assignee_col="assignee",
+                    age_days_col="__age_days",
+                    summary_max_chars=160,
+                    limit=20,
+                )
+                if cards_html:
+                    st.markdown(cards_html, unsafe_allow_html=True)
 
     st.caption(
         "Tip: el % indica el peso real de cada tema y el orden de casos se ajusta segun filtros e interacciones."

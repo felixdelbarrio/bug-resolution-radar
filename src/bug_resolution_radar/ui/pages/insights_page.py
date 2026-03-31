@@ -129,7 +129,9 @@ def render(
             render_top_topics_tab(
                 settings=settings,
                 dff_filtered=scoped,
+                dff_history=dff,
                 kpis=kpis,
+                use_accumulated_scope=use_accum,
                 header_left_render=lambda: _scope_toggle_synced(tab_key="top_topics"),
             )
         with t2:

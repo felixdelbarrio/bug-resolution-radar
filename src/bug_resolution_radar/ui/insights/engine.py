@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence, Tuple
 
@@ -11,6 +9,18 @@ import numpy as np
 import pandas as pd
 
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
+from bug_resolution_radar.analytics.insights import (
+    THEME_RULES as _CENTRAL_THEME_RULES,
+)
+from bug_resolution_radar.analytics.insights import (
+    classify_theme as _classify_theme,
+)
+from bug_resolution_radar.analytics.insights import (
+    theme_counts as _theme_counts,
+)
+from bug_resolution_radar.analytics.insights import (
+    top_non_other_theme as _top_non_other_theme,
+)
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
@@ -39,14 +49,8 @@ class TrendInsightPack:
 
 
 THEME_RULES: List[Tuple[str, List[str]]] = [
-    ("Softoken", ["softoken", "token", "firma", "otp"]),
-    ("Crédito", ["credito", "crédito", "cvv", "tarjeta", "tdc"]),
-    ("Monetarias", ["monetarias", "saldo", "nomina", "nómina"]),
-    ("Tareas", ["tareas", "task", "acciones", "dashboard"]),
-    ("Pagos", ["pago", "pagos", "tpv", "cobranza"]),
-    ("Transferencias", ["transferencia", "spei", "swift", "divisas"]),
-    ("Login y acceso", ["login", "acceso", "face id", "biometr", "password", "tokenbnc"]),
-    ("Notificaciones", ["notificacion", "notificación", "push", "mensaje"]),
+    (str(theme), [str(kw) for kw in list(keywords or [])])
+    for theme, keywords in list(_CENTRAL_THEME_RULES)
 ]
 
 
@@ -121,13 +125,6 @@ def _ratio(numerator: float, denominator: float) -> float:
     return float(numerator) / float(denominator)
 
 
-def _norm_text(value: object) -> str:
-    txt = str(value or "").strip().lower()
-    txt = unicodedata.normalize("NFKD", txt)
-    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
-    return txt
-
-
 def _is_finalist_status(value: object) -> bool:
     token = str(value or "").strip().lower()
     return token in _FINALIST_STATUS_TOKENS
@@ -152,36 +149,15 @@ def _top_non_final_status(
 def classify_theme(
     summary: object, *, theme_rules: Sequence[Tuple[str, Sequence[str]]] | None = None
 ) -> str:
-    rules = list(theme_rules or THEME_RULES)
-    text = _norm_text(summary)
-    if not text:
-        return "Otros"
-    for theme_name, keys in rules:
-        for kw in keys:
-            if re.search(rf"\b{re.escape(_norm_text(kw))}\b", text):
-                return str(theme_name)
-    return "Otros"
+    return _classify_theme(summary, theme_rules=theme_rules)
 
 
 def theme_counts(open_df: pd.DataFrame) -> pd.Series:
-    df = _safe_df(open_df)
-    if df.empty or "summary" not in df.columns:
-        return pd.Series(dtype="int64")
-    summaries = df["summary"].fillna("").astype(str).str.strip()
-    summaries = summaries[summaries != ""]
-    if summaries.empty:
-        return pd.Series(dtype="int64")
-    return summaries.map(classify_theme).value_counts()
+    return _theme_counts(open_df)
 
 
 def top_non_other_theme(open_df: pd.DataFrame) -> Tuple[str, int]:
-    vc = theme_counts(open_df)
-    if vc.empty:
-        return "-", 0
-    non_other = vc[vc.index.astype(str) != "Otros"]
-    if non_other.empty:
-        return "—", 0
-    return str(non_other.index[0]), int(non_other.iloc[0])
+    return _top_non_other_theme(open_df)
 
 
 def _daily_flow(dff: pd.DataFrame, *, lookback_days: int = 90) -> pd.DataFrame:
