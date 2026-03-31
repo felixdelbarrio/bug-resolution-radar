@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.insights import (
+    build_theme_daily_trend,
     build_theme_fortnight_trend,
     prepare_open_theme_payload,
 )
@@ -237,20 +238,24 @@ def _inject_topic_expander_color_css(
     )
 
 
-def _render_theme_fortnight_chart(
+def _render_theme_trend_chart(
     *,
     trend_df: pd.DataFrame,
-    cumulative: bool,
     theme_order: list[str],
     theme_color_map: dict[str, str],
+    x_col: str,
+    x_label_col: str,
+    x_title: str,
+    y_title: str,
+    tick_angle: int,
 ) -> None:
     if trend_df.empty:
         return
 
     axis = (
-        trend_df.loc[:, ["quincena_start", "quincena_label"]]
-        .drop_duplicates(subset=["quincena_start"])
-        .sort_values("quincena_start", ascending=True)
+        trend_df.loc[:, [x_col, x_label_col]]
+        .drop_duplicates(subset=[x_col])
+        .sort_values(x_col, ascending=True)
     )
     if axis.empty:
         return
@@ -262,24 +267,23 @@ def _render_theme_fortnight_chart(
     if not theme_order:
         return
 
-    y_title = "Incidencias acumuladas" if cumulative else "Incidencias"
     fig = go.Figure()
     for theme in theme_order:
-        sub = trend_df.loc[trend_df["tema"] == theme].sort_values("quincena_start", ascending=True)
+        sub = trend_df.loc[trend_df["tema"] == theme].sort_values(x_col, ascending=True)
         if sub.empty:
             continue
         fig.add_trace(
             go.Scatter(
-                x=sub["quincena_start"],
+                x=sub[x_col],
                 y=sub["issues_value"],
                 mode="lines+markers",
                 name=theme,
-                line=dict(color=theme_color_map.get(theme), width=2.8 if cumulative else 2.3),
+                line=dict(color=theme_color_map.get(theme), width=2.45),
                 marker=dict(size=7),
-                customdata=sub[["quincena_label"]],
+                customdata=sub[[x_label_col]],
                 hovertemplate=(
                     "Tema: %{fullData.name}<br>"
-                    "Quincena: %{customdata[0]}<br>"
+                    f"{x_title}: %{{customdata[0]}}<br>"
                     f"{y_title}: %{{y}}<extra></extra>"
                 ),
             )
@@ -288,16 +292,16 @@ def _render_theme_fortnight_chart(
     fig.update_layout(
         height=380,
         margin=dict(l=16, r=16, t=18, b=170),
-        xaxis_title="Quincena",
+        xaxis_title=x_title,
         yaxis_title=y_title,
         hovermode="x unified",
         xaxis_title_standoff=18,
     )
     fig.update_xaxes(
         tickmode="array",
-        tickvals=axis["quincena_start"],
-        ticktext=axis["quincena_label"],
-        tickangle=-26,
+        tickvals=axis[x_col],
+        ticktext=axis[x_label_col],
+        tickangle=tick_angle,
     )
     fig = apply_plotly_bbva(fig, showlegend=True)
     fig.update_layout(
@@ -375,55 +379,81 @@ def render_top_topics_tab(
             csv_df=top_tbl.copy(deep=False),
         ),
     )
-    history_source = safe_df(dff_history) if isinstance(dff_history, pd.DataFrame) else dff
-    history_open = open_only(history_source)
     selected_themes = _ordered_unique_labels(top_tbl["tema"].tolist())
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     topic_color_map = _theme_color_map(theme_order=selected_themes, dark_mode=dark_mode)
-    trend_df = pd.DataFrame(
-        columns=[
-            "quincena_start",
-            "quincena_end",
-            "quincena_label",
-            "tema",
-            "issues",
-            "issues_cumulative",
-            "issues_value",
-        ]
-    )
-    if not history_open.empty and selected_themes:
-        theme_token = "|".join(selected_themes)
-        trend_sig = dataframe_signature(
-            history_open,
-            columns=("summary", "created", "status", "resolved"),
-            salt=(
-                f"insights.top_topics.fortnight.v1:{int(bool(use_accumulated_scope))}:{theme_token}"
-            ),
-        )
-        trend_payload, _ = cached_by_signature(
-            "insights.top_topics.fortnight",
-            trend_sig,
-            lambda: build_theme_fortnight_trend(
+    trend_df = pd.DataFrame()
+    trend_mode_label = "diaria"
+    if use_accumulated_scope:
+        history_source = safe_df(dff_history) if isinstance(dff_history, pd.DataFrame) else dff
+        history_open = open_only(history_source)
+        if not history_open.empty and selected_themes:
+            theme_token = "|".join(selected_themes)
+            trend_sig = dataframe_signature(
                 history_open,
-                theme_whitelist=selected_themes,
-                cumulative=bool(use_accumulated_scope),
-            ),
-            max_entries=12,
-        )
-        if isinstance(trend_payload, pd.DataFrame):
-            trend_df = trend_payload
+                columns=("summary", "created", "status", "resolved"),
+                salt=f"insights.top_topics.fortnight.v2:1:{theme_token}",
+            )
+            trend_payload, _ = cached_by_signature(
+                "insights.top_topics.fortnight",
+                trend_sig,
+                lambda: build_theme_fortnight_trend(
+                    history_open,
+                    theme_whitelist=selected_themes,
+                    cumulative=True,
+                ),
+                max_entries=12,
+            )
+            if isinstance(trend_payload, pd.DataFrame):
+                trend_df = trend_payload
+        trend_mode_label = "quincenal acumulada"
+    else:
+        daily_source = open_df
+        if not daily_source.empty and selected_themes:
+            theme_token = "|".join(selected_themes)
+            trend_sig = dataframe_signature(
+                daily_source,
+                columns=("summary", "created", "status", "resolved"),
+                salt=f"insights.top_topics.daily.v1:{theme_token}",
+            )
+            trend_payload, _ = cached_by_signature(
+                "insights.top_topics.daily",
+                trend_sig,
+                lambda: build_theme_daily_trend(
+                    daily_source,
+                    theme_whitelist=selected_themes,
+                ),
+                max_entries=12,
+            )
+            if isinstance(trend_payload, pd.DataFrame):
+                trend_df = trend_payload
+        trend_mode_label = "diaria de la quincena analizada"
 
     if not trend_df.empty:
-        _render_theme_fortnight_chart(
-            trend_df=trend_df,
-            cumulative=bool(use_accumulated_scope),
-            theme_order=selected_themes,
-            theme_color_map=topic_color_map,
-        )
+        if use_accumulated_scope:
+            _render_theme_trend_chart(
+                trend_df=trend_df,
+                theme_order=selected_themes,
+                theme_color_map=topic_color_map,
+                x_col="quincena_start",
+                x_label_col="quincena_label",
+                x_title="Quincena",
+                y_title="Incidencias acumuladas",
+                tick_angle=-26,
+            )
+        else:
+            _render_theme_trend_chart(
+                trend_df=trend_df,
+                theme_order=selected_themes,
+                theme_color_map=topic_color_map,
+                x_col="date",
+                x_label_col="date_label",
+                x_title="Día",
+                y_title="Incidencias",
+                tick_angle=-35,
+            )
     else:
-        st.caption(
-            "No hay histórico suficiente para construir la tendencia quincenal por funcionalidad."
-        )
+        st.caption(f"No hay histórico suficiente para construir la tendencia {trend_mode_label}.")
 
     for idx, (_, r) in enumerate(top_tbl.iterrows()):
         topic = str(r.get("tema", "") or "").strip()

@@ -4,6 +4,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.insights import (
     _tokenize_summary,
+    build_theme_daily_trend,
     build_theme_fortnight_trend,
     find_similar_issue_clusters,
     order_theme_labels,
@@ -124,6 +125,34 @@ def test_build_theme_fortnight_trend_builds_raw_and_cumulative_series() -> None:
     assert pagos == [1, 1, 0]
     assert pagos_acc == [1, 2, 2]
     assert trend["issues_value"].equals(trend["issues_cumulative"])
+
+
+def test_build_theme_daily_trend_uses_day_axis_inside_fortnight() -> None:
+    df = pd.DataFrame(
+        {
+            "summary": [
+                "Error de pagos",
+                "Error de pagos",
+                "Fallo de login biometria",
+            ],
+            "created": [
+                "2026-01-16T10:00:00+00:00",
+                "2026-01-18T10:00:00+00:00",
+                "2026-01-18T15:00:00+00:00",
+            ],
+        }
+    )
+    trend = build_theme_daily_trend(
+        df,
+        theme_whitelist=["Pagos", "Login y acceso"],
+    )
+    assert trend["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso"]
+    assert trend["date_label"].iloc[0] == "2026-01-16"
+    assert trend["date_label"].iloc[-1] == "2026-01-31"
+    pagos_daily = trend.loc[trend["tema"] == "Pagos", "issues"].tolist()
+    assert pagos_daily[0] == 1  # 2026-01-16
+    assert pagos_daily[1] == 0  # 2026-01-17 gap
+    assert pagos_daily[2] == 1  # 2026-01-18
 
 
 def test_order_theme_labels_prioritizes_business_focus_themes() -> None:
