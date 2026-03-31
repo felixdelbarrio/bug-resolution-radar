@@ -19,7 +19,10 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 from bug_resolution_radar.ui.dashboard.constants import order_statuses_canonical
-from bug_resolution_radar.ui.dashboard.quincenal_scope import quincenal_scope_options
+from bug_resolution_radar.ui.dashboard.quincenal_scope import (
+    normalize_quincenal_scope_label,
+    quincenal_scope_options,
+)
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -50,7 +53,7 @@ def _sync_from_ui_to_canonical(
     st.session_state[FILTER_PRIORITY_KEY] = list(st.session_state.get(ui_prio_key) or [])
     st.session_state[FILTER_ASSIGNEE_KEY] = list(st.session_state.get(ui_assignee_key) or [])
     if ui_quincenal_key:
-        selected = str(st.session_state.get(ui_quincenal_key) or "Todas").strip() or "Todas"
+        selected = normalize_quincenal_scope_label(st.session_state.get(ui_quincenal_key))
         st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = selected
 
 
@@ -329,8 +332,8 @@ def _mirror_canonical_to_ui(
     ]
     st.session_state[ui_assignee_key] = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
     if ui_quincenal_key:
-        st.session_state[ui_quincenal_key] = (
-            str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip() or "Todas"
+        st.session_state[ui_quincenal_key] = normalize_quincenal_scope_label(
+            st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
         )
 
 
@@ -435,9 +438,7 @@ def render_filters(
     if include_quincenal:
         quincenal_options = quincenal_scope_options(df, settings=settings)
         quincenal_labels = list(quincenal_options.keys()) if quincenal_options else ["Todas"]
-        selected_quincenal = (
-            str(st.session_state.get(ui_quincenal_key) or "Todas").strip() or "Todas"
-        )
+        selected_quincenal = normalize_quincenal_scope_label(st.session_state.get(ui_quincenal_key))
         if selected_quincenal not in quincenal_labels:
             selected_quincenal = "Todas"
         st.session_state[ui_quincenal_key] = selected_quincenal
@@ -538,8 +539,8 @@ def render_filters(
                         "nuevas/cerradas/maestras/otras."
                     ),
                 )
-                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = (
-                    str(st.session_state.get(ui_quincenal_key) or "Todas").strip() or "Todas"
+                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = normalize_quincenal_scope_label(
+                    st.session_state.get(ui_quincenal_key)
                 )
 
     # Return canonical state (single source of truth)

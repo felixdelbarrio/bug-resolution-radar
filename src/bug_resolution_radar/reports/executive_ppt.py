@@ -693,8 +693,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         return None
 
     try:
+        from bug_resolution_radar.analytics.insights import prepare_open_theme_payload
         from bug_resolution_radar.ui.insights.duplicates import _prepare_duplicates_payload
-        from bug_resolution_radar.ui.insights.top_topics import _prepare_top_topics_payload
     except Exception:
         return None
 
@@ -702,7 +702,7 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         # Both "Por funcionalidad" and duplicates rely on `summary`.
         return None
 
-    topics_payload = _prepare_top_topics_payload(open_df)
+    topics_payload = prepare_open_theme_payload(open_df, top_n=10)
     top_tbl = topics_payload.get("top_tbl") if isinstance(topics_payload, dict) else None
     if not isinstance(top_tbl, pd.DataFrame):
         top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])

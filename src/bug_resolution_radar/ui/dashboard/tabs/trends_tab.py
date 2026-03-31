@@ -25,7 +25,9 @@ from bug_resolution_radar.ui.common import (
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
     build_age_bucket_points,
+    build_age_bucket_priority_distribution,
     build_age_buckets_issue_distribution,
+    build_age_buckets_open_priority_stacked,
 )
 from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
@@ -804,6 +806,43 @@ def _render_trend_chart(
             figure=fig,
         )
         st.plotly_chart(fig, use_container_width=True)
+
+        # Additional stacked view for open incidents by age bucket + priority.
+        open_scope = _exclude_terminal_status_rows(open_df)
+        if not open_scope.empty and "created" in open_scope.columns:
+            open_age_sig = dataframe_signature(
+                open_scope,
+                columns=("created", "priority", "status", "key", "summary"),
+                salt="trends.age_buckets.open_priority_stack.v1",
+            )
+            open_points, _ = cached_by_signature(
+                "trends.age_buckets.open_points",
+                open_age_sig,
+                lambda: build_age_bucket_points(open_scope),
+                max_entries=10,
+            )
+            grouped_open, _ = cached_by_signature(
+                "trends.age_buckets.open_priority.grouped",
+                open_age_sig,
+                lambda: build_age_bucket_priority_distribution(
+                    issues=open_points,
+                    bucket_order=AGE_BUCKET_ORDER,
+                ),
+                max_entries=10,
+            )
+            if isinstance(grouped_open, pd.DataFrame) and not grouped_open.empty:
+                stacked_fig = build_age_buckets_open_priority_stacked(
+                    grouped=grouped_open,
+                    bucket_order=AGE_BUCKET_ORDER,
+                )
+                _measure_export(
+                    key_prefix=f"trends::{chart_id}::open_priority_stack",
+                    filename_prefix="tendencias",
+                    suffix=f"{chart_id}_open_priority_stack",
+                    csv_df=grouped_open.copy(deep=False),
+                    figure=stacked_fig,
+                )
+                st.plotly_chart(stacked_fig, use_container_width=True)
         return _chart_perf_result()
 
     if chart_id == "resolution_hist":

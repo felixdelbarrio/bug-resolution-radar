@@ -22,6 +22,7 @@ from bug_resolution_radar.reports import (
 )
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
+from bug_resolution_radar.ui.dashboard.quincenal_scope import normalize_quincenal_scope_label
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
@@ -204,7 +205,7 @@ def _visible_filter_label(values: list[str], *, name: str) -> str:
 
 
 def _visible_quincenal_scope_label(value: object) -> str:
-    token = str(value or "").strip() or "Todas"
+    token = normalize_quincenal_scope_label(value)
     return f"Quincenal={token}"
 
 
@@ -259,7 +260,7 @@ def _report_request_signature(
         "status_filters": _normalize_filter_values(status_filters),
         "priority_filters": _normalize_filter_values(priority_filters),
         "assignee_filters": _normalize_filter_values(assignee_filters),
-        "quincenal_scope": str(quincenal_scope or "Todas").strip() or "Todas",
+        "quincenal_scope": normalize_quincenal_scope_label(quincenal_scope),
         "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
         "data_path": str(getattr(settings, "DATA_PATH", "") or "").strip(),
         "data_mtime_ns": _data_path_mtime_ns(getattr(settings, "DATA_PATH", "")),
@@ -372,8 +373,9 @@ def _render_executive_report(settings: Settings) -> None:
     status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
-    quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
-    quincenal_scope = quincenal_scope or "Todas"
+    quincenal_scope = normalize_quincenal_scope_label(
+        st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+    )
 
     all_df_for_scope: pd.DataFrame | None = None
     scoped_for_scope = pd.DataFrame()
@@ -631,8 +633,9 @@ def _render_period_followup_report(settings: Settings) -> None:
     status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
-    quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
-    quincenal_scope = quincenal_scope or "Todas"
+    quincenal_scope = normalize_quincenal_scope_label(
+        st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+    )
 
     try:
         df_all = load_issues_df(settings.DATA_PATH)

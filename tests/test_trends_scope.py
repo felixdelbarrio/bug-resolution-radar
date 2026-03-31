@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
+    AGE_BUCKET_ORDER,
+    build_age_bucket_points,
+    build_age_bucket_priority_distribution,
+    build_age_buckets_open_priority_stacked,
+)
 from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
     _render_age_buckets,
@@ -193,3 +199,64 @@ def test_render_age_buckets_renders_issue_level_distribution() -> None:
             continue
         marker_points += len(list(getattr(trace, "x", []) or []))
     assert marker_points == len(open_df)
+
+
+def test_age_bucket_priority_distribution_groups_open_counts() -> None:
+    now = pd.Timestamp.utcnow()
+    open_df = pd.DataFrame(
+        {
+            "priority": ["Highest", "Highest", "Medium", "Low", None],
+            "created": [
+                now - pd.Timedelta(days=1),
+                now - pd.Timedelta(hours=36),
+                now - pd.Timedelta(days=6),
+                now - pd.Timedelta(days=9),
+                now - pd.Timedelta(days=45),
+            ],
+        }
+    )
+    points = build_age_bucket_points(open_df)
+    grouped = build_age_bucket_priority_distribution(issues=points, bucket_order=AGE_BUCKET_ORDER)
+
+    assert isinstance(grouped, pd.DataFrame)
+    assert set(grouped.columns.tolist()) == {"bucket", "bucket_label", "priority", "count"}
+    count_map = {
+        (str(row.bucket), str(row.priority)): int(row.count)
+        for row in grouped.itertuples(index=False)
+    }
+    assert count_map.get(("0-2", "Highest"), 0) == 2
+    assert count_map.get(("3-7", "Medium"), 0) == 1
+    assert count_map.get(("8-14", "Low"), 0) == 1
+    assert count_map.get((">30", "(sin priority)"), 0) == 1
+
+
+def test_age_bucket_open_priority_stacked_has_totals_and_open_axis_wording() -> None:
+    grouped = pd.DataFrame(
+        {
+            "bucket": ["0-2", "0-2", "3-7", "3-7", "8-14"],
+            "bucket_label": ["0-2 días", "0-2 días", "3-7 días", "3-7 días", "8-14 días"],
+            "priority": ["Highest", "Medium", "High", "Low", "Medium"],
+            "count": [3, 2, 4, 1, 2],
+        }
+    )
+    fig = build_age_buckets_open_priority_stacked(grouped=grouped, bucket_order=AGE_BUCKET_ORDER)
+
+    assert fig is not None
+    assert (
+        str(getattr(getattr(fig.layout, "xaxis", None), "title", None).text) == "Antigüedad (días)"
+    )
+    assert (
+        str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text)
+        == "Incidencias abiertas"
+    )
+    bar_traces = [
+        tr for tr in list(fig.data) if str(getattr(tr, "type", "") or "").strip().lower() == "bar"
+    ]
+    assert len(bar_traces) >= 1
+    total_labels = [
+        tr
+        for tr in list(fig.data)
+        if str(getattr(tr, "type", "") or "").strip().lower() == "scatter"
+        and str(getattr(tr, "mode", "") or "").strip().lower() == "text"
+    ]
+    assert len(total_labels) >= 1
