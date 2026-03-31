@@ -9,6 +9,8 @@ import streamlit as st
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.dashboard.quincenal_scope import (
+    QUINCENAL_SCOPE_CLOSED_CURRENT,
+    QUINCENAL_SCOPE_CREATED_CURRENT,
     apply_issue_key_scope,
     quincenal_scope_options,
 )
@@ -39,7 +41,7 @@ def _insights_quincenal_df(*, settings: Settings, dff: pd.DataFrame) -> pd.DataF
 
     options = quincenal_scope_options(safe, settings=settings)
     selected_keys: list[str] = []
-    for label in ("Nuevas (quincena actual)", "Cerradas (quincena actual)"):
+    for label in (QUINCENAL_SCOPE_CREATED_CURRENT, QUINCENAL_SCOPE_CLOSED_CURRENT):
         selected_keys.extend(options.get(label, []))
 
     scoped = apply_issue_key_scope(safe, keys=selected_keys)

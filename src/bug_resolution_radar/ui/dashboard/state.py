@@ -13,6 +13,7 @@ from bug_resolution_radar.config import Settings, save_settings
 from bug_resolution_radar.ui.common import open_issues_only
 from bug_resolution_radar.ui.dashboard.quincenal_scope import (
     apply_issue_key_scope,
+    normalize_quincenal_scope_label,
     quincenal_scope_options,
 )
 
@@ -262,7 +263,7 @@ def apply_issue_scope_like_filter(
     """Apply quincenal + zoom + like scopes from session state across dashboard tabs."""
     scoped = df
     if settings is not None and isinstance(scoped, pd.DataFrame) and not scoped.empty:
-        scoped_label = issue_scope_label()
+        scoped_label = normalize_quincenal_scope_label(issue_scope_label())
         scoped_keys = issue_scope_keys()
         if scoped_keys and scoped_label:
             options_for_migration = quincenal_scope_options(scoped, settings=settings)
@@ -270,8 +271,9 @@ def apply_issue_scope_like_filter(
                 st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = scoped_label
                 clear_issue_scope()
 
-    quincenal_scope = str(st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY) or "Todas").strip()
-    quincenal_scope = quincenal_scope or "Todas"
+    quincenal_scope = normalize_quincenal_scope_label(
+        st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+    )
     if (
         settings is not None
         and quincenal_scope != "Todas"
@@ -283,6 +285,7 @@ def apply_issue_scope_like_filter(
             quincenal_scope = "Todas"
             st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = quincenal_scope
         else:
+            st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = quincenal_scope
             scoped = apply_issue_key_scope(scoped, keys=options.get(quincenal_scope, []))
 
     scoped_keys = issue_scope_keys()

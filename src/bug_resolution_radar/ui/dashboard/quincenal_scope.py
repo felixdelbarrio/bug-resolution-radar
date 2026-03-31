@@ -13,6 +13,31 @@ from bug_resolution_radar.analytics.period_summary import (
 )
 from bug_resolution_radar.config import Settings
 
+QUINCENAL_SCOPE_ALL = "Todas"
+QUINCENAL_SCOPE_CREATED_CURRENT = "Creadas en la quincena actual"
+QUINCENAL_SCOPE_CREATED_PREVIOUS = "Creadas en la quincena previa"
+QUINCENAL_SCOPE_CREATED_MONTH = "Creadas en el mes actual"
+QUINCENAL_SCOPE_CLOSED_CURRENT = "Cerradas en la quincena"
+QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT = (
+    "Días de resolución incidencias cerradas en la quincena actual"
+)
+QUINCENAL_SCOPE_OPEN_TOTAL = "Abiertas totales"
+QUINCENAL_SCOPE_MAESTRAS_OPEN = "Maestras abiertas"
+QUINCENAL_SCOPE_OTHERS_OPEN = "Otras abiertas"
+
+_LEGACY_LABEL_TO_CANONICAL: Dict[str, str] = {
+    "Nuevas (quincena actual)": QUINCENAL_SCOPE_CREATED_CURRENT,
+    "Nuevas (quincena previa)": QUINCENAL_SCOPE_CREATED_PREVIOUS,
+    "Nuevas (acumulado)": QUINCENAL_SCOPE_CREATED_MONTH,
+    "Cerradas (quincena actual)": QUINCENAL_SCOPE_CLOSED_CURRENT,
+    "Resolución (cerradas ahora)": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
+}
+
+
+def normalize_quincenal_scope_label(value: object) -> str:
+    raw = str(value or "").strip() or QUINCENAL_SCOPE_ALL
+    return _LEGACY_LABEL_TO_CANONICAL.get(raw, raw)
+
 
 def _issue_keys(df: pd.DataFrame | None) -> List[str]:
     if df is None or df.empty or "key" not in df.columns:
@@ -39,7 +64,7 @@ def should_show_open_split(*, maestras_total: int, others_total: int, open_total
 def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> Dict[str, List[str]]:
     """Return quincenal issue subsets for the current workspace scope."""
     if settings is None or df is None or df.empty:
-        return {"Todas": []}
+        return {QUINCENAL_SCOPE_ALL: []}
 
     country = str(st.session_state.get("workspace_country") or "").strip()
     if not country and "country" in df.columns:
@@ -73,18 +98,20 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         open_total=int(summary.open_total),
     )
     options: Dict[str, List[str]] = {
-        "Todas": [],
-        "Nuevas (quincena actual)": _issue_keys(groups.new_now),
-        "Nuevas (quincena previa)": _issue_keys(groups.new_before),
-        "Nuevas (acumulado)": _issue_keys(groups.new_accumulated),
-        "Cerradas (quincena actual)": _issue_keys(groups.closed_now),
-        "Resolución (cerradas ahora)": _issue_keys(groups.resolved_now),
-        "Abiertas totales": _issue_keys(open_total_df),
+        QUINCENAL_SCOPE_ALL: [],
+        QUINCENAL_SCOPE_CREATED_CURRENT: _issue_keys(groups.new_now),
+        QUINCENAL_SCOPE_CREATED_PREVIOUS: _issue_keys(groups.new_before),
+        QUINCENAL_SCOPE_CREATED_MONTH: _issue_keys(groups.new_accumulated),
+        QUINCENAL_SCOPE_CLOSED_CURRENT: _issue_keys(groups.closed_now),
+        QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT: _issue_keys(groups.resolved_now),
+        QUINCENAL_SCOPE_OPEN_TOTAL: _issue_keys(open_total_df),
     }
     if show_open_split:
-        options["Maestras abiertas"] = _issue_keys(groups.maestras_open)
-        options["Otras abiertas"] = _issue_keys(groups.others_open)
-    return {label: keys for label, keys in options.items() if label == "Todas" or keys}
+        options[QUINCENAL_SCOPE_MAESTRAS_OPEN] = _issue_keys(groups.maestras_open)
+        options[QUINCENAL_SCOPE_OTHERS_OPEN] = _issue_keys(groups.others_open)
+    return {
+        label: keys for label, keys in options.items() if label == QUINCENAL_SCOPE_ALL or keys
+    }
 
 
 def apply_issue_key_scope(df: pd.DataFrame, *, keys: List[str]) -> pd.DataFrame:

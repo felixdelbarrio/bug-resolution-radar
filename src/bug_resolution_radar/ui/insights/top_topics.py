@@ -16,6 +16,7 @@ from bug_resolution_radar.analytics.insights import (
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import (
+    BBVA_DARK,
     BBVA_GOAL_ACCENT_7,
     BBVA_LIGHT,
     BBVA_SIGNAL_GREEN_1,
@@ -205,9 +206,45 @@ def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
 def _theme_color_map(*, theme_order: list[str], dark_mode: bool) -> dict[str, str]:
     out: dict[str, str] = {}
     palette = _signal_palette(dark_mode=dark_mode)
-    for idx, theme in enumerate(theme_order):
-        out[theme] = palette[idx % len(palette)]
+    fallback_idx = 0
+    others_color = BBVA_DARK.ink_muted if dark_mode else BBVA_LIGHT.ink_muted
+    for theme in theme_order:
+        if str(theme).strip().lower() == "otros":
+            out[theme] = others_color
+            continue
+        out[theme] = palette[fallback_idx % len(palette)]
+        fallback_idx += 1
     return out
+
+
+def _critical_rank(*, theme: str, color_hex: str, dark_mode: bool) -> int:
+    if str(theme).strip().lower() == "otros":
+        return 999
+    palette = _signal_palette(dark_mode=dark_mode)
+    try:
+        return int(palette.index(color_hex))
+    except ValueError:
+        return len(palette) + 1
+
+
+def _hex_luminance(hex_color: str) -> float:
+    token = str(hex_color or "").strip().lstrip("#")
+    if len(token) != 6:
+        return 0.0
+    try:
+        r = int(token[0:2], 16) / 255.0
+        g = int(token[2:4], 16) / 255.0
+        b = int(token[4:6], 16) / 255.0
+    except ValueError:
+        return 0.0
+    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+
+
+def _segment_text_color(fill_hex: str, *, dark_mode: bool) -> str:
+    lum = _hex_luminance(fill_hex)
+    if lum >= (0.58 if dark_mode else 0.64):
+        return BBVA_LIGHT.midnight
+    return BBVA_LIGHT.white
 
 
 def _inject_topic_expander_color_css(
@@ -267,43 +304,104 @@ def _render_theme_trend_chart(
     if not theme_order:
         return
 
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    stacked_order = sorted(
+        list(theme_order),
+        key=lambda theme: (
+            _critical_rank(
+                theme=theme,
+                color_hex=str(theme_color_map.get(theme) or ""),
+                dark_mode=dark_mode,
+            ),
+            theme_order.index(theme),
+        ),
+        reverse=True,
+    )
+    axis_labels = axis[x_label_col].astype(str).tolist()
+    total_by_label = (
+        trend_df.groupby(x_label_col, as_index=True)["issues_value"]
+        .sum()
+        .reindex(axis_labels, fill_value=0.0)
+    )
+
     fig = go.Figure()
-    for theme in theme_order:
+    for theme in stacked_order:
         sub = trend_df.loc[trend_df["tema"] == theme].sort_values(x_col, ascending=True)
         if sub.empty:
             continue
+        values = pd.to_numeric(sub["issues_value"], errors="coerce").fillna(0.0).tolist()
+        labels = sub[x_label_col].astype(str).tolist()
+        total_custom = [[int(total_by_label.get(lbl, 0.0))] for lbl in labels]
+        text_vals = [str(int(v)) if float(v) > 0 else "" for v in values]
+        color_hex = str(theme_color_map.get(theme) or BBVA_LIGHT.serene_blue)
         fig.add_trace(
-            go.Scatter(
-                x=sub[x_col],
-                y=sub["issues_value"],
-                mode="lines+markers",
+            go.Bar(
+                x=labels,
+                y=values,
                 name=theme,
-                line=dict(color=theme_color_map.get(theme), width=2.45),
-                marker=dict(size=7),
-                customdata=sub[[x_label_col]],
+                marker=dict(color=color_hex),
+                text=text_vals,
+                textposition="inside",
+                textfont=dict(color=_segment_text_color(color_hex, dark_mode=dark_mode), size=11),
+                customdata=total_custom,
+                legendrank=int(theme_order.index(theme)),
                 hovertemplate=(
                     "Tema: %{fullData.name}<br>"
-                    f"{x_title}: %{{customdata[0]}}<br>"
-                    f"{y_title}: %{{y}}<extra></extra>"
+                    f"{x_title}: %{{x}}<br>"
+                    f"{y_title}: %{{y}}<br>"
+                    "Total columna: %{customdata[0]}<extra></extra>"
                 ),
             )
         )
+
+    max_total = float(total_by_label.max()) if not total_by_label.empty else 0.0
+    total_offset = max(max_total * 0.055, 0.16)
+    total_text = [f"{int(v)}" for v in total_by_label.tolist()]
+    fig.add_trace(
+        go.Scatter(
+            x=axis_labels,
+            y=[float(v) + total_offset for v in total_by_label.tolist()],
+            mode="text",
+            text=total_text,
+            textposition="top center",
+            showlegend=False,
+            hoverinfo="skip",
+            textfont=dict(size=12, color=BBVA_LIGHT.white if dark_mode else BBVA_LIGHT.midnight),
+        )
+    )
 
     fig.update_layout(
         height=380,
         margin=dict(l=16, r=16, t=18, b=170),
         xaxis_title=x_title,
         yaxis_title=y_title,
-        hovermode="x unified",
+        hovermode="x",
         xaxis_title_standoff=18,
+        barmode="stack",
+        bargap=0.20,
+        uniformtext=dict(minsize=10, mode="hide"),
     )
     fig.update_xaxes(
-        tickmode="array",
-        tickvals=axis[x_col],
-        ticktext=axis[x_label_col],
+        type="category",
+        categoryorder="array",
+        categoryarray=axis_labels,
         tickangle=tick_angle,
     )
+    fig.update_yaxes(range=[0, max_total + (total_offset * 2.3) if max_total > 0 else 1.0])
     fig = apply_plotly_bbva(fig, showlegend=True)
+    for trace in list(getattr(fig, "data", []) or []):
+        try:
+            if str(getattr(trace, "type", "")).strip().lower() != "bar":
+                continue
+            trace_name = str(getattr(trace, "name", "") or "").strip()
+            if not trace_name:
+                continue
+            fill = str(theme_color_map.get(trace_name) or "")
+            if not fill:
+                continue
+            trace.textfont = dict(color=_segment_text_color(fill, dark_mode=dark_mode), size=11)
+        except Exception:
+            continue
     fig.update_layout(
         legend=dict(
             orientation="h",
@@ -438,7 +536,7 @@ def render_top_topics_tab(
                 x_col="quincena_start",
                 x_label_col="quincena_label",
                 x_title="Quincena",
-                y_title="Incidencias acumuladas",
+                y_title="Incidencias abiertas acumuladas",
                 tick_angle=-26,
             )
         else:
@@ -449,7 +547,7 @@ def render_top_topics_tab(
                 x_col="date",
                 x_label_col="date_label",
                 x_title="Día",
-                y_title="Incidencias",
+                y_title="Incidencias abiertas",
                 tick_angle=-35,
             )
     else:

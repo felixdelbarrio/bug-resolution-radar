@@ -13,11 +13,32 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.config import Settings
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_GOAL_ACCENT_7,
+    BBVA_LIGHT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_ORANGE_1,
+    BBVA_SIGNAL_ORANGE_2,
+    BBVA_SIGNAL_RED_1,
+    hex_to_rgba,
+)
 from bug_resolution_radar.ui.components.actionable_cards import (
     ActionableCardItem,
     render_actionable_card_grid,
 )
-from bug_resolution_radar.ui.dashboard.quincenal_scope import should_show_open_split
+from bug_resolution_radar.ui.dashboard.quincenal_scope import (
+    QUINCENAL_SCOPE_CLOSED_CURRENT,
+    QUINCENAL_SCOPE_CREATED_CURRENT,
+    QUINCENAL_SCOPE_CREATED_MONTH,
+    QUINCENAL_SCOPE_CREATED_PREVIOUS,
+    QUINCENAL_SCOPE_MAESTRAS_OPEN,
+    QUINCENAL_SCOPE_OPEN_TOTAL,
+    QUINCENAL_SCOPE_OTHERS_OPEN,
+    QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
+    normalize_quincenal_scope_label,
+    should_show_open_split,
+)
 from bug_resolution_radar.ui.dashboard.state import (
     ISSUES_QUINCENAL_SCOPE_KEY,
     clear_issue_scope,
@@ -69,6 +90,50 @@ def _inject_period_summary_layout_css() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _inject_period_group_signal_css(*, container_key: str, color_hex: str) -> None:
+    tint = hex_to_rgba(color_hex, 0.26, fallback=color_hex)
+    st.markdown(
+        f"""
+        <style>
+          .st-key-{container_key} div[data-testid="stExpander"] {{
+            box-shadow:
+              inset 4px 0 0 {color_hex},
+              inset 0 0 0 1px {tint};
+          }}
+          .st-key-{container_key} div[data-testid="stExpander"] summary p {{
+            color: {color_hex} !important;
+            font-weight: 760 !important;
+          }}
+          .st-key-{container_key} div[data-testid="stExpander"] summary svg {{
+            color: {color_hex} !important;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _period_group_signal_color(label: str) -> str:
+    token = str(label or "").strip().lower()
+    if "quincena previa" in token:
+        return BBVA_SIGNAL_ORANGE_1
+    if "quincena actual" in token and "creadas" in token:
+        return BBVA_SIGNAL_RED_1
+    if "mes actual" in token:
+        return BBVA_GOAL_ACCENT_7
+    if "cerradas en la quincena" in token and "resolución" not in token:
+        return BBVA_SIGNAL_GREEN_1
+    if "resolución" in token:
+        return BBVA_SIGNAL_GREEN_2
+    if "maestras" in token:
+        return BBVA_SIGNAL_ORANGE_2
+    if "otras" in token:
+        return BBVA_LIGHT.ink_muted
+    if "abiertas totales" in token:
+        return BBVA_SIGNAL_ORANGE_2
+    return BBVA_LIGHT.serene_blue
 
 
 def _fmt_delta(value: float | None) -> str:
@@ -145,7 +210,7 @@ def _jump_to_issues_with_keys(*, label: str, keys: List[str]) -> None:
     if not scoped_keys:
         st.info("No hay incidencias en este bloque para abrir en Issues.")
         return
-    st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = str(label or "").strip() or "Todas"
+    st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = normalize_quincenal_scope_label(label)
     clear_issue_scope()
     st.session_state["__jump_to_tab"] = "issues"
     st.rerun()
@@ -167,61 +232,69 @@ def _render_issue_group(
     zoom_label: str | None = None,
 ) -> None:
     suffix = f" ({help_text})" if help_text else ""
-    with st.expander(f"{title}: {count}{suffix}", expanded=False):
-        if df is None or df.empty:
-            st.caption("Sin incidencias en este bloque.")
-            return
-        rows_total = int(len(df))
-        top_status = (
-            str(df["status"].fillna("").astype(str).value_counts().index[0]).strip()
-            if "status" in df.columns and rows_total > 0
-            else "(sin estado)"
-        )
-        top_priority = (
-            str(df["priority"].fillna("").astype(str).value_counts().index[0]).strip()
-            if "priority" in df.columns and rows_total > 0
-            else "(sin priority)"
-        )
-        chips = [
-            neutral_chip_html(f"{rows_total} incidencias"),
-            status_chip_html(top_status),
-            priority_chip_html(top_priority),
-        ]
-        if help_text:
-            chips.insert(1, neutral_chip_html(help_text))
-        meta_col, action_col = st.columns([4.25, 1.2], gap="small")
-        with meta_col:
-            st.markdown(f'<div class="ins-meta-row">{"".join(chips)}</div>', unsafe_allow_html=True)
-        scope_label = str(zoom_label or title or "").strip() or title
-        with action_col:
-            with st.container(key=f"period_summary_group_open_{_slug_for_key(scope_label)}"):
-                if st.button(
-                    "Abrir en Issues ↗",
-                    key=f"period_summary_group_open_btn::{_slug_for_key(scope_label)}",
-                    width="stretch",
-                ):
-                    _jump_to_issues_with_scope(label=scope_label, df=df)
-
-        cards_html = issue_cards_html_from_df(
-            df,
-            key_to_url=key_to_url,
-            key_to_meta=key_to_meta,
-            summary_col="summary",
-            assignee_col="assignee",
-            source_col=source_col,
-            summary_max_chars=180,
-            limit=60,
-        )
-        if cards_html:
-            st.markdown(cards_html, unsafe_allow_html=True)
-        else:
-            st.dataframe(
-                df.loc[:, _visible_columns(df)].copy(deep=False),
-                hide_index=True,
-                width="stretch",
+    scope_label = str(zoom_label or title or "").strip() or title
+    scope_slug = _slug_for_key(scope_label)
+    signal_color = _period_group_signal_color(scope_label)
+    container_key = f"period_summary_group_signal_{scope_slug}"
+    with st.container(key=container_key):
+        _inject_period_group_signal_css(container_key=container_key, color_hex=signal_color)
+        with st.expander(f"{title}: {count}{suffix}", expanded=False):
+            if df is None or df.empty:
+                st.caption("Sin incidencias en este bloque.")
+                return
+            rows_total = int(len(df))
+            top_status = (
+                str(df["status"].fillna("").astype(str).value_counts().index[0]).strip()
+                if "status" in df.columns and rows_total > 0
+                else "(sin estado)"
             )
-        if rows_total > 60:
-            st.caption(f"Mostrando 60 de {rows_total} incidencias.")
+            top_priority = (
+                str(df["priority"].fillna("").astype(str).value_counts().index[0]).strip()
+                if "priority" in df.columns and rows_total > 0
+                else "(sin priority)"
+            )
+            chips = [
+                neutral_chip_html(f"{rows_total} incidencias"),
+                status_chip_html(top_status),
+                priority_chip_html(top_priority),
+            ]
+            if help_text:
+                chips.insert(1, neutral_chip_html(help_text))
+            meta_col, action_col = st.columns([4.25, 1.2], gap="small")
+            with meta_col:
+                st.markdown(
+                    f'<div class="ins-meta-row">{"".join(chips)}</div>',
+                    unsafe_allow_html=True,
+                )
+            with action_col:
+                with st.container(key=f"period_summary_group_open_{scope_slug}"):
+                    if st.button(
+                        "Abrir en Issues ↗",
+                        key=f"period_summary_group_open_btn::{scope_slug}",
+                        width="stretch",
+                    ):
+                        _jump_to_issues_with_scope(label=scope_label, df=df)
+
+            cards_html = issue_cards_html_from_df(
+                df,
+                key_to_url=key_to_url,
+                key_to_meta=key_to_meta,
+                summary_col="summary",
+                assignee_col="assignee",
+                source_col=source_col,
+                summary_max_chars=180,
+                limit=60,
+            )
+            if cards_html:
+                st.markdown(cards_html, unsafe_allow_html=True)
+            else:
+                st.dataframe(
+                    df.loc[:, _visible_columns(df)].copy(deep=False),
+                    hide_index=True,
+                    width="stretch",
+                )
+            if rows_total > 60:
+                st.caption(f"Mostrando 60 de {rows_total} incidencias.")
 
 
 def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> None:
@@ -276,14 +349,14 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     cards: List[ActionableCardItem] = [
         ActionableCardItem(
             card_id="new_now",
-            kicker="Insights · Nuevas",
+            kicker="Insights · Creadas",
             metric=f"{int(summary.new_now):,}",
             detail=_fmt_delta_hint(summary.new_delta_pct),
-            link_label="Nuevas (quincena actual) ↗",
+            link_label=f"{QUINCENAL_SCOPE_CREATED_CURRENT} ↗",
             tone="risk",
             on_click=_jump_to_issues_with_keys,
             click_kwargs={
-                "label": "Nuevas (quincena actual)",
+                "label": QUINCENAL_SCOPE_CREATED_CURRENT,
                 "keys": _issue_keys(groups.new_now),
             },
         ),
@@ -292,11 +365,11 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             kicker="Insights · Cerradas",
             metric=f"{int(summary.closed_now):,}",
             detail=_fmt_delta_hint(summary.closed_delta_pct),
-            link_label="Cerradas (quincena actual) ↗",
+            link_label=f"{QUINCENAL_SCOPE_CLOSED_CURRENT} ↗",
             tone="flow",
             on_click=_jump_to_issues_with_keys,
             click_kwargs={
-                "label": "Cerradas (quincena actual)",
+                "label": QUINCENAL_SCOPE_CLOSED_CURRENT,
                 "keys": _issue_keys(groups.closed_now),
             },
         ),
@@ -305,11 +378,11 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             kicker="Insights · Resolución",
             metric=_fmt_days(summary.resolution_days_now),
             detail=_fmt_delta_hint(summary.resolution_delta_pct),
-            link_label="Resolución (cerradas ahora) ↗",
+            link_label=f"{QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT} ↗",
             tone="flow",
             on_click=_jump_to_issues_with_keys,
             click_kwargs={
-                "label": "Resolución (cerradas ahora)",
+                "label": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
                 "keys": _issue_keys(groups.resolved_now),
             },
         ),
@@ -322,7 +395,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             tone="warning",
             on_click=_jump_to_issues_with_keys,
             click_kwargs={
-                "label": "Abiertas totales",
+                "label": QUINCENAL_SCOPE_OPEN_TOTAL,
                 "keys": _issue_keys(open_total_group),
             },
         ),
@@ -339,7 +412,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                     tone="warning",
                     on_click=_jump_to_issues_with_keys,
                     click_kwargs={
-                        "label": "Maestras abiertas",
+                        "label": QUINCENAL_SCOPE_MAESTRAS_OPEN,
                         "keys": _issue_keys(groups.maestras_open),
                     },
                 ),
@@ -352,7 +425,7 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                     tone="warning",
                     on_click=_jump_to_issues_with_keys,
                     click_kwargs={
-                        "label": "Otras abiertas",
+                        "label": QUINCENAL_SCOPE_OTHERS_OPEN,
                         "keys": _issue_keys(groups.others_open),
                     },
                 ),
@@ -383,50 +456,50 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                 zoom_label="Otras abiertas",
             )
         _render_issue_group(
-            "Nuevas (antes)",
+            "Creadas en la quincena previa",
             summary.new_before,
             groups.new_before,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="quincena previa",
-            zoom_label="Nuevas (quincena previa)",
+            zoom_label=QUINCENAL_SCOPE_CREATED_PREVIOUS,
         )
         _render_issue_group(
-            "Nuevas (ahora)",
+            "Creadas en la quincena actual",
             summary.new_now,
             groups.new_now,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="quincena actual",
-            zoom_label="Nuevas (quincena actual)",
+            zoom_label=QUINCENAL_SCOPE_CREATED_CURRENT,
         )
         _render_issue_group(
-            "Nuevas acumulado",
+            "Creadas en el mes actual",
             summary.new_accumulated,
             groups.new_accumulated,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="mes actual",
-            zoom_label="Nuevas (acumulado)",
+            zoom_label=QUINCENAL_SCOPE_CREATED_MONTH,
         )
         _render_issue_group(
-            "Cerradas (ahora)",
+            "Cerradas en la quincena",
             summary.closed_now,
             groups.closed_now,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="quincena actual",
-            zoom_label="Cerradas (quincena actual)",
+            zoom_label=QUINCENAL_SCOPE_CLOSED_CURRENT,
         )
         _render_issue_group(
-            "Días de resolución (detalle)",
+            "Días de resolución incidencias cerradas en la quincena actual",
             len(groups.resolved_now),
             groups.resolved_now,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
             help_text="cerradas quincena actual",
             source_col=None,
-            zoom_label="Resolución (cerradas ahora)",
+            zoom_label=QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
         )
 
     if scope_mode == "country" and result.by_source:

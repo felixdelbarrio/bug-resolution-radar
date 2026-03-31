@@ -111,7 +111,7 @@ def test_build_dashboard_data_context_applies_quincenal_scope(monkeypatch: Any) 
             dashboard_state.FILTER_STATUS_KEY: [],
             dashboard_state.FILTER_PRIORITY_KEY: [],
             dashboard_state.FILTER_ASSIGNEE_KEY: [],
-            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Nuevas (quincena actual)",
+            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Creadas en la quincena actual",
             "workspace_country": "México",
             "workspace_scope_mode": "source",
             "workspace_source_id": "jira:mexico:core",
@@ -170,7 +170,7 @@ def test_build_dashboard_data_context_applies_quincenal_scope_new_accumulated(
             dashboard_state.FILTER_STATUS_KEY: [],
             dashboard_state.FILTER_PRIORITY_KEY: [],
             dashboard_state.FILTER_ASSIGNEE_KEY: [],
-            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Nuevas (acumulado)",
+            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Creadas en el mes actual",
             "workspace_country": "México",
             "workspace_scope_mode": "source",
             "workspace_source_id": "jira:mexico:core",
@@ -347,7 +347,7 @@ def test_apply_issue_scope_like_filter_migrates_legacy_zoom_to_quincenal_scope(
     assert out["key"].tolist() == ["A-1"]
     assert (
         fake_state.session_state.get(dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY)
-        == "Nuevas (quincena actual)"
+        == "Creadas en la quincena actual"
     )
     assert dashboard_state.ISSUES_SCOPE_KEYS_KEY not in fake_state.session_state
     assert dashboard_state.ISSUES_SCOPE_LABEL_KEY not in fake_state.session_state
@@ -363,7 +363,7 @@ def test_clear_all_filters_clears_issue_zoom_scope(monkeypatch: Any) -> None:
             dashboard_state.ISSUES_SCOPE_LABEL_KEY: "Maestras",
             dashboard_state.ISSUES_SCOPE_SORT_COL_KEY: "key",
             dashboard_state.ISSUES_SCOPE_LIKE_QUERY_KEY: "a-1",
-            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Nuevas (quincena actual)",
+            dashboard_state.ISSUES_QUINCENAL_SCOPE_KEY: "Creadas en la quincena actual",
         }
     )
     monkeypatch.setattr(dashboard_state, "st", fake_state)
