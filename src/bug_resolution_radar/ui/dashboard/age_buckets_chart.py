@@ -1,4 +1,4 @@
-"""Shared age-buckets chart helpers (issue-level distribution)."""
+"""Shared age-buckets chart helpers (issue-level + aggregated distributions)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import streamlit as st
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT, hex_to_rgba
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
+    priority_color_map,
     priority_rank,
     status_color_map,
 )
@@ -211,4 +212,155 @@ def build_age_buckets_issue_distribution(
         range=[0.5, float(len(priority_order)) + 0.5],
     )
     fig = apply_plotly_bbva(fig, showlegend=True)
+    return fig
+
+
+def build_age_bucket_priority_distribution(
+    *,
+    issues: pd.DataFrame,
+    bucket_order: Sequence[str] = AGE_BUCKET_ORDER,
+) -> pd.DataFrame:
+    """Aggregate issues by age bucket + priority for stacked open-incidents views."""
+    cols = ["bucket", "bucket_label", "priority", "count"]
+    if issues is None or issues.empty or "bucket" not in issues.columns:
+        return pd.DataFrame(columns=cols)
+
+    df = issues.copy(deep=False)
+    if "priority" in df.columns:
+        df["priority"] = normalize_text_col(df["priority"], "(sin priority)")
+    else:
+        df["priority"] = "(sin priority)"
+    df = df[df["bucket"].notna()].copy(deep=False)
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+
+    grouped = (
+        df.groupby(["bucket", "priority"], dropna=False, observed=True)
+        .size()
+        .reset_index(name="count")
+    )
+    if grouped.empty:
+        return pd.DataFrame(columns=cols)
+
+    grouped["bucket"] = grouped["bucket"].astype(str)
+    grouped = grouped[grouped["bucket"].isin([str(x) for x in list(bucket_order)])].copy(deep=False)
+    if grouped.empty:
+        return pd.DataFrame(columns=cols)
+
+    grouped["bucket"] = pd.Categorical(
+        grouped["bucket"],
+        categories=[str(x) for x in list(bucket_order)],
+        ordered=True,
+    )
+    grouped["__priority_sort"] = grouped["priority"].map(_priority_sort_key)
+    grouped = grouped.sort_values(["bucket", "__priority_sort", "priority"]).drop(
+        columns="__priority_sort"
+    )
+    grouped["bucket_label"] = grouped["bucket"].astype(str).map(
+        lambda b: AGE_BUCKET_LABELS_DAYS.get(b, b)
+    )
+    grouped["count"] = grouped["count"].astype(int)
+    return grouped[cols]
+
+
+def _add_bar_totals(
+    fig: go.Figure,
+    *,
+    x_values: Sequence[str],
+    y_totals: Sequence[float],
+    font_size: int = 12,
+) -> None:
+    if not x_values or not y_totals:
+        return
+    ymax = max(float(v) for v in y_totals) if y_totals else 0.0
+    offset = max(1.0, ymax * 0.04)
+    dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
+    text_color = (BBVA_DARK if dark_mode else BBVA_LIGHT).ink
+    fig.add_scatter(
+        x=list(x_values),
+        y=[float(v) + offset for v in list(y_totals)],
+        mode="text",
+        text=[f"{int(v)}" for v in list(y_totals)],
+        textposition="top center",
+        textfont=dict(size=font_size, color=text_color),
+        hoverinfo="skip",
+        showlegend=False,
+        cliponaxis=False,
+    )
+    fig.update_yaxes(range=[0, ymax + (offset * 2.4)])
+
+
+def build_age_buckets_open_priority_stacked(
+    *,
+    grouped: pd.DataFrame,
+    bucket_order: Sequence[str] = AGE_BUCKET_ORDER,
+) -> go.Figure:
+    """Render stacked columns: open incidents by age bucket and priority."""
+    fig = go.Figure()
+    safe = grouped if isinstance(grouped, pd.DataFrame) else pd.DataFrame()
+    bucket_keys = [str(x) for x in list(bucket_order)]
+    bucket_labels = [AGE_BUCKET_LABELS_DAYS.get(b, b) for b in bucket_keys]
+    priority_colors = priority_color_map()
+    neutral_color = priority_colors.get("(sin priority)", "#9AA3B2")
+
+    if safe.empty:
+        fig.update_layout(
+            title_text="",
+            barmode="stack",
+            xaxis_title="Antigüedad (días)",
+            yaxis_title="Incidencias abiertas",
+        )
+        fig = apply_plotly_bbva(fig, showlegend=True)
+        return fig
+
+    by_bucket_priority = {
+        (str(row.bucket), str(row.priority)): int(row.count)
+        for row in safe.itertuples(index=False)
+    }
+    priorities = sorted(
+        safe["priority"].astype(str).unique().tolist(),
+        key=_priority_sort_key,
+    )
+    # Most critical priorities are rendered last so they stay visually on top of each stack.
+    stacked_priority_order = list(reversed(priorities))
+
+    for priority in stacked_priority_order:
+        values: list[int] = []
+        labels: list[str] = []
+        for bucket in bucket_keys:
+            value = int(by_bucket_priority.get((bucket, str(priority)), 0))
+            values.append(value)
+            labels.append(str(value) if value > 0 else "")
+        fig.add_trace(
+            go.Bar(
+                x=bucket_labels,
+                y=values,
+                name=str(priority),
+                marker=dict(color=priority_colors.get(str(priority), neutral_color)),
+                text=labels,
+                textposition="inside",
+                insidetextanchor="middle",
+                hovertemplate=(
+                    "Antigüedad: %{x}<br>"
+                    "Prioridad: %{fullData.name}<br>"
+                    "Incidencias abiertas: %{y}<extra></extra>"
+                ),
+            )
+        )
+
+    totals = [
+        sum(int(by_bucket_priority.get((bucket, str(priority)), 0)) for priority in priorities)
+        for bucket in bucket_keys
+    ]
+    _add_bar_totals(fig, x_values=bucket_labels, y_totals=[float(x) for x in totals], font_size=12)
+    fig.update_layout(
+        title_text="",
+        barmode="stack",
+        xaxis_title="Antigüedad (días)",
+        yaxis_title="Incidencias abiertas",
+        bargap=0.18,
+    )
+    fig.update_xaxes(type="category", categoryorder="array", categoryarray=bucket_labels)
+    fig = apply_plotly_bbva(fig, showlegend=True)
+    fig.update_layout(legend=dict(traceorder="reversed"))
     return fig
