@@ -48,7 +48,10 @@ def _write_helix_dump(path: Path) -> None:
 def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path: Path) -> None:
     helix_dump = tmp_path / "helix_dump.json"
     _write_helix_dump(helix_dump)
-    settings = Settings(HELIX_DATA_PATH=str(helix_dump))
+    settings = Settings(
+        HELIX_DATA_PATH=str(helix_dump),
+        OPEN_ISSUES_FOCUS_MODE="maestras",
+    )
 
     now = pd.Timestamp("2026-03-15T00:00:00+00:00")
     df = pd.DataFrame(
@@ -135,8 +138,11 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
 
     summary = result.aggregate.summary
     assert summary.open_total == 4
+    assert summary.open_focus_total == 1
+    assert summary.open_other_total == 3
     assert summary.maestras_total == 1
     assert summary.others_total == 3
+    assert summary.open_focus_label == "Maestras abiertas"
     assert summary.new_now == 2
     assert summary.new_before == 3
     assert summary.closed_now == 1
@@ -144,6 +150,63 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
     assert summary.resolution_days_now is not None
     assert int(round(summary.resolution_days_now)) == 19
     assert set(result.by_source.keys()) == {"helix:mexico:senda", "helix:mexico:gema"}
+
+
+def test_build_country_quincenal_result_defaults_to_high_criticality_focus() -> None:
+    now = pd.Timestamp("2026-03-15T00:00:00+00:00")
+    settings = Settings()
+    df = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Alta 1",
+                "status": "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+            {
+                "key": "A-2",
+                "summary": "Alta 2",
+                "status": "In Progress",
+                "priority": "Highest",
+                "created": (now - pd.Timedelta(days=3)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+            {
+                "key": "A-3",
+                "summary": "Media",
+                "status": "New",
+                "priority": "Medium",
+                "created": (now - pd.Timedelta(days=4)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+        ]
+    )
+
+    result = build_country_quincenal_result(
+        df=df,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:core"],
+        reference_day=now,
+    )
+
+    summary = result.aggregate.summary
+    assert summary.open_group_mode == "criticidad_alta"
+    assert summary.open_focus_label == "Incidencias con criticidad alta"
+    assert summary.open_other_label == "Otras incidencias"
+    assert summary.open_focus_total == 2
+    assert summary.open_other_total == 1
 
 
 def test_build_country_quincenal_result_uses_natural_month_fortnight_by_default() -> None:

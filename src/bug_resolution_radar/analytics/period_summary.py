@@ -23,6 +23,28 @@ _MAESTRA_FLAG_KEYS = (
     "BBVA_MasterIncident",
 )
 _MAESTRA_TRUE_TOKENS = {"1", "si", "yes", "true", "x", "maestra", "master"}
+OPEN_ISSUES_FOCUS_MODE_MAESTRAS = "maestras"
+OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH = "criticidad_alta"
+DEFAULT_OPEN_ISSUES_FOCUS_MODE = OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+_CRITICAL_PRIORITY_TOKENS = {
+    "suponeunimpedimento",
+    "impedimento",
+    "highest",
+    "high",
+}
+
+
+@dataclass(frozen=True)
+class OpenIssueGrouping:
+    mode: str
+    focus_scope_label: str
+    other_scope_label: str
+    focus_card_kicker: str
+    focus_card_detail: str
+    other_card_kicker: str
+    other_card_detail: str
+    focus_report_label: str
+    other_report_label: str
 
 
 @dataclass(frozen=True)
@@ -36,8 +58,8 @@ class QuincenalWindow:
 
 @dataclass(frozen=True)
 class QuincenalGroups:
-    maestras_open: pd.DataFrame
-    others_open: pd.DataFrame
+    open_focus: pd.DataFrame
+    open_other: pd.DataFrame
     new_now: pd.DataFrame
     new_before: pd.DataFrame
     new_accumulated: pd.DataFrame
@@ -45,6 +67,16 @@ class QuincenalGroups:
     closed_before: pd.DataFrame
     resolved_now: pd.DataFrame
     resolved_before: pd.DataFrame
+
+    @property
+    def maestras_open(self) -> pd.DataFrame:
+        # Backward-compatible alias: now represents open "focus" group.
+        return self.open_focus
+
+    @property
+    def others_open(self) -> pd.DataFrame:
+        # Backward-compatible alias: now represents open "other" group.
+        return self.open_other
 
 
 @dataclass(frozen=True)
@@ -54,8 +86,17 @@ class QuincenalSummary:
     window: QuincenalWindow
     total_issues: int
     open_total: int
-    maestras_total: int
-    others_total: int
+    open_group_mode: str
+    open_focus_label: str
+    open_other_label: str
+    open_focus_card_kicker: str
+    open_focus_card_detail: str
+    open_other_card_kicker: str
+    open_other_card_detail: str
+    open_focus_report_label: str
+    open_other_report_label: str
+    open_focus_total: int
+    open_other_total: int
     new_now: int
     new_before: int
     new_accumulated: int
@@ -66,6 +107,16 @@ class QuincenalSummary:
     resolution_days_now: float | None
     resolution_days_before: float | None
     resolution_delta_pct: float | None
+
+    @property
+    def maestras_total(self) -> int:
+        # Backward-compatible alias: now represents open "focus" total.
+        return int(self.open_focus_total)
+
+    @property
+    def others_total(self) -> int:
+        # Backward-compatible alias: now represents open "other" total.
+        return int(self.open_other_total)
 
 
 @dataclass(frozen=True)
@@ -109,6 +160,74 @@ def _normalize_flag_token(value: object) -> str:
     token = unicodedata.normalize("NFKD", token)
     token = "".join(ch for ch in token if not unicodedata.combining(ch))
     return token.strip()
+
+
+def _compact_token(value: object) -> str:
+    token = _normalize_flag_token(value)
+    return "".join(ch for ch in token if ch.isalnum())
+
+
+def normalize_open_issues_focus_mode(value: object) -> str:
+    token = _compact_token(value)
+    if token in {"maestra", "maestras", "master", "masters"}:
+        return OPEN_ISSUES_FOCUS_MODE_MAESTRAS
+    if token in {
+        "criticidadalta",
+        "criticalidadalta",
+        "criticalhigh",
+        "highcriticality",
+        "high",
+        "critical",
+        "criticidad",
+    }:
+        return OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+    return DEFAULT_OPEN_ISSUES_FOCUS_MODE
+
+
+def open_issues_focus_mode(settings: Settings | None) -> str:
+    raw = (
+        getattr(settings, "OPEN_ISSUES_FOCUS_MODE", DEFAULT_OPEN_ISSUES_FOCUS_MODE)
+        if settings is not None
+        else DEFAULT_OPEN_ISSUES_FOCUS_MODE
+    )
+    return normalize_open_issues_focus_mode(raw)
+
+
+def open_issue_grouping(settings: Settings | None) -> OpenIssueGrouping:
+    mode = open_issues_focus_mode(settings)
+    if mode == OPEN_ISSUES_FOCUS_MODE_MAESTRAS:
+        return OpenIssueGrouping(
+            mode=mode,
+            focus_scope_label="Maestras abiertas",
+            other_scope_label="Otras incidencias",
+            focus_card_kicker="Insights · Maestras",
+            focus_card_detail="Abiertas marcadas como maestras",
+            other_card_kicker="Insights · Otras",
+            other_card_detail="Abiertas no maestras",
+            focus_report_label="INCIDENCIAS MAESTRAS",
+            other_report_label="OTRAS INCIDENCIAS",
+        )
+    return OpenIssueGrouping(
+        mode=OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH,
+        focus_scope_label="Incidencias con criticidad alta",
+        other_scope_label="Otras incidencias",
+        focus_card_kicker="Insights · Criticidad alta",
+        focus_card_detail="Abiertas con prioridad Impedimento / High / Highest",
+        other_card_kicker="Insights · Otras",
+        other_card_detail="Abiertas sin criticidad alta",
+        focus_report_label="INCIDENCIAS CON CRITICIDAD ALTA",
+        other_report_label="OTRAS INCIDENCIAS",
+    )
+
+
+def _critical_priority_mask(df: pd.DataFrame) -> pd.Series:
+    safe = _safe_df(df)
+    if safe.empty:
+        return pd.Series(False, index=safe.index, dtype=bool)
+    if "priority" not in safe.columns:
+        return pd.Series(False, index=safe.index, dtype=bool)
+    normalized = safe["priority"].fillna("").astype(str).map(_compact_token)
+    return normalized.isin(_CRITICAL_PRIORITY_TOKENS).fillna(False).astype(bool)
 
 
 def _is_truthy_flag(value: object) -> bool:
@@ -389,12 +508,16 @@ def _scope_result(
         reference_day,
         last_finished_only=_quincena_last_finished_only(settings),
     )
+    grouping = open_issue_grouping(settings)
 
     closed_mask = effective_closed_mask(safe)
     open_df = safe.loc[~closed_mask].copy(deep=False) if not safe.empty else pd.DataFrame()
-    maestras_mask = mark_maestra_rows(open_df, settings=settings)
-    maestras_open = open_df.loc[maestras_mask].copy(deep=False)
-    others_open = open_df.loc[~maestras_mask].copy(deep=False)
+    if grouping.mode == OPEN_ISSUES_FOCUS_MODE_MAESTRAS:
+        open_focus_mask = mark_maestra_rows(open_df, settings=settings)
+    else:
+        open_focus_mask = _critical_priority_mask(open_df)
+    open_focus = open_df.loc[open_focus_mask].copy(deep=False)
+    open_other = open_df.loc[~open_focus_mask].copy(deep=False)
 
     created = _to_dt_naive(safe["created"]) if "created" in safe.columns else pd.Series(pd.NaT)
     created_day = created.dt.normalize()
@@ -457,8 +580,8 @@ def _scope_result(
     )
 
     groups = QuincenalGroups(
-        maestras_open=_issue_listing(maestras_open, source_label_by_id=source_label_by_id),
-        others_open=_issue_listing(others_open, source_label_by_id=source_label_by_id),
+        open_focus=_issue_listing(open_focus, source_label_by_id=source_label_by_id),
+        open_other=_issue_listing(open_other, source_label_by_id=source_label_by_id),
         new_now=_issue_listing(
             safe.loc[new_now_mask].copy(deep=False),
             source_label_by_id=source_label_by_id,
@@ -491,8 +614,17 @@ def _scope_result(
         window=window,
         total_issues=int(len(safe)),
         open_total=int(len(open_df)),
-        maestras_total=int(len(maestras_open)),
-        others_total=int(len(others_open)),
+        open_group_mode=str(grouping.mode),
+        open_focus_label=str(grouping.focus_scope_label),
+        open_other_label=str(grouping.other_scope_label),
+        open_focus_card_kicker=str(grouping.focus_card_kicker),
+        open_focus_card_detail=str(grouping.focus_card_detail),
+        open_other_card_kicker=str(grouping.other_card_kicker),
+        open_other_card_detail=str(grouping.other_card_detail),
+        open_focus_report_label=str(grouping.focus_report_label),
+        open_other_report_label=str(grouping.other_report_label),
+        open_focus_total=int(len(open_focus)),
+        open_other_total=int(len(open_other)),
         new_now=int(new_now_mask.sum()),
         new_before=int(new_before_mask.sum()),
         new_accumulated=int(new_accumulated_mask.sum()),

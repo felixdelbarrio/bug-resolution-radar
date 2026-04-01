@@ -143,6 +143,75 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
     assert out.content
 
 
+def test_generate_country_period_followup_ppt_uses_open_focus_label_from_settings() -> None:
+    template = bundled_period_ppt_template_path()
+    now = pd.Timestamp("2026-03-15T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Issue A",
+                "status": "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+            },
+            {
+                "key": "B-1",
+                "summary": "Issue B",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": (now - pd.Timedelta(days=10)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": (now - pd.Timedelta(days=1)).isoformat(),
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+                "source_type": "jira",
+            },
+        ]
+    )
+
+    settings_critical = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(template),
+        OPEN_ISSUES_FOCUS_MODE="criticidad_alta",
+    )
+    out_critical = generate_country_period_followup_ppt(
+        settings_critical,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs_critical = Presentation(BytesIO(out_critical.content))
+    critical_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs_critical.slides[2].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).upper()
+    assert "CRITICIDAD ALTA" in critical_blob
+
+    settings_maestras = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(template),
+        OPEN_ISSUES_FOCUS_MODE="maestras",
+    )
+    out_maestras = generate_country_period_followup_ppt(
+        settings_maestras,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs_maestras = Presentation(BytesIO(out_maestras.content))
+    maestras_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs_maestras.slides[2].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).upper()
+    assert "INCIDENCIAS MAESTRAS" in maestras_blob
+
+
 def test_generate_country_period_followup_ppt_bundled_template_layout_regression() -> None:
     template = bundled_period_ppt_template_path()
     assert template.exists()

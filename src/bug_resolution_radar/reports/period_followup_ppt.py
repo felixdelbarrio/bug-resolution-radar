@@ -552,8 +552,20 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     summary = scope_result.summary
     _set_shape_text(slide, 3, title)
     _set_first_number(slide, shape_index=4, value=int(summary.open_total))
-    _set_first_number(slide, shape_index=5, value=int(summary.maestras_total))
-    _set_first_number(slide, shape_index=6, value=int(summary.others_total))
+    _set_first_number(slide, shape_index=5, value=int(summary.open_focus_total))
+    _set_first_number(slide, shape_index=6, value=int(summary.open_other_total))
+    _set_label_run(
+        slide,
+        shape_index=5,
+        paragraph_index=0,
+        text=str(summary.open_focus_report_label),
+    )
+    _set_label_run(
+        slide,
+        shape_index=6,
+        paragraph_index=0,
+        text=str(summary.open_other_report_label),
+    )
     _set_first_number(slide, shape_index=9, value=int(summary.closed_now))
     _set_first_number(slide, shape_index=12, value=_fmt_days(summary.resolution_days_now))
     _set_first_number(slide, shape_index=15, value=int(summary.new_now))
