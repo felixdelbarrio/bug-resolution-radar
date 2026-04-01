@@ -72,6 +72,23 @@ def _sort_topics_by_volume_with_others_last(top_tbl: pd.DataFrame) -> pd.DataFra
     return sort_theme_table_by_volume(top_tbl, label_col="tema", count_col="open_count")
 
 
+def _stacked_theme_order(
+    theme_order: list[str],
+    *,
+    theme_count_by_label: dict[str, int] | None = None,
+) -> list[str]:
+    ordered = order_theme_labels_by_volume(
+        theme_order,
+        counts_by_label=theme_count_by_label,
+        others_last=True,
+    )
+    if not ordered:
+        return []
+    non_other = [theme for theme in ordered if not _is_others_label(theme)]
+    other = [theme for theme in ordered if _is_others_label(theme)]
+    return non_other + other
+
+
 def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -> pd.DataFrame:
     """Order functional topics prioritizing business criticality over raw volume."""
     if not isinstance(top_tbl, pd.DataFrame) or top_tbl.empty:
@@ -386,6 +403,7 @@ def _render_theme_trend_chart(
     trend_df: pd.DataFrame,
     theme_order: list[str],
     theme_color_map: dict[str, str],
+    theme_count_by_label: dict[str, int] | None = None,
     x_col: str,
     x_label_col: str,
     x_title: str,
@@ -415,9 +433,17 @@ def _render_theme_trend_chart(
     if not theme_order:
         return
 
+    theme_order = _stacked_theme_order(
+        theme_order,
+        theme_count_by_label=theme_count_by_label,
+    )
+    if not theme_order:
+        return
+
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
-    # Plotly stacks bars in insertion order (bottom -> top). Keeping theme_order here makes
-    # the highest non-"Otros" theme appear first at the base and "Otros" last on top.
+    # Plotly stacks bars in insertion order (bottom -> top).
+    # This order is normalized to always keep non-"Otros" themes first by volume
+    # and "Otros" as the topmost (last) segment.
     stacked_order = list(theme_order)
     axis_labels = axis[x_label_col].astype(str).tolist()
     total_by_label = (
@@ -594,6 +620,12 @@ def render_top_topics_tab(
         ),
         others_last=True,
     )
+    theme_count_by_label = dict(
+        zip(
+            top_tbl["tema"].astype(str).tolist(),
+            pd.to_numeric(top_tbl["open_count"], errors="coerce").fillna(0).astype(int).tolist(),
+        )
+    )
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     topic_color_map = _theme_color_map(theme_order=selected_themes, dark_mode=dark_mode)
     trend_df = pd.DataFrame()
@@ -649,6 +681,7 @@ def render_top_topics_tab(
                 trend_df=trend_df,
                 theme_order=selected_themes,
                 theme_color_map=topic_color_map,
+                theme_count_by_label=theme_count_by_label,
                 x_col="quincena_start",
                 x_label_col="quincena_label",
                 x_title="Quincena",
@@ -660,6 +693,7 @@ def render_top_topics_tab(
                 trend_df=trend_df,
                 theme_order=selected_themes,
                 theme_color_map=topic_color_map,
+                theme_count_by_label=theme_count_by_label,
                 x_col="date",
                 x_label_col="date_label",
                 x_title="Día",

@@ -30,3 +30,21 @@ def test_sort_topics_by_volume_treats_otros_case_insensitive() -> None:
     out = top_topics._sort_topics_by_volume_with_others_last(top_tbl)
 
     assert out["tema"].tolist() == ["Login y acceso", "Tareas", "oTrOs"]
+
+
+def test_stacked_theme_order_keeps_others_as_topmost_segment() -> None:
+    order = top_topics._stacked_theme_order(
+        ["Otros", "Pagos", "Monetarias", "Tareas"],
+        theme_count_by_label={"Otros": 202, "Pagos": 54, "Monetarias": 44, "Tareas": 47},
+    )
+
+    assert order == ["Pagos", "Tareas", "Monetarias", "Otros"]
+
+
+def test_stacked_theme_order_normalizes_other_aliases() -> None:
+    order = top_topics._stacked_theme_order(
+        ["Pagos", "other", "Tareas"],
+        theme_count_by_label={"Pagos": 10, "other": 500, "Tareas": 12},
+    )
+
+    assert order == ["Tareas", "Pagos", "other"]
