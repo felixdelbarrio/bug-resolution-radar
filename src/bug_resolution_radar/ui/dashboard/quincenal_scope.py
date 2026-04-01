@@ -66,7 +66,12 @@ def should_show_open_split(*, maestras_total: int, others_total: int, open_total
     return not (maestras == 0 and others == open_total_safe)
 
 
-def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> Dict[str, List[str]]:
+def quincenal_scope_options(
+    df: pd.DataFrame,
+    *,
+    settings: Settings | None,
+    reference_day: pd.Timestamp | None = None,
+) -> Dict[str, List[str]]:
     """Return quincenal issue subsets for the current workspace scope."""
     if settings is None or df is None or df.empty:
         return {QUINCENAL_SCOPE_ALL: []}
@@ -91,6 +96,7 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         country=country,
         source_ids=source_ids,
         source_label_by_id=labels,
+        reference_day=reference_day,
     )
     groups = result.aggregate.groups
     summary = result.aggregate.summary

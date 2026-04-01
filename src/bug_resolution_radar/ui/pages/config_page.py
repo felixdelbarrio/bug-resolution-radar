@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Sequence, Tuple, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -468,6 +468,12 @@ def _fmt_ms(value: Any) -> str:
     return f"{_safe_float(value):.0f} ms"
 
 
+def _as_non_empty_text_list(value: object) -> List[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [str(x) for x in value if str(x).strip()]
+
+
 def _build_perf_history_df() -> pd.DataFrame:
     rows: List[Dict[str, Any]] = []
     for row in perf_history_rows(limit=320):
@@ -476,7 +482,8 @@ def _build_perf_history_df() -> pd.DataFrame:
         metrics_map = metrics if isinstance(metrics, dict) else {}
         budgets_map = budgets if isinstance(budgets, dict) else {}
         overruns = row.get("overruns")
-        overrun_list = [str(x) for x in list(overruns or []) if str(x).strip()]
+        overrun_list = _as_non_empty_text_list(overruns)
+        overrun_count_raw = row.get("overrun_count", len(overrun_list))
         blocks = sorted([str(k) for k in metrics_map.keys()])
         rows.append(
             {
@@ -487,7 +494,7 @@ def _build_perf_history_df() -> pd.DataFrame:
                 "total_budget_ms": _safe_float(
                     row.get("total_budget_ms", budgets_map.get("total", 0.0))
                 ),
-                "overrun_count": int(row.get("overrun_count", len(overrun_list)) or 0),
+                "overrun_count": int(_safe_float(overrun_count_raw)),
                 "overruns": ", ".join(overrun_list) if overrun_list else "—",
                 "blocks": ", ".join(blocks),
             }
@@ -523,7 +530,9 @@ def _render_perf_hero(*, history_df: pd.DataFrame, snapshot_count: int) -> None:
         totals = pd.to_numeric(history_df["total_ms"], errors="coerce").fillna(0.0)
         p95_total = float(totals.quantile(0.95)) if not totals.empty else 0.0
         avg_total = float(totals.mean()) if not totals.empty else 0.0
-        overrun_events = int((pd.to_numeric(history_df["overrun_count"], errors="coerce").fillna(0) > 0).sum())
+        overrun_events = int(
+            (pd.to_numeric(history_df["overrun_count"], errors="coerce").fillna(0) > 0).sum()
+        )
 
     st.markdown(
         (
@@ -578,7 +587,7 @@ def _render_performance_tab(*, settings: Settings) -> None:
             metrics_map = metrics if isinstance(metrics, dict) else {}
             budgets_map = budgets if isinstance(budgets, dict) else {}
             overruns = payload.get("overruns")
-            overrun_list = [str(x) for x in list(overruns or []) if str(x).strip()]
+            overrun_list = _as_non_empty_text_list(overruns)
             latest_rows.append(
                 {
                     "snapshot_key": str(snapshot_key),
@@ -590,7 +599,9 @@ def _render_performance_tab(*, settings: Settings) -> None:
                     "overruns": ", ".join(overrun_list) if overrun_list else "—",
                 }
             )
-        latest_df = pd.DataFrame(latest_rows).sort_values(["view", "snapshot_key"]).reset_index(drop=True)
+        latest_df = (
+            pd.DataFrame(latest_rows).sort_values(["view", "snapshot_key"]).reset_index(drop=True)
+        )
         cards_html = ['<div class="cfg-perf-view-grid">']
         for row in latest_df.to_dict(orient="records"):
             is_warn = int(row.get("overrun_count", 0) or 0) > 0
@@ -605,7 +616,7 @@ def _render_performance_tab(*, settings: Settings) -> None:
                 f'<span class="cfg-perf-view-total">{_fmt_ms(row.get("total_ms", 0.0))}</span>'
                 "</div>"
                 f'<div class="cfg-perf-view-meta">Budget total: {_fmt_ms(total_budget)} '
-                f'({ratio:.0f}% uso)</div>'
+                f"({ratio:.0f}% uso)</div>"
                 f'<div class="cfg-perf-view-meta">Overruns: {escape(str(row.get("overruns", "—") or "—"))}</div>'
                 f'<div class="cfg-perf-view-meta">{escape(str(row.get("captured_at_utc", "—") or "—"))}</div>'
                 "</article>"
@@ -690,6 +701,7 @@ def _render_performance_tab(*, settings: Settings) -> None:
                 "blocks": st.column_config.TextColumn("Bloques medidos"),
             },
         )
+
 
 def _render_selected_source_chips(
     selected_source_ids: List[str], source_label_by_id: Dict[str, str]
@@ -1284,9 +1296,7 @@ def render(settings: Settings) -> None:
         active_tab = "Preferencias"
     st.session_state["__cfg_active_tab"] = active_tab
     with st.container(key="cfg_tabs_shell"):
-        t_prefs, t_jira, t_helix, t_agg, t_caches, t_perf = st.tabs(
-            tab_labels, default=active_tab
-        )
+        t_prefs, t_jira, t_helix, t_agg, t_caches, t_perf = st.tabs(tab_labels, default=active_tab)
 
     with t_jira:
         st.markdown("### Jira global")
@@ -1701,7 +1711,9 @@ def render(settings: Settings) -> None:
             with st.container(border=True, key="cfg_prefs_card_open_focus"):
                 st.markdown("#### Criterio de foco en abiertas")
                 open_focus_mode_default = normalize_open_issues_focus_mode(
-                    getattr(settings, "OPEN_ISSUES_FOCUS_MODE", OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH)
+                    getattr(
+                        settings, "OPEN_ISSUES_FOCUS_MODE", OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+                    )
                 )
                 st.session_state.setdefault("cfg_open_issues_focus_mode", open_focus_mode_default)
                 if str(st.session_state.get("cfg_open_issues_focus_mode") or "").strip() not in {

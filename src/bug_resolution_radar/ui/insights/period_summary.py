@@ -350,9 +350,9 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     groups = result.aggregate.groups
     st.caption(f"{summary.scope_label or selected_country} · {format_window_label(summary.window)}")
 
-    open_total_group = pd.concat([groups.open_focus, groups.open_other], axis=0, ignore_index=True).copy(
-        deep=False
-    )
+    open_total_group = pd.concat(
+        [groups.open_focus, groups.open_other], axis=0, ignore_index=True
+    ).copy(deep=False)
     show_open_split = should_show_open_split(
         maestras_total=int(summary.open_focus_total),
         others_total=int(summary.open_other_total),

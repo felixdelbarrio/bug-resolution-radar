@@ -65,7 +65,9 @@ def _append_perf_history(
     payload: Mapping[str, object],
 ) -> None:
     raw_history = st.session_state.get(_PERF_HISTORY_KEY, [])
-    history: list[dict[str, object]] = [dict(row) for row in raw_history if isinstance(row, Mapping)]
+    history: list[dict[str, object]] = [
+        dict(row) for row in raw_history if isinstance(row, Mapping)
+    ]
     captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     metrics = payload.get("metrics_ms")
@@ -73,7 +75,12 @@ def _append_perf_history(
     overruns = payload.get("overruns")
     metrics_map = metrics if isinstance(metrics, Mapping) else {}
     budgets_map = budgets if isinstance(budgets, Mapping) else {}
-    overruns_list = [str(x) for x in list(overruns or []) if str(x).strip()]
+    overruns_seq = (
+        overruns
+        if isinstance(overruns, Sequence) and not isinstance(overruns, (str, bytes))
+        else []
+    )
+    overruns_list = [str(x) for x in overruns_seq if str(x).strip()]
     row: dict[str, object] = {
         "captured_at_utc": captured_at,
         "snapshot_key": str(snapshot_key),
