@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from bug_resolution_radar.analytics import kpis as kpis_module
-from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.analytics.kpis import build_timeseries_daily, compute_kpis
 from bug_resolution_radar.config import Settings
 
 
@@ -166,3 +166,23 @@ def test_kpis_can_skip_timeseries_chart_generation() -> None:
     )
     k = compute_kpis(df, settings=Settings(), include_timeseries_chart=False)
     assert k["timeseries_chart"] is None
+
+
+def test_build_timeseries_daily_returns_dense_window_and_non_negative_backlog() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "created": "2026-01-01T00:00:00+00:00",
+                "resolved": "2026-01-03T00:00:00+00:00",
+            },
+            {
+                "created": "2026-01-04T00:00:00+00:00",
+                "resolved": pd.NaT,
+            },
+        ]
+    )
+    daily = build_timeseries_daily(df, lookback_days=5, include_deployed=False)
+
+    assert list(daily.columns) == ["date", "created", "closed", "open_backlog_proxy"]
+    assert len(daily) == 5
+    assert int(daily["open_backlog_proxy"].min()) >= 0

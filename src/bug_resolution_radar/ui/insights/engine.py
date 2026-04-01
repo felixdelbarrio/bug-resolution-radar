@@ -21,6 +21,7 @@ from bug_resolution_radar.analytics.insights import (
 from bug_resolution_radar.analytics.insights import (
     top_non_other_theme as _top_non_other_theme,
 )
+from bug_resolution_radar.analytics.kpis import build_timeseries_daily
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
@@ -161,49 +162,18 @@ def top_non_other_theme(open_df: pd.DataFrame) -> Tuple[str, int]:
 
 
 def _daily_flow(dff: pd.DataFrame, *, lookback_days: int = 90) -> pd.DataFrame:
-    if dff.empty:
-        return pd.DataFrame(columns=["date", "created", "closed", "net", "backlog_proxy"])
-    created = (
-        _to_dt_naive(dff["created"])
-        if "created" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
+    base_daily = build_timeseries_daily(
+        dff,
+        lookback_days=lookback_days,
+        include_deployed=False,
     )
-    closed = (
-        _to_dt_naive(dff["resolved"])
-        if "resolved" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
-    )
-
-    valid_created = created.dropna()
-    valid_closed = closed.dropna()
-    if valid_created.empty and valid_closed.empty:
+    if base_daily.empty:
         return pd.DataFrame(columns=["date", "created", "closed", "net", "backlog_proxy"])
 
-    end_candidates: List[pd.Timestamp] = []
-    if not valid_created.empty:
-        end_candidates.append(pd.Timestamp(valid_created.max()).normalize())
-    if not valid_closed.empty:
-        end_candidates.append(pd.Timestamp(valid_closed.max()).normalize())
-    end_ts = max(end_candidates) if end_candidates else pd.Timestamp.utcnow().normalize()
-    start_ts = end_ts - pd.Timedelta(days=max(lookback_days - 1, 1))
-
-    created_daily = (
-        valid_created[valid_created >= start_ts].dt.floor("D").value_counts(sort=False)
-        if not valid_created.empty
-        else pd.Series(dtype="int64")
-    )
-    closed_daily = (
-        valid_closed[valid_closed >= start_ts].dt.floor("D").value_counts(sort=False)
-        if not valid_closed.empty
-        else pd.Series(dtype="int64")
-    )
-
-    days = pd.date_range(start=start_ts, end=end_ts, freq="D")
-    daily = pd.DataFrame({"date": days})
-    daily["created"] = [int(created_daily.get(d, 0)) for d in days]
-    daily["closed"] = [int(closed_daily.get(d, 0)) for d in days]
+    daily = base_daily.loc[:, ["date", "created", "closed", "open_backlog_proxy"]].copy(deep=False)
     daily["net"] = daily["created"] - daily["closed"]
-    daily["backlog_proxy"] = daily["net"].cumsum().clip(lower=0)
+    daily["backlog_proxy"] = daily["open_backlog_proxy"]
+    daily = daily.drop(columns=["open_backlog_proxy"])
     return daily
 
 
@@ -454,7 +424,7 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
             ActionInsight(
                 title="Tendencia semanal neta positiva",
                 body=(
-                    f"El saldo medio reciente es +{weekly_net:.1f} incidencias/semana. "
+                    f"El saldo medio reciente es +{weekly_net:.1f} incidencias abiertas/semana. "
                     "Si persiste, el backlog seguira aumentando."
                 ),
                 score=12.0 + weekly_net,
@@ -465,7 +435,7 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
             ActionInsight(
                 title="Reduccion semanal sostenida",
                 body=(
-                    f"El saldo medio reciente es {weekly_net:.1f} incidencias/semana. "
+                    f"El saldo medio reciente es {weekly_net:.1f} incidencias abiertas/semana. "
                     "Hay traccion suficiente para limpiar cola envejecida."
                 ),
                 score=7.0 + abs(weekly_net),

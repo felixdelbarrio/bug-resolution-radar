@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from bug_resolution_radar.analytics.kpis import build_timeseries_daily
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
@@ -29,7 +30,10 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_issue_distribution,
     build_age_buckets_open_priority_stacked,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
+from bug_resolution_radar.ui.dashboard.constants import (
+    Y_AXIS_LABEL_OPEN_ISSUES,
+    canonical_status_order,
+)
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.performance import (
     elapsed_ms,
@@ -437,82 +441,12 @@ def _add_bar_totals(
 
 
 def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
-    """Build daily aggregates for timeseries chart from the filtered dataframe."""
-    if dff.empty:
-        return pd.DataFrame()
-
-    created = (
-        _to_dt_naive(dff["created"])
-        if "created" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
+    """Build canonical daily aggregates for timeseries chart from the filtered dataframe."""
+    return build_timeseries_daily(
+        dff,
+        lookback_days=90,
+        include_deployed=True,
     )
-    resolved = (
-        _to_dt_naive(dff["resolved"])
-        if "resolved" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
-    )
-    updated = (
-        _to_dt_naive(dff["updated"])
-        if "updated" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
-    )
-    status_norm = (
-        normalize_text_col(dff["status"], "(sin estado)").map(_norm_status_token)
-        if "status" in dff.columns
-        else pd.Series("", index=dff.index)
-    )
-    deployed_mask = status_norm.eq("deployed")
-    deployed_ts = pd.Series(pd.NaT, index=dff.index)
-    if deployed_mask.any():
-        deployed_ts = resolved.where(deployed_mask)
-        deployed_ts = deployed_ts.where(deployed_ts.notna(), updated.where(deployed_mask))
-        deployed_ts = deployed_ts.where(deployed_ts.notna(), created.where(deployed_mask))
-
-    created_notna = created.notna()
-    resolved_notna = resolved.notna()
-    deployed_notna = deployed_ts.notna()
-    if not created_notna.any() and not resolved_notna.any() and not deployed_notna.any():
-        return pd.DataFrame()
-
-    end_candidates = []
-    if created_notna.any():
-        end_candidates.append(created.loc[created_notna].max())
-    if resolved_notna.any():
-        end_candidates.append(resolved.loc[resolved_notna].max())
-    if deployed_notna.any():
-        end_candidates.append(deployed_ts.loc[deployed_notna].max())
-    end_ts = (
-        pd.Timestamp(max(end_candidates)).normalize()
-        if end_candidates
-        else pd.Timestamp.utcnow().normalize()
-    )
-    start_ts = end_ts - pd.Timedelta(days=90)
-
-    created_daily = (
-        created.loc[created_notna & (created >= start_ts)].dt.floor("D").value_counts(sort=False)
-    )
-    closed_daily = (
-        resolved.loc[resolved_notna & (resolved >= start_ts)].dt.floor("D").value_counts(sort=False)
-    )
-    deployed_daily = (
-        deployed_ts.loc[deployed_notna & (deployed_ts >= start_ts)]
-        .dt.floor("D")
-        .value_counts(sort=False)
-    )
-
-    all_dates = (
-        created_daily.index.union(closed_daily.index).union(deployed_daily.index).sort_values()
-    )
-    if all_dates.empty:
-        return pd.DataFrame()
-
-    daily = pd.DataFrame({"date": all_dates})
-    daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
-    daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
-    daily["deployed"] = deployed_daily.reindex(all_dates, fill_value=0).to_numpy()
-    # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
-    daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
-    return daily
 
 
 def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -750,7 +684,7 @@ def _render_trend_chart(
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return _chart_perf_result()
         fig = px.line(daily, x="date", y=["created", "closed", "deployed", "open_backlog_proxy"])
-        fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
+        fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES)
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
         export_df = dff[[c for c in export_cols if c in dff.columns]].copy(deep=False)
@@ -899,7 +833,7 @@ def _render_trend_chart(
         fig.update_layout(
             title_text="",
             xaxis_title="Tiempo hasta estado final",
-            yaxis_title="Incidencias",
+            yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
             bargap=0.10,
         )
         fig.update_traces(textposition="inside", textfont=dict(size=10))

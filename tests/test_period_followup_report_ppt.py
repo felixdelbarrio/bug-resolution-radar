@@ -192,6 +192,8 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         if getattr(shape, "has_text_frame", False)
     ).upper()
     assert "CRITICIDAD ALTA" in critical_blob
+    assert "ALTAS:" in critical_blob
+    assert "RESTO:" in critical_blob
 
     settings_maestras = Settings(
         PERIOD_PPT_TEMPLATE_PATH=str(template),
@@ -210,6 +212,8 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         if getattr(shape, "has_text_frame", False)
     ).upper()
     assert "INCIDENCIAS MAESTRAS" in maestras_blob
+    assert "MAESTRAS:" in maestras_blob
+    assert "RESTO:" in maestras_blob
 
 
 def test_generate_country_period_followup_ppt_bundled_template_layout_regression() -> None:

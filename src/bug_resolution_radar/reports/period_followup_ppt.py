@@ -20,6 +20,7 @@ from pptx.util import Pt
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.period_summary import (
+    OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
     QuincenalScopeResult,
     build_country_quincenal_result,
     format_window_label,
@@ -445,6 +446,147 @@ def _set_shape_font_size(
                 run.font.bold = bool(bold)
 
 
+def _shape_text_frame(
+    slide: Any,
+    *,
+    shape_index: int,
+) -> Any | None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return None
+    tf = shape.text_frame
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    return tf
+
+
+def _set_paragraph_single_run(
+    paragraph: Any,
+    *,
+    text: str,
+    size_pt: float,
+    bold: bool = True,
+    italic: bool = False,
+    space_before_pt: float = 0.0,
+) -> None:
+    paragraph.clear()
+    run = paragraph.add_run()
+    run.text = str(text or "")
+    run.font.size = Pt(float(size_pt))
+    run.font.bold = bool(bold)
+    run.font.italic = bool(italic)
+    paragraph.space_before = Pt(float(space_before_pt))
+    paragraph.space_after = Pt(0)
+
+
+def _set_paragraph_value_label(
+    paragraph: Any,
+    *,
+    value_text: str,
+    label_text: str,
+    value_size_pt: float,
+    label_size_pt: float,
+) -> None:
+    paragraph.clear()
+    value_run = paragraph.add_run()
+    value_run.text = f"{str(value_text)} "
+    value_run.font.size = Pt(float(value_size_pt))
+    value_run.font.bold = True
+    label_run = paragraph.add_run()
+    label_run.text = str(label_text or "")
+    label_run.font.size = Pt(float(label_size_pt))
+    label_run.font.bold = True
+    paragraph.space_before = Pt(0)
+    paragraph.space_after = Pt(0)
+
+
+def _write_open_criticity_card(
+    slide: Any,
+    *,
+    shape_index: int,
+    value: int,
+    label: str,
+) -> None:
+    tf = _shape_text_frame(slide, shape_index=shape_index)
+    if tf is None:
+        return
+    tf.clear()
+    p0 = tf.paragraphs[0]
+    _set_paragraph_single_run(p0, text=str(int(value)), size_pt=35.0, bold=True)
+    p1 = tf.add_paragraph()
+    _set_paragraph_single_run(
+        p1,
+        text=str(label or "").strip(),
+        size_pt=12.0,
+        bold=True,
+        space_before_pt=0.6,
+    )
+
+
+def _write_metric_card(
+    slide: Any,
+    *,
+    shape_index: int,
+    value_text: str,
+    label_text: str,
+    extra_lines: Sequence[tuple[str, float, bool, bool, float]] | None = None,
+    value_size_pt: float = 25.0,
+    label_size_pt: float = 12.0,
+) -> None:
+    tf = _shape_text_frame(slide, shape_index=shape_index)
+    if tf is None:
+        return
+    tf.clear()
+    p0 = tf.paragraphs[0]
+    _set_paragraph_value_label(
+        p0,
+        value_text=str(value_text or ""),
+        label_text=str(label_text or ""),
+        value_size_pt=float(value_size_pt),
+        label_size_pt=float(label_size_pt),
+    )
+
+    for text, size_pt, bold, italic, space_before in list(extra_lines or []):
+        p = tf.add_paragraph()
+        _set_paragraph_single_run(
+            p,
+            text=str(text or ""),
+            size_pt=float(size_pt),
+            bold=bool(bold),
+            italic=bool(italic),
+            space_before_pt=float(space_before),
+        )
+
+
+def _align_delta_badges_with_new_card(slide: Any) -> None:
+    ref_card = _shape_or_none(slide, 15)
+    ref_delta = _shape_or_none(slide, 19)
+    ref_marker = _shape_or_none(slide, 18)
+    if ref_card is None or ref_delta is None or ref_marker is None:
+        return
+    delta_dx = int(ref_delta.left) - int(ref_card.left)
+    delta_dy = int(ref_delta.top) - int(ref_card.top)
+    marker_dx = int(ref_marker.left) - int(ref_card.left)
+    marker_dy = int(ref_marker.top) - int(ref_card.top)
+
+    for card_idx, delta_idx, marker_idx in ((9, 10, 11), (12, 13, 14)):
+        card = _shape_or_none(slide, card_idx)
+        delta = _shape_or_none(slide, delta_idx)
+        marker = _shape_or_none(slide, marker_idx)
+        if card is not None and delta is not None:
+            delta.left = int(card.left) + delta_dx
+            delta.top = int(card.top) + delta_dy
+        if card is not None and marker is not None:
+            marker.left = int(card.left) + marker_dx
+            marker.top = int(card.top) + marker_dy
+
+
 def _overlay_picture(
     slide: Any,
     *,
@@ -544,6 +686,16 @@ def _chart_png(
     fig = spec.render(ChartContext(dff=dff, open_df=open_df, kpis=kpis))
     if fig is None:
         return b""
+    if chart_id == "timeseries":
+        margin = getattr(getattr(fig, "layout", None), "margin", None)
+        left = int(getattr(margin, "l", 16) or 16)
+        right = int(getattr(margin, "r", 16) or 16)
+        top = int(getattr(margin, "t", 48) or 48)
+        bottom = max(int(getattr(margin, "b", 92) or 92), 144)
+        fig.update_layout(
+            legend=dict(font=dict(size=18)),
+            margin=dict(l=left, r=right, t=top, b=bottom),
+        )
     payload = _fig_to_png(fig)
     return payload or b""
 
@@ -551,36 +703,6 @@ def _chart_png(
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     _set_shape_text(slide, 3, title)
-    _set_first_number(slide, shape_index=4, value=int(summary.open_total))
-    _set_first_number(slide, shape_index=5, value=int(summary.open_focus_total))
-    _set_first_number(slide, shape_index=6, value=int(summary.open_other_total))
-    _set_label_run(
-        slide,
-        shape_index=5,
-        paragraph_index=0,
-        text=str(summary.open_focus_report_label),
-    )
-    _set_label_run(
-        slide,
-        shape_index=6,
-        paragraph_index=0,
-        text=str(summary.open_other_report_label),
-    )
-    _set_first_number(slide, shape_index=9, value=int(summary.closed_now))
-    _set_first_number(slide, shape_index=12, value=_fmt_days(summary.resolution_days_now))
-    _set_first_number(slide, shape_index=15, value=int(summary.new_now))
-    _set_label_run(
-        slide,
-        shape_index=9,
-        paragraph_index=0,
-        text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
-    )
-    _set_label_run(
-        slide,
-        shape_index=15,
-        paragraph_index=0,
-        text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
-    )
     _set_paragraph_value_after_colon(
         slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
     )
@@ -593,9 +715,74 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
     _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
     _set_shape_text(slide, 19, _fmt_delta_pct(summary.new_delta_pct))
+    focus_split_label = (
+        "MAESTRAS"
+        if str(summary.open_group_mode or "").strip() == OPEN_ISSUES_FOCUS_MODE_MAESTRAS
+        else "ALTAS"
+    )
+    _write_open_criticity_card(
+        slide,
+        shape_index=4,
+        value=int(summary.open_total),
+        label="INCIDENCIAS ABIERTAS EN TOTAL",
+    )
+    _write_open_criticity_card(
+        slide,
+        shape_index=5,
+        value=int(summary.open_focus_total),
+        label=str(summary.open_focus_report_label),
+    )
+    _write_open_criticity_card(
+        slide,
+        shape_index=6,
+        value=int(summary.open_other_total),
+        label=str(summary.open_other_report_label),
+    )
+
+    _write_metric_card(
+        slide,
+        shape_index=15,
+        value_text=str(int(summary.new_now)),
+        label_text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
+    )
+    _write_metric_card(
+        slide,
+        shape_index=9,
+        value_text=str(int(summary.closed_now)),
+        label_text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
+        extra_lines=[
+            (
+                f"{focus_split_label}: {int(summary.closed_focus_now)}  |  "
+                f"RESTO: {int(summary.closed_other_now)}",
+                10.5,
+                True,
+                False,
+                1.4,
+            )
+        ],
+    )
+    _write_metric_card(
+        slide,
+        shape_index=12,
+        value_text=str(_fmt_days(summary.resolution_days_now)),
+        label_text="DÍAS DE RESOLUCIÓN",
+        extra_lines=[
+            ("(EN PROMEDIO)", 9.5, True, True, 0.6),
+            (
+                f"{focus_split_label}: {int(summary.resolved_focus_now)}  |  "
+                f"RESTO: {int(summary.resolved_other_now)}",
+                10.5,
+                True,
+                False,
+                1.0,
+            ),
+        ],
+    )
+
     _set_shape_font_size(slide, shape_index=10, font_size_pt=14.0, bold=True)
     _set_shape_font_size(slide, shape_index=13, font_size_pt=14.0, bold=True)
     _set_shape_font_size(slide, shape_index=19, font_size_pt=14.0, bold=True)
+    _align_delta_badges_with_new_card(slide)
 
 
 def _populate_evolution_slide(

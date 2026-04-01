@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     AGE_BUCKET_ORDER,
     build_age_bucket_points,
@@ -12,6 +14,8 @@ from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
     _render_age_buckets,
     _render_open_priority_pie,
+    _render_resolution_hist,
+    _render_timeseries,
 )
 from bug_resolution_radar.ui.dashboard.tabs.trends_tab import (
     _effective_trends_open_scope,
@@ -150,6 +154,55 @@ def test_timeseries_daily_from_filtered_includes_deployed_series() -> None:
     }
     assert by_day.get(pd.Timestamp("2025-01-03"), 0) == 1
     assert by_day.get(pd.Timestamp("2025-01-04"), 0) == 1
+
+
+def test_render_timeseries_uses_open_axis_wording() -> None:
+    now = pd.Timestamp("2026-02-01T00:00:00+00:00")
+    dff = pd.DataFrame(
+        {
+            "created": [
+                (now - pd.Timedelta(days=2)).isoformat(),
+                (now - pd.Timedelta(days=1)).isoformat(),
+            ],
+            "resolved": [pd.NaT, (now - pd.Timedelta(days=1)).isoformat()],
+            "status": ["New", "Closed"],
+        }
+    )
+    kpis = compute_kpis(dff, settings=Settings(), include_timeseries_chart=True)
+    open_df = dff.loc[dff["resolved"].isna()].copy(deep=False)
+    fig = _render_timeseries(ChartContext(dff=dff, open_df=open_df, kpis=kpis))
+
+    assert fig is not None
+    assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == (
+        "Incidencias abiertas"
+    )
+
+
+def test_render_resolution_hist_uses_open_axis_wording() -> None:
+    dff = pd.DataFrame(
+        {
+            "created": [
+                "2026-02-01T00:00:00+00:00",
+                "2026-02-02T00:00:00+00:00",
+            ],
+            "resolved": [
+                "2026-02-04T00:00:00+00:00",
+                "2026-02-05T00:00:00+00:00",
+            ],
+            "updated": [
+                "2026-02-04T00:00:00+00:00",
+                "2026-02-05T00:00:00+00:00",
+            ],
+            "status": ["Deployed", "Closed"],
+            "priority": ["High", "Medium"],
+        }
+    )
+    fig = _render_resolution_hist(ChartContext(dff=dff, open_df=pd.DataFrame(), kpis={}))
+
+    assert fig is not None
+    assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == (
+        "Incidencias abiertas"
+    )
 
 
 def test_render_open_priority_pie_excludes_deployed_rows() -> None:

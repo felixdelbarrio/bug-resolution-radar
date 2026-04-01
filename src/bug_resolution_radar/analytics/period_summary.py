@@ -102,9 +102,13 @@ class QuincenalSummary:
     new_accumulated: int
     new_delta_pct: float | None
     closed_now: int
+    closed_focus_now: int
+    closed_other_now: int
     closed_before: int
     closed_delta_pct: float | None
     resolution_days_now: float | None
+    resolved_focus_now: int
+    resolved_other_now: int
     resolution_days_before: float | None
     resolution_delta_pct: float | None
 
@@ -407,6 +411,35 @@ def _delta_pct(now_value: float | int, before_value: float | int) -> float | Non
     return (now_val - before_val) / before_val
 
 
+def _focus_group_mask(
+    df: pd.DataFrame,
+    *,
+    grouping: OpenIssueGrouping,
+    settings: Settings,
+) -> pd.Series:
+    safe = _safe_df(df)
+    if safe.empty:
+        return pd.Series(False, index=safe.index, dtype=bool)
+    if grouping.mode == OPEN_ISSUES_FOCUS_MODE_MAESTRAS:
+        return mark_maestra_rows(safe, settings=settings)
+    return _critical_priority_mask(safe)
+
+
+def _focus_other_counts(
+    df: pd.DataFrame,
+    *,
+    grouping: OpenIssueGrouping,
+    settings: Settings,
+) -> tuple[int, int]:
+    safe = _safe_df(df)
+    if safe.empty:
+        return 0, 0
+    focus_mask = _focus_group_mask(safe, grouping=grouping, settings=settings)
+    focus_total = int(focus_mask.sum())
+    other_total = max(int(len(safe)) - focus_total, 0)
+    return focus_total, other_total
+
+
 def _issue_listing(
     df: pd.DataFrame,
     *,
@@ -512,10 +545,7 @@ def _scope_result(
 
     closed_mask = effective_closed_mask(safe)
     open_df = safe.loc[~closed_mask].copy(deep=False) if not safe.empty else pd.DataFrame()
-    if grouping.mode == OPEN_ISSUES_FOCUS_MODE_MAESTRAS:
-        open_focus_mask = mark_maestra_rows(open_df, settings=settings)
-    else:
-        open_focus_mask = _critical_priority_mask(open_df)
+    open_focus_mask = _focus_group_mask(open_df, grouping=grouping, settings=settings)
     open_focus = open_df.loc[open_focus_mask].copy(deep=False)
     open_other = open_df.loc[~open_focus_mask].copy(deep=False)
 
@@ -540,6 +570,11 @@ def _scope_result(
 
     closed_now = safe.loc[closed_now_mask].copy(deep=False)
     closed_before = safe.loc[closed_before_mask].copy(deep=False)
+    closed_focus_now, closed_other_now = _focus_other_counts(
+        closed_now,
+        grouping=grouping,
+        settings=settings,
+    )
 
     resolution_source = safe.copy(deep=False)
     resolution_source["__created"] = created
@@ -567,6 +602,11 @@ def _scope_result(
         float(pd.to_numeric(resolved_now["resolution_days"], errors="coerce").mean())
         if not resolved_now.empty
         else None
+    )
+    resolved_focus_now, resolved_other_now = _focus_other_counts(
+        resolved_now,
+        grouping=grouping,
+        settings=settings,
     )
     resolution_before_days = (
         float(pd.to_numeric(resolved_before["resolution_days"], errors="coerce").mean())
@@ -630,9 +670,13 @@ def _scope_result(
         new_accumulated=int(new_accumulated_mask.sum()),
         new_delta_pct=_delta_pct(int(new_now_mask.sum()), int(new_before_mask.sum())),
         closed_now=int(closed_now_mask.sum()),
+        closed_focus_now=int(closed_focus_now),
+        closed_other_now=int(closed_other_now),
         closed_before=int(closed_before_mask.sum()),
         closed_delta_pct=_delta_pct(int(closed_now_mask.sum()), int(closed_before_mask.sum())),
         resolution_days_now=resolution_now_days,
+        resolved_focus_now=int(resolved_focus_now),
+        resolved_other_now=int(resolved_other_now),
         resolution_days_before=resolution_before_days,
         resolution_delta_pct=resolution_delta_pct,
     )

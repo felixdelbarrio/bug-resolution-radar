@@ -22,7 +22,10 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_bucket_points,
     build_age_buckets_issue_distribution,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
+from bug_resolution_radar.ui.dashboard.constants import (
+    Y_AXIS_LABEL_OPEN_ISSUES,
+    canonical_status_order,
+)
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 TERMINAL_STATUS_TOKENS = (
@@ -175,7 +178,7 @@ def _render_timeseries(ctx: ChartContext) -> Optional[go.Figure]:
             except Exception:
                 marker_size = 0.0
             trace.marker = dict(color=color, size=marker_size if marker_size > 0 else 6)
-    out.update_layout(legend_title_text="")
+    out.update_layout(legend_title_text="", yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES)
     return out
 
 
@@ -353,7 +356,7 @@ def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
     fig.update_layout(
         title_text="",
         xaxis_title="Tiempo hasta estado final",
-        yaxis_title="Incidencias",
+        yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
         bargap=0.10,
     )
     fig.update_traces(textposition="inside", textfont=dict(size=10))
