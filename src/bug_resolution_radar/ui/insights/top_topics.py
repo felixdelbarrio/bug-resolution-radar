@@ -72,6 +72,30 @@ def _ordered_unique_labels(values: list[object]) -> list[str]:
     return out
 
 
+def _is_others_label(value: object) -> bool:
+    return str(value or "").strip().casefold() == "otros"
+
+
+def _sort_topics_by_volume_with_others_last(top_tbl: pd.DataFrame) -> pd.DataFrame:
+    if top_tbl.empty:
+        return top_tbl
+    if "tema" not in top_tbl.columns or "open_count" not in top_tbl.columns:
+        return top_tbl
+
+    work = top_tbl.copy(deep=False)
+    work["__topic_label"] = work["tema"].fillna("").astype(str).str.strip()
+    work["__open_count"] = pd.to_numeric(work["open_count"], errors="coerce").fillna(0).astype(int)
+    work["__is_others"] = work["__topic_label"].map(_is_others_label)
+    work["__topic_key"] = work["__topic_label"].str.casefold()
+
+    ordered = work.sort_values(
+        by=["__is_others", "__open_count", "__topic_key"],
+        ascending=[True, False, True],
+        kind="mergesort",
+    )
+    return ordered.loc[:, top_tbl.columns]
+
+
 def _signal_palette(*, dark_mode: bool) -> tuple[str, ...]:
     if dark_mode:
         return (
@@ -217,16 +241,6 @@ def _theme_color_map(*, theme_order: list[str], dark_mode: bool) -> dict[str, st
     return out
 
 
-def _critical_rank(*, theme: str, color_hex: str, dark_mode: bool) -> int:
-    if str(theme).strip().lower() == "otros":
-        return 999
-    palette = _signal_palette(dark_mode=dark_mode)
-    try:
-        return int(palette.index(color_hex))
-    except ValueError:
-        return len(palette) + 1
-
-
 def _hex_luminance(hex_color: str) -> float:
     token = str(hex_color or "").strip().lstrip("#")
     if len(token) != 6:
@@ -305,18 +319,7 @@ def _render_theme_trend_chart(
         return
 
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
-    stacked_order = sorted(
-        list(theme_order),
-        key=lambda theme: (
-            _critical_rank(
-                theme=theme,
-                color_hex=str(theme_color_map.get(theme) or ""),
-                dark_mode=dark_mode,
-            ),
-            theme_order.index(theme),
-        ),
-        reverse=True,
-    )
+    stacked_order = list(theme_order)
     axis_labels = axis[x_label_col].astype(str).tolist()
     total_by_label = (
         trend_df.groupby(x_label_col, as_index=True)["issues_value"]
@@ -463,6 +466,7 @@ def render_top_topics_tab(
         tmp_open = pd.DataFrame()
     if not isinstance(top_tbl, pd.DataFrame):
         top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
+    top_tbl = _sort_topics_by_volume_with_others_last(top_tbl)
     if top_tbl.empty:
         st.info("No hay columna `summary` para construir temas.")
         return
