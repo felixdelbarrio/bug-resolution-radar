@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
+import inspect
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -763,10 +764,18 @@ def build_country_quincenal_result(
     )
     labels = dict(source_label_by_id or source_label_map(settings, country=country_txt))
     scoped = _scope_df(df, country=country_txt, source_ids=selected_source_ids)
-    normalized_reference_day = _analysis_reference_day(
-        reference_day=reference_day,
-        df=scoped,
-    )
+    analysis_reference_day_fn = _analysis_reference_day
+    try:
+        supports_df_arg = "df" in inspect.signature(analysis_reference_day_fn).parameters
+    except (TypeError, ValueError):
+        supports_df_arg = False
+    if supports_df_arg:
+        normalized_reference_day = analysis_reference_day_fn(
+            reference_day=reference_day,
+            df=scoped,
+        )
+    else:
+        normalized_reference_day = analysis_reference_day_fn(reference_day=reference_day)
 
     aggregate = _scope_result(
         df=scoped,
