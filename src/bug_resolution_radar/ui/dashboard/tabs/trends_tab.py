@@ -8,13 +8,15 @@ import unicodedata
 from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.analytics.kpis import build_timeseries_daily
-from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.kpis import (
+    RESOLUTION_BUCKET_LABELS,
+    build_resolution_hist_payload,
+    build_timeseries_daily,
+)
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
@@ -31,6 +33,7 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_open_priority_stacked,
 )
 from bug_resolution_radar.ui.dashboard.constants import (
+    Y_AXIS_LABEL_FINALIZED_ISSUES,
     Y_AXIS_LABEL_OPEN_ISSUES,
     canonical_status_order,
 )
@@ -123,22 +126,6 @@ def _trends_perf_budget(view: str) -> dict[str, float]:
         budgets_by_view=_TRENDS_PERF_BUDGETS_MS,
         default_view="default",
     )
-
-
-def _to_dt_naive(s: pd.Series) -> pd.Series:
-    """Convert to naive datetime64 for safe arithmetic/comparisons."""
-    if s is None:
-        return pd.Series([], dtype="datetime64[ns]")
-    out = pd.to_datetime(s, errors="coerce")
-    try:
-        if hasattr(out.dt, "tz") and out.dt.tz is not None:
-            out = out.dt.tz_localize(None)
-    except Exception:
-        try:
-            out = out.dt.tz_localize(None)
-        except Exception:
-            pass
-    return out
 
 
 def _safe_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -400,22 +387,6 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     return (priority_rank(p), pl)
 
 
-def _resolution_bucket(days: pd.Series) -> pd.Categorical:
-    """Build categorical buckets to avoid confusion in continuous histograms."""
-    bins = [-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, np.inf]
-    labels = [
-        "Mismo dia (0d)",
-        "1-2d",
-        "3-7d",
-        "8-14d",
-        "15-30d",
-        "31-60d",
-        "61-90d",
-        ">90d",
-    ]
-    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
-
-
 def _add_bar_totals(
     fig: Any, *, x_values: list[str], y_totals: list[float], font_size: int = 12
 ) -> None:
@@ -451,61 +422,7 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
 
 def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Build grouped 'time to final state' distribution plus export-ready closed subset."""
-    empty_grouped = pd.DataFrame(columns=["resolution_bucket", "priority", "count"])
-    empty_closed = pd.DataFrame(
-        columns=[
-            "key",
-            "summary",
-            "status",
-            "priority",
-            "created",
-            "finalized_at",
-            "resolved",
-            "resolution_days",
-            "resolution_bucket",
-        ]
-    )
-    if "created" not in dff.columns:
-        return {"grouped": empty_grouped, "closed": empty_closed}
-
-    created = _to_dt_naive(dff["created"])
-    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
-
-    closed = dff.copy(deep=False)
-    closed["__created"] = created
-    closed["__finalized_at"] = finalized_at
-    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
-    if closed.empty:
-        return {"grouped": empty_grouped, "closed": empty_closed}
-
-    closed["resolution_days"] = (
-        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
-    ).clip(lower=0.0)
-    if "priority" in closed.columns:
-        closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
-    else:
-        closed["priority"] = "(sin priority)"
-
-    closed["resolution_bucket"] = _resolution_bucket(closed["resolution_days"])
-    grouped_res = (
-        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
-        .size()
-        .reset_index(name="count")
-    )
-    export_cols = [
-        "key",
-        "summary",
-        "status",
-        "priority",
-        "created",
-        "finalized_at",
-        "resolved",
-        "resolution_days",
-        "resolution_bucket",
-    ]
-    closed["finalized_at"] = closed["__finalized_at"]
-    export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
-    return {"grouped": grouped_res, "closed": export_df}
+    return build_resolution_hist_payload(dff)
 
 
 def _open_status_payload(status_df: pd.DataFrame) -> dict[str, Any]:
@@ -817,14 +734,7 @@ def _render_trend_chart(
             barmode="stack",
             category_orders={
                 "resolution_bucket": [
-                    "Mismo dia (0d)",
-                    "1-2d",
-                    "3-7d",
-                    "8-14d",
-                    "15-30d",
-                    "31-60d",
-                    "61-90d",
-                    ">90d",
+                    *list(RESOLUTION_BUCKET_LABELS),
                 ],
                 "priority": priority_order,
             },
@@ -833,20 +743,11 @@ def _render_trend_chart(
         fig.update_layout(
             title_text="",
             xaxis_title="Tiempo hasta estado final",
-            yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
+            yaxis_title=Y_AXIS_LABEL_FINALIZED_ISSUES,
             bargap=0.10,
         )
         fig.update_traces(textposition="inside", textfont=dict(size=10))
-        res_order = [
-            "Mismo dia (0d)",
-            "1-2d",
-            "3-7d",
-            "8-14d",
-            "15-30d",
-            "31-60d",
-            "61-90d",
-            ">90d",
-        ]
+        res_order = list(RESOLUTION_BUCKET_LABELS)
         res_totals = grouped_res.groupby("resolution_bucket", dropna=False, observed=False)[
             "count"
         ].sum()

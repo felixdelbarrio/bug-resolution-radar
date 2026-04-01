@@ -3,21 +3,37 @@
 from __future__ import annotations
 
 import unicodedata
-from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Final
 
 import pandas as pd
 import plotly.express as px
 
 from bug_resolution_radar.config import Settings
 
-from .status_semantics import effective_closed_mask
+from .status_semantics import effective_closed_mask, effective_finalized_at
 
 _DT_COLS = ("created", "updated", "resolved")
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+RESOLUTION_BUCKET_BINS: Final[tuple[float, ...]] = (
+    -0.1,
+    0.0,
+    2.0,
+    7.0,
+    14.0,
+    30.0,
+    60.0,
+    90.0,
+    float("inf"),
+)
+RESOLUTION_BUCKET_LABELS: Final[tuple[str, ...]] = (
+    "Mismo día (0d)",
+    "1-2d",
+    "3-7d",
+    "8-14d",
+    "15-30d",
+    "31-60d",
+    "61-90d",
+    ">90d",
+)
 
 
 def _ensure_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -68,6 +84,17 @@ def _normalize_status_token(value: object) -> str:
         return ""
     txt = unicodedata.normalize("NFKD", txt)
     return "".join(ch for ch in txt if not unicodedata.combining(ch) and ch.isalnum())
+
+
+def _normalize_priority_col(
+    series: pd.Series | None,
+    *,
+    default: str = "(sin priority)",
+) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype=str)
+    out = series.fillna("").astype(str).str.strip()
+    return out.where(out.str.len() > 0, default)
 
 
 def build_timeseries_daily(
@@ -163,6 +190,84 @@ def build_timeseries_daily(
     if include_deployed:
         daily["deployed"] = deployed_daily.reindex(days, fill_value=0).to_numpy()
     return daily
+
+
+def build_resolution_hist_payload(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    """
+    Canonical payload for 'Tiempo hasta estado final' distribution.
+
+    Returns:
+    - grouped: columns [resolution_bucket, priority, count]
+    - closed: detail rows with resolution_days + resolution_bucket
+    """
+    empty_grouped = pd.DataFrame(columns=["resolution_bucket", "priority", "count"])
+    empty_closed = pd.DataFrame(
+        columns=[
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "created",
+            "finalized_at",
+            "resolved",
+            "resolution_days",
+            "resolution_bucket",
+        ]
+    )
+    work_df = _ensure_datetime_columns(df)
+    if work_df.empty or "created" not in work_df.columns:
+        return {"grouped": empty_grouped, "closed": empty_closed}
+
+    created = pd.to_datetime(work_df["created"], utc=True, errors="coerce")
+    try:
+        created = created.dt.tz_convert(None)
+    except Exception:
+        created = created.dt.tz_localize(None)
+    finalized_at = effective_finalized_at(work_df, created_col="created", updated_col="updated")
+
+    closed = work_df.copy(deep=False)
+    closed["__created"] = created
+    closed["__finalized_at"] = finalized_at
+    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
+    if closed.empty:
+        return {"grouped": empty_grouped, "closed": empty_closed}
+
+    closed["resolution_days"] = (
+        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
+    ).clip(lower=0.0)
+    closed["priority"] = (
+        _normalize_priority_col(closed["priority"])
+        if "priority" in closed.columns
+        else "(sin priority)"
+    )
+    closed["resolution_bucket"] = pd.cut(
+        closed["resolution_days"],
+        bins=list(RESOLUTION_BUCKET_BINS),
+        labels=list(RESOLUTION_BUCKET_LABELS),
+        right=True,
+        include_lowest=True,
+        ordered=True,
+    )
+
+    grouped_res = (
+        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+    )
+    export_cols = [
+        "key",
+        "summary",
+        "status",
+        "priority",
+        "created",
+        "finalized_at",
+        "resolved",
+        "resolution_days",
+        "resolution_bucket",
+    ]
+    closed["finalized_at"] = closed["__finalized_at"]
+    export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
+    return {"grouped": grouped_res, "closed": export_df}
 
 
 def compute_kpis(

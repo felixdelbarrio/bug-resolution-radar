@@ -35,7 +35,6 @@ from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trend
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
-_FIRST_NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 
 @dataclass(frozen=True)
@@ -351,24 +350,6 @@ def _set_shape_text_by_shape(shape: Any, text: str) -> None:
     _set_shape_text_fit(shape)
 
 
-def _set_first_number(slide: Any, *, shape_index: int, value: int) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None or not getattr(shape, "has_text_frame", False):
-        return
-    replacement = str(int(value))
-    for paragraph in list(shape.text_frame.paragraphs):
-        for run in list(paragraph.runs):
-            src = str(getattr(run, "text", "") or "")
-            if not _FIRST_NUMBER_RE.search(src):
-                continue
-            run.text = _FIRST_NUMBER_RE.sub(replacement, src, count=1)
-            _set_shape_text_fit(shape)
-            return
-    source = str(getattr(shape, "text", "") or "")
-    if _FIRST_NUMBER_RE.search(source):
-        _set_shape_text_by_shape(shape, _FIRST_NUMBER_RE.sub(replacement, source, count=1))
-
-
 def _set_paragraph_value_after_colon(
     slide: Any, *, shape_index: int, paragraph_index: int, value: int
 ) -> None:
@@ -390,31 +371,6 @@ def _set_paragraph_value_after_colon(
     target.text = f": {int(value)}{trailing}"
     for run in runs[2:]:
         run.text = ""
-    _set_shape_text_fit(shape)
-
-
-def _set_label_run(slide: Any, *, shape_index: int, paragraph_index: int, text: str) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None or not getattr(shape, "has_text_frame", False):
-        return
-    paragraphs = list(shape.text_frame.paragraphs)
-    if paragraph_index >= len(paragraphs):
-        return
-    paragraph = paragraphs[paragraph_index]
-    runs = list(paragraph.runs)
-    if len(runs) < 2:
-        _set_shape_text_by_shape(shape, str(text or ""))
-        return
-    label_txt = str(text or "")
-    if len(runs) >= 3 and not str(getattr(runs[1], "text", "") or "").strip():
-        runs[1].text = " "
-        runs[2].text = label_txt
-        for run in runs[3:]:
-            run.text = ""
-    else:
-        runs[1].text = label_txt
-        for run in runs[2:]:
-            run.text = ""
     _set_shape_text_fit(shape)
 
 

@@ -10,7 +10,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.kpis import (
+    RESOLUTION_BUCKET_LABELS,
+    build_resolution_hist_payload,
+)
 from bug_resolution_radar.ui.common import (
     flow_signal_color_map,
     normalize_text_col,
@@ -23,6 +26,7 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import (
+    Y_AXIS_LABEL_FINALIZED_ISSUES,
     Y_AXIS_LABEL_OPEN_ISSUES,
     canonical_status_order,
 )
@@ -103,23 +107,15 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
 
 
 def _resolution_days_series(dff: pd.DataFrame) -> pd.Series:
-    if dff is None or dff.empty:
+    payload = build_resolution_hist_payload(dff)
+    closed = payload.get("closed") if isinstance(payload, dict) else None
+    if (
+        not isinstance(closed, pd.DataFrame)
+        or closed.empty
+        or "resolution_days" not in closed.columns
+    ):
         return pd.Series([], dtype=float)
-    if "created" not in dff.columns:
-        return pd.Series([], dtype=float)
-
-    created = _to_dt_naive(dff["created"])
-    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
-
-    closed = dff.copy()
-    closed["__created"] = created
-    closed["__finalized_at"] = finalized_at
-    closed = closed[closed["__finalized_at"].notna() & closed["__created"].notna()]
-    if closed.empty:
-        return pd.Series([], dtype=float)
-
-    days = (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
-    return days.clip(lower=0.0)
+    return pd.to_numeric(closed["resolution_days"], errors="coerce").dropna().clip(lower=0.0)
 
 
 def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
@@ -281,67 +277,15 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
 
 
 def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
-    dff = ctx.dff
-    if dff is None or dff.empty or "created" not in dff.columns:
-        return None
-
-    created = _to_dt_naive(dff["created"])
-    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
-    closed = dff.copy(deep=False)
-    closed["__created"] = created
-    closed["__finalized_at"] = finalized_at
-    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
-    if closed.empty:
-        return None
-
-    closed["resolution_days"] = (
-        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
-    ).clip(lower=0.0)
-    closed["priority"] = (
-        normalize_text_col(closed["priority"], "(sin priority)")
-        if "priority" in closed.columns
-        else "(sin priority)"
-    )
-
-    closed["resolution_bucket"] = pd.cut(
-        closed["resolution_days"],
-        bins=[-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, float("inf")],
-        labels=[
-            "Mismo día (0d)",
-            "1-2d",
-            "3-7d",
-            "8-14d",
-            "15-30d",
-            "31-60d",
-            "61-90d",
-            ">90d",
-        ],
-        right=True,
-        include_lowest=True,
-        ordered=True,
-    )
-    grouped = (
-        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
-        .size()
-        .reset_index(name="count")
-    )
-    if grouped.empty:
+    payload = build_resolution_hist_payload(ctx.dff)
+    grouped = payload.get("grouped") if isinstance(payload, dict) else None
+    if not isinstance(grouped, pd.DataFrame) or grouped.empty:
         return None
 
     priority_order = sorted(
         grouped["priority"].astype(str).unique().tolist(),
         key=_priority_sort_key,
     )
-    bucket_order = [
-        "Mismo día (0d)",
-        "1-2d",
-        "3-7d",
-        "8-14d",
-        "15-30d",
-        "31-60d",
-        "61-90d",
-        ">90d",
-    ]
     fig = px.bar(
         grouped,
         x="resolution_bucket",
@@ -349,14 +293,17 @@ def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
         text="count",
         color="priority",
         barmode="stack",
-        category_orders={"resolution_bucket": bucket_order, "priority": priority_order},
+        category_orders={
+            "resolution_bucket": list(RESOLUTION_BUCKET_LABELS),
+            "priority": priority_order,
+        },
         color_discrete_map=priority_color_map(),
         title="Tiempo hasta estado final",
     )
     fig.update_layout(
         title_text="",
         xaxis_title="Tiempo hasta estado final",
-        yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
+        yaxis_title=Y_AXIS_LABEL_FINALIZED_ISSUES,
         bargap=0.10,
     )
     fig.update_traces(textposition="inside", textfont=dict(size=10))

@@ -178,7 +178,7 @@ def test_render_timeseries_uses_open_axis_wording() -> None:
     )
 
 
-def test_render_resolution_hist_uses_open_axis_wording() -> None:
+def test_render_resolution_hist_uses_finalized_axis_wording() -> None:
     dff = pd.DataFrame(
         {
             "created": [
@@ -201,7 +201,7 @@ def test_render_resolution_hist_uses_open_axis_wording() -> None:
 
     assert fig is not None
     assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == (
-        "Incidencias abiertas"
+        "Incidencias finalizadas"
     )
 
 

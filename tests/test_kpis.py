@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 import pandas as pd
 
-from bug_resolution_radar.analytics import kpis as kpis_module
 from bug_resolution_radar.analytics.kpis import build_timeseries_daily, compute_kpis
 from bug_resolution_radar.config import Settings
 
@@ -61,10 +59,7 @@ def test_kpis_empty_dataframe_returns_defaults() -> None:
     assert list(k["top_open_table"].columns) == ["summary", "open_count"]
 
 
-def test_kpis_handles_missing_columns_and_bad_settings(monkeypatch: Any) -> None:
-    fixed_now = datetime(2025, 1, 20, tzinfo=timezone.utc)
-    monkeypatch.setattr(kpis_module, "_utcnow", lambda: fixed_now)
-
+def test_kpis_handles_missing_columns_and_bad_settings() -> None:
     df = pd.DataFrame(
         [
             {"key": "M-1", "summary": "issue uno", "priority": "High"},
@@ -80,10 +75,7 @@ def test_kpis_handles_missing_columns_and_bad_settings(monkeypatch: Any) -> None
     assert k["mean_resolution_days"] == 0.0
 
 
-def test_kpis_top_open_table_is_sorted_by_frequency(monkeypatch: Any) -> None:
-    fixed_now = datetime(2025, 1, 20, tzinfo=timezone.utc)
-    monkeypatch.setattr(kpis_module, "_utcnow", lambda: fixed_now)
-
+def test_kpis_top_open_table_is_sorted_by_frequency() -> None:
     df = pd.DataFrame(
         [
             {

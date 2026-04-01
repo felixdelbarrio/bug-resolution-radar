@@ -21,6 +21,7 @@ CANONICAL_STATUS_ORDER: Tuple[str, ...] = (
 
 # Shared chart labels to avoid wording drift between dashboard destinations.
 Y_AXIS_LABEL_OPEN_ISSUES = "Incidencias abiertas"
+Y_AXIS_LABEL_FINALIZED_ISSUES = "Incidencias finalizadas"
 
 
 def canonical_status_order() -> List[str]:
