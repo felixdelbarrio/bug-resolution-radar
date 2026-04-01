@@ -349,6 +349,27 @@ def _df_records(df: pd.DataFrame) -> List[dict[str, object]]:
     return list(_iter_df_records(df))
 
 
+def _coerce_days_float(value: object) -> float:
+    try:
+        if pd.isna(value):
+            return 0.0
+    except Exception:
+        pass
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, float):
+        return float(value)
+    token = str(value or "").strip()
+    if not token:
+        return 0.0
+    try:
+        return float(token)
+    except Exception:
+        return 0.0
+
+
 def _selection_payload(event: object) -> dict[str, object]:
     if event is None:
         return {}
@@ -631,8 +652,8 @@ def render_issue_cards(
             prio_txt = _safe_cell_text(row.get("priority"))
             assignee_txt = _safe_cell_text(row.get("assignee"))
             is_open = bool(row.get("__is_open", True))
-            open_age = float(row.get("__open_age_days", 0.0) or 0.0)
-            cycle_days = float(row.get("__cycle_days", 0.0) or 0.0)
+            open_age = _coerce_days_float(row.get("__open_age_days", 0.0))
+            cycle_days = _coerce_days_float(row.get("__cycle_days", 0.0))
 
             badges: List[str] = []
             if prio_txt != "—":

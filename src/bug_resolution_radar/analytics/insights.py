@@ -143,8 +143,19 @@ def _coerce_theme_count(value: object) -> int:
             return 0
     except Exception:
         pass
+
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return int(value)
+
+    token = str(value or "").strip()
+    if not token:
+        return 0
     try:
-        return int(float(value))
+        return int(float(token))
     except Exception:
         return 0
 
