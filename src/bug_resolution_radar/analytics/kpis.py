@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+import unicodedata
+from typing import Any, Dict, Final
 
 import pandas as pd
 import plotly.express as px
@@ -13,10 +13,27 @@ from bug_resolution_radar.config import Settings
 from .status_semantics import effective_closed_mask
 
 _DT_COLS = ("created", "updated", "resolved")
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+OPEN_AGE_BUCKET_BINS: Final[tuple[float, ...]] = (
+    -0.1,
+    0.0,
+    2.0,
+    7.0,
+    14.0,
+    30.0,
+    60.0,
+    90.0,
+    float("inf"),
+)
+OPEN_AGE_BUCKET_LABELS: Final[tuple[str, ...]] = (
+    "Mismo día (0d)",
+    "1-2d",
+    "3-7d",
+    "8-14d",
+    "15-30d",
+    "31-60d",
+    "61-90d",
+    ">90d",
+)
 
 
 def _ensure_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -61,13 +78,219 @@ def _empty_timeseries_chart() -> Any:
     return px.line(empty_ts, x="date", y=["created", "closed", "open_backlog_proxy"])
 
 
+def _normalize_status_token(value: object) -> str:
+    txt = str(value or "").strip().lower()
+    if not txt:
+        return ""
+    txt = unicodedata.normalize("NFKD", txt)
+    return "".join(ch for ch in txt if not unicodedata.combining(ch) and ch.isalnum())
+
+
+def _normalize_priority_col(
+    series: pd.Series | None,
+    *,
+    default: str = "(sin priority)",
+) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype=str)
+    out = series.fillna("").astype(str).str.strip()
+    return out.where(out.str.len() > 0, default)
+
+
+def build_timeseries_daily(
+    df: pd.DataFrame,
+    *,
+    lookback_days: int = 90,
+    include_deployed: bool = False,
+) -> pd.DataFrame:
+    """
+    Canonical daily flow payload shared by dashboard charts and insights.
+
+    Columns:
+    - date
+    - created
+    - closed
+    - open_backlog_proxy
+    - deployed (optional, only when include_deployed=True)
+    """
+    work_df = _ensure_datetime_columns(df)
+    if work_df.empty:
+        cols = ["date", "created", "closed", "open_backlog_proxy"]
+        if include_deployed:
+            cols.append("deployed")
+        return pd.DataFrame(columns=cols)
+
+    created = (
+        work_df["created"]
+        if "created" in work_df.columns
+        else pd.Series(pd.NaT, index=work_df.index, dtype="datetime64[ns, UTC]")
+    )
+    resolved = (
+        work_df["resolved"]
+        if "resolved" in work_df.columns
+        else pd.Series(pd.NaT, index=work_df.index, dtype="datetime64[ns, UTC]")
+    )
+    updated = (
+        work_df["updated"]
+        if "updated" in work_df.columns
+        else pd.Series(pd.NaT, index=work_df.index, dtype="datetime64[ns, UTC]")
+    )
+
+    deployed_ts = pd.Series(pd.NaT, index=work_df.index, dtype="datetime64[ns, UTC]")
+    if include_deployed and "status" in work_df.columns:
+        status_norm = work_df["status"].fillna("").astype(str).map(_normalize_status_token)
+        deployed_mask = status_norm.eq("deployed")
+        if deployed_mask.any():
+            deployed_ts = resolved.where(deployed_mask)
+            deployed_ts = deployed_ts.where(deployed_ts.notna(), updated.where(deployed_mask))
+            deployed_ts = deployed_ts.where(deployed_ts.notna(), created.where(deployed_mask))
+
+    event_series: list[pd.Series] = [created, resolved]
+    if include_deployed:
+        event_series.append(deployed_ts)
+
+    end_candidates: list[pd.Timestamp] = []
+    for event in event_series:
+        valid = event.dropna()
+        if valid.empty:
+            continue
+        end_candidates.append(pd.Timestamp(valid.max()).normalize())
+    if not end_candidates:
+        cols = ["date", "created", "closed", "open_backlog_proxy"]
+        if include_deployed:
+            cols.append("deployed")
+        return pd.DataFrame(columns=cols)
+
+    end_ts = max(end_candidates)
+    lookback_span = max(int(lookback_days or 0), 1)
+    start_ts = end_ts - pd.Timedelta(days=lookback_span - 1)
+    days = pd.date_range(start=start_ts, end=end_ts, freq="D")
+
+    created_daily = (
+        created.loc[created.notna() & (created >= start_ts)].dt.floor("D").value_counts(sort=False)
+    )
+    closed_daily = (
+        resolved.loc[resolved.notna() & (resolved >= start_ts)]
+        .dt.floor("D")
+        .value_counts(sort=False)
+    )
+    deployed_daily = (
+        deployed_ts.loc[deployed_ts.notna() & (deployed_ts >= start_ts)]
+        .dt.floor("D")
+        .value_counts(sort=False)
+        if include_deployed
+        else pd.Series(dtype="int64")
+    )
+
+    daily = pd.DataFrame({"date": pd.DatetimeIndex(days).tz_localize(None)})
+    daily["created"] = created_daily.reindex(days, fill_value=0).to_numpy()
+    daily["closed"] = closed_daily.reindex(days, fill_value=0).to_numpy()
+    net = daily["created"] - daily["closed"]
+    daily["open_backlog_proxy"] = net.cumsum().clip(lower=0)
+    if include_deployed:
+        daily["deployed"] = deployed_daily.reindex(days, fill_value=0).to_numpy()
+    return daily
+
+
+def build_open_age_priority_payload(
+    df: pd.DataFrame,
+    *,
+    reference_now: pd.Timestamp | None = None,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Canonical payload for open-incidents age distribution by priority.
+
+    Returns:
+    - grouped: columns [age_bucket, priority, count]
+    - open: detail rows with open_days + age_bucket
+    """
+    empty_grouped = pd.DataFrame(columns=["age_bucket", "priority", "count"])
+    empty_open = pd.DataFrame(
+        columns=[
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "created",
+            "updated",
+            "resolved",
+            "open_days",
+            "age_bucket",
+        ]
+    )
+    work_df = _ensure_datetime_columns(df)
+    if work_df.empty or "created" not in work_df.columns:
+        return {"grouped": empty_grouped, "open": empty_open}
+
+    closed_mask = effective_closed_mask(work_df)
+    open_df = work_df.loc[~closed_mask].copy(deep=False)
+    if open_df.empty:
+        return {"grouped": empty_grouped, "open": empty_open}
+
+    created = pd.to_datetime(open_df["created"], utc=True, errors="coerce")
+    try:
+        created = created.dt.tz_convert(None)
+    except Exception:
+        created = created.dt.tz_localize(None)
+    open_df = open_df.assign(__created=created)
+    open_df = open_df[open_df["__created"].notna()].copy(deep=False)
+    if open_df.empty:
+        return {"grouped": empty_grouped, "open": empty_open}
+
+    now_ref = reference_now
+    if now_ref is None:
+        now_ref = pd.Timestamp.utcnow().tz_localize(None)
+    else:
+        now_ref = pd.Timestamp(now_ref)
+        if now_ref.tzinfo is not None:
+            try:
+                now_ref = now_ref.tz_convert(None)
+            except Exception:
+                now_ref = now_ref.tz_localize(None)
+    open_df["open_days"] = ((now_ref - open_df["__created"]).dt.total_seconds() / 86400.0).clip(
+        lower=0.0
+    )
+    open_df["priority"] = (
+        _normalize_priority_col(open_df["priority"])
+        if "priority" in open_df.columns
+        else "(sin priority)"
+    )
+    open_df["age_bucket"] = pd.cut(
+        open_df["open_days"],
+        bins=list(OPEN_AGE_BUCKET_BINS),
+        labels=list(OPEN_AGE_BUCKET_LABELS),
+        right=True,
+        include_lowest=True,
+        ordered=True,
+    )
+
+    grouped_res = (
+        open_df.groupby(["age_bucket", "priority"], dropna=False, observed=False)
+        .size()
+        .reset_index(name="count")
+    )
+    grouped_res["count"] = grouped_res["count"].astype(int)
+    export_cols = [
+        "key",
+        "summary",
+        "status",
+        "priority",
+        "created",
+        "updated",
+        "resolved",
+        "open_days",
+        "age_bucket",
+    ]
+    export_df = open_df[[c for c in export_cols if c in open_df.columns]].copy(deep=False)
+    return {"grouped": grouped_res, "open": export_df}
+
+
 def compute_kpis(
     df: pd.DataFrame,
     settings: Settings,
     *,
     include_timeseries_chart: bool = True,
 ) -> Dict[str, Any]:
-    now = pd.Timestamp(_utcnow())
     _ = settings  # signature preserved for API compatibility
     work_df = _ensure_datetime_columns(df)
 
@@ -81,6 +304,9 @@ def compute_kpis(
             "mean_resolution_days": 0.0,
             "mean_resolution_days_by_priority": {},
             "timeseries_chart": _empty_timeseries_chart() if include_timeseries_chart else None,
+            "timeseries_daily": pd.DataFrame(
+                columns=["date", "created", "closed", "open_backlog_proxy"]
+            ),
             "top_open_table": pd.DataFrame(columns=["summary", "open_count"]),
         }
 
@@ -143,33 +369,20 @@ def compute_kpis(
             mean_by_priority = {}
 
     timeseries_chart = None
+    timeseries_daily = pd.DataFrame(columns=["date", "created", "closed", "open_backlog_proxy"])
     if include_timeseries_chart:
-        range_days = 90
-        start = now - timedelta(days=range_days)
-
-        created_daily = (
-            created.loc[created_notna & (created >= start)].dt.floor("D").value_counts(sort=False)
-            if has_created
-            else pd.Series(dtype=int)
+        timeseries_daily = build_timeseries_daily(
+            work_df,
+            lookback_days=90,
+            include_deployed=False,
         )
-        closed_daily = (
-            resolved.loc[resolved_notna & (resolved >= start)]
-            .dt.floor("D")
-            .value_counts(sort=False)
-            if has_resolved
-            else pd.Series(dtype=int)
-        )
-
-        if created_daily.empty and closed_daily.empty:
+        if timeseries_daily.empty:
             timeseries_chart = _empty_timeseries_chart()
         else:
-            all_dates = created_daily.index.union(closed_daily.index).sort_values()
-            daily = pd.DataFrame({"date": all_dates})
-            daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
-            daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
-            daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum()
             timeseries_chart = px.line(
-                daily, x="date", y=["created", "closed", "open_backlog_proxy"]
+                timeseries_daily,
+                x="date",
+                y=["created", "closed", "open_backlog_proxy"],
             )
 
     if open_now_total > 0 and has_summary:
@@ -194,5 +407,6 @@ def compute_kpis(
         "mean_resolution_days": mean_resolution_days,
         "mean_resolution_days_by_priority": mean_by_priority,
         "timeseries_chart": timeseries_chart,
+        "timeseries_daily": timeseries_daily,
         "top_open_table": top_open,
     }

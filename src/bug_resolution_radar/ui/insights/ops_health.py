@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 import pandas as pd
 import streamlit as st
 
@@ -14,6 +16,7 @@ from bug_resolution_radar.ui.insights.chips import (
     priority_chip_html,
 )
 from bug_resolution_radar.ui.insights.engine import build_ops_health_brief
+from bug_resolution_radar.ui.insights.header_actions import render_insights_header_row
 from bug_resolution_radar.ui.insights.helpers import (
     as_naive_utc,
     build_issue_lookup,
@@ -23,7 +26,12 @@ from bug_resolution_radar.ui.insights.helpers import (
 )
 
 
-def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> None:
+def render_ops_health_tab(
+    *,
+    settings: Settings,
+    dff_filtered: pd.DataFrame,
+    header_left_render: Callable[[], None] | None = None,
+) -> None:
     """
     Tab: Salud operativa (operational quick insights)
       - KPIs resumen (issues filtradas, abiertas, prioridad dominante)
@@ -38,11 +46,14 @@ def render_ops_health_tab(*, settings: Settings, dff_filtered: pd.DataFrame) -> 
 
     open_df = open_only(dff)
     export_cols = ["key", "summary", "status", "priority", "assignee", "created", "updated", "url"]
-    render_minimal_export_actions(
-        key_prefix="insights::ops_health",
-        filename_prefix="insights_salud",
-        suffix="abiertas",
-        csv_df=open_df[[c for c in export_cols if c in open_df.columns]].copy(deep=False),
+    render_insights_header_row(
+        left_render=header_left_render,
+        right_render=lambda: render_minimal_export_actions(
+            key_prefix="insights::ops_health",
+            filename_prefix="insights_salud",
+            suffix="abiertas",
+            csv_df=open_df[[c for c in export_cols if c in open_df.columns]].copy(deep=False),
+        ),
     )
 
     # -------------------------

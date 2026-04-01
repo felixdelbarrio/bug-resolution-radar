@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 from streamlit.components.v1 import html as components_html
 
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import hex_with_alpha
 from bug_resolution_radar.ui.common import (
     normalize_text_col,
@@ -18,10 +19,15 @@ from bug_resolution_radar.ui.common import (
     status_color,
 )
 from bug_resolution_radar.ui.dashboard.constants import order_statuses_canonical
+from bug_resolution_radar.ui.dashboard.quincenal_scope import (
+    normalize_quincenal_scope_label,
+    quincenal_scope_options,
+)
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
+    ISSUES_QUINCENAL_SCOPE_KEY,
     FilterState,
 )
 
@@ -36,11 +42,19 @@ def _ui_key(prefix: str, name: str) -> str:
     return f"{p}::{name}" if p else name
 
 
-def _sync_from_ui_to_canonical(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
+def _sync_from_ui_to_canonical(
+    ui_status_key: str,
+    ui_prio_key: str,
+    ui_assignee_key: str,
+    ui_quincenal_key: str | None = None,
+) -> None:
     """Copy UI widget state (namespaced keys) into canonical shared keys."""
     st.session_state[FILTER_STATUS_KEY] = list(st.session_state.get(ui_status_key) or [])
     st.session_state[FILTER_PRIORITY_KEY] = list(st.session_state.get(ui_prio_key) or [])
     st.session_state[FILTER_ASSIGNEE_KEY] = list(st.session_state.get(ui_assignee_key) or [])
+    if ui_quincenal_key:
+        selected = normalize_quincenal_scope_label(st.session_state.get(ui_quincenal_key))
+        st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = selected
 
 
 def _status_combo_label(status: str) -> str:
@@ -303,7 +317,12 @@ def _inject_semantic_option_runtime_bridge(
     )
 
 
-def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_key: str) -> None:
+def _mirror_canonical_to_ui(
+    ui_status_key: str,
+    ui_prio_key: str,
+    ui_assignee_key: str,
+    ui_quincenal_key: str | None = None,
+) -> None:
     """Before creating widgets, ensure their state reflects canonical keys (for cross-component sync)."""
     st.session_state[ui_status_key] = [
         _status_combo_label(x) for x in list(st.session_state.get(FILTER_STATUS_KEY) or [])
@@ -312,6 +331,10 @@ def _mirror_canonical_to_ui(ui_status_key: str, ui_prio_key: str, ui_assignee_ke
         _priority_combo_label(x) for x in list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     ]
     st.session_state[ui_assignee_key] = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
+    if ui_quincenal_key:
+        st.session_state[ui_quincenal_key] = normalize_quincenal_scope_label(
+            st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+        )
 
 
 def _normalize_filter_values(values: List[str]) -> List[str]:
@@ -345,7 +368,13 @@ def _active_context_label(
 # ---------------------------------------------------------------------
 # Filters UI
 # ---------------------------------------------------------------------
-def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
+def render_filters(
+    df: pd.DataFrame,
+    *,
+    key_prefix: str = "",
+    settings: Settings | None = None,
+    include_quincenal: bool = False,
+) -> FilterState:
     """Render filter widgets and return the selected filter state.
 
     IMPORTANT:
@@ -353,7 +382,8 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
       when the same filters are rendered in multiple tabs.
     - Canonical shared state remains in:
         filter_status, filter_priority, filter_assignee
-      so matrix/kanban/insights can still sync by writing those keys.
+      and (when enabled) issues_tab::quincenal_scope,
+      so matrix/kanban/insights/reportes consumen el mismo scope.
     """
     _inject_filters_panel_css()
 
@@ -373,9 +403,15 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
     ui_status_key = _ui_key(key_prefix, "filter_status_ui")
     ui_prio_key = _ui_key(key_prefix, "filter_priority_ui")
     ui_assignee_key = _ui_key(key_prefix, "filter_assignee_ui")
+    ui_quincenal_key = _ui_key(key_prefix, "filter_quincenal_ui")
 
     # Mirror canonical -> ui before widget creation (so matrix clicks reflect in widgets)
-    _mirror_canonical_to_ui(ui_status_key, ui_prio_key, ui_assignee_key)
+    _mirror_canonical_to_ui(
+        ui_status_key,
+        ui_prio_key,
+        ui_assignee_key,
+        ui_quincenal_key if include_quincenal else None,
+    )
 
     ctx_label = _active_context_label(
         st.session_state.get(FILTER_ACTION_CONTEXT_KEY),
@@ -397,6 +433,16 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
             key=lambda p: (priority_rank(p), p),
         )
         prio_opts_ui = [_priority_combo_label(p) for p in prio_opts]
+    quincenal_options: dict[str, List[str]] = {"Todas": []}
+    quincenal_labels: List[str] = ["Todas"]
+    if include_quincenal:
+        quincenal_options = quincenal_scope_options(df, settings=settings)
+        quincenal_labels = list(quincenal_options.keys()) if quincenal_options else ["Todas"]
+        selected_quincenal = normalize_quincenal_scope_label(st.session_state.get(ui_quincenal_key))
+        if selected_quincenal not in quincenal_labels:
+            selected_quincenal = "Todas"
+        st.session_state[ui_quincenal_key] = selected_quincenal
+        st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = selected_quincenal
 
     # Tags use stable aria-label selectors (color only, no dot) from centralized token map.
     _inject_semantic_tag_css(
@@ -415,7 +461,18 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
                 ),
                 unsafe_allow_html=True,
             )
-        c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
+        sync_args = (
+            ui_status_key,
+            ui_prio_key,
+            ui_assignee_key,
+            ui_quincenal_key if include_quincenal else None,
+        )
+        if include_quincenal:
+            c_status, c_prio, c_assignee, c_quincenal = st.columns(
+                [1.25, 0.96, 0.96, 1.06], gap="small"
+            )
+        else:
+            c_status, c_prio, c_assignee = st.columns([1.35, 1.0, 1.0], gap="small")
 
         with c_status:
             selected_ui_status = list(st.session_state.get(ui_status_key) or [])
@@ -425,7 +482,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
                 status_opts_ui,
                 key=ui_status_key,
                 on_change=_sync_from_ui_to_canonical,
-                args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                args=sync_args,
                 placeholder="Estado",
             )
 
@@ -438,7 +495,7 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
                     prio_opts_ui,
                     key=ui_prio_key,
                     on_change=_sync_from_ui_to_canonical,
-                    args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                    args=sync_args,
                     placeholder="Priority",
                 )
             else:
@@ -462,12 +519,29 @@ def render_filters(df: pd.DataFrame, *, key_prefix: str = "") -> FilterState:
                     assignee_opts,
                     key=ui_assignee_key,
                     on_change=_sync_from_ui_to_canonical,
-                    args=(ui_status_key, ui_prio_key, ui_assignee_key),
+                    args=sync_args,
                     placeholder="Asignado",
                 )
             else:
                 st.session_state[ui_assignee_key] = []
                 st.session_state[FILTER_ASSIGNEE_KEY] = []
+
+        if include_quincenal:
+            with c_quincenal:
+                st.selectbox(
+                    "Quincenal",
+                    options=quincenal_labels,
+                    key=ui_quincenal_key,
+                    on_change=_sync_from_ui_to_canonical,
+                    args=sync_args,
+                    help=(
+                        "Filtro quincenal operativo para visualizar bloques de "
+                        "nuevas/cerradas/foco abierto/otras incidencias."
+                    ),
+                )
+                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = normalize_quincenal_scope_label(
+                    st.session_state.get(ui_quincenal_key)
+                )
 
     # Return canonical state (single source of truth)
     fs = FilterState(

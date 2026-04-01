@@ -200,8 +200,8 @@ def build_default_slide_specs() -> List[SlideSpec]:
         ),
         SlideSpec(
             "resolution_hist",
-            "Tiempos de resolución",
-            "Distribución de lead time (cerradas) y fricción del flujo.",
+            "Días abiertas por prioridad",
+            "Distribución de antigüedad de incidencias abiertas y riesgo de cola larga.",
         ),
         SlideSpec(
             "open_priority_pie",

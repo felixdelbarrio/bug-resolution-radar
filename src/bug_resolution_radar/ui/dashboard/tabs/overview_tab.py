@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Dict, List, Optional
@@ -13,6 +12,10 @@ import streamlit as st
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.common import normalize_text_col
+from bug_resolution_radar.ui.components.actionable_cards import (
+    ActionableCardItem,
+    render_actionable_card_grid,
+)
 from bug_resolution_radar.ui.components.executive_kpis import (
     ExecutiveKpiItem,
     render_executive_kpi_grid,
@@ -230,6 +233,7 @@ def render_overview_tab(
         ordered_blocks=_overview_perf_order(summary_view),
         metrics_ms=perf_ms,
         budgets_ms=_overview_perf_budget(summary_view),
+        emit_captions=False,
     )
 
     # End-to-end snapshot aggregates KPI + Summary timings for overview tab control.
@@ -255,6 +259,7 @@ def render_overview_tab(
                 metrics_ms=overview_metrics,
                 budgets_ms=_overview_perf_budget(overview_view),
                 caption_prefix="Perf E2E",
+                emit_captions=False,
             )
 
 
@@ -369,78 +374,6 @@ def render_overview_kpis(
             font-size: 0.96rem;
             letter-spacing: -0.01em;
           }
-          .exec-focus-accent {
-            width: 4.20rem;
-            height: 0.22rem;
-            border-radius: 999px;
-            margin-bottom: 0.10rem;
-          }
-          .exec-focus-kicker {
-            font-size: 0.70rem;
-            font-weight: 800;
-            line-height: 1.1;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-          }
-          .exec-focus-metric {
-            font-size: 2.02rem;
-            font-weight: 800;
-            line-height: 1.02;
-            letter-spacing: -0.02em;
-          }
-          .exec-focus-detail {
-            color: var(--bbva-text-muted);
-            font-size: 0.92rem;
-            line-height: 1.3;
-            min-height: 2.34rem;
-          }
-          [class*="st-key-exec_focus_card_"] {
-            border: 1px solid var(--bbva-border) !important;
-            border-radius: 12px !important;
-            background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2)) !important;
-            box-shadow: none !important;
-            padding: 0.54rem 0.64rem !important;
-          }
-          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlock"] {
-            gap: 0.45rem !important;
-          }
-          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button {
-            justify-content: flex-start !important;
-            width: 100% !important;
-            min-height: 1.66rem !important;
-            padding: 0 !important;
-            border: 0 !important;
-            background: transparent !important;
-            color: var(--bbva-action-link) !important;
-            font-family: var(--bbva-font-sans) !important;
-            font-size: 0.98rem !important;
-            font-weight: 760 !important;
-            letter-spacing: 0 !important;
-            border-radius: 8px !important;
-            text-align: left !important;
-            box-shadow: none !important;
-          }
-          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button *,
-          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button svg {
-            color: inherit !important;
-            fill: currentColor !important;
-          }
-          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:hover {
-            color: var(--bbva-action-link-hover) !important;
-            transform: translateX(1px);
-          }
-          [class*="st-key-exec_focus_link_"] div[data-testid="stButton"] > button:focus-visible {
-            outline: none !important;
-            box-shadow: 0 0 0 2px color-mix(in srgb, var(--bbva-primary) 34%, transparent) !important;
-          }
-          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] {
-            border: 0 !important;
-            background: transparent !important;
-            box-shadow: none !important;
-          }
-          [class*="st-key-exec_focus_card_"] [data-testid="stVerticalBlockBorderWrapper"] > div {
-            padding-top: 0 !important;
-          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -497,15 +430,6 @@ def render_overview_kpis(
             detail = insights_target_labels.get(str(focus.insights_tab or ""), "Detalle")
             return f"Insights · {detail}"
         return "Operación"
-
-    def _focus_tone_color(focus: FocusCard) -> str:
-        return {
-            "risk": "var(--bbva-focus-tone-risk)",
-            "warning": "var(--bbva-focus-tone-warning)",
-            "flow": "var(--bbva-focus-tone-flow)",
-            "quality": "var(--bbva-focus-tone-quality)",
-            "opportunity": "var(--bbva-focus-tone-opportunity)",
-        }.get(str(focus.tone or "").strip().lower(), "var(--bbva-primary)")
 
     focus_candidates: list[FocusCard] = []
     if aged_30_count > 0:
@@ -679,44 +603,27 @@ def render_overview_kpis(
             if len(focus_cards) >= 4:
                 break
 
-    focus_cols = st.columns(4, gap="small")
-    for col, focus in zip(focus_cols, focus_cards):
-        with col:
-            with st.container(key=f"exec_focus_card_{focus.card_id}"):
-                tone_color = _focus_tone_color(focus)
-                st.markdown(
-                    (
-                        '<div class="exec-focus-accent" '
-                        f'style="background: color-mix(in srgb, {tone_color} 82%, var(--bbva-primary) 18%);"></div>'
-                        '<div class="exec-focus-kicker" '
-                        f'style="color: color-mix(in srgb, {tone_color} 76%, var(--bbva-text-muted) 24%);">'
-                        f"{html.escape(_focus_scope_label(focus))}"
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    (
-                        '<div class="exec-focus-metric" '
-                        f'style="color: color-mix(in srgb, {tone_color} 62%, var(--bbva-text) 38%);">'
-                        f"{html.escape(focus.metric)}"
-                        "</div>"
-                        f'<div class="exec-focus-detail">{html.escape(focus.detail)}</div>'
-                    ),
-                    unsafe_allow_html=True,
-                )
-                with st.container(key=f"exec_focus_link_{focus.card_id}"):
-                    st.button(
-                        f"{focus.title} ↗",
-                        key=f"exec_focus_{focus.card_id}_link",
-                        width="stretch",
-                        on_click=_jump_to,
-                        args=(focus.section,),
-                        kwargs={
-                            "trend_chart": focus.trend_chart,
-                            "insights_tab": focus.insights_tab,
-                        },
-                    )
+    render_actionable_card_grid(
+        [
+            ActionableCardItem(
+                card_id=str(focus.card_id),
+                kicker=_focus_scope_label(focus),
+                metric=str(focus.metric),
+                detail=str(focus.detail),
+                link_label=f"{focus.title} ↗",
+                tone=str(focus.tone or "neutral"),
+                on_click=_jump_to,
+                click_args=(focus.section,),
+                click_kwargs={
+                    "trend_chart": focus.trend_chart,
+                    "insights_tab": focus.insights_tab,
+                },
+            )
+            for focus in focus_cards
+        ],
+        columns=4,
+        key_prefix="exec_focus",
+    )
     perf_ms["focus_cards"] = elapsed_ms(focus_cards_start_ts)
     perf_ms["total"] = elapsed_ms(section_start_ts)
     kpis_view = "KPIs"
@@ -726,4 +633,5 @@ def render_overview_kpis(
         ordered_blocks=_overview_perf_order(kpis_view),
         metrics_ms=perf_ms,
         budgets_ms=_overview_perf_budget(kpis_view),
+        emit_captions=False,
     )

@@ -93,7 +93,12 @@ def _reset_scope_filters() -> None:
     """Reset dashboard filters whenever workspace scope changes."""
     clear_all_filters()
     st.session_state.pop("__filters_action_context", None)
-    suffixes = ("filter_status_ui", "filter_priority_ui", "filter_assignee_ui")
+    suffixes = (
+        "filter_status_ui",
+        "filter_priority_ui",
+        "filter_assignee_ui",
+        "filter_quincenal_ui",
+    )
     for key in list(st.session_state.keys()):
         key_txt = str(key or "")
         if key_txt in suffixes:
@@ -687,4 +692,7 @@ def main() -> None:
         with st.container(key=f"workspace_dashboard_content_{section}"):
             dashboard_page.render(settings, active_section=section)
 
-    persist_filters_in_env(settings)
+    # Rendered pages can persist settings mid-run (e.g., ingest source selectors).
+    # Reload before persisting filters to avoid stale settings objects overwriting
+    # unrelated keys in `.env`.
+    persist_filters_in_env(load_settings())

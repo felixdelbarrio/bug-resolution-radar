@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
 
 from bug_resolution_radar.config import Settings, save_settings
 from bug_resolution_radar.ui.common import open_issues_only
+from bug_resolution_radar.ui.dashboard.quincenal_scope import (
+    apply_issue_key_scope,
+    normalize_quincenal_scope_label,
+    quincenal_scope_options,
+)
 
 # Canonical keys shared across dashboard modules/components.
 FILTER_STATUS_KEY = "filter_status"
@@ -20,6 +25,9 @@ FILTERS_BOOTSTRAPPED_KEY = "__filters_bootstrapped_from_env"
 ISSUES_SCOPE_SORT_COL_KEY = "issues_tab::sort_col"
 ISSUES_SCOPE_SORT_ASC_KEY = "issues_tab::sort_asc"
 ISSUES_SCOPE_LIKE_QUERY_KEY = "issues_tab::sort_like_query"
+ISSUES_SCOPE_KEYS_KEY = "issues_tab::scope_keys"
+ISSUES_SCOPE_LABEL_KEY = "issues_tab::scope_label"
+ISSUES_QUINCENAL_SCOPE_KEY = "issues_tab::quincenal_scope"
 
 FILTER_STATUS_ENV_KEY = "DASHBOARD_FILTER_STATUS_JSON"
 FILTER_PRIORITY_ENV_KEY = "DASHBOARD_FILTER_PRIORITY_JSON"
@@ -156,8 +164,61 @@ def clear_all_filters() -> None:
     st.session_state[FILTER_STATUS_KEY] = []
     st.session_state[FILTER_PRIORITY_KEY] = []
     st.session_state[FILTER_ASSIGNEE_KEY] = []
-    for key in (ISSUES_SCOPE_SORT_COL_KEY, ISSUES_SCOPE_SORT_ASC_KEY, ISSUES_SCOPE_LIKE_QUERY_KEY):
+    for key in (
+        ISSUES_SCOPE_SORT_COL_KEY,
+        ISSUES_SCOPE_SORT_ASC_KEY,
+        ISSUES_SCOPE_LIKE_QUERY_KEY,
+        ISSUES_SCOPE_KEYS_KEY,
+        ISSUES_SCOPE_LABEL_KEY,
+        ISSUES_QUINCENAL_SCOPE_KEY,
+    ):
         st.session_state.pop(key, None)
+
+
+def _normalize_issue_keys(values: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in list(values or []):
+        token = str(raw or "").strip().upper()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def issue_scope_keys() -> List[str]:
+    """Return active zoom scope keys (if any)."""
+    return _normalize_issue_keys(list(st.session_state.get(ISSUES_SCOPE_KEYS_KEY) or []))
+
+
+def issue_scope_label() -> str:
+    """Return human-readable label for current zoom scope."""
+    return str(st.session_state.get(ISSUES_SCOPE_LABEL_KEY) or "").strip()
+
+
+def set_issue_scope(
+    *,
+    keys: Sequence[str],
+    label: str = "",
+    sort_col: str = "key",
+) -> None:
+    """Set zoom scope that narrows dashboard data to an explicit issue-key subset."""
+    normalized_keys = _normalize_issue_keys(keys)
+    if normalized_keys:
+        st.session_state[ISSUES_SCOPE_KEYS_KEY] = normalized_keys
+        st.session_state[ISSUES_SCOPE_LABEL_KEY] = str(label or "").strip()
+    else:
+        st.session_state.pop(ISSUES_SCOPE_KEYS_KEY, None)
+        st.session_state.pop(ISSUES_SCOPE_LABEL_KEY, None)
+    st.session_state[ISSUES_SCOPE_SORT_COL_KEY] = str(sort_col or "key").strip() or "key"
+    st.session_state.pop(ISSUES_SCOPE_LIKE_QUERY_KEY, None)
+
+
+def clear_issue_scope() -> None:
+    """Clear zoom scope subset while preserving global status/priority/assignee filters."""
+    st.session_state.pop(ISSUES_SCOPE_KEYS_KEY, None)
+    st.session_state.pop(ISSUES_SCOPE_LABEL_KEY, None)
 
 
 def apply_text_like_filter(
@@ -194,11 +255,53 @@ def apply_text_like_filter(
     return df.loc[mask].copy(deep=False)
 
 
-def apply_issue_scope_like_filter(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply issues scope like-filter from session state (shared across dashboard tabs)."""
+def apply_issue_scope_like_filter(
+    df: pd.DataFrame,
+    *,
+    settings: Settings | None = None,
+) -> pd.DataFrame:
+    """Apply quincenal + zoom + like scopes from session state across dashboard tabs."""
+    scoped = df
+    if settings is not None and isinstance(scoped, pd.DataFrame) and not scoped.empty:
+        scoped_label = normalize_quincenal_scope_label(issue_scope_label())
+        scoped_keys = issue_scope_keys()
+        if scoped_keys and scoped_label:
+            options_for_migration = quincenal_scope_options(scoped, settings=settings)
+            if scoped_label in options_for_migration:
+                st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = scoped_label
+                clear_issue_scope()
+
+    quincenal_scope = normalize_quincenal_scope_label(
+        st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+    )
+    if (
+        settings is not None
+        and quincenal_scope != "Todas"
+        and isinstance(scoped, pd.DataFrame)
+        and not scoped.empty
+    ):
+        options = quincenal_scope_options(scoped, settings=settings)
+        if quincenal_scope not in options:
+            quincenal_scope = "Todas"
+            st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = quincenal_scope
+        else:
+            st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = quincenal_scope
+            scoped = apply_issue_key_scope(scoped, keys=options.get(quincenal_scope, []))
+
+    scoped_keys = issue_scope_keys()
+    if (
+        scoped_keys
+        and isinstance(scoped, pd.DataFrame)
+        and not scoped.empty
+        and "key" in scoped.columns
+    ):
+        allowed = set(scoped_keys)
+        mask = scoped["key"].fillna("").astype(str).str.strip().str.upper().isin(allowed)
+        scoped = scoped.loc[mask].copy(deep=False)
+
     sort_col = str(st.session_state.get(ISSUES_SCOPE_SORT_COL_KEY) or "").strip()
     like_query = str(st.session_state.get(ISSUES_SCOPE_LIKE_QUERY_KEY) or "").strip()
-    return apply_text_like_filter(df, column=sort_col, query=like_query)
+    return apply_text_like_filter(scoped, column=sort_col, query=like_query)
 
 
 # -------------------------

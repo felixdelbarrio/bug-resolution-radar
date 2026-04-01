@@ -214,6 +214,40 @@ def test_normalize_analysis_lookback_months_defaults_for_non_positive_values() -
     assert cfg.normalize_analysis_lookback_months("6") == 6
 
 
+def test_config_roundtrip_quincena_last_finished_preference(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("QUINCENA_LAST_FINISHED_ONLY=true\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    assert str(settings.QUINCENA_LAST_FINISHED_ONLY).strip().lower() == "true"
+
+    settings.QUINCENA_LAST_FINISHED_ONLY = "false"
+    cfg.save_settings(settings)
+    saved = env_path.read_text(encoding="utf-8")
+    assert "QUINCENA_LAST_FINISHED_ONLY=false" in saved
+
+
+def test_config_roundtrip_open_issues_focus_mode(monkeypatch: Any, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("OPEN_ISSUES_FOCUS_MODE=maestras\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    assert str(settings.OPEN_ISSUES_FOCUS_MODE).strip().lower() == "maestras"
+
+    settings.OPEN_ISSUES_FOCUS_MODE = "criticidad_alta"
+    cfg.save_settings(settings)
+    saved = env_path.read_text(encoding="utf-8")
+    assert "OPEN_ISSUES_FOCUS_MODE=criticidad_alta" in saved
+
+
 def test_semantic_status_and_priority_colors() -> None:
     assert status_color("New") == "#E85D63"
     assert status_color("Ready") == "#E85D63"

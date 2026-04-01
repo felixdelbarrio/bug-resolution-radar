@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.kpis import build_open_age_priority_payload
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -156,17 +156,14 @@ def _daily_flow(df: pd.DataFrame, days: int = 90) -> Tuple[pd.DataFrame, Dict[st
     return ts.reset_index(names="date"), stats
 
 
-def _resolution_days(df: pd.DataFrame) -> pd.Series:
-    if df is None or df.empty or not _has_cols(df, ["created"]):
+def _open_age_days(df: pd.DataFrame) -> pd.Series:
+    payload = build_open_age_priority_payload(df)
+    opened = payload.get("open") if isinstance(payload, dict) else None
+    if not isinstance(opened, pd.DataFrame) or opened.empty or "open_days" not in opened.columns:
         return pd.Series([], dtype=float)
-    created = _safe_dt(df["created"])
-    finalized_at = effective_finalized_at(df, created_col="created", updated_col="updated")
-    finalized_at = _safe_dt(finalized_at)
-    mask = created.notna() & finalized_at.notna()
-    if not mask.any():
-        return pd.Series([], dtype=float)
-    days = ((finalized_at[mask] - created[mask]).dt.total_seconds() / 86400.0).clip(lower=0.0)
-    return days.astype(float)
+    return (
+        pd.to_numeric(opened["open_days"], errors="coerce").dropna().clip(lower=0.0).astype(float)
+    )
 
 
 def _hhi(shares: pd.Series) -> float:
@@ -338,13 +335,13 @@ def build_chart_insights(
         return out[:4]
 
     if chart_id == "resolution_hist":
-        res = _resolution_days(dff)
+        res = _open_age_days(dff)
         if res.empty:
             return [
                 Insight(
                     "info",
-                    "Sin cierres con fechas suficientes",
-                    "No hay incidencias en estado final con fechas suficientes para estimar tiempos de cierre.",
+                    "Sin abiertas con fecha suficiente",
+                    "No hay incidencias abiertas con fechas suficientes para estimar antigüedad.",
                 )
             ]
 
@@ -354,9 +351,9 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "Tiempo hasta estado final",
-                f"Tiempo habitual: {_fmt_days(median)} · casos lentos: {_fmt_days(p90)}. "
-                "Si bajas el tiempo de los casos lentos, la experiencia del cliente mejora más rápido.",
+                "Antigüedad de abiertas",
+                f"Tiempo habitual abierta: {_fmt_days(median)} · tramo crítico: {_fmt_days(p90)}. "
+                "Reducir la cola alta de antigüedad impacta directamente en la percepción de control del backlog.",
             )
         )
 
@@ -365,39 +362,34 @@ def build_chart_insights(
         out.append(
             Insight(
                 "info",
-                "Casos de cierre lento",
-                f"El {_fmt_pct(very_slow)} de los cierres está en el tramo más lento; ahí suelen vivir dependencias externas, falta de ownership o tickets mal definidos. "
+                "Casos abiertos muy envejecidos",
+                f"El {_fmt_pct(very_slow)} de las abiertas está en el tramo más envejecido; ahí suelen vivir dependencias externas, falta de ownership o tickets mal definidos. "
                 "Acción: etiqueta esos casos y crea una categoría de causa raíz (blocked/dependency/spec).",
             )
         )
 
         # Priority comparison if present
-        if "priority" in dff.columns:
-            closed = dff.copy()
-            closed["created"] = _safe_dt(closed.get("created"))
-            closed["finalized_at"] = effective_finalized_at(
-                closed, created_col="created", updated_col="updated"
+        payload = build_open_age_priority_payload(dff)
+        opened = payload.get("open") if isinstance(payload, dict) else None
+        if isinstance(opened, pd.DataFrame) and not opened.empty and "priority" in opened.columns:
+            opened = opened.copy(deep=False)
+            opened["priority"] = normalize_text_col(opened["priority"], "(sin priority)")
+            g = (
+                opened.groupby("priority", dropna=False)["open_days"]
+                .median()
+                .sort_values(ascending=False)
             )
-            closed["finalized_at"] = _safe_dt(closed.get("finalized_at"))
-            mask = closed["created"].notna() & closed["finalized_at"].notna()
-            closed = closed[mask].copy()
-            if not closed.empty:
-                closed["resolution_days"] = (
-                    (closed["finalized_at"] - closed["created"]).dt.total_seconds() / 86400.0
-                ).clip(lower=0.0)
-                closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
-                g = closed.groupby("priority")["resolution_days"].median().sort_values()
-                if len(g) >= 2:
-                    fastest = g.index[0]
-                    slowest = g.index[-1]
-                    out.append(
-                        Insight(
-                            "warn" if priority_rank(slowest) <= priority_rank(fastest) else "info",
-                            "Diferencial por prioridad",
-                            f"La prioridad más rápida es **{fastest}** ({_fmt_days(g.iloc[0])}) y la más lenta **{slowest}** ({_fmt_days(g.iloc[-1])}). "
-                            "Si una prioridad alta está entre las más lentas, indica fricción (dependencias, falta de definición o demasiados casos en curso).",
-                        )
+            if len(g) >= 2:
+                slowest = str(g.index[0])
+                fastest = str(g.index[-1])
+                out.append(
+                    Insight(
+                        "warn",
+                        "Diferencial por prioridad",
+                        f"La prioridad más envejecida es **{slowest}** ({_fmt_days(g.iloc[0])}) y la menos envejecida **{fastest}** ({_fmt_days(g.iloc[-1])}). "
+                        "Si una prioridad alta queda arriba, hay fricción operativa en el flujo crítico.",
                     )
+                )
         return out[:4]
 
     if chart_id == "open_priority_pie":

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from typing import Iterable, Sequence
 
 import pandas as pd
 
@@ -50,6 +52,383 @@ _STOPWORDS = {
     "with",
     "y",
 }
+
+THEME_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Softoken", ("softoken", "token", "firma", "otp")),
+    ("Cr\u00e9dito", ("credito", "cr\u00e9dito", "cvv", "tarjeta", "tdc")),
+    ("Monetarias", ("monetarias", "saldo", "nomina", "n\u00f3mina")),
+    ("Tareas", ("tareas", "task", "acciones", "dashboard")),
+    ("Pagos", ("pago", "pagos", "tpv", "cobranza")),
+    ("Transferencias", ("transferencia", "spei", "swift", "divisas")),
+    ("Login y acceso", ("login", "acceso", "face id", "biometr", "password", "tokenbnc")),
+    ("Notificaciones", ("notificacion", "notificaci\u00f3n", "push", "mensaje")),
+)
+
+THEME_LEGEND_PRIORITY: tuple[str, ...] = (
+    "Pagos",
+    "Monetarias",
+    "Login y acceso",
+    "Transferencias",
+    "Notificaciones",
+    "Otros",
+)
+
+_EMPTY_THEME_TREND_COLUMNS: tuple[str, ...] = (
+    "quincena_start",
+    "quincena_end",
+    "quincena_label",
+    "tema",
+    "issues",
+    "issues_cumulative",
+    "issues_value",
+)
+_EMPTY_THEME_DAILY_COLUMNS: tuple[str, ...] = (
+    "date",
+    "date_label",
+    "tema",
+    "issues",
+    "issues_value",
+)
+
+
+def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
+    return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+
+def _to_dt_naive(series: pd.Series | None) -> pd.Series:
+    if series is None:
+        return pd.Series([], dtype="datetime64[ns]")
+    out = pd.to_datetime(series, errors="coerce", utc=True)
+    try:
+        return out.dt.tz_convert(None)
+    except Exception:
+        try:
+            return out.dt.tz_localize(None)
+        except Exception:
+            return out
+
+
+def _normalize_theme_token(value: object) -> str:
+    txt = str(value or "").strip().lower()
+    if not txt:
+        return ""
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    return txt
+
+
+def classify_theme(
+    summary: object,
+    *,
+    theme_rules: Sequence[tuple[str, Sequence[str]]] | None = None,
+    default_theme: str = "Otros",
+) -> str:
+    """Map an issue summary to a functional theme bucket."""
+    text = _normalize_theme_token(summary)
+    if not text:
+        return default_theme
+
+    rules = list(theme_rules or THEME_RULES)
+    for theme_name, keys in rules:
+        for kw in list(keys or []):
+            token = _normalize_theme_token(kw)
+            if token and re.search(rf"\b{re.escape(token)}\b", text):
+                return str(theme_name)
+    return default_theme
+
+
+def theme_counts(open_df: pd.DataFrame) -> pd.Series:
+    """Count open issues by classified theme, excluding blank summaries."""
+    df = _safe_df(open_df)
+    if df.empty or "summary" not in df.columns:
+        return pd.Series(dtype="int64")
+    summaries = df["summary"].fillna("").astype(str).str.strip()
+    summaries = summaries[summaries != ""]
+    if summaries.empty:
+        return pd.Series(dtype="int64")
+    return summaries.map(classify_theme).value_counts()
+
+
+def top_non_other_theme(open_df: pd.DataFrame) -> tuple[str, int]:
+    vc = theme_counts(open_df)
+    if vc.empty:
+        return "-", 0
+    non_other = vc[vc.index.astype(str) != "Otros"]
+    if non_other.empty:
+        return "\u2014", 0
+    return str(non_other.index[0]), int(non_other.iloc[0])
+
+
+def order_theme_labels(
+    labels: Iterable[object],
+    *,
+    priority: Sequence[str] | None = None,
+) -> list[str]:
+    """Return deduplicated labels with business-priority themes first."""
+    unique: list[str] = []
+    seen: set[str] = set()
+    for raw in labels:
+        label = str(raw or "").strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        unique.append(label)
+    if not unique:
+        return []
+
+    preferred = list(priority or THEME_LEGEND_PRIORITY)
+    head = [theme for theme in preferred if theme in seen]
+    tail = [theme for theme in unique if theme not in set(head)]
+    return head + tail
+
+
+def prepare_open_theme_payload(
+    open_df: pd.DataFrame,
+    *,
+    top_n: int = 10,
+) -> dict[str, pd.DataFrame]:
+    """Build top-theme payload for open issues (shared by UI and reports)."""
+    tmp_open = _safe_df(open_df).copy(deep=False)
+    empty_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
+    if tmp_open.empty:
+        return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
+
+    if "summary" not in tmp_open.columns:
+        return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
+
+    tmp_open["summary"] = tmp_open["summary"].fillna("").astype(str)
+    tmp_open["__theme"] = tmp_open["summary"].map(classify_theme)
+    counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
+    if counts.empty:
+        return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
+
+    top_n_safe = max(int(top_n or 10), 1)
+    non_otros = [t for t in counts.index.tolist() if str(t) != "Otros"]
+    has_otros = "Otros" in counts.index
+    if has_otros:
+        body_limit = max(top_n_safe - 1, 0)
+        if len(non_otros) > body_limit:
+            top_themes = non_otros[:body_limit] + ["Otros"]
+        else:
+            top_themes = non_otros + ["Otros"]
+    else:
+        top_themes = non_otros[:top_n_safe]
+
+    total_open = int(len(tmp_open))
+    top_tbl = pd.DataFrame(
+        {
+            "tema": top_themes,
+            "open_count": [int(counts[t]) for t in top_themes],
+            "pct_open": [
+                (float(counts[t]) / float(total_open) * 100.0 if total_open else 0.0)
+                for t in top_themes
+            ],
+        }
+    )
+    return {"tmp_open": tmp_open, "top_tbl": top_tbl}
+
+
+def _quincena_axis(created: pd.Series) -> pd.DataFrame:
+    month_start = created.dt.to_period("M").dt.to_timestamp()
+    month_end = month_start + pd.offsets.MonthEnd(0)
+    first_half = created.dt.day <= 15
+    quincena_start = month_start.where(first_half, month_start + pd.Timedelta(days=15))
+    quincena_end = (month_start + pd.Timedelta(days=14)).where(first_half, month_end)
+    month_label = month_start.dt.strftime("%Y-%m")
+    quincena_label = (month_label + " \u00b7 1-15").where(
+        first_half,
+        month_label + " \u00b7 16-" + month_end.dt.day.astype(str),
+    )
+    return pd.DataFrame(
+        {
+            "quincena_start": quincena_start,
+            "quincena_end": quincena_end,
+            "quincena_label": quincena_label,
+        }
+    )
+
+
+def _daily_axis(created: pd.Series) -> pd.DataFrame:
+    quincena = _quincena_axis(created)
+    day_start = pd.Timestamp(quincena["quincena_start"].min()).normalize()
+    day_end = pd.Timestamp(quincena["quincena_end"].max()).normalize()
+    days = pd.date_range(start=day_start, end=day_end, freq="D")
+    return pd.DataFrame(
+        {
+            "date": days,
+            "date_label": days.strftime("%Y-%m-%d"),
+        }
+    )
+
+
+def build_theme_daily_trend(
+    df: pd.DataFrame,
+    *,
+    theme_whitelist: Sequence[str] | None = None,
+    theme_rules: Sequence[tuple[str, Sequence[str]]] | None = None,
+) -> pd.DataFrame:
+    """
+    Build daily trend points by theme for the analyzed fortnight scope.
+
+    Returns a normalized long table with:
+    - date / date_label
+    - tema
+    - issues (daily count)
+    - issues_value (alias for charting)
+    """
+    safe = _safe_df(df)
+    if safe.empty or "created" not in safe.columns or "summary" not in safe.columns:
+        return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
+
+    work = safe.loc[:, ["created", "summary"]].copy(deep=False)
+    work["summary"] = work["summary"].fillna("").astype(str)
+    created = _to_dt_naive(work["created"])
+    valid = created.notna()
+    if not bool(valid.any()):
+        return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
+
+    work = work.loc[valid].copy(deep=False)
+    created = created.loc[valid]
+    work["date"] = created.dt.floor("D").to_numpy(copy=False)
+    work["tema"] = [
+        classify_theme(summary, theme_rules=theme_rules) for summary in work["summary"].tolist()
+    ]
+
+    theme_order: list[str]
+    if theme_whitelist is not None:
+        requested_order = order_theme_labels(theme_whitelist)
+        present = set(work["tema"].unique().tolist())
+        theme_order = [theme for theme in requested_order if theme in present]
+        if not theme_order:
+            return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
+        work = work.loc[work["tema"].isin(theme_order)].copy(deep=False)
+    else:
+        totals = work["tema"].value_counts()
+        theme_order = order_theme_labels(totals.index.tolist())
+        if not theme_order:
+            return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
+
+    grouped = (
+        work.groupby(["date", "tema"], as_index=False).size().rename(columns={"size": "issues"})
+    )
+    day_axis = _daily_axis(created)
+    if day_axis.empty:
+        return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
+
+    grid = pd.MultiIndex.from_product(
+        [day_axis["date"].tolist(), theme_order],
+        names=["date", "tema"],
+    ).to_frame(index=False)
+    trend = (
+        grid.merge(day_axis, on="date", how="left")
+        .merge(grouped, on=["date", "tema"], how="left")
+        .fillna({"issues": 0})
+    )
+    trend["issues"] = pd.to_numeric(trend["issues"], errors="coerce").fillna(0).astype(int)
+    trend["tema"] = pd.Categorical(trend["tema"], categories=theme_order, ordered=True)
+    trend = trend.sort_values(["date", "tema"], ascending=[True, True]).reset_index(drop=True)
+    trend["issues_value"] = trend["issues"]
+    trend["tema"] = trend["tema"].astype(str)
+    return trend.loc[:, list(_EMPTY_THEME_DAILY_COLUMNS)]
+
+
+def build_theme_fortnight_trend(
+    df: pd.DataFrame,
+    *,
+    theme_whitelist: Sequence[str] | None = None,
+    cumulative: bool = False,
+    theme_rules: Sequence[tuple[str, Sequence[str]]] | None = None,
+) -> pd.DataFrame:
+    """
+    Build fortnight trend points by theme.
+
+    Returns a normalized long table with:
+    - quincena_start / quincena_end / quincena_label
+    - tema
+    - issues (fortnight count)
+    - issues_cumulative (running total by theme)
+    - issues_value (issues or issues_cumulative based on `cumulative`)
+    """
+    safe = _safe_df(df)
+    if safe.empty or "created" not in safe.columns or "summary" not in safe.columns:
+        return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
+
+    work = safe.loc[:, ["created", "summary"]].copy(deep=False)
+    work["summary"] = work["summary"].fillna("").astype(str)
+    created = _to_dt_naive(work["created"])
+    valid = created.notna()
+    if not bool(valid.any()):
+        return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
+
+    work = work.loc[valid].copy(deep=False)
+    created = created.loc[valid]
+    axis = _quincena_axis(created)
+    work["quincena_start"] = axis["quincena_start"].to_numpy(copy=False)
+    work["quincena_end"] = axis["quincena_end"].to_numpy(copy=False)
+    work["quincena_label"] = axis["quincena_label"].to_numpy(copy=False)
+    work["tema"] = [
+        classify_theme(summary, theme_rules=theme_rules) for summary in work["summary"].tolist()
+    ]
+
+    theme_order: list[str]
+    if theme_whitelist is not None:
+        requested_order = order_theme_labels(theme_whitelist)
+        present = set(work["tema"].unique().tolist())
+        theme_order = [theme for theme in requested_order if theme in present]
+        if not theme_order:
+            return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
+        work = work.loc[work["tema"].isin(theme_order)].copy(deep=False)
+    else:
+        totals = work["tema"].value_counts()
+        theme_order = order_theme_labels(totals.index.tolist())
+        if not theme_order:
+            return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
+
+    grouped = (
+        work.groupby(
+            ["quincena_start", "quincena_end", "quincena_label", "tema"],
+            as_index=False,
+        )
+        .size()
+        .rename(columns={"size": "issues"})
+    )
+
+    axis_tbl = (
+        grouped.loc[:, ["quincena_start", "quincena_end", "quincena_label"]]
+        .drop_duplicates(subset=["quincena_start"])
+        .sort_values("quincena_start", ascending=True)
+    )
+    if axis_tbl.empty:
+        return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
+
+    grid = pd.MultiIndex.from_product(
+        [axis_tbl["quincena_start"].tolist(), theme_order],
+        names=["quincena_start", "tema"],
+    ).to_frame(index=False)
+
+    trend = (
+        grid.merge(axis_tbl, on="quincena_start", how="left")
+        .merge(
+            grouped.loc[:, ["quincena_start", "tema", "issues"]],
+            on=["quincena_start", "tema"],
+            how="left",
+        )
+        .fillna({"issues": 0})
+    )
+    trend["issues"] = pd.to_numeric(trend["issues"], errors="coerce").fillna(0).astype(int)
+    trend["tema"] = pd.Categorical(trend["tema"], categories=theme_order, ordered=True)
+    trend = trend.sort_values(["quincena_start", "tema"], ascending=[True, True]).reset_index(
+        drop=True
+    )
+    trend["issues_cumulative"] = (
+        trend.groupby("tema", observed=False)["issues"].cumsum().astype(int)
+    )
+    if cumulative:
+        trend["issues_value"] = trend["issues_cumulative"]
+    else:
+        trend["issues_value"] = trend["issues"]
+    trend["tema"] = trend["tema"].astype(str)
+    return trend.loc[:, list(_EMPTY_THEME_TREND_COLUMNS)]
 
 
 def _tokenize_summary(text: str) -> set[str]:

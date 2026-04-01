@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Sequence, Tuple, cast
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.analysis_window import (
     max_available_backlog_months,
     parse_analysis_lookback_months,
+)
+from bug_resolution_radar.analytics.period_summary import (
+    OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH,
+    OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
+    normalize_open_issues_focus_mode,
 )
 from bug_resolution_radar.config import (
     LEGACY_ENV_KEYS_TO_PRUNE,
@@ -34,12 +40,24 @@ from bug_resolution_radar.services.source_maintenance import (
     purge_source_cache,
     reset_cache_store,
 )
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_LIGHT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_ORANGE_1,
+    BBVA_SIGNAL_RED_1,
+)
 from bug_resolution_radar.ui.cache import clear_signature_cache
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.performance import (
+    clear_perf_history,
+    list_perf_snapshots,
+    perf_history_rows,
+)
 from bug_resolution_radar.ui.dashboard.exports.downloads import (
     build_download_filename,
     df_to_excel_bytes,
 )
+from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 _DELETE_ROW_TOKEN_PREFIX = "__cfg_delete_row__:"
 
@@ -63,7 +81,7 @@ def _trend_chart_catalog() -> List[Tuple[str, str]]:
     return [
         ("timeseries", "Evolución (últimos 90 días)"),
         ("age_buckets", "Distribución antigüedad (abiertas)"),
-        ("resolution_hist", "Tiempo hasta estado final"),
+        ("resolution_hist", "Días abiertas por prioridad"),
         ("open_priority_pie", "Issues abiertos por prioridad (pie)"),
         ("open_status_bar", "Issues por Estado (bar)"),
     ]
@@ -326,6 +344,363 @@ def _inject_preferences_zone_css() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _inject_performance_zone_css() -> None:
+    st.markdown(
+        """
+        <style>
+          .cfg-perf-hero {
+            border: 1px solid color-mix(in srgb, var(--bbva-primary) 24%, var(--bbva-border) 76%);
+            border-radius: var(--bbva-radius-xl);
+            padding: 1rem 1.05rem .9rem;
+            background:
+              radial-gradient(820px 220px at 4% -8%, color-mix(in srgb, var(--bbva-primary) 20%, transparent), transparent 60%),
+              radial-gradient(560px 160px at 100% 0%, color-mix(in srgb, var(--bbva-glow-soft) 26%, transparent), transparent 58%),
+              linear-gradient(155deg, color-mix(in srgb, var(--bbva-surface-elevated) 92%, var(--bbva-midnight) 8%), var(--bbva-surface));
+            box-shadow: 0 14px 34px color-mix(in srgb, var(--bbva-text) 13%, transparent);
+            margin-bottom: .9rem;
+          }
+          .cfg-perf-title {
+            font-size: 1.04rem;
+            font-weight: 760;
+            letter-spacing: -.01em;
+            color: var(--bbva-text);
+          }
+          .cfg-perf-subtitle {
+            margin-top: .2rem;
+            color: var(--bbva-text-muted);
+            font-size: .9rem;
+          }
+          .cfg-perf-kpi-grid {
+            margin-top: .78rem;
+            display: grid;
+            gap: .52rem;
+            grid-template-columns: repeat(4, minmax(120px, 1fr));
+          }
+          .cfg-perf-kpi {
+            border-radius: 13px;
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 72%, var(--bbva-glow-soft) 28%);
+            background: color-mix(in srgb, var(--bbva-surface-elevated) 86%, var(--bbva-midnight) 14%);
+            padding: .62rem .72rem;
+            min-height: 72px;
+          }
+          .cfg-perf-kpi span {
+            display: block;
+            font-size: .75rem;
+            color: var(--bbva-text-muted);
+            text-transform: uppercase;
+            letter-spacing: .03em;
+            font-weight: 700;
+            margin-bottom: .16rem;
+          }
+          .cfg-perf-kpi strong {
+            font-size: 1.06rem;
+            color: var(--bbva-text);
+            font-weight: 760;
+            letter-spacing: -.01em;
+          }
+          .cfg-perf-view-grid {
+            display: grid;
+            gap: .55rem;
+            grid-template-columns: repeat(2, minmax(180px, 1fr));
+          }
+          .cfg-perf-view-card {
+            border-radius: 13px;
+            padding: .7rem .8rem .66rem;
+            border: 1px solid color-mix(in srgb, var(--bbva-border) 78%, var(--bbva-glow-soft) 22%);
+            background:
+              linear-gradient(160deg, color-mix(in srgb, var(--bbva-surface) 96%, var(--bbva-surface-2)), var(--bbva-surface));
+          }
+          .cfg-perf-view-card.is-ok {
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bbva-ok) 26%, transparent);
+          }
+          .cfg-perf-view-card.is-warn {
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bbva-warning) 34%, transparent);
+          }
+          .cfg-perf-view-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: .5rem;
+          }
+          .cfg-perf-view-name {
+            font-weight: 740;
+            color: var(--bbva-text);
+            font-size: .94rem;
+          }
+          .cfg-perf-view-total {
+            font-weight: 780;
+            font-size: 1rem;
+            color: var(--bbva-text);
+          }
+          .cfg-perf-view-meta {
+            margin-top: .22rem;
+            color: var(--bbva-text-muted);
+            font-size: .82rem;
+          }
+          @media (max-width: 980px) {
+            .cfg-perf-kpi-grid {
+              grid-template-columns: repeat(2, minmax(120px, 1fr));
+            }
+            .cfg-perf-view-grid {
+              grid-template-columns: repeat(1, minmax(140px, 1fr));
+            }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        if value is None:
+            return 0.0
+        if pd.isna(value):
+            return 0.0
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _fmt_ms(value: Any) -> str:
+    return f"{_safe_float(value):.0f} ms"
+
+
+def _as_non_empty_text_list(value: object) -> List[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [str(x) for x in value if str(x).strip()]
+
+
+def _build_perf_history_df() -> pd.DataFrame:
+    rows: List[Dict[str, Any]] = []
+    for row in perf_history_rows(limit=320):
+        metrics = row.get("metrics_ms")
+        budgets = row.get("budget_ms")
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        budgets_map = budgets if isinstance(budgets, dict) else {}
+        overruns = row.get("overruns")
+        overrun_list = _as_non_empty_text_list(overruns)
+        overrun_count_raw = row.get("overrun_count", len(overrun_list))
+        blocks = sorted([str(k) for k in metrics_map.keys()])
+        rows.append(
+            {
+                "captured_at_utc": str(row.get("captured_at_utc", "") or ""),
+                "view": str(row.get("view", "") or ""),
+                "snapshot_key": str(row.get("snapshot_key", "") or ""),
+                "total_ms": _safe_float(row.get("total_ms", metrics_map.get("total", 0.0))),
+                "total_budget_ms": _safe_float(
+                    row.get("total_budget_ms", budgets_map.get("total", 0.0))
+                ),
+                "overrun_count": int(_safe_float(overrun_count_raw)),
+                "overruns": ", ".join(overrun_list) if overrun_list else "—",
+                "blocks": ", ".join(blocks),
+            }
+        )
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "captured_at_utc",
+                "view",
+                "snapshot_key",
+                "total_ms",
+                "total_budget_ms",
+                "overrun_count",
+                "overruns",
+                "blocks",
+            ]
+        )
+    hist = pd.DataFrame(rows)
+    hist["captured_dt"] = pd.to_datetime(hist["captured_at_utc"], errors="coerce", utc=True)
+    hist = hist.sort_values("captured_dt", ascending=False).reset_index(drop=True)
+    return hist
+
+
+def _render_perf_hero(*, history_df: pd.DataFrame, snapshot_count: int) -> None:
+    total_events = int(len(history_df))
+    if history_df.empty:
+        latest_txt = "Sin muestras"
+        p95_total = 0.0
+        avg_total = 0.0
+        overrun_events = 0
+    else:
+        latest_txt = str(history_df.iloc[0].get("captured_at_utc", "") or "Sin marca temporal")
+        totals = pd.to_numeric(history_df["total_ms"], errors="coerce").fillna(0.0)
+        p95_total = float(totals.quantile(0.95)) if not totals.empty else 0.0
+        avg_total = float(totals.mean()) if not totals.empty else 0.0
+        overrun_events = int(
+            (pd.to_numeric(history_df["overrun_count"], errors="coerce").fillna(0) > 0).sum()
+        )
+
+    st.markdown(
+        (
+            '<div class="cfg-perf-hero">'
+            '<div class="cfg-perf-title">Performance observability</div>'
+            '<div class="cfg-perf-subtitle">'
+            "Telemetría técnica centralizada. El Resumen queda limpio para usuario final."
+            "</div>"
+            '<div class="cfg-perf-kpi-grid">'
+            f'<div class="cfg-perf-kpi"><span>Muestras</span><strong>{total_events}</strong></div>'
+            f'<div class="cfg-perf-kpi"><span>Snapshots activos</span><strong>{snapshot_count}</strong></div>'
+            f'<div class="cfg-perf-kpi"><span>P95 total</span><strong>{_fmt_ms(p95_total)}</strong></div>'
+            f'<div class="cfg-perf-kpi"><span>Media total</span><strong>{_fmt_ms(avg_total)}</strong></div>'
+            f'<div class="cfg-perf-kpi"><span>Eventos con overrun</span><strong>{overrun_events}</strong></div>'
+            f'<div class="cfg-perf-kpi"><span>Última captura</span><strong>{escape(latest_txt)}</strong></div>'
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_performance_tab(*, settings: Settings) -> None:
+    del settings  # sección operativa: usa telemetría en sesión, no configuración persistida.
+    st.markdown("### Performance")
+    st.caption("Panel técnico con histórico de tiempos y verificación de budget por bloque.")
+    _inject_performance_zone_css()
+
+    snapshots = list_perf_snapshots()
+    history_df = _build_perf_history_df()
+    _render_perf_hero(history_df=history_df, snapshot_count=len(snapshots))
+
+    action_col, _ = st.columns([1.5, 4.0])
+    with action_col:
+        if st.button(
+            "Limpiar histórico de performance",
+            key="cfg_perf_clear_btn",
+            width="stretch",
+        ):
+            removed = clear_perf_history()
+            st.session_state["__cfg_flash_success"] = (
+                f"Histórico de performance limpiado ({int(removed)} registro(s))."
+            )
+            st.session_state["__cfg_active_tab"] = "Performance"
+            st.rerun()
+
+    if snapshots:
+        latest_rows: List[Dict[str, Any]] = []
+        for snapshot_key, payload in snapshots.items():
+            metrics = payload.get("metrics_ms")
+            budgets = payload.get("budget_ms")
+            metrics_map = metrics if isinstance(metrics, dict) else {}
+            budgets_map = budgets if isinstance(budgets, dict) else {}
+            overruns = payload.get("overruns")
+            overrun_list = _as_non_empty_text_list(overruns)
+            latest_rows.append(
+                {
+                    "snapshot_key": str(snapshot_key),
+                    "view": str(payload.get("view", "") or ""),
+                    "captured_at_utc": str(payload.get("captured_at_utc", "") or "—"),
+                    "total_ms": _safe_float(metrics_map.get("total", 0.0)),
+                    "total_budget_ms": _safe_float(budgets_map.get("total", 0.0)),
+                    "overrun_count": int(len(overrun_list)),
+                    "overruns": ", ".join(overrun_list) if overrun_list else "—",
+                }
+            )
+        latest_df = (
+            pd.DataFrame(latest_rows).sort_values(["view", "snapshot_key"]).reset_index(drop=True)
+        )
+        cards_html = ['<div class="cfg-perf-view-grid">']
+        for row in latest_df.to_dict(orient="records"):
+            is_warn = int(row.get("overrun_count", 0) or 0) > 0
+            ratio = 0.0
+            total_budget = _safe_float(row.get("total_budget_ms", 0.0))
+            if total_budget > 0:
+                ratio = (_safe_float(row.get("total_ms", 0.0)) / total_budget) * 100.0
+            cards_html.append(
+                f'<article class="cfg-perf-view-card {"is-warn" if is_warn else "is-ok"}">'
+                '<div class="cfg-perf-view-head">'
+                f'<span class="cfg-perf-view-name">{escape(str(row.get("view", "") or "-"))}</span>'
+                f'<span class="cfg-perf-view-total">{_fmt_ms(row.get("total_ms", 0.0))}</span>'
+                "</div>"
+                f'<div class="cfg-perf-view-meta">Budget total: {_fmt_ms(total_budget)} '
+                f"({ratio:.0f}% uso)</div>"
+                f'<div class="cfg-perf-view-meta">Overruns: {escape(str(row.get("overruns", "—") or "—"))}</div>'
+                f'<div class="cfg-perf-view-meta">{escape(str(row.get("captured_at_utc", "—") or "—"))}</div>'
+                "</article>"
+            )
+        cards_html.append("</div>")
+        st.markdown("#### Estado actual por vista")
+        st.markdown("".join(cards_html), unsafe_allow_html=True)
+    else:
+        st.info("Todavía no hay snapshots de performance en esta sesión.")
+
+    if not history_df.empty:
+        st.markdown("#### Tendencia de tiempos (total)")
+        trend = history_df.copy(deep=False)
+        trend = trend.dropna(subset=["captured_dt"]).sort_values("captured_dt", ascending=True)
+        fig = go.Figure()
+        view_color_map = {
+            "KPIs": BBVA_LIGHT.electric_blue,
+            "Summary": BBVA_SIGNAL_ORANGE_1,
+            "Overview": BBVA_LIGHT.core_blue,
+            "Issues": BBVA_SIGNAL_RED_1,
+            "Trends": BBVA_SIGNAL_GREEN_1,
+            "default": BBVA_LIGHT.ink_muted,
+        }
+        for view_name in sorted(trend["view"].astype(str).unique().tolist()):
+            sub = trend[trend["view"].astype(str) == view_name]
+            if sub.empty:
+                continue
+            fig.add_trace(
+                go.Scatter(
+                    x=sub["captured_dt"],
+                    y=pd.to_numeric(sub["total_ms"], errors="coerce").fillna(0.0),
+                    mode="lines+markers",
+                    name=view_name,
+                    line=dict(
+                        width=2.2,
+                        color=view_color_map.get(view_name, view_color_map["default"]),
+                    ),
+                    marker=dict(size=6),
+                    hovertemplate=(
+                        f"Vista: {escape(view_name)}<br>"
+                        "Total: %{y:.0f} ms<br>"
+                        "Fecha: %{x}<extra></extra>"
+                    ),
+                )
+            )
+        fig.update_layout(
+            height=330,
+            margin=dict(l=14, r=14, t=18, b=54),
+            xaxis_title="Captura",
+            yaxis_title="Tiempo total (ms)",
+            legend_title_text="",
+        )
+        fig = apply_plotly_bbva(fig, showlegend=True)
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### Registro de ejecución")
+        history_view = history_df.loc[
+            :,
+            [
+                "captured_at_utc",
+                "view",
+                "snapshot_key",
+                "total_ms",
+                "total_budget_ms",
+                "overrun_count",
+                "overruns",
+                "blocks",
+            ],
+        ].copy(deep=False)
+        st.dataframe(
+            history_view,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "captured_at_utc": st.column_config.TextColumn("Captura (UTC)"),
+                "view": st.column_config.TextColumn("Vista"),
+                "snapshot_key": st.column_config.TextColumn("Snapshot key"),
+                "total_ms": st.column_config.NumberColumn("Total (ms)", format="%.0f"),
+                "total_budget_ms": st.column_config.NumberColumn("Budget (ms)", format="%.0f"),
+                "overrun_count": st.column_config.NumberColumn("Overruns", format="%d"),
+                "overruns": st.column_config.TextColumn("Bloques excedidos"),
+                "blocks": st.column_config.TextColumn("Bloques medidos"),
+            },
+        )
 
 
 def _render_selected_source_chips(
@@ -915,13 +1290,13 @@ def render(settings: Settings) -> None:
     st.subheader("Configuración")
 
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
-    tab_labels = ["Preferencias", "Jira", "Helix", "Agregados", "Cache"]
+    tab_labels = ["Preferencias", "Jira", "Helix", "Agregados", "Cache", "Performance"]
     active_tab = str(st.session_state.get("__cfg_active_tab", "Preferencias") or "").strip()
     if active_tab not in tab_labels:
         active_tab = "Preferencias"
     st.session_state["__cfg_active_tab"] = active_tab
     with st.container(key="cfg_tabs_shell"):
-        t_prefs, t_jira, t_helix, t_agg, t_caches = st.tabs(tab_labels, default=active_tab)
+        t_prefs, t_jira, t_helix, t_agg, t_caches, t_perf = st.tabs(tab_labels, default=active_tab)
 
     with t_jira:
         st.markdown("### Jira global")
@@ -1310,6 +1685,61 @@ def render(settings: Settings) -> None:
                     f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
                 )
 
+            with st.container(border=True, key="cfg_prefs_card_quincena"):
+                st.markdown("#### Alcance quincenal")
+                quincena_last_finished_default = _boolish(
+                    getattr(settings, "QUINCENA_LAST_FINISHED_ONLY", "false"),
+                    default=False,
+                )
+                st.session_state.setdefault(
+                    "cfg_quincena_last_finished_only",
+                    quincena_last_finished_default,
+                )
+                quincena_last_finished_only = st.checkbox(
+                    "Usar última quincena finalizada",
+                    key="cfg_quincena_last_finished_only",
+                    help=(
+                        "Desmarcado: usa la quincena natural en curso (1-15 o 16-fin de mes). "
+                        "Marcado: usa siempre la última quincena ya cerrada."
+                    ),
+                )
+                st.caption(
+                    "Aplicación transversal en Insights, filtros quincenales y "
+                    "reportes de seguimiento."
+                )
+
+            with st.container(border=True, key="cfg_prefs_card_open_focus"):
+                st.markdown("#### Criterio de foco en abiertas")
+                open_focus_mode_default = normalize_open_issues_focus_mode(
+                    getattr(
+                        settings, "OPEN_ISSUES_FOCUS_MODE", OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+                    )
+                )
+                st.session_state.setdefault("cfg_open_issues_focus_mode", open_focus_mode_default)
+                if str(st.session_state.get("cfg_open_issues_focus_mode") or "").strip() not in {
+                    OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH,
+                    OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
+                }:
+                    st.session_state["cfg_open_issues_focus_mode"] = open_focus_mode_default
+                open_issues_focus_mode = st.radio(
+                    "Agrupar abiertas por",
+                    options=[
+                        OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH,
+                        OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
+                    ],
+                    format_func=lambda mode: (
+                        "Criticidad alta (Impedimento / High / Highest)"
+                        if str(mode) == OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+                        else "Incidencias maestras"
+                    ),
+                    horizontal=False,
+                    key="cfg_open_issues_focus_mode",
+                )
+                st.caption(
+                    "Aplica de forma centralizada en Insights, scopes quincenales "
+                    "y el informe Seguimiento del periodo."
+                )
+
             with st.container(border=True, key="cfg_prefs_card_ppt"):
                 st.markdown("#### Descargas del informe PPT")
                 st.markdown("**Carpeta de guardado**")
@@ -1438,6 +1868,12 @@ def render(settings: Settings) -> None:
                         "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
                             analysis_selected_months,
                             default=12,
+                        ),
+                        "QUINCENA_LAST_FINISHED_ONLY": (
+                            "true" if bool(quincena_last_finished_only) else "false"
+                        ),
+                        "OPEN_ISSUES_FOCUS_MODE": normalize_open_issues_focus_mode(
+                            open_issues_focus_mode
                         ),
                     },
                 )
@@ -1588,9 +2024,12 @@ def render(settings: Settings) -> None:
             st.session_state["__cfg_flash_success"] = (
                 f"Reset de cache completado ({len(results)} seleccionado(s), {total_reset} registros vaciados)."
             )
-            st.session_state["__cfg_active_tab"] = "Caches"
+            st.session_state["__cfg_active_tab"] = "Cache"
             st.rerun()
 
         cache_reset_results = st.session_state.pop("__cfg_cache_reset_results", None)
         if isinstance(cache_reset_results, list) and cache_reset_results:
             _render_cache_reset_results(cache_reset_results)
+
+    with t_perf:
+        _render_performance_tab(settings=settings)

@@ -17,12 +17,34 @@ from bug_resolution_radar.analytics.status_semantics import (
 from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 
-_WINDOW_DAYS = 14
+_DEFAULT_QUINCENA_LAST_FINISHED_ONLY = False
 _MAESTRA_FLAG_KEYS = (
     "BBVA_SEL_GIM_Maestra",
     "BBVA_MasterIncident",
 )
 _MAESTRA_TRUE_TOKENS = {"1", "si", "yes", "true", "x", "maestra", "master"}
+OPEN_ISSUES_FOCUS_MODE_MAESTRAS = "maestras"
+OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH = "criticidad_alta"
+DEFAULT_OPEN_ISSUES_FOCUS_MODE = OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+_CRITICAL_PRIORITY_TOKENS = {
+    "suponeunimpedimento",
+    "impedimento",
+    "highest",
+    "high",
+}
+
+
+@dataclass(frozen=True)
+class OpenIssueGrouping:
+    mode: str
+    focus_scope_label: str
+    other_scope_label: str
+    focus_card_kicker: str
+    focus_card_detail: str
+    other_card_kicker: str
+    other_card_detail: str
+    focus_report_label: str
+    other_report_label: str
 
 
 @dataclass(frozen=True)
@@ -36,8 +58,8 @@ class QuincenalWindow:
 
 @dataclass(frozen=True)
 class QuincenalGroups:
-    maestras_open: pd.DataFrame
-    others_open: pd.DataFrame
+    open_focus: pd.DataFrame
+    open_other: pd.DataFrame
     new_now: pd.DataFrame
     new_before: pd.DataFrame
     new_accumulated: pd.DataFrame
@@ -45,6 +67,16 @@ class QuincenalGroups:
     closed_before: pd.DataFrame
     resolved_now: pd.DataFrame
     resolved_before: pd.DataFrame
+
+    @property
+    def maestras_open(self) -> pd.DataFrame:
+        # Backward-compatible alias: now represents open "focus" group.
+        return self.open_focus
+
+    @property
+    def others_open(self) -> pd.DataFrame:
+        # Backward-compatible alias: now represents open "other" group.
+        return self.open_other
 
 
 @dataclass(frozen=True)
@@ -54,18 +86,41 @@ class QuincenalSummary:
     window: QuincenalWindow
     total_issues: int
     open_total: int
-    maestras_total: int
-    others_total: int
+    open_group_mode: str
+    open_focus_label: str
+    open_other_label: str
+    open_focus_card_kicker: str
+    open_focus_card_detail: str
+    open_other_card_kicker: str
+    open_other_card_detail: str
+    open_focus_report_label: str
+    open_other_report_label: str
+    open_focus_total: int
+    open_other_total: int
     new_now: int
     new_before: int
     new_accumulated: int
     new_delta_pct: float | None
     closed_now: int
+    closed_focus_now: int
+    closed_other_now: int
     closed_before: int
     closed_delta_pct: float | None
     resolution_days_now: float | None
+    resolved_focus_now: int
+    resolved_other_now: int
     resolution_days_before: float | None
     resolution_delta_pct: float | None
+
+    @property
+    def maestras_total(self) -> int:
+        # Backward-compatible alias: now represents open "focus" total.
+        return int(self.open_focus_total)
+
+    @property
+    def others_total(self) -> int:
+        # Backward-compatible alias: now represents open "other" total.
+        return int(self.open_other_total)
 
 
 @dataclass(frozen=True)
@@ -109,6 +164,74 @@ def _normalize_flag_token(value: object) -> str:
     token = unicodedata.normalize("NFKD", token)
     token = "".join(ch for ch in token if not unicodedata.combining(ch))
     return token.strip()
+
+
+def _compact_token(value: object) -> str:
+    token = _normalize_flag_token(value)
+    return "".join(ch for ch in token if ch.isalnum())
+
+
+def normalize_open_issues_focus_mode(value: object) -> str:
+    token = _compact_token(value)
+    if token in {"maestra", "maestras", "master", "masters"}:
+        return OPEN_ISSUES_FOCUS_MODE_MAESTRAS
+    if token in {
+        "criticidadalta",
+        "criticalidadalta",
+        "criticalhigh",
+        "highcriticality",
+        "high",
+        "critical",
+        "criticidad",
+    }:
+        return OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
+    return DEFAULT_OPEN_ISSUES_FOCUS_MODE
+
+
+def open_issues_focus_mode(settings: Settings | None) -> str:
+    raw = (
+        getattr(settings, "OPEN_ISSUES_FOCUS_MODE", DEFAULT_OPEN_ISSUES_FOCUS_MODE)
+        if settings is not None
+        else DEFAULT_OPEN_ISSUES_FOCUS_MODE
+    )
+    return normalize_open_issues_focus_mode(raw)
+
+
+def open_issue_grouping(settings: Settings | None) -> OpenIssueGrouping:
+    mode = open_issues_focus_mode(settings)
+    if mode == OPEN_ISSUES_FOCUS_MODE_MAESTRAS:
+        return OpenIssueGrouping(
+            mode=mode,
+            focus_scope_label="Maestras abiertas",
+            other_scope_label="Otras incidencias",
+            focus_card_kicker="Insights · Maestras",
+            focus_card_detail="Abiertas marcadas como maestras",
+            other_card_kicker="Insights · Otras",
+            other_card_detail="Abiertas no maestras",
+            focus_report_label="INCIDENCIAS MAESTRAS",
+            other_report_label="OTRAS INCIDENCIAS",
+        )
+    return OpenIssueGrouping(
+        mode=OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH,
+        focus_scope_label="Incidencias con criticidad alta",
+        other_scope_label="Otras incidencias",
+        focus_card_kicker="Insights · Criticidad alta",
+        focus_card_detail="Abiertas con prioridad Impedimento / High / Highest",
+        other_card_kicker="Insights · Otras",
+        other_card_detail="Abiertas sin criticidad alta",
+        focus_report_label="INCIDENCIAS CON CRITICIDAD ALTA",
+        other_report_label="OTRAS INCIDENCIAS",
+    )
+
+
+def _critical_priority_mask(df: pd.DataFrame) -> pd.Series:
+    safe = _safe_df(df)
+    if safe.empty:
+        return pd.Series(False, index=safe.index, dtype=bool)
+    if "priority" not in safe.columns:
+        return pd.Series(False, index=safe.index, dtype=bool)
+    normalized = safe["priority"].fillna("").astype(str).map(_compact_token)
+    return normalized.isin(_CRITICAL_PRIORITY_TOKENS).fillna(False).astype(bool)
 
 
 def _is_truthy_flag(value: object) -> bool:
@@ -200,36 +323,81 @@ def mark_maestra_rows(df: pd.DataFrame, *, settings: Settings) -> pd.Series:
     return is_maestra.fillna(False).astype(bool)
 
 
-def _scope_reference_day(df: pd.DataFrame) -> pd.Timestamp:
-    safe = _safe_df(df)
-    if safe.empty:
-        return pd.Timestamp.utcnow().tz_localize(None).normalize()
-
-    candidates: List[pd.Timestamp] = []
-    for col in ("updated", "resolved", "created"):
-        if col not in safe.columns:
-            continue
-        parsed = _to_dt_naive(safe[col]).dropna()
-        if parsed.empty:
-            continue
-        candidates.append(pd.Timestamp(parsed.max()).normalize())
-    if not candidates:
-        return pd.Timestamp.utcnow().tz_localize(None).normalize()
-    return max(candidates)
+def _parse_bool_flag(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    if not token:
+        return bool(default)
+    if token in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if token in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
 
 
-def _window_from_reference(reference_day: pd.Timestamp) -> QuincenalWindow:
-    end = pd.Timestamp(reference_day).normalize()
-    current_start = end - pd.Timedelta(days=_WINDOW_DAYS - 1)
-    previous_end = current_start - pd.Timedelta(days=1)
-    previous_start = previous_end - pd.Timedelta(days=_WINDOW_DAYS - 1)
-    month_start = end.replace(day=1)
+def _quincena_last_finished_only(settings: Settings) -> bool:
+    return _parse_bool_flag(
+        getattr(settings, "QUINCENA_LAST_FINISHED_ONLY", _DEFAULT_QUINCENA_LAST_FINISHED_ONLY),
+        default=_DEFAULT_QUINCENA_LAST_FINISHED_ONLY,
+    )
+
+
+def _analysis_reference_day(*, reference_day: pd.Timestamp | None = None) -> pd.Timestamp:
+    if reference_day is not None:
+        ts = pd.Timestamp(reference_day)
+        try:
+            ts = ts.tz_convert(None)
+        except Exception:
+            try:
+                ts = ts.tz_localize(None)
+            except Exception:
+                pass
+        return ts.normalize()
+    return pd.Timestamp.now().normalize()
+
+
+def _window_from_reference(
+    reference_day: pd.Timestamp,
+    *,
+    last_finished_only: bool,
+) -> QuincenalWindow:
+    anchor = pd.Timestamp(reference_day).normalize()
+    month_start = anchor.replace(day=1)
+    month_end = (month_start + pd.offsets.MonthBegin(1) - pd.Timedelta(days=1)).normalize()
+
+    if last_finished_only:
+        if int(anchor.day) <= 15:
+            previous_month_end = month_start - pd.Timedelta(days=1)
+            current_start = previous_month_end.replace(day=16)
+            current_end = previous_month_end
+        else:
+            current_start = month_start
+            current_end = month_start + pd.Timedelta(days=14)
+    else:
+        if int(anchor.day) <= 15:
+            current_start = month_start
+            current_end = month_start + pd.Timedelta(days=14)
+        else:
+            current_start = month_start + pd.Timedelta(days=15)
+            current_end = month_end
+
+    if int(current_start.day) == 1:
+        previous_end = current_start - pd.Timedelta(days=1)
+        previous_start = previous_end.replace(day=16)
+    else:
+        previous_start = current_start.replace(day=1)
+        previous_end = current_start - pd.Timedelta(days=1)
+    accumulated_month_start = current_start.replace(day=1)
+
     return QuincenalWindow(
         current_start=current_start,
-        current_end=end,
+        current_end=current_end,
         previous_start=previous_start,
         previous_end=previous_end,
-        month_start=month_start,
+        month_start=accumulated_month_start,
     )
 
 
@@ -241,6 +409,35 @@ def _delta_pct(now_value: float | int, before_value: float | int) -> float | Non
             return 0.0
         return None
     return (now_val - before_val) / before_val
+
+
+def _focus_group_mask(
+    df: pd.DataFrame,
+    *,
+    grouping: OpenIssueGrouping,
+    settings: Settings,
+) -> pd.Series:
+    safe = _safe_df(df)
+    if safe.empty:
+        return pd.Series(False, index=safe.index, dtype=bool)
+    if grouping.mode == OPEN_ISSUES_FOCUS_MODE_MAESTRAS:
+        return mark_maestra_rows(safe, settings=settings)
+    return _critical_priority_mask(safe)
+
+
+def _focus_other_counts(
+    df: pd.DataFrame,
+    *,
+    grouping: OpenIssueGrouping,
+    settings: Settings,
+) -> tuple[int, int]:
+    safe = _safe_df(df)
+    if safe.empty:
+        return 0, 0
+    focus_mask = _focus_group_mask(safe, grouping=grouping, settings=settings)
+    focus_total = int(focus_mask.sum())
+    other_total = max(int(len(safe)) - focus_total, 0)
+    return focus_total, other_total
 
 
 def _issue_listing(
@@ -340,13 +537,17 @@ def _scope_result(
     reference_day: pd.Timestamp,
 ) -> QuincenalScopeResult:
     safe = _safe_df(df)
-    window = _window_from_reference(reference_day)
+    window = _window_from_reference(
+        reference_day,
+        last_finished_only=_quincena_last_finished_only(settings),
+    )
+    grouping = open_issue_grouping(settings)
 
     closed_mask = effective_closed_mask(safe)
     open_df = safe.loc[~closed_mask].copy(deep=False) if not safe.empty else pd.DataFrame()
-    maestras_mask = mark_maestra_rows(open_df, settings=settings)
-    maestras_open = open_df.loc[maestras_mask].copy(deep=False)
-    others_open = open_df.loc[~maestras_mask].copy(deep=False)
+    open_focus_mask = _focus_group_mask(open_df, grouping=grouping, settings=settings)
+    open_focus = open_df.loc[open_focus_mask].copy(deep=False)
+    open_other = open_df.loc[~open_focus_mask].copy(deep=False)
 
     created = _to_dt_naive(safe["created"]) if "created" in safe.columns else pd.Series(pd.NaT)
     created_day = created.dt.normalize()
@@ -369,6 +570,11 @@ def _scope_result(
 
     closed_now = safe.loc[closed_now_mask].copy(deep=False)
     closed_before = safe.loc[closed_before_mask].copy(deep=False)
+    closed_focus_now, closed_other_now = _focus_other_counts(
+        closed_now,
+        grouping=grouping,
+        settings=settings,
+    )
 
     resolution_source = safe.copy(deep=False)
     resolution_source["__created"] = created
@@ -397,6 +603,11 @@ def _scope_result(
         if not resolved_now.empty
         else None
     )
+    resolved_focus_now, resolved_other_now = _focus_other_counts(
+        resolved_now,
+        grouping=grouping,
+        settings=settings,
+    )
     resolution_before_days = (
         float(pd.to_numeric(resolved_before["resolution_days"], errors="coerce").mean())
         if not resolved_before.empty
@@ -409,8 +620,8 @@ def _scope_result(
     )
 
     groups = QuincenalGroups(
-        maestras_open=_issue_listing(maestras_open, source_label_by_id=source_label_by_id),
-        others_open=_issue_listing(others_open, source_label_by_id=source_label_by_id),
+        open_focus=_issue_listing(open_focus, source_label_by_id=source_label_by_id),
+        open_other=_issue_listing(open_other, source_label_by_id=source_label_by_id),
         new_now=_issue_listing(
             safe.loc[new_now_mask].copy(deep=False),
             source_label_by_id=source_label_by_id,
@@ -443,16 +654,29 @@ def _scope_result(
         window=window,
         total_issues=int(len(safe)),
         open_total=int(len(open_df)),
-        maestras_total=int(len(maestras_open)),
-        others_total=int(len(others_open)),
+        open_group_mode=str(grouping.mode),
+        open_focus_label=str(grouping.focus_scope_label),
+        open_other_label=str(grouping.other_scope_label),
+        open_focus_card_kicker=str(grouping.focus_card_kicker),
+        open_focus_card_detail=str(grouping.focus_card_detail),
+        open_other_card_kicker=str(grouping.other_card_kicker),
+        open_other_card_detail=str(grouping.other_card_detail),
+        open_focus_report_label=str(grouping.focus_report_label),
+        open_other_report_label=str(grouping.other_report_label),
+        open_focus_total=int(len(open_focus)),
+        open_other_total=int(len(open_other)),
         new_now=int(new_now_mask.sum()),
         new_before=int(new_before_mask.sum()),
         new_accumulated=int(new_accumulated_mask.sum()),
         new_delta_pct=_delta_pct(int(new_now_mask.sum()), int(new_before_mask.sum())),
         closed_now=int(closed_now_mask.sum()),
+        closed_focus_now=int(closed_focus_now),
+        closed_other_now=int(closed_other_now),
         closed_before=int(closed_before_mask.sum()),
         closed_delta_pct=_delta_pct(int(closed_now_mask.sum()), int(closed_before_mask.sum())),
         resolution_days_now=resolution_now_days,
+        resolved_focus_now=int(resolved_focus_now),
+        resolved_other_now=int(resolved_other_now),
         resolution_days_before=resolution_before_days,
         resolution_delta_pct=resolution_delta_pct,
     )
@@ -499,6 +723,7 @@ def build_country_quincenal_result(
     country: str,
     source_ids: Sequence[str],
     source_label_by_id: Mapping[str, str] | None = None,
+    reference_day: pd.Timestamp | None = None,
 ) -> QuincenalCountryResult:
     country_txt = str(country or "").strip()
     selected_source_ids = tuple(
@@ -506,7 +731,7 @@ def build_country_quincenal_result(
     )
     labels = dict(source_label_by_id or source_label_map(settings, country=country_txt))
     scoped = _scope_df(df, country=country_txt, source_ids=selected_source_ids)
-    reference_day = _scope_reference_day(scoped)
+    normalized_reference_day = _analysis_reference_day(reference_day=reference_day)
 
     aggregate = _scope_result(
         df=scoped,
@@ -514,7 +739,7 @@ def build_country_quincenal_result(
         scope_id=country_txt,
         scope_label=country_txt or "País",
         source_label_by_id=labels,
-        reference_day=reference_day,
+        reference_day=normalized_reference_day,
     )
 
     by_source: Dict[str, QuincenalScopeResult] = {}
@@ -530,7 +755,7 @@ def build_country_quincenal_result(
             scope_id=sid,
             scope_label=labels.get(sid, sid),
             source_label_by_id=labels,
-            reference_day=reference_day,
+            reference_day=normalized_reference_day,
         )
 
     return QuincenalCountryResult(

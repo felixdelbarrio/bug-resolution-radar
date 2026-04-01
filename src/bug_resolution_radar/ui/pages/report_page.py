@@ -22,10 +22,12 @@ from bug_resolution_radar.reports import (
 )
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
+from bug_resolution_radar.ui.dashboard.quincenal_scope import normalize_quincenal_scope_label
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
     FILTER_PRIORITY_KEY,
     FILTER_STATUS_KEY,
+    ISSUES_QUINCENAL_SCOPE_KEY,
 )
 
 _REPORT_STATUS_KEY = "workspace_report_status"
@@ -57,12 +59,10 @@ def _default_report_export_dir(settings: Settings) -> Path:
         candidates.append(Path(configured).expanduser())
     candidates.append((Path.home() / "Downloads").expanduser())
 
-    seen: set[str] = set()
     for candidate in candidates:
-        key = str(candidate)
-        if key in seen:
+        txt = str(candidate).strip()
+        if not txt:
             continue
-        seen.add(key)
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             if candidate.is_dir():
@@ -70,6 +70,40 @@ def _default_report_export_dir(settings: Settings) -> Path:
         except Exception:
             continue
     return Path.cwd()
+
+
+def _ensure_report_export_dir(settings: Settings) -> Path:
+    """
+    Resolve and create export directory only when a save action is explicitly requested.
+    """
+    export_dir = _default_report_export_dir(settings)
+    try:
+        export_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    if export_dir.is_dir():
+        return export_dir
+    return Path.cwd()
+
+
+def _report_export_target_label(settings: Settings) -> str:
+    """
+    Human-readable destination used in UI before touching filesystem.
+    """
+    configured = _configured_export_path(settings)
+    if configured is not None:
+        return str(configured)
+    return str((Path.home() / "Downloads").expanduser())
+
+
+def _report_export_help_text(settings: Settings) -> str:
+    """
+    Explain deferred write-permission behavior in report buttons.
+    """
+    return (
+        "Solo al pulsar este botón se intentará escribir en disco. "
+        f"Destino previsto: {_report_export_target_label(settings)}"
+    )
 
 
 def _unique_export_path(export_dir: Path, *, file_name: str) -> Path:
@@ -170,6 +204,11 @@ def _visible_filter_label(values: list[str], *, name: str) -> str:
     return f"{name}={', '.join(clean[:3])} (+{len(clean) - 3})"
 
 
+def _visible_quincenal_scope_label(value: object) -> str:
+    token = normalize_quincenal_scope_label(value)
+    return f"Quincenal={token}"
+
+
 def _saved_path_state_key(scope_key: str) -> str:
     return f"{_REPORT_SAVED_PATH_KEY_PREFIX}::{scope_key}"
 
@@ -213,6 +252,7 @@ def _report_request_signature(
     status_filters: list[str],
     priority_filters: list[str],
     assignee_filters: list[str],
+    quincenal_scope: str,
 ) -> str:
     payload = {
         "country": str(country or "").strip(),
@@ -220,6 +260,7 @@ def _report_request_signature(
         "status_filters": _normalize_filter_values(status_filters),
         "priority_filters": _normalize_filter_values(priority_filters),
         "assignee_filters": _normalize_filter_values(assignee_filters),
+        "quincenal_scope": normalize_quincenal_scope_label(quincenal_scope),
         "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
         "data_path": str(getattr(settings, "DATA_PATH", "") or "").strip(),
         "data_mtime_ns": _data_path_mtime_ns(getattr(settings, "DATA_PATH", "")),
@@ -332,6 +373,9 @@ def _render_executive_report(settings: Settings) -> None:
     status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
+    quincenal_scope = normalize_quincenal_scope_label(
+        st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+    )
 
     all_df_for_scope: pd.DataFrame | None = None
     scoped_for_scope = pd.DataFrame()
@@ -346,6 +390,7 @@ def _render_executive_report(settings: Settings) -> None:
         _visible_filter_label(status_filters, name="Estado"),
         _visible_filter_label(priority_filters, name="Prioridad"),
         _visible_filter_label(assignee_filters, name="Responsable"),
+        _visible_quincenal_scope_label(quincenal_scope),
     ]
     st.info(
         f"Scope activo: {country or 'Sin país'} · {source_id} · Filtros: {' | '.join(filters_summary)}"
@@ -355,9 +400,6 @@ def _render_executive_report(settings: Settings) -> None:
     phase_key = _phase_state_key(scope_key)
     request_sig_key = _request_sig_state_key(scope_key)
 
-    export_dir = _default_report_export_dir(settings)
-    export_dir_label = str(export_dir)
-
     current_request_sig = _report_request_signature(
         settings,
         country=country,
@@ -365,6 +407,7 @@ def _render_executive_report(settings: Settings) -> None:
         status_filters=status_filters,
         priority_filters=priority_filters,
         assignee_filters=assignee_filters,
+        quincenal_scope=quincenal_scope,
     )
 
     stored_request_sig = str(st.session_state.get(request_sig_key) or "").strip()
@@ -414,7 +457,7 @@ def _render_executive_report(settings: Settings) -> None:
             disabled=phase != "ready",
             help=(
                 "Se habilita cuando finalice la generación automática. "
-                f"Guardará el PPT en: {export_dir_label}"
+                + _report_export_help_text(settings)
             ),
         )
 
@@ -446,6 +489,7 @@ def _render_executive_report(settings: Settings) -> None:
             try:
                 file_name = str(ready_payload.get("file_name") or "").strip() or "radar-export.pptx"
                 content = _bytes_from_obj(ready_payload.get("content"))
+                export_dir = _ensure_report_export_dir(settings)
                 export_path = _unique_export_path(export_dir, file_name=file_name)
                 export_path.write_bytes(content)
                 st.session_state[_saved_path_state_key(scope_key)] = str(export_path)
@@ -589,6 +633,9 @@ def _render_period_followup_report(settings: Settings) -> None:
     status_filters = list(st.session_state.get(FILTER_STATUS_KEY) or [])
     priority_filters = list(st.session_state.get(FILTER_PRIORITY_KEY) or [])
     assignee_filters = list(st.session_state.get(FILTER_ASSIGNEE_KEY) or [])
+    quincenal_scope = normalize_quincenal_scope_label(
+        st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
+    )
 
     try:
         df_all = load_issues_df(settings.DATA_PATH)
@@ -663,17 +710,17 @@ def _render_period_followup_report(settings: Settings) -> None:
         _visible_filter_label(status_filters, name="Estado"),
         _visible_filter_label(priority_filters, name="Prioridad"),
         _visible_filter_label(assignee_filters, name="Responsable"),
+        _visible_quincenal_scope_label(quincenal_scope),
     ]
     st.caption(f"Filtros aplicados: {' | '.join(filters_summary)}")
 
     scope_key = f"{country}::{','.join(selected_source_ids)}"
-    export_dir = _default_report_export_dir(settings)
     if st.button(
         "Generar y guardar en disco",
         key=f"btn_generate_period_report::{scope_key}",
         type="primary",
         width="stretch",
-        help=f"Guardará el PPT en: {export_dir}",
+        help=_report_export_help_text(settings),
     ):
         try:
             result = generate_country_period_followup_ppt(
@@ -684,6 +731,7 @@ def _render_period_followup_report(settings: Settings) -> None:
                 open_df_override=ctx.open_df,
                 applied_filter_summary=" | ".join(filters_summary),
             )
+            export_dir = _ensure_report_export_dir(settings)
             export_path = _unique_export_path(export_dir, file_name=result.file_name)
             export_path.write_bytes(bytes(result.content or b""))
             st.session_state[_period_saved_path_state_key(scope_key)] = str(export_path)

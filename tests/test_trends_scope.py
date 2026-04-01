@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.config import Settings
+from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
+    AGE_BUCKET_ORDER,
+    build_age_bucket_points,
+    build_age_bucket_priority_distribution,
+    build_age_buckets_open_priority_stacked,
+)
 from bug_resolution_radar.ui.dashboard.registry import (
     ChartContext,
     _render_age_buckets,
     _render_open_priority_pie,
+    _render_resolution_hist,
+    _render_timeseries,
 )
 from bug_resolution_radar.ui.dashboard.tabs.trends_tab import (
     _effective_trends_open_scope,
@@ -85,6 +95,7 @@ def test_available_trend_chart_labels_are_executive_and_consistent() -> None:
     labels = {cid: label for cid, label in available_trend_charts()}
     assert labels["open_priority_pie"] == "Issues abiertos por prioridad"
     assert labels["open_status_bar"] == "Issues por Estado"
+    assert labels["resolution_hist"] == "Días abiertas por prioridad"
     assert "abiertas" not in labels["age_buckets"].lower()
 
 
@@ -146,6 +157,65 @@ def test_timeseries_daily_from_filtered_includes_deployed_series() -> None:
     assert by_day.get(pd.Timestamp("2025-01-04"), 0) == 1
 
 
+def test_render_timeseries_uses_open_axis_wording() -> None:
+    now = pd.Timestamp("2026-02-01T00:00:00+00:00")
+    dff = pd.DataFrame(
+        {
+            "created": [
+                (now - pd.Timedelta(days=2)).isoformat(),
+                (now - pd.Timedelta(days=1)).isoformat(),
+            ],
+            "resolved": [pd.NaT, (now - pd.Timedelta(days=1)).isoformat()],
+            "status": ["New", "Closed"],
+        }
+    )
+    kpis = compute_kpis(dff, settings=Settings(), include_timeseries_chart=True)
+    open_df = dff.loc[dff["resolved"].isna()].copy(deep=False)
+    fig = _render_timeseries(ChartContext(dff=dff, open_df=open_df, kpis=kpis))
+
+    assert fig is not None
+    assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == (
+        "Incidencias abiertas"
+    )
+
+
+def test_render_resolution_hist_uses_open_axis_wording() -> None:
+    dff = pd.DataFrame(
+        {
+            "created": [
+                "2026-02-01T00:00:00+00:00",
+                "2026-02-02T00:00:00+00:00",
+                "2026-02-03T00:00:00+00:00",
+            ],
+            "resolved": [
+                pd.NaT,
+                pd.NaT,
+                "2026-02-05T00:00:00+00:00",
+            ],
+            "updated": [
+                "2026-02-04T00:00:00+00:00",
+                "2026-02-05T00:00:00+00:00",
+                "2026-02-05T00:00:00+00:00",
+            ],
+            "status": ["New", "Blocked", "Closed"],
+            "priority": ["High", "Medium", "Low"],
+        }
+    )
+    fig = _render_resolution_hist(ChartContext(dff=dff, open_df=pd.DataFrame(), kpis={}))
+
+    assert fig is not None
+    assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == (
+        "Incidencias abiertas"
+    )
+    total_open_rendered = 0
+    for trace in list(getattr(fig, "data", []) or []):
+        ys = getattr(trace, "y", None)
+        if ys is None:
+            continue
+        total_open_rendered += int(pd.Series(ys).fillna(0).sum())
+    assert total_open_rendered == 2
+
+
 def test_render_open_priority_pie_excludes_deployed_rows() -> None:
     open_df = pd.DataFrame(
         {
@@ -193,3 +263,64 @@ def test_render_age_buckets_renders_issue_level_distribution() -> None:
             continue
         marker_points += len(list(getattr(trace, "x", []) or []))
     assert marker_points == len(open_df)
+
+
+def test_age_bucket_priority_distribution_groups_open_counts() -> None:
+    now = pd.Timestamp.utcnow()
+    open_df = pd.DataFrame(
+        {
+            "priority": ["Highest", "Highest", "Medium", "Low", None],
+            "created": [
+                now - pd.Timedelta(days=1),
+                now - pd.Timedelta(hours=36),
+                now - pd.Timedelta(days=6),
+                now - pd.Timedelta(days=9),
+                now - pd.Timedelta(days=45),
+            ],
+        }
+    )
+    points = build_age_bucket_points(open_df)
+    grouped = build_age_bucket_priority_distribution(issues=points, bucket_order=AGE_BUCKET_ORDER)
+
+    assert isinstance(grouped, pd.DataFrame)
+    assert set(grouped.columns.tolist()) == {"bucket", "bucket_label", "priority", "count"}
+    count_map = {
+        (str(row.bucket), str(row.priority)): int(row.count)
+        for row in grouped.itertuples(index=False)
+    }
+    assert count_map.get(("0-2", "Highest"), 0) == 2
+    assert count_map.get(("3-7", "Medium"), 0) == 1
+    assert count_map.get(("8-14", "Low"), 0) == 1
+    assert count_map.get((">30", "(sin priority)"), 0) == 1
+
+
+def test_age_bucket_open_priority_stacked_has_totals_and_open_axis_wording() -> None:
+    grouped = pd.DataFrame(
+        {
+            "bucket": ["0-2", "0-2", "3-7", "3-7", "8-14"],
+            "bucket_label": ["0-2 días", "0-2 días", "3-7 días", "3-7 días", "8-14 días"],
+            "priority": ["Highest", "Medium", "High", "Low", "Medium"],
+            "count": [3, 2, 4, 1, 2],
+        }
+    )
+    fig = build_age_buckets_open_priority_stacked(grouped=grouped, bucket_order=AGE_BUCKET_ORDER)
+
+    assert fig is not None
+    assert (
+        str(getattr(getattr(fig.layout, "xaxis", None), "title", None).text) == "Antigüedad (días)"
+    )
+    assert (
+        str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text)
+        == "Incidencias abiertas"
+    )
+    bar_traces = [
+        tr for tr in list(fig.data) if str(getattr(tr, "type", "") or "").strip().lower() == "bar"
+    ]
+    assert len(bar_traces) >= 1
+    total_labels = [
+        tr
+        for tr in list(fig.data)
+        if str(getattr(tr, "type", "") or "").strip().lower() == "scatter"
+        and str(getattr(tr, "mode", "") or "").strip().lower() == "text"
+    ]
+    assert len(total_labels) >= 1
