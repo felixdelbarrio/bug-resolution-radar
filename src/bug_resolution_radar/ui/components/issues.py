@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import re
 from functools import lru_cache
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 from urllib.parse import quote, unquote
 
 import pandas as pd
@@ -339,6 +339,25 @@ def _coerce_record_dict(value: object) -> dict[str, object] | None:
     return out
 
 
+def _row_to_record_dict(row: pd.Series) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, value in row.items():
+        out[str(key)] = value
+    return out
+
+
+def _iter_df_records(df: pd.DataFrame) -> Iterable[dict[str, object]]:
+    columns = [str(col) for col in df.columns.tolist()]
+    for values in df.itertuples(index=False, name=None):
+        yield {columns[idx]: value for idx, value in enumerate(values)}
+
+
+def _df_records(df: pd.DataFrame) -> List[dict[str, object]]:
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    return list(_iter_df_records(df))
+
+
 def _selection_payload(event: object) -> dict[str, object]:
     if event is None:
         return {}
@@ -393,8 +412,9 @@ def _row_record_from_selection(
             if isinstance(maybe, pd.DataFrame):
                 if maybe.empty:
                     return None
-                return _coerce_record_dict(maybe.iloc[0].to_dict())
-            return _coerce_record_dict(maybe.to_dict())
+                return _row_to_record_dict(maybe.iloc[0])
+            if isinstance(maybe, pd.Series):
+                return _row_to_record_dict(maybe)
     except Exception:
         return None
     return None
@@ -414,7 +434,7 @@ def _render_issue_table_native(
     origin_header = _origin_link_header(display_df)
     key_display_col = "__jira_key_display__"
 
-    records = display_df.to_dict(orient="records")
+    records = _df_records(display_df)
     if "key" in df_show.columns:
         key_values: List[str] = []
         for row in records:
@@ -598,9 +618,10 @@ def render_issue_cards(
         if isinstance(prepared_df, pd.DataFrame)
         else prepare_issue_cards_df(dff, max_cards=max_cards)
     )
+    records = _df_records(cards_df)
 
     with st.container():
-        for idx_card, row in enumerate(cards_df.to_dict(orient="records")):
+        for idx_card, row in enumerate(records):
             key_txt = _safe_cell_text(row.get("key"))
             key_label = key_txt if key_txt != "—" else _jira_label_from_row(row)
             url_raw = str(row.get("url") or "").strip()
