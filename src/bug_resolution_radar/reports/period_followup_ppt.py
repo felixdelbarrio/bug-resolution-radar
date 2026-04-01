@@ -508,7 +508,7 @@ def _write_open_criticity_card(
     _set_paragraph_single_run(
         p1,
         text=str(label or "").strip(),
-        size_pt=11.0,
+        size_pt=9.5,
         bold=True,
         space_before_pt=0.6,
         color_rgb=base_color,
@@ -568,7 +568,11 @@ def _add_metric_split_column(
     if card is None:
         return
 
-    base_color = text_color_rgb if text_color_rgb is not None else RGBColor(0, 0, 0)
+    base_color = (
+        text_color_rgb
+        if text_color_rgb is not None
+        else (_first_run_color_rgb(_shape_or_none(slide, 16)) or RGBColor(4, 19, 139))
+    )
 
     left = int(card.left)
     top = int(card.top)
@@ -657,6 +661,25 @@ def _align_delta_badges_with_new_card(slide: Any) -> None:
         if card is not None and marker is not None:
             marker.left = int(card.left) + marker_dx
             marker.top = int(card.top) + marker_dy
+
+
+def _set_paragraph_level(
+    slide: Any,
+    *,
+    shape_index: int,
+    paragraph_index: int,
+    level: int,
+) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    paragraphs = list(shape.text_frame.paragraphs)
+    if paragraph_index < 0 or paragraph_index >= len(paragraphs):
+        return
+    try:
+        paragraphs[paragraph_index].level = max(0, int(level))
+    except Exception:
+        return
 
 
 def _overlay_picture(
@@ -841,6 +864,7 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
             ("(EN PROMEDIO)", 9.5, True, True, 0.6),
         ],
     )
+    _set_paragraph_level(slide, shape_index=12, paragraph_index=1, level=1)
     _add_metric_split_column(
         slide,
         card_shape_index=12,
