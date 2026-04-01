@@ -330,15 +330,6 @@ def _native_link_cell_style(value: object, *, dark_mode: bool = False) -> str:
     return f"color: {link_color}; text-decoration: underline; font-weight: 800; cursor: pointer;"
 
 
-def _coerce_record_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
-        return None
-    out: dict[str, object] = {}
-    for key, item in value.items():
-        out[str(key)] = item
-    return out
-
-
 def _row_to_record_dict(row: pd.Series) -> dict[str, object]:
     out: dict[str, object] = {}
     for key, value in row.items():
