@@ -73,6 +73,64 @@ def _ordered_unique_labels(values: list[object]) -> list[str]:
     return out
 
 
+def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -> pd.DataFrame:
+    """Order functional topics prioritizing business criticality over raw volume."""
+    if not isinstance(top_tbl, pd.DataFrame) or top_tbl.empty:
+        return top_tbl
+
+    ordered = top_tbl.copy(deep=False)
+    ordered["tema"] = ordered["tema"].astype(str)
+    ordered["open_count"] = (
+        pd.to_numeric(ordered["open_count"], errors="coerce").fillna(0).astype(int)
+    )
+
+    if (
+        not isinstance(tmp_open, pd.DataFrame)
+        or tmp_open.empty
+        or not col_exists(tmp_open, "__theme")
+    ):
+        return ordered.sort_values(["open_count", "tema"], ascending=[False, True]).reset_index(
+            drop=True
+        )
+
+    if col_exists(tmp_open, "priority"):
+        prio_rank = tmp_open["priority"].astype(str).map(priority_rank).fillna(99).astype(int)
+    else:
+        prio_rank = pd.Series([99] * len(tmp_open), index=tmp_open.index, dtype=int)
+
+    prio_source = pd.DataFrame(
+        {
+            "tema": tmp_open["__theme"].astype(str),
+            "__prio_rank": prio_rank,
+        }
+    )
+    prio_stats = (
+        prio_source.groupby("tema", dropna=False)
+        .agg(
+            __best_prio=("__prio_rank", "min"),
+            __critical_cnt=("__prio_rank", lambda s: int((s <= 2).sum())),
+            __avg_prio=("__prio_rank", "mean"),
+        )
+        .reset_index()
+    )
+
+    merged = ordered.merge(prio_stats, on="tema", how="left")
+    merged["__best_prio"] = (
+        pd.to_numeric(merged["__best_prio"], errors="coerce").fillna(99).astype(int)
+    )
+    merged["__critical_cnt"] = (
+        pd.to_numeric(merged["__critical_cnt"], errors="coerce").fillna(0).astype(int)
+    )
+    merged["__avg_prio"] = pd.to_numeric(merged["__avg_prio"], errors="coerce").fillna(99.0)
+
+    merged = merged.sort_values(
+        ["__best_prio", "__critical_cnt", "open_count", "__avg_prio", "tema"],
+        ascending=[True, False, False, True, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    return merged.drop(columns=["__best_prio", "__critical_cnt", "__avg_prio"], errors="ignore")
+
+
 def _normalize_theme_key(value: object) -> str:
     txt = str(value or "").strip().lower()
     if not txt:
@@ -159,7 +217,10 @@ def _rank_topic_candidates(sub: pd.DataFrame) -> pd.DataFrame:
         + (stale.clip(upper=90.0) * 0.18)
         + no_owner_bonus
     )
-    return work.sort_values(["__topic_score", "__age_days"], ascending=[False, False])
+    return work.sort_values(
+        ["__prio_rank", "__topic_score", "__age_days"],
+        ascending=[True, False, False],
+    )
 
 
 def _rotate_topic_tail(df: pd.DataFrame, *, topic: str, total_open: int) -> pd.DataFrame:
@@ -502,6 +563,7 @@ def render_top_topics_tab(
     if top_tbl.empty:
         st.info("No hay columna `summary` para construir temas.")
         return
+    top_tbl = _priority_ordered_topics(top_tbl, tmp_open=tmp_open)
 
     key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
     render_insights_header_row(

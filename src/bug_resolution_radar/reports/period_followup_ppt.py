@@ -524,9 +524,9 @@ def _write_metric_card(
     extra_lines: Sequence[tuple[str, float, bool, bool, float]] | None = None,
     value_size_pt: float = 25.0,
     label_size_pt: float = 12.0,
+    text_color_rgb: RGBColor | None = None,
 ) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    base_color = _first_run_color_rgb(shape)
+    base_color = text_color_rgb if text_color_rgb is not None else RGBColor(0, 0, 0)
     tf = _shape_text_frame(slide, shape_index=shape_index)
     if tf is None:
         return
@@ -568,9 +568,7 @@ def _add_metric_split_column(
     if card is None:
         return
 
-    base_color = text_color_rgb or _first_run_color_rgb(_shape_or_none(slide, 16))
-    if base_color is None:
-        base_color = RGBColor(0, 39, 146)
+    base_color = text_color_rgb if text_color_rgb is not None else RGBColor(0, 0, 0)
 
     left = int(card.left)
     top = int(card.top)
@@ -579,9 +577,10 @@ def _add_metric_split_column(
     if width <= 0 or height <= 0:
         return
 
-    divider_left = left + int(width * 0.64)
-    divider_top = top + int(height * 0.12)
-    divider_height = int(height * 0.76)
+    # Mirror the visual geometry of the "NUEVAS INCIDENCIAS" right column.
+    divider_left = left + int(width * 0.636)
+    divider_top = top + int(height * 0.094)
+    divider_height = int(height * 0.811)
     divider_width = max(int(width * 0.0018), 1)
 
     divider = slide.shapes.add_shape(
@@ -595,10 +594,10 @@ def _add_metric_split_column(
     divider.fill.fore_color.rgb = base_color
     divider.line.fill.background()
 
-    text_left = divider_left + int(width * 0.028)
-    text_top = top + int(height * 0.10)
-    text_width = max((left + width) - text_left - int(width * 0.03), 1)
-    text_height = int(height * 0.80)
+    text_left = divider_left + int(width * 0.012)
+    text_top = top + int(height * 0.078)
+    text_width = max((left + width) - text_left - int(width * 0.040), 1)
+    text_height = int(height * 0.845)
     split_box = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
     tf = split_box.text_frame
     try:
@@ -609,13 +608,20 @@ def _add_metric_split_column(
         tf.word_wrap = True
     except Exception:
         pass
+    try:
+        tf.margin_left = 0
+        tf.margin_right = 0
+        tf.margin_top = 0
+        tf.margin_bottom = 0
+    except Exception:
+        pass
     tf.clear()
 
     p0 = tf.paragraphs[0]
     _set_paragraph_single_run(
         p0,
         text=f"{str(top_label).strip()}: {int(top_value)}",
-        size_pt=16.0,
+        size_pt=12.0,
         bold=True,
         color_rgb=base_color,
     )
@@ -623,10 +629,10 @@ def _add_metric_split_column(
     _set_paragraph_single_run(
         p1,
         text=f"{str(bottom_label).strip()}: {int(bottom_value)}",
-        size_pt=16.0,
+        size_pt=12.0,
         bold=True,
         color_rgb=base_color,
-        space_before_pt=0.6,
+        space_before_pt=0.3,
     )
 
 
