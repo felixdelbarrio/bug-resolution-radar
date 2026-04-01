@@ -13,7 +13,10 @@ import streamlit as st
 from bug_resolution_radar.analytics.insights import (
     build_theme_daily_trend,
     build_theme_fortnight_trend,
+    is_other_theme_label,
+    order_theme_labels_by_volume,
     prepare_open_theme_payload,
+    sort_theme_table_by_volume,
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import (
@@ -61,16 +64,29 @@ from bug_resolution_radar.ui.insights.learning_store import (
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
 
-def _ordered_unique_labels(values: list[object]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for raw in values:
-        label = str(raw or "").strip()
-        if not label or label in seen:
-            continue
-        seen.add(label)
-        out.append(label)
-    return out
+def _is_others_label(value: object) -> bool:
+    return is_other_theme_label(value)
+
+
+def _sort_topics_by_volume_with_others_last(top_tbl: pd.DataFrame) -> pd.DataFrame:
+    return sort_theme_table_by_volume(top_tbl, label_col="tema", count_col="open_count")
+
+
+def _stacked_theme_order(
+    theme_order: list[str],
+    *,
+    theme_count_by_label: dict[str, int] | None = None,
+) -> list[str]:
+    ordered = order_theme_labels_by_volume(
+        theme_order,
+        counts_by_label=theme_count_by_label,
+        others_last=True,
+    )
+    if not ordered:
+        return []
+    non_other = [theme for theme in ordered if not _is_others_label(theme)]
+    other = [theme for theme in ordered if _is_others_label(theme)]
+    return non_other + other
 
 
 def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -> pd.DataFrame:
@@ -78,7 +94,7 @@ def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -
     if not isinstance(top_tbl, pd.DataFrame) or top_tbl.empty:
         return top_tbl
 
-    ordered = top_tbl.copy(deep=False)
+    ordered = _sort_topics_by_volume_with_others_last(top_tbl)
     ordered["tema"] = ordered["tema"].astype(str)
     ordered["open_count"] = (
         pd.to_numeric(ordered["open_count"], errors="coerce").fillna(0).astype(int)
@@ -89,9 +105,7 @@ def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -
         or tmp_open.empty
         or not col_exists(tmp_open, "__theme")
     ):
-        return ordered.sort_values(["open_count", "tema"], ascending=[False, True]).reset_index(
-            drop=True
-        )
+        return ordered.reset_index(drop=True)
 
     if col_exists(tmp_open, "priority"):
         prio_rank = tmp_open["priority"].astype(str).map(priority_rank).fillna(99).astype(int)
@@ -122,13 +136,17 @@ def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -
         pd.to_numeric(merged["__critical_cnt"], errors="coerce").fillna(0).astype(int)
     )
     merged["__avg_prio"] = pd.to_numeric(merged["__avg_prio"], errors="coerce").fillna(99.0)
+    merged["__is_others"] = merged["tema"].map(_is_others_label)
 
     merged = merged.sort_values(
-        ["__best_prio", "__critical_cnt", "open_count", "__avg_prio", "tema"],
-        ascending=[True, False, False, True, True],
+        ["__is_others", "__best_prio", "__critical_cnt", "open_count", "__avg_prio", "tema"],
+        ascending=[True, True, False, False, True, True],
         kind="mergesort",
     ).reset_index(drop=True)
-    return merged.drop(columns=["__best_prio", "__critical_cnt", "__avg_prio"], errors="ignore")
+    return merged.drop(
+        columns=["__best_prio", "__critical_cnt", "__avg_prio", "__is_others"],
+        errors="ignore",
+    )
 
 
 def _normalize_theme_key(value: object) -> str:
@@ -385,6 +403,7 @@ def _render_theme_trend_chart(
     trend_df: pd.DataFrame,
     theme_order: list[str],
     theme_color_map: dict[str, str],
+    theme_count_by_label: dict[str, int] | None = None,
     x_col: str,
     x_label_col: str,
     x_title: str,
@@ -405,14 +424,27 @@ def _render_theme_trend_chart(
     present = set(trend_df["tema"].astype(str).tolist())
     theme_order = [t for t in theme_order if t in present]
     if not theme_order:
-        theme_order = _ordered_unique_labels(trend_df["tema"].tolist())
+        totals = trend_df["tema"].value_counts()
+        theme_order = order_theme_labels_by_volume(
+            totals.index.tolist(),
+            counts_by_label=totals,
+            others_last=True,
+        )
+    if not theme_order:
+        return
+
+    theme_order = _stacked_theme_order(
+        theme_order,
+        theme_count_by_label=theme_count_by_label,
+    )
     if not theme_order:
         return
 
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
-    # Keep legend order for reading, but stack bars bottom->top as generic->top theme.
-    # This yields "Otros" at the base and the top-volume theme at the top.
-    stacked_order = list(reversed(theme_order))
+    # Plotly stacks bars in insertion order (bottom -> top).
+    # This order is normalized to always keep non-"Otros" themes first by volume
+    # and "Otros" as the topmost (last) segment.
+    stacked_order = list(theme_order)
     axis_labels = axis[x_label_col].astype(str).tolist()
     total_by_label = (
         trend_df.groupby(x_label_col, as_index=True)["issues_value"]
@@ -560,10 +592,10 @@ def render_top_topics_tab(
         tmp_open = pd.DataFrame()
     if not isinstance(top_tbl, pd.DataFrame):
         top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
+    top_tbl = _sort_topics_by_volume_with_others_last(top_tbl)
     if top_tbl.empty:
         st.info("No hay columna `summary` para construir temas.")
         return
-    top_tbl = _priority_ordered_topics(top_tbl, tmp_open=tmp_open)
 
     key_to_url, key_to_meta = build_issue_lookup(open_df, settings=settings)
     render_insights_header_row(
@@ -575,7 +607,25 @@ def render_top_topics_tab(
             csv_df=top_tbl.copy(deep=False),
         ),
     )
-    selected_themes = _ordered_unique_labels(top_tbl["tema"].tolist())
+    selected_themes = order_theme_labels_by_volume(
+        top_tbl["tema"].tolist(),
+        counts_by_label=dict(
+            zip(
+                top_tbl["tema"].astype(str).tolist(),
+                pd.to_numeric(top_tbl["open_count"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+                .tolist(),
+            )
+        ),
+        others_last=True,
+    )
+    theme_count_by_label = dict(
+        zip(
+            top_tbl["tema"].astype(str).tolist(),
+            pd.to_numeric(top_tbl["open_count"], errors="coerce").fillna(0).astype(int).tolist(),
+        )
+    )
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     topic_color_map = _theme_color_map(theme_order=selected_themes, dark_mode=dark_mode)
     trend_df = pd.DataFrame()
@@ -631,6 +681,7 @@ def render_top_topics_tab(
                 trend_df=trend_df,
                 theme_order=selected_themes,
                 theme_color_map=topic_color_map,
+                theme_count_by_label=theme_count_by_label,
                 x_col="quincena_start",
                 x_label_col="quincena_label",
                 x_title="Quincena",
@@ -642,6 +693,7 @@ def render_top_topics_tab(
                 trend_df=trend_df,
                 theme_order=selected_themes,
                 theme_color_map=topic_color_map,
+                theme_count_by_label=theme_count_by_label,
                 x_col="date",
                 x_label_col="date_label",
                 x_title="Día",

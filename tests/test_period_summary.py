@@ -318,3 +318,47 @@ def test_build_country_quincenal_result_uses_last_finished_when_enabled() -> Non
     assert window.previous_end == pd.Timestamp("2026-02-28")
     assert result.aggregate.summary.new_now == 1
     assert result.aggregate.summary.new_before == 1
+
+
+def test_build_country_quincenal_result_infers_reference_day_from_scoped_data() -> None:
+    settings = Settings(
+        QUINCENA_LAST_FINISHED_ONLY="false",
+        JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+    )
+    df = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Segunda quincena mes actual",
+                "status": "New",
+                "created": "2026-03-20T00:00:00+00:00",
+                "updated": "2026-03-20T00:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+            {
+                "key": "A-2",
+                "summary": "Primera quincena mes actual",
+                "status": "Resolved",
+                "created": "2026-03-10T00:00:00+00:00",
+                "updated": "2026-03-10T00:00:00+00:00",
+                "resolved": "2026-03-18T00:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+        ]
+    )
+
+    result = build_country_quincenal_result(
+        df=df,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:core"],
+    )
+
+    window = result.aggregate.summary.window
+    assert window.current_start == pd.Timestamp("2026-03-16")
+    assert window.current_end == pd.Timestamp("2026-03-31")

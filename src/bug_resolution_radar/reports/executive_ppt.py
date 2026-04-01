@@ -693,7 +693,10 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         return None
 
     try:
-        from bug_resolution_radar.analytics.insights import prepare_open_theme_payload
+        from bug_resolution_radar.analytics.insights import (
+            prepare_open_theme_payload,
+            sort_theme_table_by_volume,
+        )
         from bug_resolution_radar.ui.insights.duplicates import _prepare_duplicates_payload
     except Exception:
         return None
@@ -748,8 +751,8 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
             pd.to_numeric(view["open_count"], errors="coerce").fillna(0).astype(int)
         )
 
+        view = sort_theme_table_by_volume(view, label_col="tema", count_col="open_count")
         # Keep the pie legible: top N + (optional) "Otros" if present.
-        view = view.sort_values("open_count", ascending=False)
         max_slices = 7
         head = view.head(max_slices).copy(deep=False)
 

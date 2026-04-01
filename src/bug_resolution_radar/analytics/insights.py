@@ -6,7 +6,7 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
 
@@ -89,6 +89,7 @@ _EMPTY_THEME_DAILY_COLUMNS: tuple[str, ...] = (
     "issues",
     "issues_value",
 )
+_OTHER_THEME_TOKENS: tuple[str, ...] = ("otros", "other")
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -115,6 +116,142 @@ def _normalize_theme_token(value: object) -> str:
     txt = unicodedata.normalize("NFKD", txt)
     txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
     return txt
+
+
+def is_other_theme_label(value: object) -> bool:
+    return _normalize_theme_token(value) in _OTHER_THEME_TOKENS
+
+
+def _ordered_unique_theme_labels(labels: Iterable[object]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in labels:
+        label = str(raw or "").strip()
+        if not label:
+            continue
+        token = label.casefold()
+        if token in seen:
+            continue
+        seen.add(token)
+        out.append(label)
+    return out
+
+
+def _coerce_theme_count(value: object) -> int:
+    try:
+        if pd.isna(value):
+            return 0
+    except Exception:
+        pass
+
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return int(value)
+
+    token = str(value or "").strip()
+    if not token:
+        return 0
+    try:
+        return int(float(token))
+    except Exception:
+        return 0
+
+
+def _theme_count_maps(
+    counts_by_label: Mapping[object, object] | pd.Series | None,
+) -> tuple[dict[str, int], dict[str, int]]:
+    exact: dict[str, int] = {}
+    normalized: dict[str, int] = {}
+    if counts_by_label is None:
+        return exact, normalized
+
+    items: Iterable[tuple[object, object]]
+    if isinstance(counts_by_label, pd.Series):
+        items = counts_by_label.items()
+    else:
+        items = counts_by_label.items()
+
+    for raw_label, raw_count in items:
+        label = str(raw_label or "").strip()
+        if not label:
+            continue
+        count = _coerce_theme_count(raw_count)
+        exact[label] = count
+        norm = _normalize_theme_token(label)
+        if not norm:
+            continue
+        if norm not in normalized or count > normalized[norm]:
+            normalized[norm] = count
+    return exact, normalized
+
+
+def order_theme_labels_by_volume(
+    labels: Iterable[object],
+    *,
+    counts_by_label: Mapping[object, object] | pd.Series | None = None,
+    others_last: bool = True,
+) -> list[str]:
+    unique = _ordered_unique_theme_labels(labels)
+    if not unique:
+        return []
+
+    has_counts = counts_by_label is not None
+    exact_counts, normalized_counts = _theme_count_maps(counts_by_label)
+    order_pos = {label: idx for idx, label in enumerate(unique)}
+
+    def _count_for(label: str) -> int:
+        if label in exact_counts:
+            return exact_counts[label]
+        return normalized_counts.get(_normalize_theme_token(label), 0)
+
+    return sorted(
+        unique,
+        key=lambda label: (
+            bool(others_last and is_other_theme_label(label)),
+            -_count_for(label),
+            _normalize_theme_token(label) if has_counts else "",
+            order_pos[label],
+        ),
+    )
+
+
+def sort_theme_table_by_volume(
+    top_tbl: pd.DataFrame,
+    *,
+    label_col: str = "tema",
+    count_col: str = "open_count",
+    others_last: bool = True,
+) -> pd.DataFrame:
+    if not isinstance(top_tbl, pd.DataFrame) or top_tbl.empty:
+        return top_tbl
+    if label_col not in top_tbl.columns or count_col not in top_tbl.columns:
+        return top_tbl
+
+    work = top_tbl.copy(deep=False)
+    labels = work[label_col].fillna("").astype(str).str.strip()
+    counts = pd.to_numeric(work[count_col], errors="coerce").fillna(0).astype(int)
+    work[label_col] = labels
+    work[count_col] = counts
+
+    ordered_labels = order_theme_labels_by_volume(
+        labels.tolist(),
+        counts_by_label=dict(zip(labels.tolist(), counts.tolist())),
+        others_last=others_last,
+    )
+    if not ordered_labels:
+        return work.loc[:, top_tbl.columns].reset_index(drop=True)
+
+    order_map = {label: idx for idx, label in enumerate(ordered_labels)}
+    work["__theme_order"] = work[label_col].map(order_map).fillna(len(order_map)).astype(int)
+    ordered = work.sort_values(
+        by=["__theme_order", count_col],
+        ascending=[True, False],
+        kind="mergesort",
+    )
+    return ordered.loc[:, top_tbl.columns].reset_index(drop=True)
 
 
 def classify_theme(
@@ -153,7 +290,7 @@ def top_non_other_theme(open_df: pd.DataFrame) -> tuple[str, int]:
     vc = theme_counts(open_df)
     if vc.empty:
         return "-", 0
-    non_other = vc[vc.index.astype(str) != "Otros"]
+    non_other = vc[~vc.index.astype(str).map(is_other_theme_label)]
     if non_other.empty:
         return "\u2014", 0
     return str(non_other.index[0]), int(non_other.iloc[0])
@@ -203,16 +340,18 @@ def prepare_open_theme_payload(
         return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
 
     top_n_safe = max(int(top_n or 10), 1)
-    non_otros = [t for t in counts.index.tolist() if str(t) != "Otros"]
-    has_otros = "Otros" in counts.index
-    if has_otros:
+    labels = [str(t) for t in counts.index.tolist()]
+    non_other = [theme for theme in labels if not is_other_theme_label(theme)]
+    other_labels = [theme for theme in labels if is_other_theme_label(theme)]
+    if other_labels:
+        other_label = other_labels[0]
         body_limit = max(top_n_safe - 1, 0)
-        if len(non_otros) > body_limit:
-            top_themes = non_otros[:body_limit] + ["Otros"]
+        if len(non_other) > body_limit:
+            top_themes = non_other[:body_limit] + [other_label]
         else:
-            top_themes = non_otros + ["Otros"]
+            top_themes = non_other + [other_label]
     else:
-        top_themes = non_otros[:top_n_safe]
+        top_themes = non_other[:top_n_safe]
 
     total_open = int(len(tmp_open))
     top_tbl = pd.DataFrame(
@@ -225,6 +364,7 @@ def prepare_open_theme_payload(
             ],
         }
     )
+    top_tbl = sort_theme_table_by_volume(top_tbl)
     return {"tmp_open": tmp_open, "top_tbl": top_tbl}
 
 
@@ -296,7 +436,7 @@ def build_theme_daily_trend(
 
     theme_order: list[str]
     if theme_whitelist is not None:
-        requested_order = order_theme_labels(theme_whitelist)
+        requested_order = order_theme_labels_by_volume(theme_whitelist, others_last=True)
         present = set(work["tema"].unique().tolist())
         theme_order = [theme for theme in requested_order if theme in present]
         if not theme_order:
@@ -304,7 +444,11 @@ def build_theme_daily_trend(
         work = work.loc[work["tema"].isin(theme_order)].copy(deep=False)
     else:
         totals = work["tema"].value_counts()
-        theme_order = order_theme_labels(totals.index.tolist())
+        theme_order = order_theme_labels_by_volume(
+            totals.index.tolist(),
+            counts_by_label=totals,
+            others_last=True,
+        )
         if not theme_order:
             return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
 
@@ -372,7 +516,7 @@ def build_theme_fortnight_trend(
 
     theme_order: list[str]
     if theme_whitelist is not None:
-        requested_order = order_theme_labels(theme_whitelist)
+        requested_order = order_theme_labels_by_volume(theme_whitelist, others_last=True)
         present = set(work["tema"].unique().tolist())
         theme_order = [theme for theme in requested_order if theme in present]
         if not theme_order:
@@ -380,7 +524,11 @@ def build_theme_fortnight_trend(
         work = work.loc[work["tema"].isin(theme_order)].copy(deep=False)
     else:
         totals = work["tema"].value_counts()
-        theme_order = order_theme_labels(totals.index.tolist())
+        theme_order = order_theme_labels_by_volume(
+            totals.index.tolist(),
+            counts_by_label=totals,
+            others_last=True,
+        )
         if not theme_order:
             return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
 
