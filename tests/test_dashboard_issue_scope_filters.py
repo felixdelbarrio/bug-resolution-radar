@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from bug_resolution_radar.analytics import period_summary as period_summary_analytics
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.dashboard import quincenal_scope as quincenal_scope_helpers
 from bug_resolution_radar.ui.dashboard import state as dashboard_state
@@ -15,6 +16,24 @@ from bug_resolution_radar.ui.pages import dashboard_page
 class _FakeStreamlitState:
     def __init__(self, session_state: dict[str, object]) -> None:
         self.session_state = session_state
+
+
+def _pin_quincenal_reference_day(monkeypatch: Any, reference_day: pd.Timestamp) -> None:
+    anchor = pd.Timestamp(reference_day)
+    try:
+        anchor = anchor.tz_convert(None)
+    except Exception:
+        try:
+            anchor = anchor.tz_localize(None)
+        except Exception:
+            pass
+    anchor = anchor.normalize()
+
+    def _fixed_reference_day(*, reference_day: pd.Timestamp | None = None) -> pd.Timestamp:
+        _ = reference_day
+        return anchor
+
+    monkeypatch.setattr(period_summary_analytics, "_analysis_reference_day", _fixed_reference_day)
 
 
 def test_apply_issue_scope_like_filter_uses_dashboard_scope_keys(monkeypatch: Any) -> None:
@@ -106,6 +125,7 @@ def test_build_dashboard_data_context_applies_issue_scope_like_filter(monkeypatc
 
 def test_build_dashboard_data_context_applies_quincenal_scope(monkeypatch: Any) -> None:
     now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    _pin_quincenal_reference_day(monkeypatch, now)
     fake_state = _FakeStreamlitState(
         {
             dashboard_state.FILTER_STATUS_KEY: [],
@@ -149,6 +169,7 @@ def test_build_dashboard_data_context_applies_quincenal_scope(monkeypatch: Any) 
     settings = Settings(
         ANALYSIS_LOOKBACK_MONTHS=12,
         JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+        OPEN_ISSUES_FOCUS_MODE="maestras",
     )
 
     ctx = build_dashboard_data_context(
@@ -165,6 +186,7 @@ def test_build_dashboard_data_context_applies_quincenal_scope_new_accumulated(
     monkeypatch: Any,
 ) -> None:
     now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    _pin_quincenal_reference_day(monkeypatch, now)
     fake_state = _FakeStreamlitState(
         {
             dashboard_state.FILTER_STATUS_KEY: [],
@@ -219,6 +241,7 @@ def test_build_dashboard_data_context_applies_quincenal_scope_new_accumulated(
     settings = Settings(
         ANALYSIS_LOOKBACK_MONTHS=12,
         JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+        OPEN_ISSUES_FOCUS_MODE="maestras",
     )
 
     ctx = build_dashboard_data_context(
@@ -235,6 +258,7 @@ def test_quincenal_scope_options_hide_maestras_and_others_when_split_is_redundan
     monkeypatch: Any,
 ) -> None:
     now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    _pin_quincenal_reference_day(monkeypatch, now)
     fake_state = _FakeStreamlitState(
         {
             "workspace_country": "México",
@@ -273,13 +297,65 @@ def test_quincenal_scope_options_hide_maestras_and_others_when_split_is_redundan
     settings = Settings(
         ANALYSIS_LOOKBACK_MONTHS=12,
         JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+        OPEN_ISSUES_FOCUS_MODE="maestras",
     )
 
     options = quincenal_scope_helpers.quincenal_scope_options(df, settings=settings)
 
     assert "Abiertas totales" in options
     assert "Maestras abiertas" not in options
-    assert "Otras abiertas" not in options
+    assert "Otras incidencias" not in options
+
+
+def test_quincenal_scope_options_use_high_criticality_labels_by_default(
+    monkeypatch: Any,
+) -> None:
+    now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    _pin_quincenal_reference_day(monkeypatch, now)
+    fake_state = _FakeStreamlitState(
+        {
+            "workspace_country": "México",
+            "workspace_scope_mode": "source",
+            "workspace_source_id": "jira:mexico:core",
+        }
+    )
+    monkeypatch.setattr(quincenal_scope_helpers, "st", fake_state)
+
+    df = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Abierta alta",
+                "status": "New",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+            },
+            {
+                "key": "A-2",
+                "summary": "Abierta media",
+                "status": "In Progress",
+                "priority": "Medium",
+                "assignee": "Luis",
+                "created": (now - pd.Timedelta(days=3)).isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+            },
+        ]
+    )
+    settings = Settings(
+        ANALYSIS_LOOKBACK_MONTHS=12,
+        JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
+    )
+
+    options = quincenal_scope_helpers.quincenal_scope_options(df, settings=settings)
+
+    assert "Incidencias con criticidad alta" in options
+    assert "Otras incidencias" in options
 
 
 def test_should_show_open_split_only_when_maestras_others_are_not_redundant() -> None:
@@ -304,6 +380,7 @@ def test_apply_issue_scope_like_filter_migrates_legacy_zoom_to_quincenal_scope(
     monkeypatch: Any,
 ) -> None:
     now = pd.Timestamp("2026-03-26T00:00:00+00:00")
+    _pin_quincenal_reference_day(monkeypatch, now)
     fake_state = _FakeStreamlitState(
         {
             dashboard_state.ISSUES_SCOPE_KEYS_KEY: ["A-1"],

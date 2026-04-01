@@ -369,6 +369,7 @@ class Settings(BaseModel):
     PERIOD_PPT_TEMPLATE_PATH: str = ""
     ANALYSIS_LOOKBACK_MONTHS: int = 12
     QUINCENA_LAST_FINISHED_ONLY: str = "false"
+    OPEN_ISSUES_FOCUS_MODE: str = "criticidad_alta"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
 
 
