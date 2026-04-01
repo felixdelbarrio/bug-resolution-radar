@@ -11,8 +11,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.kpis import (
-    RESOLUTION_BUCKET_LABELS,
-    build_resolution_hist_payload,
+    OPEN_AGE_BUCKET_LABELS,
+    build_open_age_priority_payload,
 )
 from bug_resolution_radar.ui.common import (
     flow_signal_color_map,
@@ -26,7 +26,6 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_issue_distribution,
 )
 from bug_resolution_radar.ui.dashboard.constants import (
-    Y_AXIS_LABEL_FINALIZED_ISSUES,
     Y_AXIS_LABEL_OPEN_ISSUES,
     canonical_status_order,
 )
@@ -106,16 +105,12 @@ def _to_dt_naive(s: pd.Series) -> pd.Series:
     return out
 
 
-def _resolution_days_series(dff: pd.DataFrame) -> pd.Series:
-    payload = build_resolution_hist_payload(dff)
-    closed = payload.get("closed") if isinstance(payload, dict) else None
-    if (
-        not isinstance(closed, pd.DataFrame)
-        or closed.empty
-        or "resolution_days" not in closed.columns
-    ):
+def _open_age_days_series(dff: pd.DataFrame) -> pd.Series:
+    payload = build_open_age_priority_payload(dff)
+    opened = payload.get("open") if isinstance(payload, dict) else None
+    if not isinstance(opened, pd.DataFrame) or opened.empty or "open_days" not in opened.columns:
         return pd.Series([], dtype=float)
-    return pd.to_numeric(closed["resolution_days"], errors="coerce").dropna().clip(lower=0.0)
+    return pd.to_numeric(opened["open_days"], errors="coerce").dropna().clip(lower=0.0)
 
 
 def _rank_by_canon(values: pd.Series, canon_order: List[str]) -> pd.Series:
@@ -277,7 +272,7 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
 
 
 def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
-    payload = build_resolution_hist_payload(ctx.dff)
+    payload = build_open_age_priority_payload(ctx.dff)
     grouped = payload.get("grouped") if isinstance(payload, dict) else None
     if not isinstance(grouped, pd.DataFrame) or grouped.empty:
         return None
@@ -288,22 +283,22 @@ def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
     )
     fig = px.bar(
         grouped,
-        x="resolution_bucket",
+        x="age_bucket",
         y="count",
         text="count",
         color="priority",
         barmode="stack",
         category_orders={
-            "resolution_bucket": list(RESOLUTION_BUCKET_LABELS),
+            "age_bucket": list(OPEN_AGE_BUCKET_LABELS),
             "priority": priority_order,
         },
         color_discrete_map=priority_color_map(),
-        title="Tiempo hasta estado final",
+        title="Días que llevan abiertas las incidencias por prioridad",
     )
     fig.update_layout(
         title_text="",
-        xaxis_title="Tiempo hasta estado final",
-        yaxis_title=Y_AXIS_LABEL_FINALIZED_ISSUES,
+        xaxis_title="Rango en días",
+        yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
         bargap=0.10,
     )
     fig.update_traces(textposition="inside", textfont=dict(size=10))
@@ -311,22 +306,22 @@ def _render_resolution_hist(ctx: ChartContext) -> Optional[go.Figure]:
 
 
 def _insights_resolution_hist(ctx: ChartContext) -> List[str]:
-    days = _resolution_days_series(ctx.dff)
+    days = _open_age_days_series(ctx.dff)
     if days.empty:
         return [
-            "No hay suficientes incidencias en estado final con fechas para analizar tiempos de cierre.",
-            "Tip: asegura ‘created’ y algún marcador de cierre (‘resolved’ o estado final) en la ingesta, y mira tiempo habitual vs casos lentos (mejor que solo la media).",
+            "No hay incidencias abiertas con fechas de creación suficientes para analizar antigüedad.",
+            "Tip: revisa la calidad de `created` en la ingesta y ataca primero los casos de mayor prioridad con más días abiertos.",
         ]
 
     p50 = float(days.quantile(0.5))
     p90 = float(days.quantile(0.9))
-    mean = float(days.mean())
+    over30 = float((days > 30).mean()) if len(days) > 0 else 0.0
 
     return [
-        f"Tiempo hasta estado final: media **{mean:.1f}d** · habitual **{p50:.0f}d** · lento **{p90:.0f}d**. "
-        "Si la media queda muy por encima del tiempo habitual, hay pocos casos muy lentos que distorsionan el resultado.",
-        "Acción: clasifica el 10% más lento por causa raíz (bloqueo externo, falta de reproducibilidad, dependencias) "
-        "y ataca la causa, no el síntoma. Reducir los casos lentos suele mejorar satisfacción más que cerrar más casos fáciles.",
+        f"Antigüedad abierta: habitual **{p50:.0f}d** · tramo crítico **{p90:.0f}d**. "
+        "El percentil alto muestra dónde se atasca de verdad el backlog.",
+        f"Cola larga: **{_fmt_pct(over30)}** de abiertas supera 30 días. "
+        "Acción: focalizar desbloqueos por prioridad en ese tramo mejora throughput y percepción de control.",
     ]
 
 
@@ -501,8 +496,8 @@ def build_trends_registry() -> Dict[str, ChartSpec]:
         ),
         ChartSpec(
             chart_id="resolution_hist",
-            title="Tiempos de resolución",
-            subtitle="Más importante reducir los casos lentos que solo la media",
+            title="Días abiertas por prioridad",
+            subtitle="Antigüedad de incidencias abiertas y cola de riesgo",
             group="Calidad",
             render=_render_resolution_hist,
             insights=_insights_resolution_hist,

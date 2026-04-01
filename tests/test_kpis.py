@@ -4,7 +4,11 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.kpis import build_timeseries_daily, compute_kpis
+from bug_resolution_radar.analytics.kpis import (
+    build_open_age_priority_payload,
+    build_timeseries_daily,
+    compute_kpis,
+)
 from bug_resolution_radar.config import Settings
 
 
@@ -178,3 +182,55 @@ def test_build_timeseries_daily_returns_dense_window_and_non_negative_backlog() 
     assert list(daily.columns) == ["date", "created", "closed", "open_backlog_proxy"]
     assert len(daily) == 5
     assert int(daily["open_backlog_proxy"].min()) >= 0
+
+
+def test_build_open_age_priority_payload_keeps_only_open_issues() -> None:
+    reference_now = pd.Timestamp("2026-03-01T00:00:00+00:00")
+    df = pd.DataFrame(
+        [
+            {
+                "key": "O-1",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-28T00:00:00+00:00",
+                "resolved": pd.NaT,
+            },
+            {
+                "key": "O-2",
+                "status": "Blocked",
+                "priority": "Medium",
+                "created": "2026-02-10T00:00:00+00:00",
+                "resolved": pd.NaT,
+            },
+            {
+                "key": "C-1",
+                "status": "Closed",
+                "priority": "Low",
+                "created": "2026-02-25T00:00:00+00:00",
+                "resolved": "2026-02-27T00:00:00+00:00",
+            },
+            {
+                "key": "C-2",
+                "status": "Accepted",
+                "priority": "Highest",
+                "created": "2026-02-20T00:00:00+00:00",
+                "resolved": pd.NaT,
+                "updated": "2026-02-25T00:00:00+00:00",
+            },
+        ]
+    )
+
+    payload = build_open_age_priority_payload(df, reference_now=reference_now)
+    grouped = payload["grouped"]
+    opened = payload["open"]
+
+    assert isinstance(grouped, pd.DataFrame)
+    assert isinstance(opened, pd.DataFrame)
+    assert set(opened["key"].astype(str).tolist()) == {"O-1", "O-2"}
+
+    grouped_map = {
+        (str(row.age_bucket), str(row.priority)): int(row.count)
+        for row in grouped.itertuples(index=False)
+    }
+    assert grouped_map.get(("1-2d", "High"), 0) == 1
+    assert grouped_map.get(("15-30d", "Medium"), 0) == 1

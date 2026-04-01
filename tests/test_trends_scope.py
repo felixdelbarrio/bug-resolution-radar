@@ -95,6 +95,7 @@ def test_available_trend_chart_labels_are_executive_and_consistent() -> None:
     labels = {cid: label for cid, label in available_trend_charts()}
     assert labels["open_priority_pie"] == "Issues abiertos por prioridad"
     assert labels["open_status_bar"] == "Issues por Estado"
+    assert labels["resolution_hist"] == "Días abiertas por prioridad"
     assert "abiertas" not in labels["age_buckets"].lower()
 
 
@@ -178,31 +179,41 @@ def test_render_timeseries_uses_open_axis_wording() -> None:
     )
 
 
-def test_render_resolution_hist_uses_finalized_axis_wording() -> None:
+def test_render_resolution_hist_uses_open_axis_wording() -> None:
     dff = pd.DataFrame(
         {
             "created": [
                 "2026-02-01T00:00:00+00:00",
                 "2026-02-02T00:00:00+00:00",
+                "2026-02-03T00:00:00+00:00",
             ],
             "resolved": [
-                "2026-02-04T00:00:00+00:00",
+                pd.NaT,
+                pd.NaT,
                 "2026-02-05T00:00:00+00:00",
             ],
             "updated": [
                 "2026-02-04T00:00:00+00:00",
                 "2026-02-05T00:00:00+00:00",
+                "2026-02-05T00:00:00+00:00",
             ],
-            "status": ["Deployed", "Closed"],
-            "priority": ["High", "Medium"],
+            "status": ["New", "Blocked", "Closed"],
+            "priority": ["High", "Medium", "Low"],
         }
     )
     fig = _render_resolution_hist(ChartContext(dff=dff, open_df=pd.DataFrame(), kpis={}))
 
     assert fig is not None
     assert str(getattr(getattr(fig.layout, "yaxis", None), "title", None).text) == (
-        "Incidencias finalizadas"
+        "Incidencias abiertas"
     )
+    total_open_rendered = 0
+    for trace in list(getattr(fig, "data", []) or []):
+        ys = getattr(trace, "y", None)
+        if ys is None:
+            continue
+        total_open_rendered += int(pd.Series(ys).fillna(0).sum())
+    assert total_open_rendered == 2
 
 
 def test_render_open_priority_pie_excludes_deployed_rows() -> None:

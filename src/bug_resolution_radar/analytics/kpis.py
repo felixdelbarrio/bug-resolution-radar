@@ -10,10 +10,10 @@ import plotly.express as px
 
 from bug_resolution_radar.config import Settings
 
-from .status_semantics import effective_closed_mask, effective_finalized_at
+from .status_semantics import effective_closed_mask
 
 _DT_COLS = ("created", "updated", "resolved")
-RESOLUTION_BUCKET_BINS: Final[tuple[float, ...]] = (
+OPEN_AGE_BUCKET_BINS: Final[tuple[float, ...]] = (
     -0.1,
     0.0,
     2.0,
@@ -24,7 +24,7 @@ RESOLUTION_BUCKET_BINS: Final[tuple[float, ...]] = (
     90.0,
     float("inf"),
 )
-RESOLUTION_BUCKET_LABELS: Final[tuple[str, ...]] = (
+OPEN_AGE_BUCKET_LABELS: Final[tuple[str, ...]] = (
     "Mismo día (0d)",
     "1-2d",
     "3-7d",
@@ -192,82 +192,97 @@ def build_timeseries_daily(
     return daily
 
 
-def build_resolution_hist_payload(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+def build_open_age_priority_payload(
+    df: pd.DataFrame,
+    *,
+    reference_now: pd.Timestamp | None = None,
+) -> Dict[str, pd.DataFrame]:
     """
-    Canonical payload for 'Tiempo hasta estado final' distribution.
+    Canonical payload for open-incidents age distribution by priority.
 
     Returns:
-    - grouped: columns [resolution_bucket, priority, count]
-    - closed: detail rows with resolution_days + resolution_bucket
+    - grouped: columns [age_bucket, priority, count]
+    - open: detail rows with open_days + age_bucket
     """
-    empty_grouped = pd.DataFrame(columns=["resolution_bucket", "priority", "count"])
-    empty_closed = pd.DataFrame(
+    empty_grouped = pd.DataFrame(columns=["age_bucket", "priority", "count"])
+    empty_open = pd.DataFrame(
         columns=[
             "key",
             "summary",
             "status",
             "priority",
             "created",
-            "finalized_at",
+            "updated",
             "resolved",
-            "resolution_days",
-            "resolution_bucket",
+            "open_days",
+            "age_bucket",
         ]
     )
     work_df = _ensure_datetime_columns(df)
     if work_df.empty or "created" not in work_df.columns:
-        return {"grouped": empty_grouped, "closed": empty_closed}
+        return {"grouped": empty_grouped, "open": empty_open}
 
-    created = pd.to_datetime(work_df["created"], utc=True, errors="coerce")
+    closed_mask = effective_closed_mask(work_df)
+    open_df = work_df.loc[~closed_mask].copy(deep=False)
+    if open_df.empty:
+        return {"grouped": empty_grouped, "open": empty_open}
+
+    created = pd.to_datetime(open_df["created"], utc=True, errors="coerce")
     try:
         created = created.dt.tz_convert(None)
     except Exception:
         created = created.dt.tz_localize(None)
-    finalized_at = effective_finalized_at(work_df, created_col="created", updated_col="updated")
+    open_df = open_df.assign(__created=created)
+    open_df = open_df[open_df["__created"].notna()].copy(deep=False)
+    if open_df.empty:
+        return {"grouped": empty_grouped, "open": empty_open}
 
-    closed = work_df.copy(deep=False)
-    closed["__created"] = created
-    closed["__finalized_at"] = finalized_at
-    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
-    if closed.empty:
-        return {"grouped": empty_grouped, "closed": empty_closed}
-
-    closed["resolution_days"] = (
-        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
-    ).clip(lower=0.0)
-    closed["priority"] = (
-        _normalize_priority_col(closed["priority"])
-        if "priority" in closed.columns
+    now_ref = reference_now
+    if now_ref is None:
+        now_ref = pd.Timestamp.utcnow().tz_localize(None)
+    else:
+        now_ref = pd.Timestamp(now_ref)
+        if now_ref.tzinfo is not None:
+            try:
+                now_ref = now_ref.tz_convert(None)
+            except Exception:
+                now_ref = now_ref.tz_localize(None)
+    open_df["open_days"] = ((now_ref - open_df["__created"]).dt.total_seconds() / 86400.0).clip(
+        lower=0.0
+    )
+    open_df["priority"] = (
+        _normalize_priority_col(open_df["priority"])
+        if "priority" in open_df.columns
         else "(sin priority)"
     )
-    closed["resolution_bucket"] = pd.cut(
-        closed["resolution_days"],
-        bins=list(RESOLUTION_BUCKET_BINS),
-        labels=list(RESOLUTION_BUCKET_LABELS),
+    open_df["age_bucket"] = pd.cut(
+        open_df["open_days"],
+        bins=list(OPEN_AGE_BUCKET_BINS),
+        labels=list(OPEN_AGE_BUCKET_LABELS),
         right=True,
         include_lowest=True,
         ordered=True,
     )
 
     grouped_res = (
-        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
+        open_df.groupby(["age_bucket", "priority"], dropna=False, observed=False)
         .size()
         .reset_index(name="count")
     )
+    grouped_res["count"] = grouped_res["count"].astype(int)
     export_cols = [
         "key",
         "summary",
         "status",
         "priority",
         "created",
-        "finalized_at",
+        "updated",
         "resolved",
-        "resolution_days",
-        "resolution_bucket",
+        "open_days",
+        "age_bucket",
     ]
-    closed["finalized_at"] = closed["__finalized_at"]
-    export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
-    return {"grouped": grouped_res, "closed": export_df}
+    export_df = open_df[[c for c in export_cols if c in open_df.columns]].copy(deep=False)
+    return {"grouped": grouped_res, "open": export_df}
 
 
 def compute_kpis(

@@ -13,8 +13,8 @@ import plotly.express as px
 import streamlit as st
 
 from bug_resolution_radar.analytics.kpis import (
-    RESOLUTION_BUCKET_LABELS,
-    build_resolution_hist_payload,
+    OPEN_AGE_BUCKET_LABELS,
+    build_open_age_priority_payload,
     build_timeseries_daily,
 )
 from bug_resolution_radar.config import Settings
@@ -33,7 +33,6 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_open_priority_stacked,
 )
 from bug_resolution_radar.ui.dashboard.constants import (
-    Y_AXIS_LABEL_FINALIZED_ISSUES,
     Y_AXIS_LABEL_OPEN_ISSUES,
     canonical_status_order,
 )
@@ -421,8 +420,8 @@ def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
 
 
 def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Build grouped 'time to final state' distribution plus export-ready closed subset."""
-    return build_resolution_hist_payload(dff)
+    """Build grouped open-age distribution plus export-ready open subset."""
+    return build_open_age_priority_payload(dff)
 
 
 def _open_status_payload(status_df: pd.DataFrame) -> dict[str, Any]:
@@ -460,7 +459,7 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     return [
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
         ("age_buckets", "Antigüedad por estado (distribución)"),
-        ("resolution_hist", "Tiempo hasta estado final"),
+        ("resolution_hist", "Días abiertas por prioridad"),
         ("open_priority_pie", "Issues abiertos por prioridad"),
         ("open_status_bar", "Issues por Estado"),
     ]
@@ -529,7 +528,11 @@ def render_trends_tab(
 
     # 2) Contenedor del gráfico seleccionado
     with st.container(border=True, key="trend_chart_shell"):
-        if adapted_for_terminal and selected_chart not in {"open_priority_pie", "open_status_bar"}:
+        if adapted_for_terminal and selected_chart not in {
+            "open_priority_pie",
+            "open_status_bar",
+            "resolution_hist",
+        }:
             st.caption(
                 "Vista adaptada al estado finalista seleccionado (incluye incidencias finalizadas)."
             )
@@ -698,28 +701,28 @@ def _render_trend_chart(
 
     if chart_id == "resolution_hist":
         if "created" not in dff.columns:
-            st.info("No hay fechas suficientes (created) para calcular tiempos hasta estado final.")
+            st.info("No hay fechas suficientes (created) para calcular antigüedad de abiertas.")
             return _chart_perf_result()
 
         res_sig = dataframe_signature(
             dff,
             columns=("key", "summary", "status", "priority", "created", "updated", "resolved"),
-            salt="trends.resolution_hist.v2",
+            salt="trends.open_age_priority.v1",
         )
         res_payload, _ = cached_by_signature(
-            "trends.resolution_hist.payload",
+            "trends.open_age_priority.payload",
             res_sig,
             lambda: _resolution_payload(dff),
             max_entries=10,
         )
         grouped_res = res_payload.get("grouped") if isinstance(res_payload, dict) else None
-        closed = res_payload.get("closed") if isinstance(res_payload, dict) else None
+        opened = res_payload.get("open") if isinstance(res_payload, dict) else None
 
         if not isinstance(grouped_res, pd.DataFrame) or grouped_res.empty:
-            st.info("No hay incidencias en estado final con fechas suficientes para este filtro.")
+            st.info("No hay incidencias abiertas con fechas suficientes para este filtro.")
             return _chart_perf_result()
-        if not isinstance(closed, pd.DataFrame):
-            closed = pd.DataFrame()
+        if not isinstance(opened, pd.DataFrame):
+            opened = pd.DataFrame()
 
         priority_order = sorted(
             grouped_res["priority"].astype(str).unique().tolist(),
@@ -727,14 +730,14 @@ def _render_trend_chart(
         )
         fig = px.bar(
             grouped_res,
-            x="resolution_bucket",
+            x="age_bucket",
             y="count",
             text="count",
             color="priority",
             barmode="stack",
             category_orders={
-                "resolution_bucket": [
-                    *list(RESOLUTION_BUCKET_LABELS),
+                "age_bucket": [
+                    *list(OPEN_AGE_BUCKET_LABELS),
                 ],
                 "priority": priority_order,
             },
@@ -742,15 +745,13 @@ def _render_trend_chart(
         )
         fig.update_layout(
             title_text="",
-            xaxis_title="Tiempo hasta estado final",
-            yaxis_title=Y_AXIS_LABEL_FINALIZED_ISSUES,
+            xaxis_title="Rango en días",
+            yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
             bargap=0.10,
         )
         fig.update_traces(textposition="inside", textfont=dict(size=10))
-        res_order = list(RESOLUTION_BUCKET_LABELS)
-        res_totals = grouped_res.groupby("resolution_bucket", dropna=False, observed=False)[
-            "count"
-        ].sum()
+        res_order = list(OPEN_AGE_BUCKET_LABELS)
+        res_totals = grouped_res.groupby("age_bucket", dropna=False, observed=False)["count"].sum()
         _add_bar_totals(
             fig,
             x_values=res_order,
@@ -758,7 +759,7 @@ def _render_trend_chart(
             font_size=12,
         )
         fig = apply_plotly_bbva(fig, showlegend=True)
-        export_df = closed.copy(deep=False)
+        export_df = opened.copy(deep=False)
         _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",

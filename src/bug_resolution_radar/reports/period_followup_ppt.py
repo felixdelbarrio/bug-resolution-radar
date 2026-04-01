@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, List, Sequence
+from typing import Any, List, Sequence, cast
 
 import pandas as pd
 from pptx import Presentation
@@ -430,6 +430,7 @@ def _set_paragraph_single_run(
     bold: bool = True,
     italic: bool = False,
     space_before_pt: float = 0.0,
+    color_rgb: RGBColor | None = None,
 ) -> None:
     paragraph.clear()
     run = paragraph.add_run()
@@ -437,6 +438,8 @@ def _set_paragraph_single_run(
     run.font.size = Pt(float(size_pt))
     run.font.bold = bool(bold)
     run.font.italic = bool(italic)
+    if color_rgb is not None:
+        run.font.color.rgb = color_rgb
     paragraph.space_before = Pt(float(space_before_pt))
     paragraph.space_after = Pt(0)
 
@@ -448,18 +451,35 @@ def _set_paragraph_value_label(
     label_text: str,
     value_size_pt: float,
     label_size_pt: float,
+    color_rgb: RGBColor | None = None,
 ) -> None:
     paragraph.clear()
     value_run = paragraph.add_run()
     value_run.text = f"{str(value_text)} "
     value_run.font.size = Pt(float(value_size_pt))
     value_run.font.bold = True
+    if color_rgb is not None:
+        value_run.font.color.rgb = color_rgb
     label_run = paragraph.add_run()
     label_run.text = str(label_text or "")
     label_run.font.size = Pt(float(label_size_pt))
     label_run.font.bold = True
+    if color_rgb is not None:
+        label_run.font.color.rgb = color_rgb
     paragraph.space_before = Pt(0)
     paragraph.space_after = Pt(0)
+
+
+def _first_run_color_rgb(shape: Any) -> RGBColor | None:
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return None
+    for paragraph in list(shape.text_frame.paragraphs):
+        for run in list(paragraph.runs):
+            color = getattr(getattr(run, "font", None), "color", None)
+            rgb = getattr(color, "rgb", None)
+            if rgb is not None:
+                return cast(RGBColor, rgb)
+    return None
 
 
 def _write_open_criticity_card(
@@ -468,20 +488,30 @@ def _write_open_criticity_card(
     shape_index: int,
     value: int,
     label: str,
+    color_rgb: RGBColor | None = None,
 ) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    base_color = color_rgb or _first_run_color_rgb(shape)
     tf = _shape_text_frame(slide, shape_index=shape_index)
     if tf is None:
         return
     tf.clear()
     p0 = tf.paragraphs[0]
-    _set_paragraph_single_run(p0, text=str(int(value)), size_pt=35.0, bold=True)
+    _set_paragraph_single_run(
+        p0,
+        text=str(int(value)),
+        size_pt=35.0,
+        bold=True,
+        color_rgb=base_color,
+    )
     p1 = tf.add_paragraph()
     _set_paragraph_single_run(
         p1,
         text=str(label or "").strip(),
-        size_pt=12.0,
+        size_pt=11.0,
         bold=True,
         space_before_pt=0.6,
+        color_rgb=base_color,
     )
 
 
@@ -495,6 +525,8 @@ def _write_metric_card(
     value_size_pt: float = 25.0,
     label_size_pt: float = 12.0,
 ) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    base_color = _first_run_color_rgb(shape)
     tf = _shape_text_frame(slide, shape_index=shape_index)
     if tf is None:
         return
@@ -506,6 +538,7 @@ def _write_metric_card(
         label_text=str(label_text or ""),
         value_size_pt=float(value_size_pt),
         label_size_pt=float(label_size_pt),
+        color_rgb=base_color,
     )
 
     for text, size_pt, bold, italic, space_before in list(extra_lines or []):
@@ -517,7 +550,84 @@ def _write_metric_card(
             bold=bool(bold),
             italic=bool(italic),
             space_before_pt=float(space_before),
+            color_rgb=base_color,
         )
+
+
+def _add_metric_split_column(
+    slide: Any,
+    *,
+    card_shape_index: int,
+    top_label: str,
+    top_value: int,
+    bottom_label: str,
+    bottom_value: int,
+    text_color_rgb: RGBColor | None = None,
+) -> None:
+    card = _shape_or_none(slide, card_shape_index)
+    if card is None:
+        return
+
+    base_color = text_color_rgb or _first_run_color_rgb(_shape_or_none(slide, 16))
+    if base_color is None:
+        base_color = RGBColor(0, 39, 146)
+
+    left = int(card.left)
+    top = int(card.top)
+    width = int(card.width)
+    height = int(card.height)
+    if width <= 0 or height <= 0:
+        return
+
+    divider_left = left + int(width * 0.64)
+    divider_top = top + int(height * 0.12)
+    divider_height = int(height * 0.76)
+    divider_width = max(int(width * 0.0018), 1)
+
+    divider = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        divider_left,
+        divider_top,
+        divider_width,
+        divider_height,
+    )
+    divider.fill.solid()
+    divider.fill.fore_color.rgb = base_color
+    divider.line.fill.background()
+
+    text_left = divider_left + int(width * 0.028)
+    text_top = top + int(height * 0.10)
+    text_width = max((left + width) - text_left - int(width * 0.03), 1)
+    text_height = int(height * 0.80)
+    split_box = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
+    tf = split_box.text_frame
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    tf.clear()
+
+    p0 = tf.paragraphs[0]
+    _set_paragraph_single_run(
+        p0,
+        text=f"{str(top_label).strip()}: {int(top_value)}",
+        size_pt=16.0,
+        bold=True,
+        color_rgb=base_color,
+    )
+    p1 = tf.add_paragraph()
+    _set_paragraph_single_run(
+        p1,
+        text=f"{str(bottom_label).strip()}: {int(bottom_value)}",
+        size_pt=16.0,
+        bold=True,
+        color_rgb=base_color,
+        space_before_pt=0.6,
+    )
 
 
 def _align_delta_badges_with_new_card(slide: Any) -> None:
@@ -681,6 +791,7 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         shape_index=4,
         value=int(summary.open_total),
         label="INCIDENCIAS ABIERTAS EN TOTAL",
+        color_rgb=RGBColor(255, 255, 255),
     )
     _write_open_criticity_card(
         slide,
@@ -706,16 +817,14 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         shape_index=9,
         value_text=str(int(summary.closed_now)),
         label_text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
-        extra_lines=[
-            (
-                f"{focus_split_label}: {int(summary.closed_focus_now)}  |  "
-                f"RESTO: {int(summary.closed_other_now)}",
-                10.5,
-                True,
-                False,
-                1.4,
-            )
-        ],
+    )
+    _add_metric_split_column(
+        slide,
+        card_shape_index=9,
+        top_label=str(focus_split_label),
+        top_value=int(summary.closed_focus_now),
+        bottom_label="RESTO",
+        bottom_value=int(summary.closed_other_now),
     )
     _write_metric_card(
         slide,
@@ -724,15 +833,15 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         label_text="DÍAS DE RESOLUCIÓN",
         extra_lines=[
             ("(EN PROMEDIO)", 9.5, True, True, 0.6),
-            (
-                f"{focus_split_label}: {int(summary.resolved_focus_now)}  |  "
-                f"RESTO: {int(summary.resolved_other_now)}",
-                10.5,
-                True,
-                False,
-                1.0,
-            ),
         ],
+    )
+    _add_metric_split_column(
+        slide,
+        card_shape_index=12,
+        top_label=str(focus_split_label),
+        top_value=int(summary.resolved_focus_now),
+        bottom_label="RESTO",
+        bottom_value=int(summary.resolved_other_now),
     )
 
     _set_shape_font_size(slide, shape_index=10, font_size_pt=14.0, bold=True)

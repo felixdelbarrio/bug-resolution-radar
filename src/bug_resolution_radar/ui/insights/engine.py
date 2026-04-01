@@ -21,8 +21,10 @@ from bug_resolution_radar.analytics.insights import (
 from bug_resolution_radar.analytics.insights import (
     top_non_other_theme as _top_non_other_theme,
 )
-from bug_resolution_radar.analytics.kpis import build_timeseries_daily
-from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.kpis import (
+    build_open_age_priority_payload,
+    build_timeseries_daily,
+)
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 
 
@@ -215,22 +217,13 @@ def _stale_days_from_updated(df: pd.DataFrame) -> pd.Series:
     return out
 
 
-def _resolution_days(dff: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
-    if dff.empty or "created" not in dff.columns:
+def _open_age_days(dff: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
+    payload = build_open_age_priority_payload(dff)
+    opened = payload.get("open") if isinstance(payload, dict) else None
+    if not isinstance(opened, pd.DataFrame) or opened.empty or "open_days" not in opened.columns:
         return pd.Series([], dtype=float), pd.DataFrame()
-    created = _to_dt_naive(dff["created"])
-    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
-    finalized_at = _to_dt_naive(finalized_at)
-    closed = dff.copy(deep=False)
-    closed["__created"] = created
-    closed["__finalized_at"] = finalized_at
-    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
-    if closed.empty:
-        return pd.Series([], dtype=float), closed
-    closed["resolution_days"] = (
-        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
-    ).clip(lower=0.0)
-    return closed["resolution_days"].astype(float), closed
+    days = pd.to_numeric(opened["open_days"], errors="coerce").dropna().clip(lower=0.0)
+    return days.astype(float), opened
 
 
 def _sorted_cards(cards: Iterable[ActionInsight], *, limit: int = 5) -> List[ActionInsight]:
@@ -717,19 +710,19 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
 
 def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
-    days, closed = _resolution_days(dff)
+    days, opened = _open_age_days(dff)
     if days.empty:
         return TrendInsightPack(
             metrics=[
-                InsightMetric("Cierre habitual", "—"),
-                InsightMetric("Cierre lento", "—"),
-                InsightMetric("Casos muy lentos", "—"),
+                InsightMetric("Antigüedad habitual", "—"),
+                InsightMetric("Casos más atascados", "—"),
+                InsightMetric(">30d abiertas", "—"),
             ],
             cards=[
                 ActionInsight(
                     title="Datos insuficientes",
                     body=(
-                        "No hay incidencias en estado final con fechas suficientes para medir tiempos de cierre."
+                        "No hay incidencias abiertas con fechas suficientes para medir antigüedad."
                     ),
                     score=1.0,
                 )
@@ -740,37 +733,37 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
     med = float(days.median())
     p90 = float(days.quantile(0.90))
     p95 = float(days.quantile(0.95))
-    tail_share = float((days >= p90).mean()) if len(days) > 0 else 0.0
+    tail_share = float((days > 30).mean()) if len(days) > 0 else 0.0
 
     cards: List[ActionInsight] = []
     cards.append(
         ActionInsight(
-            title="Impacto real en experiencia",
+            title="Riesgo real de envejecimiento",
             body=(
-                f"La mediana de cierre es {_fmt_days(med)} pero el tramo lento sube a {_fmt_days(p90)}. "
-                "Atacar ese percentil alto suele tener mas retorno que cerrar casos faciles."
+                f"La antigüedad habitual es {_fmt_days(med)} pero el tramo más atascado sube a {_fmt_days(p90)}. "
+                "Atacar ese percentil alto suele generar más impacto que cerrar solo casos recientes."
             ),
             score=8.0 + (p90 / 10.0),
         )
     )
 
-    if p95 > (med * 2.8):
+    if p95 > (med * 2.5):
         cards.append(
             ActionInsight(
-                title="Cola extrema de resolucion",
+                title="Cola extrema de antigüedad",
                 body=(
                     f"El percentil 95 ({_fmt_days(p95)}) multiplica por {p95 / max(med, 1.0):.1f} la mediana. "
-                    "Hay friccion estructural en un subconjunto de casos."
+                    "Hay fricción estructural en un subconjunto del backlog abierto."
                 ),
                 score=16.0 + (p95 / max(med, 1.0)),
             )
         )
 
-    if "priority" in closed.columns and not closed.empty:
-        pr = normalize_text_col(closed["priority"], "(sin priority)")
+    if "priority" in opened.columns and not opened.empty:
+        pr = normalize_text_col(opened["priority"], "(sin priority)")
         grouped = (
-            closed.assign(priority=pr)
-            .groupby("priority")["resolution_days"]
+            opened.assign(priority=pr)
+            .groupby("priority", dropna=False)["open_days"]
             .median()
             .sort_values(ascending=False)
         )
@@ -781,8 +774,8 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                 ActionInsight(
                     title="Brecha por prioridad",
                     body=(
-                        f"Prioridad mas lenta: {slowest} ({_fmt_days(grouped.iloc[0])}) "
-                        f"vs mas rapida: {fastest} ({_fmt_days(grouped.iloc[-1])}). "
+                        f"Prioridad más envejecida: {slowest} ({_fmt_days(grouped.iloc[0])}) "
+                        f"vs menos envejecida: {fastest} ({_fmt_days(grouped.iloc[-1])}). "
                         "La dispersion indica oportunidades de estandarizar flujo."
                     ),
                     priority_filters=[slowest],
@@ -790,85 +783,32 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
                 )
             )
 
-    if "__finalized_at" in closed.columns and not closed.empty:
-        now = pd.Timestamp.utcnow().tz_localize(None)
-        resolved_30 = int((closed["__finalized_at"] >= (now - pd.Timedelta(days=30))).sum())
-        if resolved_30 <= 5:
+    if "priority" in opened.columns and not opened.empty:
+        pr = normalize_text_col(opened["priority"], "(sin priority)")
+        critical_old = opened.loc[(pr.map(priority_rank) <= 2) & (opened["open_days"] > 14)]
+        critical_old_count = int(len(critical_old))
+        if critical_old_count > 0:
             cards.append(
                 ActionInsight(
-                    title="Baja traccion de cierre reciente",
+                    title="Incidencias críticas envejecidas",
                     body=(
-                        f"Solo {resolved_30} cierres en 30 dias con el filtro actual. "
-                        "Sin mejorar throughput, el backlog tardara en bajar de forma perceptible."
+                        f"{critical_old_count} incidencias de mayor impacto (Supone un impedimento / Highest / High) "
+                        "llevan más de 14 días abiertas. Escalar desbloqueos y decisiones aquí debe ser prioridad."
                     ),
-                    score=18.0 - float(resolved_30),
+                    priority_filters=list(CRITICAL_PRIORITY_FILTERS),
+                    score=16.0 + float(critical_old_count),
                 )
             )
 
-        recent = closed[closed["__finalized_at"] >= (now - pd.Timedelta(days=30))]
-        prev = closed[
-            (closed["__finalized_at"] >= (now - pd.Timedelta(days=60)))
-            & (closed["__finalized_at"] < (now - pd.Timedelta(days=30)))
-        ]
-        if len(recent) >= 5 and len(prev) >= 5:
-            med_recent = float(recent["resolution_days"].median())
-            med_prev = float(prev["resolution_days"].median())
-            if med_prev > 0 and med_recent > (med_prev * 1.25):
-                cards.append(
-                    ActionInsight(
-                        title="Degradacion reciente del ciclo",
-                        body=(
-                            f"La mediana de cierre sube de {_fmt_days(med_prev)} a {_fmt_days(med_recent)} "
-                            "en los ultimos 30 dias."
-                        ),
-                        score=14.0 + ((med_recent / max(med_prev, 1.0)) * 4.0),
-                    )
-                )
-            elif med_prev > 0 and med_recent < (med_prev * 0.80):
-                cards.append(
-                    ActionInsight(
-                        title="Mejora reciente del ciclo",
-                        body=(
-                            f"La mediana de cierre baja de {_fmt_days(med_prev)} a {_fmt_days(med_recent)} "
-                            "en los ultimos 30 dias."
-                        ),
-                        score=9.0 + ((med_prev / max(med_recent, 1.0)) * 2.0),
-                    )
-                )
-
-    if "priority" in closed.columns and not closed.empty:
-        pr = normalize_text_col(closed["priority"], "(sin priority)")
-        hi = closed.loc[pr.map(priority_rank) <= 2, "resolution_days"]
-        lo = closed.loc[pr.map(priority_rank) >= 3, "resolution_days"]
-        if len(hi) >= 4 and len(lo) >= 4:
-            med_hi = float(hi.median())
-            med_lo = float(lo.median())
-            if med_hi > (med_lo * 1.30):
-                n_hi = int(hi.notna().sum())
-                n_lo = int(lo.notna().sum())
-                cards.append(
-                    ActionInsight(
-                        title="Prioridades de mayor impacto: cierre mas lento",
-                        body=(
-                            "Las incidencias de mayor impacto (Supone un impedimento / Highest / High) "
-                            f"tardan {_fmt_days(med_hi)} de forma tipica en llegar a estado final "
-                            f"vs {_fmt_days(med_lo)} en el resto (muestra: {n_hi} vs {n_lo}). "
-                            "Palanca: limita el trabajo en curso de mayor impacto y prioriza desbloqueos/decisiones antes de iniciar nuevos casos de menor prioridad."
-                        ),
-                        priority_filters=list(CRITICAL_PRIORITY_FILTERS),
-                        score=15.0 + (med_hi - med_lo),
-                    )
-                )
-
     return TrendInsightPack(
         metrics=[
-            InsightMetric("Cierre habitual", _fmt_days(med)),
-            InsightMetric("Cierre lento", _fmt_days(p90)),
-            InsightMetric("Casos muy lentos", _fmt_days(p95)),
+            InsightMetric("Antigüedad habitual", _fmt_days(med)),
+            InsightMetric("Casos más atascados", _fmt_days(p90)),
+            InsightMetric(">30d abiertas", _fmt_pct(tail_share)),
         ],
         cards=_sorted_cards(cards),
         executive_tip=(
-            f"El {tail_share * 100.0:.1f}% de cierres vive en el tramo lento: objetivo directo de mejora."
+            "Regla de control: cada semana debe bajar el número absoluto de incidencias abiertas >30 días."
         ),
     )
 

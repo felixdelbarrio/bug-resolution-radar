@@ -399,7 +399,7 @@ def test_generate_scope_executive_ppt_uses_result_cache(
     assert out2.content == out1.content
 
 
-def test_build_sections_skips_resolution_chart_when_no_closed_data() -> None:
+def test_build_sections_keeps_resolution_chart_when_open_data_exists() -> None:
     dff = pd.DataFrame(
         [
             {
@@ -421,6 +421,34 @@ def test_build_sections_skips_resolution_chart_when_no_closed_data() -> None:
     dff["created"] = pd.to_datetime(dff["created"], utc=True, errors="coerce")
     dff["resolved"] = pd.to_datetime(dff["resolved"], utc=True, errors="coerce")
     open_df = dff.copy()
+
+    sections = _build_sections(Settings(DATA_PATH="unused.json"), dff=dff, open_df=open_df)
+    by_id = {sec.chart_id: sec for sec in sections}
+    assert "resolution_hist" in by_id
+
+
+def test_build_sections_skips_resolution_chart_when_no_open_data() -> None:
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "MX-200",
+                "status": "Closed",
+                "priority": "High",
+                "created": "2026-02-01T00:00:00+00:00",
+                "resolved": "2026-02-03T00:00:00+00:00",
+            },
+            {
+                "key": "MX-201",
+                "status": "Deployed",
+                "priority": "Medium",
+                "created": "2026-02-02T00:00:00+00:00",
+                "resolved": "2026-02-05T00:00:00+00:00",
+            },
+        ]
+    )
+    dff["created"] = pd.to_datetime(dff["created"], utc=True, errors="coerce")
+    dff["resolved"] = pd.to_datetime(dff["resolved"], utc=True, errors="coerce")
+    open_df = pd.DataFrame(columns=dff.columns)
 
     sections = _build_sections(Settings(DATA_PATH="unused.json"), dff=dff, open_df=open_df)
     by_id = {sec.chart_id: sec for sec in sections}
