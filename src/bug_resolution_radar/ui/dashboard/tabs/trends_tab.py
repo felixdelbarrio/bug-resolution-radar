@@ -8,12 +8,15 @@ import unicodedata
 from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
+from bug_resolution_radar.analytics.kpis import (
+    OPEN_AGE_BUCKET_LABELS,
+    build_open_age_priority_payload,
+    build_timeseries_daily,
+)
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import BBVA_DARK, BBVA_LIGHT
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
@@ -29,7 +32,10 @@ from bug_resolution_radar.ui.dashboard.age_buckets_chart import (
     build_age_buckets_issue_distribution,
     build_age_buckets_open_priority_stacked,
 )
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
+from bug_resolution_radar.ui.dashboard.constants import (
+    Y_AXIS_LABEL_OPEN_ISSUES,
+    canonical_status_order,
+)
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
 from bug_resolution_radar.ui.dashboard.performance import (
     elapsed_ms,
@@ -119,22 +125,6 @@ def _trends_perf_budget(view: str) -> dict[str, float]:
         budgets_by_view=_TRENDS_PERF_BUDGETS_MS,
         default_view="default",
     )
-
-
-def _to_dt_naive(s: pd.Series) -> pd.Series:
-    """Convert to naive datetime64 for safe arithmetic/comparisons."""
-    if s is None:
-        return pd.Series([], dtype="datetime64[ns]")
-    out = pd.to_datetime(s, errors="coerce")
-    try:
-        if hasattr(out.dt, "tz") and out.dt.tz is not None:
-            out = out.dt.tz_localize(None)
-    except Exception:
-        try:
-            out = out.dt.tz_localize(None)
-        except Exception:
-            pass
-    return out
 
 
 def _safe_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -396,22 +386,6 @@ def _priority_sort_key(priority: object) -> tuple[int, str]:
     return (priority_rank(p), pl)
 
 
-def _resolution_bucket(days: pd.Series) -> pd.Categorical:
-    """Build categorical buckets to avoid confusion in continuous histograms."""
-    bins = [-0.1, 0.0, 2.0, 7.0, 14.0, 30.0, 60.0, 90.0, np.inf]
-    labels = [
-        "Mismo dia (0d)",
-        "1-2d",
-        "3-7d",
-        "8-14d",
-        "15-30d",
-        "31-60d",
-        "61-90d",
-        ">90d",
-    ]
-    return pd.cut(days, bins=bins, labels=labels, right=True, include_lowest=True, ordered=True)
-
-
 def _add_bar_totals(
     fig: Any, *, x_values: list[str], y_totals: list[float], font_size: int = 12
 ) -> None:
@@ -437,141 +411,17 @@ def _add_bar_totals(
 
 
 def _timeseries_daily_from_filtered(dff: pd.DataFrame) -> pd.DataFrame:
-    """Build daily aggregates for timeseries chart from the filtered dataframe."""
-    if dff.empty:
-        return pd.DataFrame()
-
-    created = (
-        _to_dt_naive(dff["created"])
-        if "created" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
+    """Build canonical daily aggregates for timeseries chart from the filtered dataframe."""
+    return build_timeseries_daily(
+        dff,
+        lookback_days=90,
+        include_deployed=True,
     )
-    resolved = (
-        _to_dt_naive(dff["resolved"])
-        if "resolved" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
-    )
-    updated = (
-        _to_dt_naive(dff["updated"])
-        if "updated" in dff.columns
-        else pd.Series(pd.NaT, index=dff.index)
-    )
-    status_norm = (
-        normalize_text_col(dff["status"], "(sin estado)").map(_norm_status_token)
-        if "status" in dff.columns
-        else pd.Series("", index=dff.index)
-    )
-    deployed_mask = status_norm.eq("deployed")
-    deployed_ts = pd.Series(pd.NaT, index=dff.index)
-    if deployed_mask.any():
-        deployed_ts = resolved.where(deployed_mask)
-        deployed_ts = deployed_ts.where(deployed_ts.notna(), updated.where(deployed_mask))
-        deployed_ts = deployed_ts.where(deployed_ts.notna(), created.where(deployed_mask))
-
-    created_notna = created.notna()
-    resolved_notna = resolved.notna()
-    deployed_notna = deployed_ts.notna()
-    if not created_notna.any() and not resolved_notna.any() and not deployed_notna.any():
-        return pd.DataFrame()
-
-    end_candidates = []
-    if created_notna.any():
-        end_candidates.append(created.loc[created_notna].max())
-    if resolved_notna.any():
-        end_candidates.append(resolved.loc[resolved_notna].max())
-    if deployed_notna.any():
-        end_candidates.append(deployed_ts.loc[deployed_notna].max())
-    end_ts = (
-        pd.Timestamp(max(end_candidates)).normalize()
-        if end_candidates
-        else pd.Timestamp.utcnow().normalize()
-    )
-    start_ts = end_ts - pd.Timedelta(days=90)
-
-    created_daily = (
-        created.loc[created_notna & (created >= start_ts)].dt.floor("D").value_counts(sort=False)
-    )
-    closed_daily = (
-        resolved.loc[resolved_notna & (resolved >= start_ts)].dt.floor("D").value_counts(sort=False)
-    )
-    deployed_daily = (
-        deployed_ts.loc[deployed_notna & (deployed_ts >= start_ts)]
-        .dt.floor("D")
-        .value_counts(sort=False)
-    )
-
-    all_dates = (
-        created_daily.index.union(closed_daily.index).union(deployed_daily.index).sort_values()
-    )
-    if all_dates.empty:
-        return pd.DataFrame()
-
-    daily = pd.DataFrame({"date": all_dates})
-    daily["created"] = created_daily.reindex(all_dates, fill_value=0).to_numpy()
-    daily["closed"] = closed_daily.reindex(all_dates, fill_value=0).to_numpy()
-    daily["deployed"] = deployed_daily.reindex(all_dates, fill_value=0).to_numpy()
-    # Avoid negative baseline in windowed view; keeps interpretation stable under filters.
-    daily["open_backlog_proxy"] = (daily["created"] - daily["closed"]).cumsum().clip(lower=0)
-    return daily
 
 
 def _resolution_payload(dff: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Build grouped 'time to final state' distribution plus export-ready closed subset."""
-    empty_grouped = pd.DataFrame(columns=["resolution_bucket", "priority", "count"])
-    empty_closed = pd.DataFrame(
-        columns=[
-            "key",
-            "summary",
-            "status",
-            "priority",
-            "created",
-            "finalized_at",
-            "resolved",
-            "resolution_days",
-            "resolution_bucket",
-        ]
-    )
-    if "created" not in dff.columns:
-        return {"grouped": empty_grouped, "closed": empty_closed}
-
-    created = _to_dt_naive(dff["created"])
-    finalized_at = effective_finalized_at(dff, created_col="created", updated_col="updated")
-
-    closed = dff.copy(deep=False)
-    closed["__created"] = created
-    closed["__finalized_at"] = finalized_at
-    closed = closed[closed["__created"].notna() & closed["__finalized_at"].notna()].copy(deep=False)
-    if closed.empty:
-        return {"grouped": empty_grouped, "closed": empty_closed}
-
-    closed["resolution_days"] = (
-        (closed["__finalized_at"] - closed["__created"]).dt.total_seconds() / 86400.0
-    ).clip(lower=0.0)
-    if "priority" in closed.columns:
-        closed["priority"] = normalize_text_col(closed["priority"], "(sin priority)")
-    else:
-        closed["priority"] = "(sin priority)"
-
-    closed["resolution_bucket"] = _resolution_bucket(closed["resolution_days"])
-    grouped_res = (
-        closed.groupby(["resolution_bucket", "priority"], dropna=False, observed=False)
-        .size()
-        .reset_index(name="count")
-    )
-    export_cols = [
-        "key",
-        "summary",
-        "status",
-        "priority",
-        "created",
-        "finalized_at",
-        "resolved",
-        "resolution_days",
-        "resolution_bucket",
-    ]
-    closed["finalized_at"] = closed["__finalized_at"]
-    export_df = closed[[c for c in export_cols if c in closed.columns]].copy(deep=False)
-    return {"grouped": grouped_res, "closed": export_df}
+    """Build grouped open-age distribution plus export-ready open subset."""
+    return build_open_age_priority_payload(dff)
 
 
 def _open_status_payload(status_df: pd.DataFrame) -> dict[str, Any]:
@@ -609,7 +459,7 @@ def available_trend_charts() -> List[Tuple[str, str]]:
     return [
         ("timeseries", "Evolución del backlog (últimos 90 días)"),
         ("age_buckets", "Antigüedad por estado (distribución)"),
-        ("resolution_hist", "Tiempo hasta estado final"),
+        ("resolution_hist", "Días abiertas por prioridad"),
         ("open_priority_pie", "Issues abiertos por prioridad"),
         ("open_status_bar", "Issues por Estado"),
     ]
@@ -678,7 +528,11 @@ def render_trends_tab(
 
     # 2) Contenedor del gráfico seleccionado
     with st.container(border=True, key="trend_chart_shell"):
-        if adapted_for_terminal and selected_chart not in {"open_priority_pie", "open_status_bar"}:
+        if adapted_for_terminal and selected_chart not in {
+            "open_priority_pie",
+            "open_status_bar",
+            "resolution_hist",
+        }:
             st.caption(
                 "Vista adaptada al estado finalista seleccionado (incluye incidencias finalizadas)."
             )
@@ -750,7 +604,7 @@ def _render_trend_chart(
             st.info("No hay datos suficientes para la serie temporal con los filtros actuales.")
             return _chart_perf_result()
         fig = px.line(daily, x="date", y=["created", "closed", "deployed", "open_backlog_proxy"])
-        fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title="Incidencias")
+        fig.update_layout(title_text="", xaxis_title="Fecha", yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES)
         fig = apply_plotly_bbva(fig, showlegend=True)
         export_cols = ["key", "summary", "status", "priority", "assignee", "created", "resolved"]
         export_df = dff[[c for c in export_cols if c in dff.columns]].copy(deep=False)
@@ -847,28 +701,28 @@ def _render_trend_chart(
 
     if chart_id == "resolution_hist":
         if "created" not in dff.columns:
-            st.info("No hay fechas suficientes (created) para calcular tiempos hasta estado final.")
+            st.info("No hay fechas suficientes (created) para calcular antigüedad de abiertas.")
             return _chart_perf_result()
 
         res_sig = dataframe_signature(
             dff,
             columns=("key", "summary", "status", "priority", "created", "updated", "resolved"),
-            salt="trends.resolution_hist.v2",
+            salt="trends.open_age_priority.v1",
         )
         res_payload, _ = cached_by_signature(
-            "trends.resolution_hist.payload",
+            "trends.open_age_priority.payload",
             res_sig,
             lambda: _resolution_payload(dff),
             max_entries=10,
         )
         grouped_res = res_payload.get("grouped") if isinstance(res_payload, dict) else None
-        closed = res_payload.get("closed") if isinstance(res_payload, dict) else None
+        opened = res_payload.get("open") if isinstance(res_payload, dict) else None
 
         if not isinstance(grouped_res, pd.DataFrame) or grouped_res.empty:
-            st.info("No hay incidencias en estado final con fechas suficientes para este filtro.")
+            st.info("No hay incidencias abiertas con fechas suficientes para este filtro.")
             return _chart_perf_result()
-        if not isinstance(closed, pd.DataFrame):
-            closed = pd.DataFrame()
+        if not isinstance(opened, pd.DataFrame):
+            opened = pd.DataFrame()
 
         priority_order = sorted(
             grouped_res["priority"].astype(str).unique().tolist(),
@@ -876,21 +730,14 @@ def _render_trend_chart(
         )
         fig = px.bar(
             grouped_res,
-            x="resolution_bucket",
+            x="age_bucket",
             y="count",
             text="count",
             color="priority",
             barmode="stack",
             category_orders={
-                "resolution_bucket": [
-                    "Mismo dia (0d)",
-                    "1-2d",
-                    "3-7d",
-                    "8-14d",
-                    "15-30d",
-                    "31-60d",
-                    "61-90d",
-                    ">90d",
+                "age_bucket": [
+                    *list(OPEN_AGE_BUCKET_LABELS),
                 ],
                 "priority": priority_order,
             },
@@ -898,24 +745,13 @@ def _render_trend_chart(
         )
         fig.update_layout(
             title_text="",
-            xaxis_title="Tiempo hasta estado final",
-            yaxis_title="Incidencias",
+            xaxis_title="Rango en días",
+            yaxis_title=Y_AXIS_LABEL_OPEN_ISSUES,
             bargap=0.10,
         )
         fig.update_traces(textposition="inside", textfont=dict(size=10))
-        res_order = [
-            "Mismo dia (0d)",
-            "1-2d",
-            "3-7d",
-            "8-14d",
-            "15-30d",
-            "31-60d",
-            "61-90d",
-            ">90d",
-        ]
-        res_totals = grouped_res.groupby("resolution_bucket", dropna=False, observed=False)[
-            "count"
-        ].sum()
+        res_order = list(OPEN_AGE_BUCKET_LABELS)
+        res_totals = grouped_res.groupby("age_bucket", dropna=False, observed=False)["count"].sum()
         _add_bar_totals(
             fig,
             x_values=res_order,
@@ -923,7 +759,7 @@ def _render_trend_chart(
             font_size=12,
         )
         fig = apply_plotly_bbva(fig, showlegend=True)
-        export_df = closed.copy(deep=False)
+        export_df = opened.copy(deep=False)
         _measure_export(
             key_prefix=f"trends::{chart_id}",
             filename_prefix="tendencias",

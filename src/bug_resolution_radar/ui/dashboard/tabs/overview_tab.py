@@ -233,6 +233,7 @@ def render_overview_tab(
         ordered_blocks=_overview_perf_order(summary_view),
         metrics_ms=perf_ms,
         budgets_ms=_overview_perf_budget(summary_view),
+        emit_captions=False,
     )
 
     # End-to-end snapshot aggregates KPI + Summary timings for overview tab control.
@@ -258,6 +259,7 @@ def render_overview_tab(
                 metrics_ms=overview_metrics,
                 budgets_ms=_overview_perf_budget(overview_view),
                 caption_prefix="Perf E2E",
+                emit_captions=False,
             )
 
 
@@ -631,4 +633,5 @@ def render_overview_kpis(
         ordered_blocks=_overview_perf_order(kpis_view),
         metrics_ms=perf_ms,
         budgets_ms=_overview_perf_budget(kpis_view),
+        emit_captions=False,
     )

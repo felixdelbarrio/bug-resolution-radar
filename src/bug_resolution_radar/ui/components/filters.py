@@ -536,7 +536,7 @@ def render_filters(
                     args=sync_args,
                     help=(
                         "Filtro quincenal operativo para visualizar bloques de "
-                        "nuevas/cerradas/maestras/otras."
+                        "nuevas/cerradas/foco abierto/otras incidencias."
                     ),
                 )
                 st.session_state[ISSUES_QUINCENAL_SCOPE_KEY] = normalize_quincenal_scope_label(

@@ -220,7 +220,7 @@ CHART_THEMES: Dict[str, str] = {
     "open_priority_pie": "Riesgo y exposición",
     "age_buckets": "Riesgo y exposición",
     "timeseries": "Ritmo del flujo",
-    "resolution_hist": "Capacidad de cierre",
+    "resolution_hist": "Envejecimiento del backlog",
 }
 
 CHART_BUSINESS_SUBTITLES: Dict[str, str] = {
@@ -228,7 +228,7 @@ CHART_BUSINESS_SUBTITLES: Dict[str, str] = {
     "open_priority_pie": "Qué parte del backlog demanda más atención",
     "age_buckets": "Qué volumen acumula mayor antigüedad",
     "timeseries": "Cómo evoluciona la carga semana a semana",
-    "resolution_hist": "Dónde se alarga el cierre de incidencias",
+    "resolution_hist": "Cuánto tiempo llevan abiertas las incidencias por prioridad",
 }
 
 

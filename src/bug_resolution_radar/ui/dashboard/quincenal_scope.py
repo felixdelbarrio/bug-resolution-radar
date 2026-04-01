@@ -9,6 +9,7 @@ import streamlit as st
 
 from bug_resolution_radar.analytics.period_summary import (
     build_country_quincenal_result,
+    open_issue_grouping,
     source_label_map,
 )
 from bug_resolution_radar.config import Settings
@@ -22,8 +23,10 @@ QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT = (
     "Días de resolución incidencias cerradas en la quincena actual"
 )
 QUINCENAL_SCOPE_OPEN_TOTAL = "Abiertas totales"
+# Legacy canonical (kept for backward compatibility).
 QUINCENAL_SCOPE_MAESTRAS_OPEN = "Maestras abiertas"
-QUINCENAL_SCOPE_OTHERS_OPEN = "Otras abiertas"
+QUINCENAL_SCOPE_CRITICAL_HIGH_OPEN = "Incidencias con criticidad alta"
+QUINCENAL_SCOPE_OTHERS_OPEN = "Otras incidencias"
 
 _LEGACY_LABEL_TO_CANONICAL: Dict[str, str] = {
     "Nuevas (quincena actual)": QUINCENAL_SCOPE_CREATED_CURRENT,
@@ -31,6 +34,8 @@ _LEGACY_LABEL_TO_CANONICAL: Dict[str, str] = {
     "Nuevas (acumulado)": QUINCENAL_SCOPE_CREATED_MONTH,
     "Cerradas (quincena actual)": QUINCENAL_SCOPE_CLOSED_CURRENT,
     "Resolución (cerradas ahora)": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
+    "Otras abiertas": QUINCENAL_SCOPE_OTHERS_OPEN,
+    "Incidencias con criticidad alta abiertas": QUINCENAL_SCOPE_CRITICAL_HIGH_OPEN,
 }
 
 
@@ -54,14 +59,19 @@ def _issue_keys(df: pd.DataFrame | None) -> List[str]:
 
 
 def should_show_open_split(*, maestras_total: int, others_total: int, open_total: int) -> bool:
-    """Return True when maestra/other open split adds distinct value."""
+    """Return True when open focus/other split adds distinct value."""
     maestras = max(int(maestras_total or 0), 0)
     others = max(int(others_total or 0), 0)
     open_total_safe = max(int(open_total or 0), 0)
     return not (maestras == 0 and others == open_total_safe)
 
 
-def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> Dict[str, List[str]]:
+def quincenal_scope_options(
+    df: pd.DataFrame,
+    *,
+    settings: Settings | None,
+    reference_day: pd.Timestamp | None = None,
+) -> Dict[str, List[str]]:
     """Return quincenal issue subsets for the current workspace scope."""
     if settings is None or df is None or df.empty:
         return {QUINCENAL_SCOPE_ALL: []}
@@ -86,15 +96,18 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         country=country,
         source_ids=source_ids,
         source_label_by_id=labels,
+        reference_day=reference_day,
     )
     groups = result.aggregate.groups
     summary = result.aggregate.summary
-    open_total_df = pd.concat([groups.maestras_open, groups.others_open], ignore_index=True).copy(
+    focus_label = str(summary.open_focus_label or open_issue_grouping(settings).focus_scope_label)
+    other_label = str(summary.open_other_label or open_issue_grouping(settings).other_scope_label)
+    open_total_df = pd.concat([groups.open_focus, groups.open_other], ignore_index=True).copy(
         deep=False
     )
     show_open_split = should_show_open_split(
-        maestras_total=int(summary.maestras_total),
-        others_total=int(summary.others_total),
+        maestras_total=int(summary.open_focus_total),
+        others_total=int(summary.open_other_total),
         open_total=int(summary.open_total),
     )
     options: Dict[str, List[str]] = {
@@ -107,8 +120,8 @@ def quincenal_scope_options(df: pd.DataFrame, *, settings: Settings | None) -> D
         QUINCENAL_SCOPE_OPEN_TOTAL: _issue_keys(open_total_df),
     }
     if show_open_split:
-        options[QUINCENAL_SCOPE_MAESTRAS_OPEN] = _issue_keys(groups.maestras_open)
-        options[QUINCENAL_SCOPE_OTHERS_OPEN] = _issue_keys(groups.others_open)
+        options[focus_label] = _issue_keys(groups.open_focus)
+        options[other_label] = _issue_keys(groups.open_other)
     return {label: keys for label, keys in options.items() if label == QUINCENAL_SCOPE_ALL or keys}
 
 

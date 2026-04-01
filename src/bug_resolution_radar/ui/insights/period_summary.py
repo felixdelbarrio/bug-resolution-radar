@@ -13,28 +13,17 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.theme.design_tokens import (
-    BBVA_GOAL_ACCENT_7,
-    BBVA_LIGHT,
-    BBVA_SIGNAL_GREEN_1,
-    BBVA_SIGNAL_GREEN_2,
-    BBVA_SIGNAL_ORANGE_1,
-    BBVA_SIGNAL_ORANGE_2,
-    BBVA_SIGNAL_RED_1,
-    hex_to_rgba,
-)
 from bug_resolution_radar.ui.components.actionable_cards import (
     ActionableCardItem,
     render_actionable_card_grid,
+    tone_color_css,
 )
 from bug_resolution_radar.ui.dashboard.quincenal_scope import (
     QUINCENAL_SCOPE_CLOSED_CURRENT,
     QUINCENAL_SCOPE_CREATED_CURRENT,
     QUINCENAL_SCOPE_CREATED_MONTH,
     QUINCENAL_SCOPE_CREATED_PREVIOUS,
-    QUINCENAL_SCOPE_MAESTRAS_OPEN,
     QUINCENAL_SCOPE_OPEN_TOTAL,
-    QUINCENAL_SCOPE_OTHERS_OPEN,
     QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
     normalize_quincenal_scope_label,
     should_show_open_split,
@@ -92,22 +81,22 @@ def _inject_period_summary_layout_css() -> None:
     )
 
 
-def _inject_period_group_signal_css(*, container_key: str, color_hex: str) -> None:
-    tint = hex_to_rgba(color_hex, 0.26, fallback=color_hex)
+def _inject_period_group_signal_css(*, container_key: str, color_css: str) -> None:
+    tint = f"color-mix(in srgb, {color_css} 28%, transparent)"
     st.markdown(
         f"""
         <style>
           .st-key-{container_key} div[data-testid="stExpander"] {{
             box-shadow:
-              inset 4px 0 0 {color_hex},
+              inset 4px 0 0 {color_css},
               inset 0 0 0 1px {tint};
           }}
           .st-key-{container_key} div[data-testid="stExpander"] summary p {{
-            color: {color_hex} !important;
+            color: {color_css} !important;
             font-weight: 760 !important;
           }}
           .st-key-{container_key} div[data-testid="stExpander"] summary svg {{
-            color: {color_hex} !important;
+            color: {color_css} !important;
           }}
         </style>
         """,
@@ -117,23 +106,35 @@ def _inject_period_group_signal_css(*, container_key: str, color_hex: str) -> No
 
 def _period_group_signal_color(label: str) -> str:
     token = str(label or "").strip().lower()
-    if "quincena previa" in token:
-        return BBVA_SIGNAL_ORANGE_1
+    if token == QUINCENAL_SCOPE_CREATED_CURRENT.lower():
+        return tone_color_css("risk")
+    if token in {
+        QUINCENAL_SCOPE_CLOSED_CURRENT.lower(),
+        QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT.lower(),
+    }:
+        return tone_color_css("flow")
+    if token in {
+        QUINCENAL_SCOPE_OPEN_TOTAL.lower(),
+        QUINCENAL_SCOPE_CREATED_PREVIOUS.lower(),
+    }:
+        return tone_color_css("warning")
+    if token == QUINCENAL_SCOPE_CREATED_MONTH.lower():
+        return tone_color_css("quality")
     if "quincena actual" in token and "creadas" in token:
-        return BBVA_SIGNAL_RED_1
+        return tone_color_css("risk")
+    if "cerradas en la quincena" in token or "resolución" in token:
+        return tone_color_css("flow")
+    if (
+        "abiertas" in token
+        or "maestras" in token
+        or "criticidad alta" in token
+        or "otras incidencias" in token
+        or "quincena previa" in token
+    ):
+        return tone_color_css("warning")
     if "mes actual" in token:
-        return BBVA_GOAL_ACCENT_7
-    if "cerradas en la quincena" in token and "resolución" not in token:
-        return BBVA_SIGNAL_GREEN_1
-    if "resolución" in token:
-        return BBVA_SIGNAL_GREEN_2
-    if "maestras" in token:
-        return BBVA_SIGNAL_ORANGE_2
-    if "otras" in token:
-        return BBVA_LIGHT.ink_muted
-    if "abiertas totales" in token:
-        return BBVA_SIGNAL_ORANGE_2
-    return BBVA_LIGHT.serene_blue
+        return tone_color_css("quality")
+    return tone_color_css("quality")
 
 
 def _fmt_delta(value: float | None) -> str:
@@ -230,27 +231,38 @@ def _render_issue_group(
     help_text: str = "",
     source_col: str | None = "source",
     zoom_label: str | None = None,
+    age_days_col: str | None = None,
+    sort_by_col: str | None = None,
+    sort_desc: bool = False,
 ) -> None:
-    suffix = f" ({help_text})" if help_text else ""
     scope_label = str(zoom_label or title or "").strip() or title
     scope_slug = _slug_for_key(scope_label)
     signal_color = _period_group_signal_color(scope_label)
     container_key = f"period_summary_group_signal_{scope_slug}"
     with st.container(key=container_key):
-        _inject_period_group_signal_css(container_key=container_key, color_hex=signal_color)
-        with st.expander(f"{title}: {count}{suffix}", expanded=False):
+        _inject_period_group_signal_css(container_key=container_key, color_css=signal_color)
+        with st.expander(f"{title}: {count}", expanded=False):
             if df is None or df.empty:
                 st.caption("Sin incidencias en este bloque.")
                 return
-            rows_total = int(len(df))
+            view_df = df
+            if sort_by_col and sort_by_col in df.columns:
+                view_df = df.sort_values(
+                    by=sort_by_col,
+                    ascending=not sort_desc,
+                    na_position="last",
+                    kind="mergesort",
+                    key=lambda col: pd.to_numeric(col, errors="coerce"),
+                )
+            rows_total = int(len(view_df))
             top_status = (
-                str(df["status"].fillna("").astype(str).value_counts().index[0]).strip()
-                if "status" in df.columns and rows_total > 0
+                str(view_df["status"].fillna("").astype(str).value_counts().index[0]).strip()
+                if "status" in view_df.columns and rows_total > 0
                 else "(sin estado)"
             )
             top_priority = (
-                str(df["priority"].fillna("").astype(str).value_counts().index[0]).strip()
-                if "priority" in df.columns and rows_total > 0
+                str(view_df["priority"].fillna("").astype(str).value_counts().index[0]).strip()
+                if "priority" in view_df.columns and rows_total > 0
                 else "(sin priority)"
             )
             chips = [
@@ -273,14 +285,15 @@ def _render_issue_group(
                         key=f"period_summary_group_open_btn::{scope_slug}",
                         width="stretch",
                     ):
-                        _jump_to_issues_with_scope(label=scope_label, df=df)
+                        _jump_to_issues_with_scope(label=scope_label, df=view_df)
 
             cards_html = issue_cards_html_from_df(
-                df,
+                view_df,
                 key_to_url=key_to_url,
                 key_to_meta=key_to_meta,
                 summary_col="summary",
                 assignee_col="assignee",
+                age_days_col=age_days_col,
                 source_col=source_col,
                 summary_max_chars=180,
                 limit=60,
@@ -289,7 +302,7 @@ def _render_issue_group(
                 st.markdown(cards_html, unsafe_allow_html=True)
             else:
                 st.dataframe(
-                    df.loc[:, _visible_columns(df)].copy(deep=False),
+                    view_df.loc[:, _visible_columns(view_df)].copy(deep=False),
                     hide_index=True,
                     width="stretch",
                 )
@@ -338,11 +351,11 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     st.caption(f"{summary.scope_label or selected_country} · {format_window_label(summary.window)}")
 
     open_total_group = pd.concat(
-        [groups.maestras_open, groups.others_open], axis=0, ignore_index=True
+        [groups.open_focus, groups.open_other], axis=0, ignore_index=True
     ).copy(deep=False)
     show_open_split = should_show_open_split(
-        maestras_total=int(summary.maestras_total),
-        others_total=int(summary.others_total),
+        maestras_total=int(summary.open_focus_total),
+        others_total=int(summary.open_other_total),
         open_total=int(summary.open_total),
     )
 
@@ -404,29 +417,29 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
         cards.extend(
             [
                 ActionableCardItem(
-                    card_id="maestras",
-                    kicker="Insights · Maestras",
-                    metric=f"{int(summary.maestras_total):,}",
-                    detail="Abiertas marcadas como maestras",
-                    link_label="Maestras abiertas ↗",
+                    card_id="open_focus",
+                    kicker=str(summary.open_focus_card_kicker),
+                    metric=f"{int(summary.open_focus_total):,}",
+                    detail=str(summary.open_focus_card_detail),
+                    link_label=f"{summary.open_focus_label} ↗",
                     tone="warning",
                     on_click=_jump_to_issues_with_keys,
                     click_kwargs={
-                        "label": QUINCENAL_SCOPE_MAESTRAS_OPEN,
-                        "keys": _issue_keys(groups.maestras_open),
+                        "label": str(summary.open_focus_label),
+                        "keys": _issue_keys(groups.open_focus),
                     },
                 ),
                 ActionableCardItem(
                     card_id="others",
-                    kicker="Insights · Otras",
-                    metric=f"{int(summary.others_total):,}",
-                    detail="Abiertas no maestras",
-                    link_label="Otras abiertas ↗",
+                    kicker=str(summary.open_other_card_kicker),
+                    metric=f"{int(summary.open_other_total):,}",
+                    detail=str(summary.open_other_card_detail),
+                    link_label=f"{summary.open_other_label} ↗",
                     tone="warning",
                     on_click=_jump_to_issues_with_keys,
                     click_kwargs={
-                        "label": QUINCENAL_SCOPE_OTHERS_OPEN,
-                        "keys": _issue_keys(groups.others_open),
+                        "label": str(summary.open_other_label),
+                        "keys": _issue_keys(groups.open_other),
                     },
                 ),
             ]
@@ -440,20 +453,20 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
     with st.container(key="period_summary_groups"):
         if show_open_split:
             _render_issue_group(
-                "Maestras abiertas",
-                summary.maestras_total,
-                groups.maestras_open,
+                str(summary.open_focus_label),
+                summary.open_focus_total,
+                groups.open_focus,
                 key_to_url=key_to_url,
                 key_to_meta=key_to_meta,
-                zoom_label="Maestras abiertas",
+                zoom_label=str(summary.open_focus_label),
             )
             _render_issue_group(
-                "Otras abiertas",
-                summary.others_total,
-                groups.others_open,
+                str(summary.open_other_label),
+                summary.open_other_total,
+                groups.open_other,
                 key_to_url=key_to_url,
                 key_to_meta=key_to_meta,
-                zoom_label="Otras abiertas",
+                zoom_label=str(summary.open_other_label),
             )
         _render_issue_group(
             "Creadas en la quincena previa",
@@ -500,10 +513,15 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             help_text="cerradas quincena actual",
             source_col=None,
             zoom_label=QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
+            age_days_col="resolution_days",
+            sort_by_col="resolution_days",
+            sort_desc=True,
         )
 
     if scope_mode == "country" and result.by_source:
         st.markdown("##### Corte por origen seleccionado")
+        focus_col_label = str(summary.open_focus_label or "foco abierto")
+        other_col_label = str(summary.open_other_label or "otras incidencias")
         rows: List[Dict[str, object]] = []
         for source_id in result.source_ids:
             source_scope = result.by_source.get(source_id)
@@ -514,8 +532,8 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
                 {
                     "origen": labels.get(source_id, source_id),
                     "abiertas": int(source_summary.open_total),
-                    "maestras": int(source_summary.maestras_total),
-                    "otras": int(source_summary.others_total),
+                    focus_col_label: int(source_summary.open_focus_total),
+                    other_col_label: int(source_summary.open_other_total),
                     "nuevas_ahora": int(source_summary.new_now),
                     "cerradas_ahora": int(source_summary.closed_now),
                     "resolucion_dias_ahora": _fmt_days(source_summary.resolution_days_now),

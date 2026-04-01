@@ -27,6 +27,32 @@ def _safe_df(x: Any) -> pd.DataFrame:
     return x if isinstance(x, pd.DataFrame) else pd.DataFrame()
 
 
+def _scope_reference_day(df: pd.DataFrame) -> pd.Timestamp | None:
+    safe = _safe_df(df)
+    if safe.empty:
+        return None
+    max_candidates: list[pd.Timestamp] = []
+    for col in ("updated", "resolved", "created"):
+        if col not in safe.columns:
+            continue
+        ts = pd.to_datetime(safe[col], errors="coerce", utc=True)
+        if ts.notna().any():
+            max_ts = ts.max()
+            if pd.notna(max_ts):
+                max_candidates.append(pd.Timestamp(max_ts))
+    if not max_candidates:
+        return None
+    picked = max(max_candidates)
+    try:
+        picked = picked.tz_convert(None)
+    except Exception:
+        try:
+            picked = picked.tz_localize(None)
+        except Exception:
+            pass
+    return picked.normalize()
+
+
 def _insights_quincenal_df(*, settings: Settings, dff: pd.DataFrame) -> pd.DataFrame:
     safe = _safe_df(dff)
     if safe.empty:
@@ -39,7 +65,11 @@ def _insights_quincenal_df(*, settings: Settings, dff: pd.DataFrame) -> pd.DataF
     ):
         return safe
 
-    options = quincenal_scope_options(safe, settings=settings)
+    options = quincenal_scope_options(
+        safe,
+        settings=settings,
+        reference_day=_scope_reference_day(safe),
+    )
     selected_keys: list[str] = []
     for label in (QUINCENAL_SCOPE_CREATED_CURRENT, QUINCENAL_SCOPE_CLOSED_CURRENT):
         selected_keys.extend(options.get(label, []))
