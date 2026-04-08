@@ -62,6 +62,14 @@ def _build_filename(prefix: str, *, suffix: str = "", ext: str = "csv") -> str:
     return f"{pref}{'_' + suf if suf else ''}_{ts}.{dot_ext}"
 
 
+def _build_stable_filename(prefix: str, *, suffix: str = "", ext: str = "csv") -> str:
+    """Build deterministic filename without timestamp (stable across reruns)."""
+    pref = _safe_filename(prefix)
+    suf = _safe_filename(suffix) if suffix else ""
+    dot_ext = (ext or "").strip().lstrip(".") or "txt"
+    return f"{pref}{'_' + suf if suf else ''}.{dot_ext}"
+
+
 def build_download_filename(prefix: str, *, suffix: str = "", ext: str = "csv") -> str:
     """Public wrapper for timestamped export filenames."""
     return _build_filename(prefix, suffix=suffix, ext=ext)
@@ -697,7 +705,8 @@ def render_minimal_export_actions(
             {
                 "label": "Excel",
                 "data": df_to_excel_bytes(csv_safe, sheet_name="Datos"),
-                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="xlsx"),
+                # Stable filename avoids rotating Streamlit media ids on every rerun.
+                "file_name": _build_stable_filename(filename_prefix, suffix=suffix, ext="xlsx"),
                 "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "key": f"{key_prefix}::dl_csv_min",
                 "disabled": False,
@@ -709,7 +718,7 @@ def render_minimal_export_actions(
             {
                 "label": "HTML",
                 "data": fig_html,
-                "file_name": _build_filename(filename_prefix, suffix=suffix, ext="html"),
+                "file_name": _build_stable_filename(filename_prefix, suffix=suffix, ext="html"),
                 "mime": "text/html",
                 "key": f"{key_prefix}::dl_html_min",
                 "disabled": False,

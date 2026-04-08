@@ -4,6 +4,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.insights import (
     _tokenize_summary,
+    build_theme_render_order,
     build_theme_daily_trend,
     build_theme_fortnight_trend,
     find_similar_issue_clusters,
@@ -184,6 +185,23 @@ def test_sort_theme_table_by_volume_applies_shared_ordering_rule() -> None:
     out = sort_theme_table_by_volume(top_tbl)
     assert out["tema"].tolist() == ["Pagos", "Monetarias", "Transferencias", "Otros"]
     assert out["open_count"].tolist() == [30, 15, 4, 67]
+
+
+def test_build_theme_render_order_aligns_stack_with_legend_and_others_on_x_axis() -> None:
+    order = build_theme_render_order(
+        ["Otros", "Pagos", "Monetarias", "Login y acceso"],
+        counts_by_label={"Otros": 67, "Pagos": 30, "Monetarias": 15, "Login y acceso": 4},
+        others_last=True,
+        others_at_x_axis=True,
+    )
+
+    assert list(order.display_order) == ["Pagos", "Monetarias", "Login y acceso", "Otros"]
+    assert list(order.stack_order_bottom_to_top) == [
+        "Otros",
+        "Login y acceso",
+        "Monetarias",
+        "Pagos",
+    ]
 
 
 def test_build_theme_trends_whitelist_moves_others_to_last_position() -> None:
