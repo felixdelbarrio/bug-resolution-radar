@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import unicodedata
 import inspect
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -233,6 +233,11 @@ def _critical_priority_mask(df: pd.DataFrame) -> pd.Series:
         return pd.Series(False, index=safe.index, dtype=bool)
     normalized = safe["priority"].fillna("").astype(str).map(_compact_token)
     return normalized.isin(_CRITICAL_PRIORITY_TOKENS).fillna(False).astype(bool)
+
+
+def critical_priority_mask(df: pd.DataFrame) -> pd.Series:
+    """Public helper: high-criticality mask (Impedimento/High/Highest)."""
+    return _critical_priority_mask(df)
 
 
 def _is_truthy_flag(value: object) -> bool:

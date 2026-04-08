@@ -209,12 +209,7 @@ def infer_root_cause_label(summary: object) -> str:
         if any(str(token) in txt for token in keywords):
             return label
 
-    tokens = [
-        t for t in re.findall(r"[a-z0-9]+", txt) if len(t) >= 4 and t not in _ROOT_CAUSE_STOPWORDS
-    ]
-    if not tokens:
-        return "Sin detalle suficiente"
-    return f"Patrón: {' '.join(tokens[:2])}"
+    return "Sin detalle suficiente"
 
 
 def summarize_root_causes(
