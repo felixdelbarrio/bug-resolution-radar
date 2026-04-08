@@ -300,7 +300,51 @@ def _append_slide_clone_from_source(prs: Any, *, source_slide: Any) -> Any:
                 if attr_name.startswith(_REL_NS) and attr_value in rid_map:
                     node.set(attr_name, rid_map[attr_value])
         dest.shapes._spTree.insert_element_before(clone, "p:extLst")
+    _apply_effective_background_from_source(dest_slide=dest, source_slide=source_slide)
     return dest
+
+
+def _solid_background_rgb(shape_container: Any) -> RGBColor | None:
+    if shape_container is None:
+        return None
+    try:
+        fill = shape_container.background.fill
+    except Exception:
+        return None
+    try:
+        if int(fill.type or 0) != 1:  # SOLID
+            return None
+    except Exception:
+        return None
+    try:
+        rgb = getattr(fill.fore_color, "rgb", None)
+    except Exception:
+        rgb = None
+    if rgb is None:
+        return None
+    return cast(RGBColor, rgb)
+
+
+def _effective_background_rgb(source_slide: Any) -> RGBColor:
+    for container in (
+        source_slide,
+        getattr(source_slide, "slide_layout", None),
+        getattr(getattr(source_slide, "slide_layout", None), "slide_master", None),
+    ):
+        rgb = _solid_background_rgb(container)
+        if rgb is not None:
+            return rgb
+    return RGBColor(247, 248, 248)
+
+
+def _apply_effective_background_from_source(*, dest_slide: Any, source_slide: Any) -> None:
+    rgb = _effective_background_rgb(source_slide)
+    try:
+        fill = dest_slide.background.fill
+        fill.solid()
+        fill.fore_color.rgb = rgb
+    except Exception:
+        return
 
 
 def _shape_or_none(slide: Any, index_1_based: int) -> Any | None:
@@ -435,6 +479,19 @@ def _set_shape_text_strict(slide: Any, index_1_based: int, text: str) -> None:
         except Exception:
             pass
     _set_shape_text_fit(shape)
+
+
+def _set_shape_run_color(slide: Any, index_1_based: int, *, color_rgb: RGBColor) -> None:
+    shape = _shape_or_none(slide, index_1_based)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    for paragraph in list(tf.paragraphs):
+        for run in list(paragraph.runs):
+            try:
+                run.font.color.rgb = color_rgb
+            except Exception:
+                continue
 
 
 def _shape_table_or_none(slide: Any, index_1_based: int) -> Any | None:
@@ -583,6 +640,39 @@ def _tune_table_font(
                 tf.word_wrap = True
             except Exception:
                 pass
+
+
+def _style_table_contrast(
+    slide: Any,
+    *,
+    table_shape_index: int,
+    header_bg_rgb: RGBColor = RGBColor(0, 19, 145),
+    header_text_rgb: RGBColor = RGBColor(255, 255, 255),
+    body_bg_rgb: RGBColor = RGBColor(255, 255, 255),
+    body_text_rgb: RGBColor = RGBColor(0, 19, 145),
+) -> None:
+    shape = _shape_table_or_none(slide, table_shape_index)
+    if shape is None:
+        return
+    table = shape.table
+    for ridx in range(len(table.rows)):
+        for cidx in range(len(table.columns)):
+            cell = table.cell(ridx, cidx)
+            try:
+                fill = cell.fill
+                fill.solid()
+                fill.fore_color.rgb = header_bg_rgb if ridx == 0 else body_bg_rgb
+            except Exception:
+                pass
+            tf = getattr(cell, "text_frame", None)
+            if tf is None:
+                continue
+            for paragraph in list(tf.paragraphs):
+                for run in list(paragraph.runs):
+                    try:
+                        run.font.color.rgb = header_text_rgb if ridx == 0 else body_text_rgb
+                    except Exception:
+                        continue
 
 
 def _set_paragraph_value_after_colon(

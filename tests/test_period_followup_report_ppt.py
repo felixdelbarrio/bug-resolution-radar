@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_AUTO_SIZE
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
@@ -106,6 +107,10 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
     )
     assert "quincena" in s9_text.lower()
     assert "funcionalidad" in s10_text.lower()
+    # Functional follow-up slides must preserve light background from source template.
+    bg_fill = prs.slides[9].background.fill
+    assert int(bg_fill.type or 0) == 1
+    assert bg_fill.fore_color.rgb == RGBColor(247, 248, 248)
 
 
 def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Path) -> None:
