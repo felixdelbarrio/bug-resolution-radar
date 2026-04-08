@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.insights import (
+    build_theme_render_order,
     build_theme_daily_trend,
     build_theme_fortnight_trend,
     is_other_theme_label,
@@ -77,16 +78,13 @@ def _stacked_theme_order(
     *,
     theme_count_by_label: dict[str, int] | None = None,
 ) -> list[str]:
-    ordered = order_theme_labels_by_volume(
+    ordering = build_theme_render_order(
         theme_order,
         counts_by_label=theme_count_by_label,
         others_last=True,
+        others_at_x_axis=True,
     )
-    if not ordered:
-        return []
-    non_other = [theme for theme in ordered if not _is_others_label(theme)]
-    other = [theme for theme in ordered if _is_others_label(theme)]
-    return non_other + other
+    return list(ordering.stack_order_bottom_to_top)
 
 
 def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -> pd.DataFrame:
@@ -433,18 +431,19 @@ def _render_theme_trend_chart(
     if not theme_order:
         return
 
-    theme_order = _stacked_theme_order(
+    ordering = build_theme_render_order(
         theme_order,
-        theme_count_by_label=theme_count_by_label,
+        counts_by_label=theme_count_by_label,
+        others_last=True,
+        others_at_x_axis=True,
     )
-    if not theme_order:
+    legend_order = list(ordering.display_order)
+    stacked_order = list(ordering.stack_order_bottom_to_top)
+    if not legend_order or not stacked_order:
         return
 
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
-    # Plotly stacks bars in insertion order (bottom -> top).
-    # This order is normalized to always keep non-"Otros" themes first by volume
-    # and "Otros" as the topmost (last) segment.
-    stacked_order = list(theme_order)
+    legend_rank = {theme: idx for idx, theme in enumerate(legend_order)}
     axis_labels = axis[x_label_col].astype(str).tolist()
     total_by_label = (
         trend_df.groupby(x_label_col, as_index=True)["issues_value"]
@@ -472,7 +471,7 @@ def _render_theme_trend_chart(
                 textposition="inside",
                 textfont=dict(color=_segment_text_color(color_hex, dark_mode=dark_mode), size=11),
                 customdata=total_custom,
-                legendrank=int(theme_order.index(theme)),
+                legendrank=int(legend_rank.get(theme, len(legend_rank))),
                 hovertemplate=(
                     "Tema: %{fullData.name}<br>"
                     f"{x_title}: %{{x}}<br>"
@@ -607,18 +606,21 @@ def render_top_topics_tab(
             csv_df=top_tbl.copy(deep=False),
         ),
     )
-    selected_themes = order_theme_labels_by_volume(
-        top_tbl["tema"].tolist(),
-        counts_by_label=dict(
-            zip(
-                top_tbl["tema"].astype(str).tolist(),
-                pd.to_numeric(top_tbl["open_count"], errors="coerce")
-                .fillna(0)
-                .astype(int)
-                .tolist(),
-            )
-        ),
-        others_last=True,
+    selected_themes = list(
+        build_theme_render_order(
+            top_tbl["tema"].tolist(),
+            counts_by_label=dict(
+                zip(
+                    top_tbl["tema"].astype(str).tolist(),
+                    pd.to_numeric(top_tbl["open_count"], errors="coerce")
+                    .fillna(0)
+                    .astype(int)
+                    .tolist(),
+                )
+            ),
+            others_last=True,
+            others_at_x_axis=True,
+        ).display_order
     )
     theme_count_by_label = dict(
         zip(

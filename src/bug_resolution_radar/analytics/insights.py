@@ -218,6 +218,53 @@ def order_theme_labels_by_volume(
     )
 
 
+@dataclass(frozen=True)
+class ThemeRenderOrder:
+    """Canonical theme ordering for listings/legends and Plotly stacked traces."""
+
+    display_order: tuple[str, ...]
+    stack_order_bottom_to_top: tuple[str, ...]
+
+
+def build_theme_render_order(
+    labels: Iterable[object],
+    *,
+    counts_by_label: Mapping[object, object] | pd.Series | None = None,
+    others_last: bool = True,
+    others_at_x_axis: bool = True,
+) -> ThemeRenderOrder:
+    """
+    Build a single source of truth for theme ordering across UI and reports.
+
+    - `display_order`: order for expanders/tables/legends.
+    - `stack_order_bottom_to_top`: Plotly insertion order for stacked bars.
+      When `others_at_x_axis=True`, this order is reversed so "Otros" stays at
+      the bottom (touching X axis) while legend/listing order remains unchanged.
+    """
+    display_order = tuple(
+        order_theme_labels_by_volume(
+            labels,
+            counts_by_label=counts_by_label,
+            others_last=others_last,
+        )
+    )
+    if not display_order:
+        return ThemeRenderOrder(display_order=(), stack_order_bottom_to_top=())
+
+    if others_at_x_axis:
+        reversed_order = list(reversed(display_order))
+        other_labels = [label for label in reversed_order if is_other_theme_label(label)]
+        non_other_labels = [label for label in reversed_order if not is_other_theme_label(label)]
+        stack_order = tuple(other_labels + non_other_labels)
+    else:
+        stack_order = display_order
+
+    return ThemeRenderOrder(
+        display_order=display_order,
+        stack_order_bottom_to_top=stack_order,
+    )
+
+
 def sort_theme_table_by_volume(
     top_tbl: pd.DataFrame,
     *,
@@ -236,11 +283,12 @@ def sort_theme_table_by_volume(
     work[label_col] = labels
     work[count_col] = counts
 
-    ordered_labels = order_theme_labels_by_volume(
+    render_order = build_theme_render_order(
         labels.tolist(),
         counts_by_label=dict(zip(labels.tolist(), counts.tolist())),
         others_last=others_last,
     )
+    ordered_labels = list(render_order.display_order)
     if not ordered_labels:
         return work.loc[:, top_tbl.columns].reset_index(drop=True)
 
