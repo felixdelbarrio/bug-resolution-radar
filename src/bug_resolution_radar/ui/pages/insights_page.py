@@ -217,7 +217,9 @@ def _render_insights_combo_panel(
     initial_ctx = build_insights_combo_context(
         accumulated_df=accumulated_df,
         quincenal_df=quincenal_df,
-        view_mode=st.session_state.get(_INSIGHTS_VIEW_MODE_WIDGET_KEY, INSIGHTS_VIEW_MODE_QUINCENAL),
+        view_mode=st.session_state.get(
+            _INSIGHTS_VIEW_MODE_WIDGET_KEY, INSIGHTS_VIEW_MODE_QUINCENAL
+        ),
         selected_statuses=list(st.session_state.get(_INSIGHTS_STATUS_WIDGET_KEY) or []),
         selected_priorities=list(st.session_state.get(_INSIGHTS_PRIORITY_WIDGET_KEY) or []),
         selected_functionalities=list(
@@ -278,9 +280,7 @@ def _render_insights_combo_panel(
                 options=list(initial_ctx.functionality_options),
                 key=_INSIGHTS_FUNCTIONALITY_WIDGET_KEY,
                 placeholder="Sin valor (todas)",
-                help=(
-                    "Listado dinámico según la vista elegida y los filtros de prioridad/estado."
-                ),
+                help=("Listado dinámico según la vista elegida y los filtros de prioridad/estado."),
             )
         final_ctx = build_insights_combo_context(
             accumulated_df=accumulated_df,

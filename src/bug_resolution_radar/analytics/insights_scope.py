@@ -265,7 +265,9 @@ def build_insights_combo_context(
         )
 
     status_norm = (
-        _normalize_text_col(scoped["status"], "(sin estado)") if "status" in scoped.columns else None
+        _normalize_text_col(scoped["status"], "(sin estado)")
+        if "status" in scoped.columns
+        else None
     )
     priority_norm = (
         _normalize_text_col(scoped["priority"], "(sin priority)")
@@ -274,7 +276,9 @@ def build_insights_combo_context(
     )
 
     status_options = (
-        tuple(_order_status_values(status_norm.unique().tolist())) if status_norm is not None else ()
+        tuple(_order_status_values(status_norm.unique().tolist()))
+        if status_norm is not None
+        else ()
     )
     priority_options = (
         tuple(_order_priority_values(priority_norm.unique().tolist()))
@@ -318,4 +322,3 @@ def build_insights_combo_context(
         selected_priorities=tuple(priorities),
         selected_functionalities=tuple(functionalities),
     )
-

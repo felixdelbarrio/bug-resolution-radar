@@ -13,7 +13,12 @@ def test_insights_combo_context_default_status_excludes_core_final_states() -> N
     df = pd.DataFrame(
         [
             {"key": "A-1", "status": "New", "priority": "High", "summary": "Error de pagos"},
-            {"key": "A-2", "status": "Analysing", "priority": "Medium", "summary": "Error de pagos"},
+            {
+                "key": "A-2",
+                "status": "Analysing",
+                "priority": "Medium",
+                "summary": "Error de pagos",
+            },
             {"key": "A-3", "status": "Accepted", "priority": "Low", "summary": "Error de pagos"},
             {
                 "key": "A-4",
@@ -85,4 +90,3 @@ def test_insights_combo_context_applies_selected_functionalities() -> None:
     assert "__insights_theme" in ctx.filtered_df.columns
     assert set(ctx.filtered_df["__insights_theme"].tolist()) == {"Pagos"}
     assert ctx.filtered_df["key"].tolist() == ["A-1"]
-
