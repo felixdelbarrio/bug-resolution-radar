@@ -11,13 +11,18 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.insights import (
-    build_theme_render_order,
     build_theme_daily_trend,
     build_theme_fortnight_trend,
+    build_theme_render_order,
     is_other_theme_label,
     order_theme_labels_by_volume,
     prepare_open_theme_payload,
     sort_theme_table_by_volume,
+)
+from bug_resolution_radar.analytics.topic_expandable_summary import (
+    RootCauseRank,
+    TopicFlowSummary,
+    build_topic_expandable_summaries,
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import (
@@ -396,6 +401,85 @@ def _inject_topic_expander_color_css(
     )
 
 
+def _topic_flow_html(flow: TopicFlowSummary, *, dark_mode: bool) -> str:
+    direction = str(getattr(flow, "direction", "stable") or "stable").strip().lower()
+    pct = float(getattr(flow, "pct_delta", 0.0) or 0.0)
+    created = int(getattr(flow, "created_count", 0) or 0)
+    resolved = int(getattr(flow, "resolved_count", 0) or 0)
+    window_days = int(getattr(flow, "window_days", 30) or 30)
+
+    if direction == "improving":
+        tone = BBVA_SIGNAL_GREEN_2 if dark_mode else BBVA_SIGNAL_GREEN_1
+        triangle = "▲"
+        label = "Mejora"
+    elif direction == "worsening":
+        tone = BBVA_SIGNAL_RED_2 if dark_mode else BBVA_SIGNAL_RED_1
+        triangle = "▼"
+        label = "Empeora"
+    else:
+        tone = BBVA_SIGNAL_YELLOW_1
+        triangle = "▶"
+        label = "Estable"
+
+    badge_bg = hex_to_rgba(tone, 0.22 if dark_mode else 0.18, fallback=tone)
+    badge_border = hex_to_rgba(tone, 0.64 if dark_mode else 0.52, fallback=tone)
+    detail_bg = hex_to_rgba(BBVA_LIGHT.serene_blue, 0.18 if dark_mode else 0.14, fallback="#2D73E8")
+    detail_border = hex_to_rgba(
+        BBVA_LIGHT.serene_blue, 0.42 if dark_mode else 0.36, fallback="#2D73E8"
+    )
+
+    return (
+        '<div style="display:flex; flex-wrap:wrap; gap:0.44rem; margin:0.26rem 0 0.28rem 0;">'
+        f'<span style="display:inline-flex; align-items:center; gap:0.3rem; border-radius:999px;'
+        f"padding:0.16rem 0.6rem; border:1px solid {badge_border}; background:{badge_bg};"
+        f'color:{tone}; font-weight:780; font-size:0.8rem;">'
+        f"{triangle} {label} {pct:.1f}%"
+        "</span>"
+        f'<span style="display:inline-flex; align-items:center; gap:0.3rem; border-radius:999px;'
+        f"padding:0.16rem 0.6rem; border:1px solid {detail_border}; background:{detail_bg};"
+        f"color:{BBVA_LIGHT.white if dark_mode else BBVA_LIGHT.midnight};"
+        f'font-weight:640; font-size:0.78rem;">'
+        f"Histórico {window_days}d · creadas {created} · resueltas {resolved}"
+        "</span>"
+        "</div>"
+    )
+
+
+def _topic_root_causes_html(
+    root_causes: tuple[RootCauseRank, ...],
+    *,
+    dark_mode: bool,
+) -> str:
+    if not root_causes:
+        return (
+            f'<div style="margin:0.08rem 0 0.36rem 0; color:{BBVA_LIGHT.white if dark_mode else BBVA_LIGHT.midnight};'
+            'opacity:0.86; font-size:0.8rem;">Causa raíz (heurística): sin señal suficiente.</div>'
+        )
+
+    rows = []
+    for idx, item in enumerate(root_causes[:3], start=1):
+        label = str(getattr(item, "label", "") or "").strip() or "Sin detalle"
+        count = int(getattr(item, "count", 0) or 0)
+        chip_bg = hex_to_rgba(
+            BBVA_LIGHT.electric_blue, 0.18 if dark_mode else 0.14, fallback="#0F5AE8"
+        )
+        chip_border = hex_to_rgba(
+            BBVA_LIGHT.electric_blue, 0.44 if dark_mode else 0.36, fallback="#0F5AE8"
+        )
+        rows.append(
+            f'<span style="display:inline-flex; align-items:center; gap:0.28rem; border-radius:999px;'
+            f"padding:0.14rem 0.52rem; border:1px solid {chip_border}; background:{chip_bg};"
+            f'color:{BBVA_LIGHT.white if dark_mode else BBVA_LIGHT.midnight}; font-size:0.76rem; font-weight:640;">'
+            f"{idx}) {label} · {count}"
+            "</span>"
+        )
+    return (
+        '<div style="display:flex; flex-wrap:wrap; gap:0.34rem; margin:0.06rem 0 0.44rem 0;">'
+        + "".join(rows)
+        + "</div>"
+    )
+
+
 def _render_theme_trend_chart(
     *,
     trend_df: pd.DataFrame,
@@ -630,10 +714,37 @@ def render_top_topics_tab(
     )
     dark_mode = bool(st.session_state.get("workspace_dark_mode", False))
     topic_color_map = _theme_color_map(theme_order=selected_themes, dark_mode=dark_mode)
+
+    history_source = safe_df(dff_history) if isinstance(dff_history, pd.DataFrame) else dff
+    topic_summaries: dict[str, Any] = {}
+    summary_sig_open = dataframe_signature(
+        tmp_open,
+        columns=("summary", "__theme", "status", "created", "resolved"),
+        salt="insights.top_topics.expandable_summary.open.v1",
+    )
+    summary_sig_history = dataframe_signature(
+        history_source,
+        columns=("summary", "created", "resolved", "status"),
+        salt="insights.top_topics.expandable_summary.history.v1",
+    )
+    topic_summary_payload, _ = cached_by_signature(
+        "insights.top_topics.expandable_summary",
+        f"{summary_sig_open}:{summary_sig_history}",
+        lambda: build_topic_expandable_summaries(
+            history_df=history_source,
+            open_df=tmp_open,
+            theme_col="__theme",
+            top_root_causes=3,
+            flow_window_days=30,
+        ),
+        max_entries=12,
+    )
+    if isinstance(topic_summary_payload, dict):
+        topic_summaries = topic_summary_payload
+
     trend_df = pd.DataFrame()
     trend_mode_label = "diaria"
     if use_accumulated_scope:
-        history_source = safe_df(dff_history) if isinstance(dff_history, pd.DataFrame) else dff
         history_open = open_only(history_source)
         if not history_open.empty and selected_themes:
             theme_token = "|".join(selected_themes)
@@ -745,6 +856,19 @@ def render_top_topics_tab(
                     unsafe_allow_html=True,
                 )
                 st.caption(build_topic_brief(topic=topic, sub_df=sub, total_open=total_open))
+                topic_summary = topic_summaries.get(topic)
+                if topic_summary is not None:
+                    flow = getattr(topic_summary, "flow", None)
+                    if flow is not None:
+                        st.markdown(
+                            _topic_flow_html(flow, dark_mode=dark_mode),
+                            unsafe_allow_html=True,
+                        )
+                    roots = tuple(getattr(topic_summary, "root_causes", ()) or ())
+                    st.markdown(
+                        _topic_root_causes_html(roots, dark_mode=dark_mode),
+                        unsafe_allow_html=True,
+                    )
                 if sub.empty or not col_exists(sub, "key"):
                     st.caption("No se han podido mapear issues individuales para este tema.")
                     continue
@@ -763,6 +887,7 @@ def render_top_topics_tab(
                     summary_col="summary",
                     assignee_col="assignee",
                     age_days_col="__age_days",
+                    include_root_cause=True,
                     summary_max_chars=160,
                     limit=20,
                 )

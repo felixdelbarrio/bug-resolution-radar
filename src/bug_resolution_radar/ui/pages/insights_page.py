@@ -362,10 +362,19 @@ def render(
             )
             scoped = _safe_df(combo_ctx.filtered_df)
             use_accumulated_scope = combo_ctx.view_mode == INSIGHTS_VIEW_MODE_ACCUMULATED
+            history_ctx = build_insights_combo_context(
+                accumulated_df=dff,
+                quincenal_df=dff_quincenal,
+                view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
+                selected_statuses=list(combo_ctx.selected_statuses),
+                selected_priorities=list(combo_ctx.selected_priorities),
+                selected_functionalities=list(combo_ctx.selected_functionalities),
+                apply_default_status_when_empty=False,
+            )
             render_top_topics_tab(
                 settings=settings,
                 dff_filtered=scoped,
-                dff_history=scoped,
+                dff_history=_safe_df(history_ctx.filtered_df),
                 kpis=kpis,
                 use_accumulated_scope=use_accumulated_scope,
                 header_left_render=None,
