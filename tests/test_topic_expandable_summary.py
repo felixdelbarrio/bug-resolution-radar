@@ -23,7 +23,10 @@ def test_infer_root_cause_label_detects_known_patterns() -> None:
 
 
 def test_infer_root_cause_label_uses_theme_fallback_for_unknown_text() -> None:
-    assert infer_root_cause_label("Error funcional no especificado en pagos") == "Fallo funcional en Pagos"
+    assert (
+        infer_root_cause_label("Error funcional no especificado en pagos")
+        == "Fallo funcional en Pagos"
+    )
 
 
 def test_summarize_root_causes_returns_top_k() -> None:

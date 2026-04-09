@@ -134,6 +134,49 @@ _ROOT_CAUSE_STOPWORDS: set[str] = {
     "no",
 }
 _OTHER_THEME_TOKENS: tuple[str, ...] = ("otros", "other")
+_FALLBACK_THEME_PREFIX = "Fallo funcional en "
+_SEMANTIC_HINT_TOKENS: tuple[str, ...] = (
+    "transfer",
+    "traspas",
+    "spei",
+    "api",
+    "backend",
+    "servicio",
+    "timeout",
+    "latenc",
+    "visual",
+    "interfaz",
+    "dashboard",
+    "render",
+    "login",
+    "token",
+    "sesion",
+    "otp",
+    "valid",
+    "campo",
+    "datos",
+    "mensaje",
+    "correo",
+    "sms",
+    "notific",
+    "senda",
+    "sit",
+    "host",
+    "liquidez",
+    "saldo",
+    "nomina",
+)
+_GENERIC_PATH_SEGMENTS: set[str] = {
+    "pagos",
+    "monetarias",
+    "transferencias",
+    "transferencia",
+    "login y acceso",
+    "credito",
+    "senda bnc",
+    "bbva mx",
+    "sit",
+}
 
 
 @dataclass(frozen=True)
@@ -222,8 +265,53 @@ def _fallback_root_cause_label(summary: object, *, theme_hint: str | None = None
         theme = str(classify_theme(summary)).strip()
     theme_token = _normalize_text(theme)
     if theme and theme_token and theme_token not in _OTHER_THEME_TOKENS:
-        return f"Fallo funcional en {theme}"
+        return f"{_FALLBACK_THEME_PREFIX}{theme}"
     return _ROOT_CAUSE_FALLBACK_LABEL
+
+
+def _has_semantic_hint(segment: str) -> bool:
+    words = [w for w in str(segment or "").split() if w]
+    if not words:
+        return False
+    return any(any(word.startswith(hint) for hint in _SEMANTIC_HINT_TOKENS) for word in words)
+
+
+def _extract_semantic_phrase(summary: object) -> str:
+    normalized = _normalize_text(summary)
+    if not normalized:
+        return ""
+    parts = [part.strip() for part in re.split(r"[|/;>]+", normalized) if part.strip()]
+    for part in parts:
+        cleaned = re.sub(r"\b(?:inc|mexbmi1|sksemex)[a-z0-9-]*\b", " ", part)
+        cleaned = re.sub(r"\b\d+\b", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned or cleaned in _GENERIC_PATH_SEGMENTS:
+            continue
+        words = [w for w in cleaned.split() if w not in _ROOT_CAUSE_STOPWORDS and len(w) >= 3]
+        if len(words) < 2:
+            continue
+        candidate = " ".join(words[:6]).strip()
+        if not candidate or candidate in _GENERIC_PATH_SEGMENTS:
+            continue
+        if not _has_semantic_hint(candidate):
+            continue
+        return candidate
+    return ""
+
+
+def _format_semantic_phrase_label(phrase: str) -> str:
+    words = [w for w in str(phrase or "").split() if w]
+    if not words:
+        return ""
+    minor = {"de", "del", "la", "el", "y", "en", "a", "por", "con"}
+    formatted: list[str] = []
+    for idx, word in enumerate(words):
+        if idx > 0 and word in minor:
+            formatted.append(word)
+            continue
+        formatted.append(word.capitalize())
+    label = " ".join(formatted).strip()
+    return label[:48].rstrip()
 
 
 def _to_dt_naive(series: pd.Series | None) -> pd.Series:
