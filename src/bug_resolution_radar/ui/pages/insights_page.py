@@ -14,6 +14,7 @@ from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_QUINCENAL,
     InsightsComboContext,
     build_insights_combo_context,
+    normalize_insights_view_mode,
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.dashboard.quincenal_scope import (
@@ -26,16 +27,19 @@ from bug_resolution_radar.ui.insights.backlog_people import render_backlog_peopl
 from bug_resolution_radar.ui.insights.duplicates import render_duplicates_tab
 from bug_resolution_radar.ui.insights.ops_health import render_ops_health_tab
 from bug_resolution_radar.ui.insights.period_summary import render_period_summary_tab
+from bug_resolution_radar.ui.insights.state import (
+    INSIGHTS_FUNCTIONALITY_KEY as _INSIGHTS_FUNCTIONALITY_KEY,
+    INSIGHTS_FUNCTIONALITY_WIDGET_KEY as _INSIGHTS_FUNCTIONALITY_WIDGET_KEY,
+    INSIGHTS_LAST_VIEW_MODE_KEY as _INSIGHTS_LAST_VIEW_MODE_KEY,
+    INSIGHTS_PRIORITY_KEY as _INSIGHTS_PRIORITY_KEY,
+    INSIGHTS_PRIORITY_WIDGET_KEY as _INSIGHTS_PRIORITY_WIDGET_KEY,
+    INSIGHTS_STATUS_MANUAL_KEY as _INSIGHTS_STATUS_MANUAL_KEY,
+    INSIGHTS_STATUS_KEY as _INSIGHTS_STATUS_KEY,
+    INSIGHTS_STATUS_WIDGET_KEY as _INSIGHTS_STATUS_WIDGET_KEY,
+    INSIGHTS_VIEW_MODE_KEY as _INSIGHTS_VIEW_MODE_KEY,
+    INSIGHTS_VIEW_MODE_WIDGET_KEY as _INSIGHTS_VIEW_MODE_WIDGET_KEY,
+)
 from bug_resolution_radar.ui.insights.top_topics import render_top_topics_tab
-
-_INSIGHTS_VIEW_MODE_KEY = "insights::combo::view_mode"
-_INSIGHTS_STATUS_KEY = "insights::combo::status_values"
-_INSIGHTS_PRIORITY_KEY = "insights::combo::priority_values"
-_INSIGHTS_FUNCTIONALITY_KEY = "insights::combo::functionality_values"
-_INSIGHTS_VIEW_MODE_WIDGET_KEY = f"{_INSIGHTS_VIEW_MODE_KEY}::widget"
-_INSIGHTS_STATUS_WIDGET_KEY = f"{_INSIGHTS_STATUS_KEY}::widget"
-_INSIGHTS_PRIORITY_WIDGET_KEY = f"{_INSIGHTS_PRIORITY_KEY}::widget"
-_INSIGHTS_FUNCTIONALITY_WIDGET_KEY = f"{_INSIGHTS_FUNCTIONALITY_KEY}::widget"
 
 
 def _safe_df(x: Any) -> pd.DataFrame:
@@ -186,20 +190,45 @@ def _inject_insights_combo_panel_css() -> None:
     )
 
 
+def _should_reseed_status_defaults(
+    *,
+    status_key_missing: bool,
+    status_widget_missing: bool,
+    status_manual: bool,
+    previous_view_mode: object,
+    current_view_mode: object,
+) -> bool:
+    if status_key_missing and status_widget_missing:
+        return True
+    prev_mode = normalize_insights_view_mode(previous_view_mode)
+    curr_mode = normalize_insights_view_mode(current_view_mode)
+    if not prev_mode:
+        return False
+    return (not bool(status_manual)) and prev_mode != curr_mode
+
+
 def _render_insights_combo_panel(
     *,
     accumulated_df: pd.DataFrame,
     quincenal_df: pd.DataFrame,
 ) -> InsightsComboContext:
+    def _mark_status_manual_override() -> None:
+        st.session_state[_INSIGHTS_STATUS_MANUAL_KEY] = True
+
     status_key_missing = _INSIGHTS_STATUS_KEY not in st.session_state
     status_widget_missing = _INSIGHTS_STATUS_WIDGET_KEY not in st.session_state
     st.session_state.setdefault(_INSIGHTS_VIEW_MODE_KEY, INSIGHTS_VIEW_MODE_QUINCENAL)
     st.session_state.setdefault(_INSIGHTS_STATUS_KEY, [])
     st.session_state.setdefault(_INSIGHTS_PRIORITY_KEY, [])
     st.session_state.setdefault(_INSIGHTS_FUNCTIONALITY_KEY, [])
+    st.session_state.setdefault(_INSIGHTS_STATUS_MANUAL_KEY, False)
     st.session_state.setdefault(
         _INSIGHTS_VIEW_MODE_WIDGET_KEY,
         st.session_state.get(_INSIGHTS_VIEW_MODE_KEY, INSIGHTS_VIEW_MODE_QUINCENAL),
+    )
+    st.session_state.setdefault(
+        _INSIGHTS_LAST_VIEW_MODE_KEY,
+        st.session_state.get(_INSIGHTS_VIEW_MODE_WIDGET_KEY, INSIGHTS_VIEW_MODE_QUINCENAL),
     )
     st.session_state.setdefault(
         _INSIGHTS_STATUS_WIDGET_KEY,
@@ -213,6 +242,20 @@ def _render_insights_combo_panel(
         _INSIGHTS_FUNCTIONALITY_WIDGET_KEY,
         list(st.session_state.get(_INSIGHTS_FUNCTIONALITY_KEY) or []),
     )
+    reseed_defaults = _should_reseed_status_defaults(
+        status_key_missing=status_key_missing,
+        status_widget_missing=status_widget_missing,
+        status_manual=bool(st.session_state.get(_INSIGHTS_STATUS_MANUAL_KEY, False)),
+        previous_view_mode=st.session_state.get(
+            _INSIGHTS_LAST_VIEW_MODE_KEY, INSIGHTS_VIEW_MODE_QUINCENAL
+        ),
+        current_view_mode=st.session_state.get(
+            _INSIGHTS_VIEW_MODE_WIDGET_KEY, INSIGHTS_VIEW_MODE_QUINCENAL
+        ),
+    )
+    if reseed_defaults:
+        st.session_state[_INSIGHTS_STATUS_KEY] = []
+        st.session_state[_INSIGHTS_STATUS_WIDGET_KEY] = []
 
     initial_ctx = build_insights_combo_context(
         accumulated_df=accumulated_df,
@@ -225,7 +268,7 @@ def _render_insights_combo_panel(
         selected_functionalities=list(
             st.session_state.get(_INSIGHTS_FUNCTIONALITY_WIDGET_KEY) or []
         ),
-        apply_default_status_when_empty=(status_key_missing and status_widget_missing),
+        apply_default_status_when_empty=reseed_defaults,
     )
     st.session_state[_INSIGHTS_VIEW_MODE_KEY] = initial_ctx.view_mode
     st.session_state[_INSIGHTS_STATUS_KEY] = list(initial_ctx.selected_statuses)
@@ -266,6 +309,7 @@ def _render_insights_combo_panel(
                 options=list(initial_ctx.status_options),
                 key=_INSIGHTS_STATUS_WIDGET_KEY,
                 placeholder="Sin valor (todos)",
+                on_change=_mark_status_manual_override,
             )
         with r2_priority:
             st.multiselect(
@@ -299,6 +343,7 @@ def _render_insights_combo_panel(
         st.session_state[_INSIGHTS_PRIORITY_KEY] = list(final_ctx.selected_priorities)
         st.session_state[_INSIGHTS_FUNCTIONALITY_KEY] = list(final_ctx.selected_functionalities)
         st.session_state[_INSIGHTS_VIEW_MODE_KEY] = final_ctx.view_mode
+        st.session_state[_INSIGHTS_LAST_VIEW_MODE_KEY] = final_ctx.view_mode
 
     return final_ctx
 

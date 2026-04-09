@@ -4,6 +4,10 @@ from typing import Any
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.insights_scope import (
+    INSIGHTS_VIEW_MODE_ACCUMULATED,
+    INSIGHTS_VIEW_MODE_QUINCENAL,
+)
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.dashboard import quincenal_scope
 from bug_resolution_radar.ui.pages import insights_page
@@ -79,3 +83,43 @@ def test_insights_quincenal_df_returns_original_when_date_columns_missing(monkey
     out = insights_page._insights_quincenal_df(settings=Settings(), dff=df)
 
     assert out.equals(df)
+
+
+def test_should_reseed_status_defaults_on_first_load() -> None:
+    assert insights_page._should_reseed_status_defaults(
+        status_key_missing=True,
+        status_widget_missing=True,
+        status_manual=False,
+        previous_view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
+        current_view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
+    )
+
+
+def test_should_reseed_status_defaults_when_view_changes_without_manual_override() -> None:
+    assert insights_page._should_reseed_status_defaults(
+        status_key_missing=False,
+        status_widget_missing=False,
+        status_manual=False,
+        previous_view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
+        current_view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
+    )
+
+
+def test_should_not_reseed_status_defaults_when_view_changes_with_manual_override() -> None:
+    assert not insights_page._should_reseed_status_defaults(
+        status_key_missing=False,
+        status_widget_missing=False,
+        status_manual=True,
+        previous_view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
+        current_view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
+    )
+
+
+def test_should_not_reseed_status_defaults_when_view_does_not_change() -> None:
+    assert not insights_page._should_reseed_status_defaults(
+        status_key_missing=False,
+        status_widget_missing=False,
+        status_manual=False,
+        previous_view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
+        current_view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
+    )
