@@ -6,104 +6,112 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal, Mapping, Sequence
 
 import pandas as pd
 
 from bug_resolution_radar.analytics.insights import classify_theme
 from bug_resolution_radar.analytics.status_semantics import effective_finalized_at
 
-_ROOT_CAUSE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+_ROOT_CAUSE_RULES: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = (
     (
         "Autenticación y sesión",
         (
-            "login",
-            "acceso",
-            "password",
-            "contrasena",
-            "contraseña",
-            "token",
-            "otp",
-            "sesion",
-            "sesión",
-            "biometr",
-            "huella",
-            "face id",
+            (r"\blogin\b", 4),
+            (r"\bacceso\b", 3),
+            (r"\bpassword\b", 3),
+            (r"\bcontrasena\b", 3),
+            (r"\btoken\b", 2),
+            (r"\botp\b", 3),
+            (r"\bsesion\b", 3),
+            (r"\bbiometr\w*\b", 4),
+            (r"\bhuella\b", 3),
+            (r"\bface\s+id\b", 4),
+        ),
+    ),
+    (
+        "Transferencias en tiempo real",
+        (
+            (r"\btransferencias?\s+en\s+tiempo\s+real\b", 9),
+            (r"\btiempo\s+real\b", 4),
+            (r"\bspei\b", 5),
+            (r"\btransferencias?\b", 3),
+            (r"\btraspasos?\b", 3),
+            (r"\binterbanc\w*\b", 3),
         ),
     ),
     (
         "Conectividad / timeout",
         (
-            "timeout",
-            "latencia",
-            "lento",
-            "demora",
-            "no responde",
-            "conexion",
-            "conexión",
-            "network",
-            "gateway",
-            "502",
-            "503",
-            "504",
+            (r"\btimeout\b", 5),
+            (r"\blatencia\b", 4),
+            (r"\blent[oa]s?\b", 3),
+            (r"\bdemora\w*\b", 3),
+            (r"\bno\s+responde\b", 5),
+            (r"\bconexion\b", 3),
+            (r"\bnetwork\b", 3),
+            (r"\bgateway\b", 3),
+            (r"\b(?:502|503|504)\b", 5),
         ),
     ),
     (
         "Visualización / UI",
         (
-            "no se visualiza",
-            "no se muestra",
-            "pantalla",
-            "dashboard",
-            "ui",
-            "interfaz",
-            "vista",
-            "render",
-            "blanco",
+            (r"\bno\s+se\s+visualiza\b", 6),
+            (r"\bno\s+se\s+muestra\b", 6),
+            (r"\bpantalla\b", 3),
+            (r"\bdashboard\b", 4),
+            (r"\bui\b", 2),
+            (r"\binterfaz\b", 4),
+            (r"\bvista\b", 2),
+            (r"\brender\w*\b", 3),
+            (r"\ben\s+blanco\b", 4),
         ),
     ),
     (
         "Integración API / backend",
         (
-            "api",
-            "servicio",
-            "endpoint",
-            "microserv",
-            "backend",
-            "ws",
-            "soap",
-            "rest",
-            "integracion",
-            "integración",
+            (r"\bapi\b", 4),
+            (r"\bservicio\b", 3),
+            (r"\bendpoint\b", 4),
+            (r"\bmicroserv\w*\b", 4),
+            (r"\bbackend\b", 4),
+            (r"\bws\b", 2),
+            (r"\bsoap\b", 4),
+            (r"\brest\b", 3),
+            (r"\bintegracion\b", 4),
+            (r"\bsenda\b", 4),
+            (r"\bbnc\b", 4),
+            (r"\bsit\b", 4),
+            (r"\bhost\b", 3),
         ),
     ),
     (
         "Validación de datos / reglas",
         (
-            "no permite",
-            "invalido",
-            "inválido",
-            "validacion",
-            "validación",
-            "formato",
-            "campo",
-            "captura",
-            "error de datos",
-            "dato",
+            (r"\bno\s+permite\b", 5),
+            (r"\binvalid\w*\b", 4),
+            (r"\bvalidacion\b", 4),
+            (r"\bformato\b", 3),
+            (r"\bcampo\b", 2),
+            (r"\bcaptura\b", 3),
+            (r"\berror\s+de\s+datos\b", 5),
+            (r"\bdatos?\b", 2),
+            (r"\breglas?\b", 3),
         ),
     ),
     (
         "Notificaciones / mensajería",
         (
-            "notificacion",
-            "notificación",
-            "push",
-            "sms",
-            "correo",
-            "mensaje",
+            (r"\bnotificacion\w*\b", 4),
+            (r"\bpush\b", 4),
+            (r"\bsms\b", 4),
+            (r"\bcorreo\b", 3),
+            (r"\bmensaje\w*\b", 3),
         ),
     ),
 )
+_ROOT_CAUSE_FALLBACK_LABEL = "Contexto funcional no especificado"
 
 _ROOT_CAUSE_STOPWORDS: set[str] = {
     "de",
@@ -124,6 +132,50 @@ _ROOT_CAUSE_STOPWORDS: set[str] = {
     "que",
     "se",
     "no",
+}
+_OTHER_THEME_TOKENS: tuple[str, ...] = ("otros", "other")
+_FALLBACK_THEME_PREFIX = "Fallo funcional en "
+_SEMANTIC_HINT_TOKENS: tuple[str, ...] = (
+    "transfer",
+    "traspas",
+    "spei",
+    "api",
+    "backend",
+    "servicio",
+    "timeout",
+    "latenc",
+    "visual",
+    "interfaz",
+    "dashboard",
+    "render",
+    "login",
+    "token",
+    "sesion",
+    "otp",
+    "valid",
+    "campo",
+    "datos",
+    "mensaje",
+    "correo",
+    "sms",
+    "notific",
+    "senda",
+    "sit",
+    "host",
+    "liquidez",
+    "saldo",
+    "nomina",
+)
+_GENERIC_PATH_SEGMENTS: set[str] = {
+    "pagos",
+    "monetarias",
+    "transferencias",
+    "transferencia",
+    "login y acceso",
+    "credito",
+    "senda bnc",
+    "bbva mx",
+    "sit",
 }
 
 
@@ -162,6 +214,137 @@ def _normalize_text(value: object) -> str:
     return re.sub(r"\s+", " ", txt).strip()
 
 
+def _root_cause_text_segments(
+    summary: object,
+    description: object | None = None,
+) -> tuple[str, str]:
+    summary_txt = _normalize_text(summary)
+    description_txt = _normalize_text(description)
+    return summary_txt, description_txt
+
+
+def _root_cause_scores_weighted(
+    summary_txt: str,
+    description_txt: str,
+) -> dict[str, int]:
+    scores: dict[str, int] = {}
+    for label, score in _root_cause_scores(summary_txt).items():
+        scores[label] = scores.get(label, 0) + (int(score) * 3)
+    for label, score in _root_cause_scores(description_txt).items():
+        scores[label] = scores.get(label, 0) + (int(score) * 2)
+    combined_text = " ".join(
+        part for part in (summary_txt, description_txt) if str(part or "").strip()
+    ).strip()
+    for label, score in _root_cause_scores(combined_text).items():
+        scores[label] = scores.get(label, 0) + int(score)
+    return {label: score for label, score in scores.items() if int(score) > 0}
+
+
+def _compile_root_cause_rules() -> tuple[tuple[str, tuple[tuple[re.Pattern[str], int], ...]], ...]:
+    compiled: list[tuple[str, tuple[tuple[re.Pattern[str], int], ...]]] = []
+    for label, rules in _ROOT_CAUSE_RULES:
+        compiled_rules: list[tuple[re.Pattern[str], int]] = []
+        for pattern, weight in rules:
+            compiled_rules.append((re.compile(str(pattern), flags=re.IGNORECASE), int(weight)))
+        compiled.append((str(label), tuple(compiled_rules)))
+    return tuple(compiled)
+
+
+_COMPILED_ROOT_CAUSE_RULES = _compile_root_cause_rules()
+_ROOT_CAUSE_ORDER = {label: idx for idx, (label, _) in enumerate(_COMPILED_ROOT_CAUSE_RULES)}
+
+
+def _root_cause_scores(text: str) -> dict[str, int]:
+    txt = str(text or "").strip()
+    if not txt:
+        return {}
+    scores: dict[str, int] = {}
+    for label, compiled_rules in _COMPILED_ROOT_CAUSE_RULES:
+        score = 0
+        for matcher, weight in compiled_rules:
+            if matcher.search(txt):
+                score += int(weight)
+        if score > 0:
+            scores[label] = score
+    return scores
+
+
+def _best_root_cause_label(scores: Mapping[str, int]) -> str:
+    if not scores:
+        return ""
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: (
+            -int(item[1]),
+            int(_ROOT_CAUSE_ORDER.get(str(item[0]), 10_000)),
+            str(item[0]),
+        ),
+    )
+    return str(ranked[0][0]).strip()
+
+
+def _fallback_root_cause_label(summary: object, *, theme_hint: str | None = None) -> str:
+    hint = str(theme_hint or "").strip()
+    if hint:
+        theme = hint
+    else:
+        theme = str(classify_theme(summary)).strip()
+    theme_token = _normalize_text(theme)
+    if theme and theme_token and theme_token not in _OTHER_THEME_TOKENS:
+        return f"{_FALLBACK_THEME_PREFIX}{theme}"
+    return _ROOT_CAUSE_FALLBACK_LABEL
+
+
+def _has_semantic_hint(segment: str) -> bool:
+    words = [w for w in str(segment or "").split() if w]
+    if not words:
+        return False
+    return any(any(word.startswith(hint) for hint in _SEMANTIC_HINT_TOKENS) for word in words)
+
+
+def _extract_semantic_phrase(
+    summary: object,
+    *,
+    description: object | None = None,
+) -> str:
+    summary_txt, description_txt = _root_cause_text_segments(summary, description)
+    text = " | ".join(part for part in (summary_txt, description_txt) if part).strip()
+    if not text:
+        return ""
+    parts = [part.strip() for part in re.split(r"[|/;>\n]+", text) if part.strip()]
+    for part in parts:
+        cleaned = re.sub(r"\b(?:inc|mexbmi1|sksemex)[a-z0-9-]*\b", " ", part)
+        cleaned = re.sub(r"\b\d+\b", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned or cleaned in _GENERIC_PATH_SEGMENTS:
+            continue
+        words = [w for w in cleaned.split() if w not in _ROOT_CAUSE_STOPWORDS and len(w) >= 2]
+        if len(words) < 2:
+            continue
+        candidate = " ".join(words[:6]).strip()
+        if not candidate or candidate in _GENERIC_PATH_SEGMENTS:
+            continue
+        if not _has_semantic_hint(candidate):
+            continue
+        return candidate
+    return ""
+
+
+def _format_semantic_phrase_label(phrase: str) -> str:
+    words = [w for w in str(phrase or "").split() if w]
+    if not words:
+        return ""
+    minor = {"de", "del", "la", "el", "y", "en", "a", "por", "con"}
+    formatted: list[str] = []
+    for idx, word in enumerate(words):
+        if idx > 0 and word in minor:
+            formatted.append(word)
+            continue
+        formatted.append(word.capitalize())
+    label = " ".join(formatted).strip()
+    return label[:48].rstrip()
+
+
 def _to_dt_naive(series: pd.Series | None) -> pd.Series:
     if series is None:
         return pd.Series([], dtype="datetime64[ns]")
@@ -194,30 +377,96 @@ def ensure_theme_column(
     return work
 
 
-def infer_root_cause_label(summary: object) -> str:
-    raw = _normalize_text(summary)
-    if not raw:
-        return "Sin detalle suficiente"
+def infer_root_cause_label(
+    summary: object,
+    *,
+    description: object | None = None,
+    theme_hint: str | None = None,
+) -> str:
+    summary_txt, description_txt = _root_cause_text_segments(summary, description)
+    if not summary_txt and not description_txt:
+        return _fallback_root_cause_label(summary, theme_hint=theme_hint)
 
-    txt = re.sub(r"\[[^\]]*\]", " ", raw)
-    txt = re.sub(r"\([^)]*\)", " ", txt)
-    txt = re.sub(r"\s+", " ", txt).strip()
-    if not txt:
-        return "Sin detalle suficiente"
+    clean_summary = re.sub(r"\[[^\]]*\]", " ", summary_txt)
+    clean_summary = re.sub(r"\([^)]*\)", " ", clean_summary)
+    clean_summary = re.sub(r"\s+", " ", clean_summary).strip()
+    clean_description = re.sub(r"\[[^\]]*\]", " ", description_txt)
+    clean_description = re.sub(r"\([^)]*\)", " ", clean_description)
+    clean_description = re.sub(r"\s+", " ", clean_description).strip()
 
-    for label, keywords in _ROOT_CAUSE_RULES:
-        if any(str(token) in txt for token in keywords):
-            return label
+    if not clean_summary and not clean_description:
+        return _fallback_root_cause_label(summary, theme_hint=theme_hint)
 
-    return "Sin detalle suficiente"
+    scores = _root_cause_scores_weighted(clean_summary, clean_description)
+    best = _best_root_cause_label(scores)
+    if best:
+        return best
+    fallback = _fallback_root_cause_label(summary, theme_hint=theme_hint)
+    phrase_label = _format_semantic_phrase_label(
+        _extract_semantic_phrase(clean_summary, description=clean_description)
+    )
+    if phrase_label:
+        return phrase_label
+    return fallback
+
+
+def build_root_cause_labels(
+    summaries: Sequence[object],
+    *,
+    descriptions: Sequence[object] | None = None,
+    theme_hints: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    summary_values = [str(summary or "") for summary in list(summaries or [])]
+    description_values = [str(desc or "") for desc in list(descriptions or [])]
+    theme_hint_values = [str(hint or "") for hint in list(theme_hints or [])]
+
+    labels: list[str] = []
+    for idx, summary_txt in enumerate(summary_values):
+        description_txt = description_values[idx] if idx < len(description_values) else ""
+        theme_hint = theme_hint_values[idx] if idx < len(theme_hint_values) else ""
+        labels.append(
+            infer_root_cause_label(
+                summary_txt,
+                description=description_txt,
+                theme_hint=theme_hint,
+            )
+        )
+    return tuple(labels)
+
+
+def build_root_cause_map(
+    summaries: Sequence[object],
+    *,
+    theme_hint_by_summary: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    out: dict[str, str] = {}
+    hints = dict(theme_hint_by_summary or {})
+    for raw_summary in list(summaries or []):
+        summary_txt = str(raw_summary or "")
+        if summary_txt in out:
+            continue
+        out[summary_txt] = infer_root_cause_label(
+            summary_txt,
+            theme_hint=hints.get(summary_txt, ""),
+        )
+    return out
 
 
 def summarize_root_causes(
     summaries: Sequence[object],
     *,
+    descriptions: Sequence[object] | None = None,
+    theme_hints: Sequence[str] | None = None,
     top_k: int = 3,
 ) -> tuple[RootCauseRank, ...]:
-    labels = [infer_root_cause_label(summary) for summary in list(summaries or [])]
+    labels = [
+        str(label or "").strip()
+        for label in build_root_cause_labels(
+            summaries,
+            descriptions=descriptions,
+            theme_hints=theme_hints,
+        )
+    ]
     labels = [label for label in labels if str(label).strip()]
     if not labels:
         return ()
@@ -335,8 +584,14 @@ def build_topic_expandable_summaries(
             topic_name = str(topic or "").strip()
             if not topic_name:
                 continue
+            descriptions = (
+                sub["description"].fillna("").astype(str).tolist()
+                if "description" in sub.columns
+                else None
+            )
             roots_by_topic[topic_name] = summarize_root_causes(
                 sub["summary"].fillna("").astype(str).tolist(),
+                descriptions=descriptions,
                 top_k=top_root_causes,
             )
 

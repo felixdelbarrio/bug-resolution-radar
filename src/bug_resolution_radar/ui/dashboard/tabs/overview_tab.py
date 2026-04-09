@@ -204,7 +204,7 @@ def _render_summary_charts(*, settings: Settings, ctx: ChartContext) -> dict[str
                         continue
 
                     st.caption(chart_title or chart_id)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
         perf_ms["summary_charts"] = charts_build_ms + elapsed_ms(charts_render_start_ts)
     return perf_ms
 

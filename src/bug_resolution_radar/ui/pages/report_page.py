@@ -29,6 +29,11 @@ from bug_resolution_radar.ui.dashboard.state import (
     FILTER_STATUS_KEY,
     ISSUES_QUINCENAL_SCOPE_KEY,
 )
+from bug_resolution_radar.ui.insights.state import (
+    INSIGHTS_FUNCTIONALITY_KEY,
+    INSIGHTS_PRIORITY_KEY,
+    INSIGHTS_STATUS_KEY,
+)
 
 _REPORT_STATUS_KEY = "workspace_report_status"
 _REPORT_SAVED_PATH_KEY_PREFIX = "workspace_report_saved_path"
@@ -636,6 +641,9 @@ def _render_period_followup_report(settings: Settings) -> None:
     quincenal_scope = normalize_quincenal_scope_label(
         st.session_state.get(ISSUES_QUINCENAL_SCOPE_KEY)
     )
+    insights_status_filters = list(st.session_state.get(INSIGHTS_STATUS_KEY) or [])
+    insights_priority_filters = list(st.session_state.get(INSIGHTS_PRIORITY_KEY) or [])
+    insights_functionality_filters = list(st.session_state.get(INSIGHTS_FUNCTIONALITY_KEY) or [])
 
     try:
         df_all = load_issues_df(settings.DATA_PATH)
@@ -712,7 +720,16 @@ def _render_period_followup_report(settings: Settings) -> None:
         _visible_filter_label(assignee_filters, name="Responsable"),
         _visible_quincenal_scope_label(quincenal_scope),
     ]
-    st.caption(f"Filtros aplicados: {' | '.join(filters_summary)}")
+    functionality_scope_summary = [
+        _visible_filter_label(insights_status_filters, name="Estado insights"),
+        _visible_filter_label(insights_priority_filters, name="Prioridad insights"),
+        _visible_filter_label(insights_functionality_filters, name="Funcionalidad insights"),
+    ]
+    st.caption(
+        "Filtros aplicados: "
+        f"{' | '.join(filters_summary)} "
+        f"|| Funcionalidad (slides 10-13): {' | '.join(functionality_scope_summary)}"
+    )
 
     scope_key = f"{country}::{','.join(selected_source_ids)}"
     if st.button(
@@ -729,7 +746,13 @@ def _render_period_followup_report(settings: Settings) -> None:
                 source_ids=selected_source_ids,
                 dff_override=ctx.dff,
                 open_df_override=ctx.open_df,
-                applied_filter_summary=" | ".join(filters_summary),
+                applied_filter_summary=(
+                    f"{' | '.join(filters_summary)} || "
+                    f"Funcionalidad (slides 10-13): {' | '.join(functionality_scope_summary)}"
+                ),
+                functionality_status_filters=insights_status_filters,
+                functionality_priority_filters=insights_priority_filters,
+                functionality_filters=insights_functionality_filters,
             )
             export_dir = _ensure_report_export_dir(settings)
             export_path = _unique_export_path(export_dir, file_name=result.file_name)

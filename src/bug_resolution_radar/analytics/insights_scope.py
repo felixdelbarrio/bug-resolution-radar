@@ -26,6 +26,16 @@ _DEFAULT_EXCLUDED_STATUS_TOKENS: tuple[str, ...] = (
     "accepted",
     "ready to deploy",
     "deployed",
+    "discarded",
+)
+_DEFAULT_STATUS_SELECTION_ORDER: tuple[str, ...] = (
+    "new",
+    "analysing",
+    "en progreso",
+    "to rework",
+    "blocked",
+    "test",
+    "ready to verify",
 )
 _CANONICAL_STATUS_ORDER: tuple[str, ...] = (
     "new",
@@ -155,11 +165,35 @@ def default_status_selection(
     if not options:
         return []
     excludes = [_normalize_token(value) for value in excluded_status_tokens]
-    selected = [
-        status
-        for status in options
-        if not any(ex and ex in _normalize_token(status) for ex in excludes)
-    ]
+    preferred_aliases: dict[str, str] = {
+        "in progress": "en progreso",
+    }
+    preferred_rank = {token: idx for idx, token in enumerate(_DEFAULT_STATUS_SELECTION_ORDER)}
+
+    selected_preferred: list[str] = []
+    for status in options:
+        status_token = _normalize_token(status)
+        status_token = preferred_aliases.get(status_token, status_token)
+        if status_token not in preferred_rank:
+            continue
+        if any(ex and ex in _normalize_token(status) for ex in excludes):
+            continue
+        selected_preferred.append(status)
+
+    if selected_preferred:
+        return sorted(
+            selected_preferred,
+            key=lambda status: preferred_rank.get(
+                preferred_aliases.get(_normalize_token(status), _normalize_token(status)),
+                10_000,
+            ),
+        )
+
+    selected = []
+    for status in options:
+        if any(ex and ex in _normalize_token(status) for ex in excludes):
+            continue
+        selected.append(status)
     return selected if selected else options
 
 

@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Sequence
 
 import pandas as pd
 
 from bug_resolution_radar.analytics.insights import classify_theme, is_other_theme_label
-from bug_resolution_radar.analytics.period_summary import (
-    QuincenalScopeResult,
-    critical_priority_mask,
+from bug_resolution_radar.analytics.insights_scope import (
+    INSIGHTS_VIEW_MODE_QUINCENAL,
+    build_insights_combo_context,
 )
+from bug_resolution_radar.analytics.period_summary import QuincenalScopeResult
 from bug_resolution_radar.analytics.topic_expandable_summary import (
     RootCauseRank,
+    build_root_cause_labels,
     infer_root_cause_label,
     summarize_root_causes,
 )
@@ -31,6 +34,15 @@ _MONTH_NAMES_ES: tuple[str, ...] = (
     "Octubre",
     "Noviembre",
     "Diciembre",
+)
+_CRITICAL_PRIORITY_TOKENS: frozenset[str] = frozenset(
+    {
+        "high",
+        "highest",
+        "veryhigh",
+        "impedimento",
+        "suponeunimpedimento",
+    }
 )
 
 
@@ -71,6 +83,7 @@ class FunctionalityZoomSlide:
 class PeriodFunctionalityFollowupSummary:
     period_label: str
     total_open_critical: int
+    is_critical_focus: bool
     top_rows: tuple[FunctionalityTopRow, ...]
     tail_rows: tuple[FunctionalityTopRow, ...]
     mitigation_ready_to_verify: MitigationBucket
@@ -101,6 +114,47 @@ def _normalize_status(value: object) -> str:
     txt = str(value or "").strip().lower()
     txt = txt.replace("_", " ").replace("-", " ")
     return re.sub(r"\s+", " ", txt).strip()
+
+
+def _compact_token(value: object) -> str:
+    token = _normalize_status(value)
+    return "".join(ch for ch in token if ch.isalnum())
+
+
+def _is_critical_priority_selection(priorities: Sequence[str] | None) -> bool:
+    selected = [str(v or "").strip() for v in list(priorities or []) if str(v or "").strip()]
+    if not selected:
+        return False
+    normalized = {_compact_token(v) for v in selected}
+    if not normalized:
+        return False
+    return normalized.issubset(_CRITICAL_PRIORITY_TOKENS)
+
+
+def _apply_combo_filters(
+    *,
+    open_df: pd.DataFrame,
+    status_filters: Sequence[str] | None,
+    priority_filters: Sequence[str] | None,
+    functionality_filters: Sequence[str] | None,
+    apply_default_status_when_empty: bool,
+) -> tuple[pd.DataFrame, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    ctx = build_insights_combo_context(
+        accumulated_df=open_df,
+        quincenal_df=open_df,
+        view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
+        selected_statuses=list(status_filters or []),
+        selected_priorities=list(priority_filters or []),
+        selected_functionalities=list(functionality_filters or []),
+        apply_default_status_when_empty=bool(apply_default_status_when_empty),
+        theme_col="__theme",
+    )
+    return (
+        _safe_df(ctx.filtered_df),
+        tuple(ctx.selected_statuses),
+        tuple(ctx.selected_priorities),
+        tuple(ctx.selected_functionalities),
+    )
 
 
 def _created_current_window_mask(
@@ -224,11 +278,21 @@ def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
 
     work = safe.copy(deep=False)
     summary_series = work["summary"].fillna("").astype(str)
+    description_series = (
+        work["description"].fillna("").astype(str)
+        if "description" in work.columns
+        else pd.Series([""] * len(work), index=work.index, dtype=str)
+    )
     unique_summaries = pd.unique(summary_series.to_numpy(copy=False)).tolist()
     theme_map = {text: classify_theme(text) for text in unique_summaries}
-    cause_map = {text: infer_root_cause_label(text) for text in unique_summaries}
+    row_themes = summary_series.map(theme_map)
+    root_labels = build_root_cause_labels(
+        summary_series.tolist(),
+        descriptions=description_series.tolist(),
+        theme_hints=row_themes.tolist(),
+    )
     work["__theme"] = summary_series.map(theme_map).to_numpy(copy=False)
-    work["__root_cause"] = summary_series.map(cause_map).to_numpy(copy=False)
+    work["__root_cause"] = pd.Series(root_labels, index=work.index).to_numpy(copy=False)
     return work
 
 
@@ -240,7 +304,12 @@ def build_period_functionality_followup_summary(
     status_col: str = "status",
     priority_col: str = "priority",
     summary_col: str = "summary",
+    description_col: str = "description",
     key_col: str = "key",
+    status_filters: Sequence[str] | None = None,
+    priority_filters: Sequence[str] | None = None,
+    functionality_filters: Sequence[str] | None = None,
+    apply_default_status_when_empty: bool = True,
     top_n: int = 3,
     top_root_causes: int = 3,
 ) -> PeriodFunctionalityFollowupSummary:
@@ -249,11 +318,26 @@ def build_period_functionality_followup_summary(
     period_label = _period_label_es(window.current_start, window.current_end)
 
     open_base = _theme_root_cause_map(_safe_df(scope.open_df))
+    open_filtered, selected_statuses, selected_priorities, selected_functionalities = (
+        _apply_combo_filters(
+            open_df=open_base,
+            status_filters=status_filters,
+            priority_filters=priority_filters,
+            functionality_filters=functionality_filters,
+            apply_default_status_when_empty=apply_default_status_when_empty,
+        )
+    )
+    critical_focus = _is_critical_priority_selection(selected_priorities)
+
+    del selected_statuses, selected_functionalities  # used to drive filtering in shared pipeline
+
+    reference_day = _analysis_day(scope.dff, fallback=window.current_end)
     if open_base.empty:
         zero = MitigationBucket(count=0, avg_open_days=0.0)
         return PeriodFunctionalityFollowupSummary(
             period_label=period_label,
             total_open_critical=0,
+            is_critical_focus=critical_focus,
             top_rows=(),
             tail_rows=(),
             mitigation_ready_to_verify=zero,
@@ -263,40 +347,46 @@ def build_period_functionality_followup_summary(
             zoom_slides=(),
         )
 
-    reference_day = _analysis_day(scope.dff, fallback=window.current_end)
+    if open_filtered.empty:
+        zero = MitigationBucket(count=0, avg_open_days=0.0)
+        return PeriodFunctionalityFollowupSummary(
+            period_label=period_label,
+            total_open_critical=0,
+            is_critical_focus=critical_focus,
+            top_rows=(),
+            tail_rows=(),
+            mitigation_ready_to_verify=zero,
+            mitigation_new=zero,
+            mitigation_blocked=zero,
+            mitigation_non_critical=zero,
+            zoom_slides=(),
+        )
+
     created_mask = _created_current_window_mask(
-        open_base,
+        open_filtered,
         created_col=created_col,
         window_start=window.current_start,
         window_end=window.current_end,
     )
-    critical_mask = critical_priority_mask(open_base)
     status_norm = (
-        open_base[status_col].map(_normalize_status)
-        if status_col in open_base.columns
-        else pd.Series("", index=open_base.index, dtype=str)
+        open_filtered[status_col].map(_normalize_status)
+        if status_col in open_filtered.columns
+        else pd.Series("", index=open_filtered.index, dtype=str)
     )
 
-    open_critical = open_base.loc[critical_mask].copy(deep=False)
-    open_critical_current = open_base.loc[critical_mask & created_mask].copy(deep=False)
-    open_non_critical = open_base.loc[~critical_mask].copy(deep=False)
+    open_current = open_filtered.loc[created_mask].copy(deep=False)
 
-    critical_theme_total = (
-        open_critical["__theme"].value_counts().rename_axis("functionality").rename("open_total")
-        if not open_critical.empty
+    theme_total = (
+        open_filtered["__theme"].value_counts().rename_axis("functionality").rename("open_total")
+        if not open_filtered.empty
         else pd.Series(dtype="int64", name="open_total")
     )
-    critical_theme_new = (
-        open_critical_current["__theme"]
-        .value_counts()
-        .rename_axis("functionality")
-        .rename("new_count")
-        if not open_critical_current.empty
+    theme_new = (
+        open_current["__theme"].value_counts().rename_axis("functionality").rename("new_count")
+        if not open_current.empty
         else pd.Series(dtype="int64", name="new_count")
     )
-    theme_stats = (
-        pd.concat([critical_theme_new, critical_theme_total], axis=1).fillna(0).reset_index()
-    )
+    theme_stats = pd.concat([theme_new, theme_total], axis=1).fillna(0).reset_index()
     theme_rows = _rank_theme_rows(theme_stats)
 
     top_n_safe = max(int(top_n or 3), 1)
@@ -317,26 +407,27 @@ def build_period_functionality_followup_summary(
     blocked_mask = status_norm.str.contains("block", regex=False) | status_norm.str.contains(
         "bloque", regex=False
     )
+    covered_mask = ready_mask | new_mask | blocked_mask
 
-    mitigation_ready = _bucket(ready_mask.loc[open_base.index] & critical_mask, open_base)
-    mitigation_new = _bucket(new_mask.loc[open_base.index] & critical_mask, open_base)
-    mitigation_blocked = _bucket(blocked_mask.loc[open_base.index] & critical_mask, open_base)
-    mitigation_non_critical = MitigationBucket(
-        count=int(len(open_non_critical)),
-        avg_open_days=float(
-            _avg_open_days(open_non_critical, created_col=created_col, reference_day=reference_day)
-        ),
-    )
+    mitigation_ready = _bucket(ready_mask.loc[open_filtered.index], open_filtered)
+    mitigation_new = _bucket(new_mask.loc[open_filtered.index], open_filtered)
+    mitigation_blocked = _bucket(blocked_mask.loc[open_filtered.index], open_filtered)
+    mitigation_non_critical = _bucket(~covered_mask.loc[open_filtered.index], open_filtered)
 
     key_to_url = _build_key_to_url_map(scope.dff, jira_base_url=jira_base_url)
     zoom_themes = [row.functionality for row in list(top_rows)[:top_n_safe]]
     zoom_slides: list[FunctionalityZoomSlide] = []
     for functionality in zoom_themes:
-        sub = open_critical_current.loc[
-            open_critical_current["__theme"].fillna("").astype(str).eq(functionality)
+        sub = open_current.loc[
+            open_current["__theme"].fillna("").astype(str).eq(functionality)
         ].copy(deep=False)
         roots = summarize_root_causes(
             sub[summary_col].fillna("").astype(str).tolist() if summary_col in sub.columns else [],
+            descriptions=(
+                sub[description_col].fillna("").astype(str).tolist()
+                if description_col in sub.columns
+                else None
+            ),
             top_k=top_root_causes,
         )
         created = (
@@ -347,20 +438,48 @@ def build_period_functionality_followup_summary(
         age_days = ((reference_day - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         work = sub.copy(deep=False)
         work["__open_days"] = pd.to_numeric(age_days, errors="coerce").fillna(0.0)
-        sort_cols = ["__open_days"]
-        ascending = [False]
         if key_col in work.columns:
-            sort_cols.append(key_col)
-            ascending.append(True)
+            work["__issue_key"] = work[key_col].fillna("").astype(str).str.strip()
+        else:
+            work["__issue_key"] = ""
+        work = work.loc[work["__issue_key"] != ""].copy(deep=False)
+
+        if "updated" in work.columns:
+            work["__updated_sort"] = _to_dt_naive(work["updated"])
+        else:
+            work["__updated_sort"] = pd.NaT
+        if created_col in work.columns:
+            work["__created_sort"] = _to_dt_naive(work[created_col])
+        else:
+            work["__created_sort"] = pd.NaT
+        if summary_col in work.columns:
+            work["__summary_len"] = work[summary_col].fillna("").astype(str).str.len()
+        else:
+            work["__summary_len"] = 0
+
+        sort_cols = [
+            "__updated_sort",
+            "__created_sort",
+            "__summary_len",
+            "__open_days",
+            "__issue_key",
+        ]
+        ascending = [False, False, False, False, True]
         work = work.sort_values(sort_cols, ascending=ascending, kind="mergesort")
+        work = work.drop_duplicates(subset=["__issue_key"], keep="first")
 
         issue_rows: list[FunctionalityIssueRow] = []
         for _, row in work.iterrows():
-            key = str(row.get(key_col, "") or "").strip() if key_col in work.columns else ""
+            key = str(row.get("__issue_key", "") or "").strip()
             if not key:
                 continue
             summary = (
                 str(row.get(summary_col, "") or "").strip() if summary_col in work.columns else ""
+            )
+            description = (
+                str(row.get(description_col, "") or "").strip()
+                if description_col in work.columns
+                else ""
             )
             status = (
                 str(row.get(status_col, "") or "").strip() if status_col in work.columns else ""
@@ -368,7 +487,10 @@ def build_period_functionality_followup_summary(
             priority = (
                 str(row.get(priority_col, "") or "").strip() if priority_col in work.columns else ""
             )
-            root = str(row.get("__root_cause", "") or "").strip() or infer_root_cause_label(summary)
+            root = str(row.get("__root_cause", "") or "").strip() or infer_root_cause_label(
+                summary,
+                description=description,
+            )
             issue_rows.append(
                 FunctionalityIssueRow(
                     key=key,
@@ -392,7 +514,8 @@ def build_period_functionality_followup_summary(
 
     return PeriodFunctionalityFollowupSummary(
         period_label=period_label,
-        total_open_critical=int(len(open_critical)),
+        total_open_critical=int(len(open_filtered)),
+        is_critical_focus=critical_focus,
         top_rows=top_rows,
         tail_rows=tail_rows,
         mitigation_ready_to_verify=mitigation_ready,

@@ -670,7 +670,7 @@ def _render_performance_tab(*, settings: Settings) -> None:
             legend_title_text="",
         )
         fig = apply_plotly_bbva(fig, showlegend=True)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         st.markdown("#### Registro de ejecución")
         history_view = history_df.loc[
