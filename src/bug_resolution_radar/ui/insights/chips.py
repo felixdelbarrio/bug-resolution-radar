@@ -8,7 +8,7 @@ from typing import Mapping, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
-from bug_resolution_radar.analytics.topic_expandable_summary import build_root_cause_map
+from bug_resolution_radar.analytics.topic_expandable_summary import build_root_cause_labels
 from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
@@ -203,19 +203,34 @@ def issue_cards_html_from_df(
         return ""
 
     view = df if limit is None else df.head(max(0, int(limit)))
-    root_cause_by_summary: dict[str, str] = {}
+    root_cause_by_key: dict[str, str] = {}
     if include_root_cause:
+        ordered_keys: list[str] = []
         summaries_for_inference: list[str] = []
+        descriptions_for_inference: list[str] = []
         for _, row in view.iterrows():
+            issue_key = str(row.get("key", "") or "").strip()
+            if not issue_key:
+                continue
             raw_summary = ""
             if summary_col in view.columns:
                 raw_summary = str(row.get(summary_col, "") or "").strip()
             if not raw_summary:
-                issue_key = str(row.get("key", "") or "").strip()
                 _, _, fallback_summary = key_to_meta.get(issue_key, ("", "", ""))
                 raw_summary = str(fallback_summary or "").strip()
+            raw_description = ""
+            if "description" in view.columns:
+                raw_description = str(row.get("description", "") or "").strip()
+            ordered_keys.append(issue_key)
             summaries_for_inference.append(raw_summary)
-        root_cause_by_summary = build_root_cause_map(summaries_for_inference)
+            descriptions_for_inference.append(raw_description)
+        inferred = build_root_cause_labels(
+            summaries_for_inference,
+            descriptions=descriptions_for_inference,
+        )
+        for issue_key, label in zip(ordered_keys, inferred):
+            if issue_key and issue_key not in root_cause_by_key:
+                root_cause_by_key[issue_key] = str(label or "").strip()
 
     cards: list[str] = []
     for _, row in view.iterrows():
@@ -259,7 +274,7 @@ def issue_cards_html_from_df(
 
         root_cause = ""
         if include_root_cause:
-            root_cause = str(root_cause_by_summary.get(summary_text_raw, "") or "").strip()
+            root_cause = str(root_cause_by_key.get(issue_key, "") or "").strip()
 
         card_html = issue_card_html(
             key=issue_key,

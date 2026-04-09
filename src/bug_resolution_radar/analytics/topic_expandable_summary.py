@@ -214,6 +214,32 @@ def _normalize_text(value: object) -> str:
     return re.sub(r"\s+", " ", txt).strip()
 
 
+def _root_cause_text_segments(
+    summary: object,
+    description: object | None = None,
+) -> tuple[str, str]:
+    summary_txt = _normalize_text(summary)
+    description_txt = _normalize_text(description)
+    return summary_txt, description_txt
+
+
+def _root_cause_scores_weighted(
+    summary_txt: str,
+    description_txt: str,
+) -> dict[str, int]:
+    scores: dict[str, int] = {}
+    for label, score in _root_cause_scores(summary_txt).items():
+        scores[label] = scores.get(label, 0) + (int(score) * 3)
+    for label, score in _root_cause_scores(description_txt).items():
+        scores[label] = scores.get(label, 0) + (int(score) * 2)
+    combined_text = " ".join(
+        part for part in (summary_txt, description_txt) if str(part or "").strip()
+    ).strip()
+    for label, score in _root_cause_scores(combined_text).items():
+        scores[label] = scores.get(label, 0) + int(score)
+    return {label: score for label, score in scores.items() if int(score) > 0}
+
+
 def _compile_root_cause_rules() -> tuple[tuple[str, tuple[tuple[re.Pattern[str], int], ...]], ...]:
     compiled: list[tuple[str, tuple[tuple[re.Pattern[str], int], ...]]] = []
     for label, rules in _ROOT_CAUSE_RULES:
@@ -276,11 +302,16 @@ def _has_semantic_hint(segment: str) -> bool:
     return any(any(word.startswith(hint) for hint in _SEMANTIC_HINT_TOKENS) for word in words)
 
 
-def _extract_semantic_phrase(summary: object) -> str:
-    normalized = _normalize_text(summary)
-    if not normalized:
+def _extract_semantic_phrase(
+    summary: object,
+    *,
+    description: object | None = None,
+) -> str:
+    summary_txt, description_txt = _root_cause_text_segments(summary, description)
+    text = " | ".join(part for part in (summary_txt, description_txt) if part).strip()
+    if not text:
         return ""
-    parts = [part.strip() for part in re.split(r"[|/;>]+", normalized) if part.strip()]
+    parts = [part.strip() for part in re.split(r"[|/;>\n]+", text) if part.strip()]
     for part in parts:
         cleaned = re.sub(r"\b(?:inc|mexbmi1|sksemex)[a-z0-9-]*\b", " ", part)
         cleaned = re.sub(r"\b\d+\b", " ", cleaned)
@@ -346,22 +377,61 @@ def ensure_theme_column(
     return work
 
 
-def infer_root_cause_label(summary: object, *, theme_hint: str | None = None) -> str:
-    raw = _normalize_text(summary)
-    if not raw:
+def infer_root_cause_label(
+    summary: object,
+    *,
+    description: object | None = None,
+    theme_hint: str | None = None,
+) -> str:
+    summary_txt, description_txt = _root_cause_text_segments(summary, description)
+    if not summary_txt and not description_txt:
         return _fallback_root_cause_label(summary, theme_hint=theme_hint)
 
-    txt = re.sub(r"\[[^\]]*\]", " ", raw)
-    txt = re.sub(r"\([^)]*\)", " ", txt)
-    txt = re.sub(r"\s+", " ", txt).strip()
-    if not txt:
+    clean_summary = re.sub(r"\[[^\]]*\]", " ", summary_txt)
+    clean_summary = re.sub(r"\([^)]*\)", " ", clean_summary)
+    clean_summary = re.sub(r"\s+", " ", clean_summary).strip()
+    clean_description = re.sub(r"\[[^\]]*\]", " ", description_txt)
+    clean_description = re.sub(r"\([^)]*\)", " ", clean_description)
+    clean_description = re.sub(r"\s+", " ", clean_description).strip()
+
+    if not clean_summary and not clean_description:
         return _fallback_root_cause_label(summary, theme_hint=theme_hint)
 
-    scores = _root_cause_scores(txt)
+    scores = _root_cause_scores_weighted(clean_summary, clean_description)
     best = _best_root_cause_label(scores)
     if best:
         return best
-    return _fallback_root_cause_label(summary, theme_hint=theme_hint)
+    fallback = _fallback_root_cause_label(summary, theme_hint=theme_hint)
+    phrase_label = _format_semantic_phrase_label(
+        _extract_semantic_phrase(clean_summary, description=clean_description)
+    )
+    if phrase_label:
+        return phrase_label
+    return fallback
+
+
+def build_root_cause_labels(
+    summaries: Sequence[object],
+    *,
+    descriptions: Sequence[object] | None = None,
+    theme_hints: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    summary_values = [str(summary or "") for summary in list(summaries or [])]
+    description_values = [str(desc or "") for desc in list(descriptions or [])]
+    theme_hint_values = [str(hint or "") for hint in list(theme_hints or [])]
+
+    labels: list[str] = []
+    for idx, summary_txt in enumerate(summary_values):
+        description_txt = description_values[idx] if idx < len(description_values) else ""
+        theme_hint = theme_hint_values[idx] if idx < len(theme_hint_values) else ""
+        labels.append(
+            infer_root_cause_label(
+                summary_txt,
+                description=description_txt,
+                theme_hint=theme_hint,
+            )
+        )
+    return tuple(labels)
 
 
 def build_root_cause_map(
@@ -371,7 +441,6 @@ def build_root_cause_map(
 ) -> dict[str, str]:
     out: dict[str, str] = {}
     hints = dict(theme_hint_by_summary or {})
-    semantic_phrase_by_summary: dict[str, str] = {}
     for raw_summary in list(summaries or []):
         summary_txt = str(raw_summary or "")
         if summary_txt in out:
@@ -380,26 +449,24 @@ def build_root_cause_map(
             summary_txt,
             theme_hint=hints.get(summary_txt, ""),
         )
-        if out[summary_txt] == _ROOT_CAUSE_FALLBACK_LABEL or out[summary_txt].startswith(
-            _FALLBACK_THEME_PREFIX
-        ):
-            semantic_phrase_by_summary[summary_txt] = _extract_semantic_phrase(summary_txt)
-
-    for summary_txt, phrase in semantic_phrase_by_summary.items():
-        phrase_label = _format_semantic_phrase_label(phrase)
-        if phrase_label:
-            out[summary_txt] = phrase_label
     return out
 
 
 def summarize_root_causes(
     summaries: Sequence[object],
     *,
+    descriptions: Sequence[object] | None = None,
+    theme_hints: Sequence[str] | None = None,
     top_k: int = 3,
 ) -> tuple[RootCauseRank, ...]:
-    summary_values = [str(summary or "") for summary in list(summaries or [])]
-    label_map = build_root_cause_map(summary_values)
-    labels = [str(label_map.get(summary, "") or "").strip() for summary in summary_values]
+    labels = [
+        str(label or "").strip()
+        for label in build_root_cause_labels(
+            summaries,
+            descriptions=descriptions,
+            theme_hints=theme_hints,
+        )
+    ]
     labels = [label for label in labels if str(label).strip()]
     if not labels:
         return ()
@@ -517,8 +584,14 @@ def build_topic_expandable_summaries(
             topic_name = str(topic or "").strip()
             if not topic_name:
                 continue
+            descriptions = (
+                sub["description"].fillna("").astype(str).tolist()
+                if "description" in sub.columns
+                else None
+            )
             roots_by_topic[topic_name] = summarize_root_causes(
                 sub["summary"].fillna("").astype(str).tolist(),
+                descriptions=descriptions,
                 top_k=top_root_causes,
             )
 

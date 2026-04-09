@@ -67,3 +67,24 @@ def test_issue_cards_infer_root_cause_from_full_summary_not_truncated_preview() 
         summary_max_chars=100,
     )
     assert "Causa raíz: Transferencias en tiempo real" in html_out
+
+
+def test_issue_cards_use_description_to_infer_root_cause_when_summary_is_generic() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "MEXBMI1-4",
+                "summary": "Incidencia operativa sin detalle",
+                "description": "Timeout y error 504 al invocar endpoint backend",
+                "assignee": "QA",
+                "__age_days": 2,
+            }
+        ]
+    )
+    html_out = issue_cards_html_from_df(
+        df,
+        key_to_url={"MEXBMI1-4": "https://jira.example/MEXBMI1-4"},
+        key_to_meta={"MEXBMI1-4": ("New", "Medium", "")},
+        include_root_cause=True,
+    )
+    assert "Causa raíz: Conectividad / timeout" in html_out

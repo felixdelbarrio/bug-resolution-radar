@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from bug_resolution_radar.analytics.topic_expandable_summary import (
+    build_root_cause_labels,
     build_root_cause_map,
     build_topic_expandable_summaries,
     infer_root_cause_label,
@@ -30,6 +31,18 @@ def test_infer_root_cause_label_uses_theme_fallback_for_unknown_text() -> None:
     )
 
 
+def test_infer_root_cause_label_uses_description_context() -> None:
+    assert (
+        infer_root_cause_label(
+            "Incidencia operativa sin detalle",
+            description=(
+                "El usuario reporta timeout y error 504 al consultar el endpoint del servicio"
+            ),
+        )
+        == "Conectividad / timeout"
+    )
+
+
 def test_build_root_cause_map_promotes_semantic_phrase_on_structured_summaries() -> None:
     rows = [
         "INC0001 - PAGOS / BBVA.MX / LIQUIDEZ A TU ALCANCE / 2026-04-01",
@@ -38,6 +51,20 @@ def test_build_root_cause_map_promotes_semantic_phrase_on_structured_summaries()
     out = build_root_cause_map(rows)
     assert out[rows[0]] == "Liquidez Tu Alcance"
     assert out[rows[1]] == "Liquidez Tu Alcance"
+
+
+def test_build_root_cause_labels_disambiguates_same_summary_using_description() -> None:
+    labels = build_root_cause_labels(
+        [
+            "Incidencia operativa sin detalle",
+            "Incidencia operativa sin detalle",
+        ],
+        descriptions=[
+            "Login falla por token invalido en el inicio de sesion",
+            "Timeout al invocar API backend de pagos",
+        ],
+    )
+    assert labels == ("Autenticación y sesión", "Integración API / backend")
 
 
 def test_summarize_root_causes_returns_top_k() -> None:
@@ -53,6 +80,26 @@ def test_summarize_root_causes_returns_top_k() -> None:
     assert len(ranked) == 3
     assert ranked[0].label == "Visualización / UI"
     assert ranked[0].count == 2
+
+
+def test_summarize_root_causes_uses_description_for_grouping() -> None:
+    ranked = summarize_root_causes(
+        [
+            "Incidencia sin detalle",
+            "Incidencia sin detalle",
+            "Incidencia sin detalle",
+        ],
+        descriptions=[
+            "Timeout y error 504 al consultar servicio externo",
+            "Demora y latencia de conexion en app",
+            "Error de login por token vencido",
+        ],
+        top_k=2,
+    )
+    assert ranked[0].label == "Conectividad / timeout"
+    assert ranked[0].count == 2
+    assert ranked[1].label == "Autenticación y sesión"
+    assert ranked[1].count == 1
 
 
 def test_build_topic_expandable_summaries_builds_flow_and_root_causes() -> None:

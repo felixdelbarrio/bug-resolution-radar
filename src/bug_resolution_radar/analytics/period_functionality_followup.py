@@ -16,7 +16,7 @@ from bug_resolution_radar.analytics.insights_scope import (
 from bug_resolution_radar.analytics.period_summary import QuincenalScopeResult
 from bug_resolution_radar.analytics.topic_expandable_summary import (
     RootCauseRank,
-    build_root_cause_map,
+    build_root_cause_labels,
     infer_root_cause_label,
     summarize_root_causes,
 )
@@ -278,14 +278,21 @@ def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
 
     work = safe.copy(deep=False)
     summary_series = work["summary"].fillna("").astype(str)
+    description_series = (
+        work["description"].fillna("").astype(str)
+        if "description" in work.columns
+        else pd.Series([""] * len(work), index=work.index, dtype=str)
+    )
     unique_summaries = pd.unique(summary_series.to_numpy(copy=False)).tolist()
     theme_map = {text: classify_theme(text) for text in unique_summaries}
-    cause_map = build_root_cause_map(
-        unique_summaries,
-        theme_hint_by_summary=theme_map,
+    row_themes = summary_series.map(theme_map)
+    root_labels = build_root_cause_labels(
+        summary_series.tolist(),
+        descriptions=description_series.tolist(),
+        theme_hints=row_themes.tolist(),
     )
     work["__theme"] = summary_series.map(theme_map).to_numpy(copy=False)
-    work["__root_cause"] = summary_series.map(cause_map).to_numpy(copy=False)
+    work["__root_cause"] = pd.Series(root_labels, index=work.index).to_numpy(copy=False)
     return work
 
 
@@ -297,6 +304,7 @@ def build_period_functionality_followup_summary(
     status_col: str = "status",
     priority_col: str = "priority",
     summary_col: str = "summary",
+    description_col: str = "description",
     key_col: str = "key",
     status_filters: Sequence[str] | None = None,
     priority_filters: Sequence[str] | None = None,
@@ -415,6 +423,11 @@ def build_period_functionality_followup_summary(
         ].copy(deep=False)
         roots = summarize_root_causes(
             sub[summary_col].fillna("").astype(str).tolist() if summary_col in sub.columns else [],
+            descriptions=(
+                sub[description_col].fillna("").astype(str).tolist()
+                if description_col in sub.columns
+                else None
+            ),
             top_k=top_root_causes,
         )
         created = (
@@ -425,20 +438,48 @@ def build_period_functionality_followup_summary(
         age_days = ((reference_day - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         work = sub.copy(deep=False)
         work["__open_days"] = pd.to_numeric(age_days, errors="coerce").fillna(0.0)
-        sort_cols = ["__open_days"]
-        ascending = [False]
         if key_col in work.columns:
-            sort_cols.append(key_col)
-            ascending.append(True)
+            work["__issue_key"] = work[key_col].fillna("").astype(str).str.strip()
+        else:
+            work["__issue_key"] = ""
+        work = work.loc[work["__issue_key"] != ""].copy(deep=False)
+
+        if "updated" in work.columns:
+            work["__updated_sort"] = _to_dt_naive(work["updated"])
+        else:
+            work["__updated_sort"] = pd.NaT
+        if created_col in work.columns:
+            work["__created_sort"] = _to_dt_naive(work[created_col])
+        else:
+            work["__created_sort"] = pd.NaT
+        if summary_col in work.columns:
+            work["__summary_len"] = work[summary_col].fillna("").astype(str).str.len()
+        else:
+            work["__summary_len"] = 0
+
+        sort_cols = [
+            "__updated_sort",
+            "__created_sort",
+            "__summary_len",
+            "__open_days",
+            "__issue_key",
+        ]
+        ascending = [False, False, False, False, True]
         work = work.sort_values(sort_cols, ascending=ascending, kind="mergesort")
+        work = work.drop_duplicates(subset=["__issue_key"], keep="first")
 
         issue_rows: list[FunctionalityIssueRow] = []
         for _, row in work.iterrows():
-            key = str(row.get(key_col, "") or "").strip() if key_col in work.columns else ""
+            key = str(row.get("__issue_key", "") or "").strip()
             if not key:
                 continue
             summary = (
                 str(row.get(summary_col, "") or "").strip() if summary_col in work.columns else ""
+            )
+            description = (
+                str(row.get(description_col, "") or "").strip()
+                if description_col in work.columns
+                else ""
             )
             status = (
                 str(row.get(status_col, "") or "").strip() if status_col in work.columns else ""
@@ -446,7 +487,10 @@ def build_period_functionality_followup_summary(
             priority = (
                 str(row.get(priority_col, "") or "").strip() if priority_col in work.columns else ""
             )
-            root = str(row.get("__root_cause", "") or "").strip() or infer_root_cause_label(summary)
+            root = str(row.get("__root_cause", "") or "").strip() or infer_root_cause_label(
+                summary,
+                description=description,
+            )
             issue_rows.append(
                 FunctionalityIssueRow(
                     key=key,
