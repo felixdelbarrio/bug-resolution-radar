@@ -16,6 +16,7 @@ from bug_resolution_radar.analytics.insights_scope import (
 from bug_resolution_radar.analytics.period_summary import QuincenalScopeResult
 from bug_resolution_radar.analytics.topic_expandable_summary import (
     RootCauseRank,
+    build_root_cause_map,
     infer_root_cause_label,
     summarize_root_causes,
 )
@@ -279,7 +280,10 @@ def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
     summary_series = work["summary"].fillna("").astype(str)
     unique_summaries = pd.unique(summary_series.to_numpy(copy=False)).tolist()
     theme_map = {text: classify_theme(text) for text in unique_summaries}
-    cause_map = {text: infer_root_cause_label(text) for text in unique_summaries}
+    cause_map = build_root_cause_map(
+        unique_summaries,
+        theme_hint_by_summary=theme_map,
+    )
     work["__theme"] = summary_series.map(theme_map).to_numpy(copy=False)
     work["__root_cause"] = summary_series.map(cause_map).to_numpy(copy=False)
     return work

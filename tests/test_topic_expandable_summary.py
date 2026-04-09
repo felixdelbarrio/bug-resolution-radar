@@ -14,6 +14,16 @@ def test_infer_root_cause_label_detects_known_patterns() -> None:
         infer_root_cause_label("No se visualiza el dashboard del cliente") == "Visualización / UI"
     )
     assert infer_root_cause_label("Login falla por token caducado") == "Autenticación y sesión"
+    assert (
+        infer_root_cause_label(
+            "INC0001 - PAGOS / SENDA BNC / TRANSFERENCIAS EN TIEMPO REAL / 00853291"
+        )
+        == "Transferencias en tiempo real"
+    )
+
+
+def test_infer_root_cause_label_uses_theme_fallback_for_unknown_text() -> None:
+    assert infer_root_cause_label("Error funcional no especificado en pagos") == "Fallo funcional en Pagos"
 
 
 def test_summarize_root_causes_returns_top_k() -> None:
