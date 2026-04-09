@@ -451,7 +451,9 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         assert len(zoom_table_picture) == 1
 
 
-def test_generate_country_period_followup_ppt_functionality_wording_depends_on_priority_filter() -> None:
+def test_generate_country_period_followup_ppt_functionality_wording_depends_on_priority_filter() -> (
+    None
+):
     now = pd.Timestamp("2026-04-10T00:00:00+00:00")
     dff = pd.DataFrame(
         [

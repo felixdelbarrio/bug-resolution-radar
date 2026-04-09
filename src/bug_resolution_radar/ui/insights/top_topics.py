@@ -625,7 +625,7 @@ def _render_theme_trend_chart(
         ),
         margin=dict(l=16, r=16, t=18, b=170),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_top_topics_tab(

@@ -302,6 +302,15 @@ def _append_slide_clone_from_source(prs: Any, *, source_slide: Any) -> Any:
     for rel in source_slide.part.rels.values():
         if "slideLayout" in rel.reltype or "notesSlide" in rel.reltype or "comments" in rel.reltype:
             continue
+        if str(rel.reltype or "").endswith("/image") and not rel.is_external:
+            try:
+                img_blob = bytes(getattr(rel._target, "blob", b"") or b"")
+                if img_blob:
+                    _, img_rid = dest.part.get_or_add_image_part(BytesIO(img_blob))
+                    rid_map[rel.rId] = img_rid
+                    continue
+            except Exception:
+                pass
         rel_target = rel.target_ref if rel.is_external else rel._target
         rid_map[rel.rId] = dest.part.rels._add_relationship(
             rel.reltype,
@@ -594,9 +603,7 @@ def _fit_lines_in_cell(
     if capacity == 1:
         return [_shorten_to_width(draw, " ".join(lines), font, max_width=max_width)]
     tail = " ".join(lines[capacity - 1 :])
-    return lines[: capacity - 1] + [
-        _shorten_to_width(draw, tail, font, max_width=max_width)
-    ]
+    return lines[: capacity - 1] + [_shorten_to_width(draw, tail, font, max_width=max_width)]
 
 
 def _draw_table_cell_text(
@@ -797,11 +804,15 @@ def _table_picture_payload(
     ]
     col_widths_px[-1] += width_px - sum(col_widths_px)
 
-    header_h_emu = int(table.rows[0].height or max(int(table_shape.height / (len(normalized_rows) + 1)), 1))
+    header_h_emu = int(
+        table.rows[0].height or max(int(table_shape.height / (len(normalized_rows) + 1)), 1)
+    )
     remaining_h_emu = max(int(table_shape.height) - header_h_emu, 1)
     body_row_h_emu = max(int(remaining_h_emu / max(len(normalized_rows), 1)), 1)
     header_h_px = _emu_to_px(header_h_emu)
-    body_row_h_px = max(int(round(float(height_px - header_h_px) / max(len(normalized_rows), 1))), 1)
+    body_row_h_px = max(
+        int(round(float(height_px - header_h_px) / max(len(normalized_rows), 1))), 1
+    )
     body_row_h_px = max(body_row_h_px, _emu_to_px(body_row_h_emu))
     header_h_px = max(height_px - (body_row_h_px * len(normalized_rows)), 1)
 
@@ -813,7 +824,9 @@ def _table_picture_payload(
 
     left_cols = {int(idx) for idx in left_align_cols}
     headers = [str(table.cell(0, cidx).text or "").strip() for cidx in range(col_count)]
-    hyperlinks = {int(k): str(v).strip() for k, v in dict(hyperlink_by_row or {}).items() if str(v).strip()}
+    hyperlinks = {
+        int(k): str(v).strip() for k, v in dict(hyperlink_by_row or {}).items() if str(v).strip()
+    }
 
     x = 0
     for cidx, cell_w in enumerate(col_widths_px):

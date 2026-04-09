@@ -643,9 +643,7 @@ def _render_period_followup_report(settings: Settings) -> None:
     )
     insights_status_filters = list(st.session_state.get(INSIGHTS_STATUS_KEY) or [])
     insights_priority_filters = list(st.session_state.get(INSIGHTS_PRIORITY_KEY) or [])
-    insights_functionality_filters = list(
-        st.session_state.get(INSIGHTS_FUNCTIONALITY_KEY) or []
-    )
+    insights_functionality_filters = list(st.session_state.get(INSIGHTS_FUNCTIONALITY_KEY) or [])
 
     try:
         df_all = load_issues_df(settings.DATA_PATH)

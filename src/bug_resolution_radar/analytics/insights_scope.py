@@ -168,9 +168,7 @@ def default_status_selection(
     preferred_aliases: dict[str, str] = {
         "in progress": "en progreso",
     }
-    preferred_rank = {
-        token: idx for idx, token in enumerate(_DEFAULT_STATUS_SELECTION_ORDER)
-    }
+    preferred_rank = {token: idx for idx, token in enumerate(_DEFAULT_STATUS_SELECTION_ORDER)}
 
     selected_preferred: list[str] = []
     for status in options:

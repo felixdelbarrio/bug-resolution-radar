@@ -370,10 +370,7 @@ def build_period_functionality_followup_summary(
         else pd.Series(dtype="int64", name="open_total")
     )
     theme_new = (
-        open_current["__theme"]
-        .value_counts()
-        .rename_axis("functionality")
-        .rename("new_count")
+        open_current["__theme"].value_counts().rename_axis("functionality").rename("new_count")
         if not open_current.empty
         else pd.Series(dtype="int64", name="new_count")
     )
@@ -409,9 +406,9 @@ def build_period_functionality_followup_summary(
     zoom_themes = [row.functionality for row in list(top_rows)[:top_n_safe]]
     zoom_slides: list[FunctionalityZoomSlide] = []
     for functionality in zoom_themes:
-        sub = open_current.loc[open_current["__theme"].fillna("").astype(str).eq(functionality)].copy(
-            deep=False
-        )
+        sub = open_current.loc[
+            open_current["__theme"].fillna("").astype(str).eq(functionality)
+        ].copy(deep=False)
         roots = summarize_root_causes(
             sub[summary_col].fillna("").astype(str).tolist() if summary_col in sub.columns else [],
             top_k=top_root_causes,

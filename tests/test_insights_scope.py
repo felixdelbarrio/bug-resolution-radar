@@ -92,7 +92,9 @@ def test_insights_combo_context_applies_selected_functionalities() -> None:
     assert ctx.filtered_df["key"].tolist() == ["A-1"]
 
 
-def test_insights_combo_context_default_status_uses_operational_order_and_excludes_discarded() -> None:
+def test_insights_combo_context_default_status_uses_operational_order_and_excludes_discarded() -> (
+    None
+):
     df = pd.DataFrame(
         [
             {"key": "A-1", "status": "Discarded", "priority": "High", "summary": "x"},
