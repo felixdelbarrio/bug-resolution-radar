@@ -10,6 +10,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
@@ -458,6 +459,76 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     assert str(runs[0].hyperlink.address or "").startswith("https://")
     assert first_data_key_cell.text_frame.paragraphs[0].alignment == PP_ALIGN.LEFT
     assert first_data_key_cell.vertical_anchor == MSO_VERTICAL_ANCHOR.MIDDLE
+    header_criticity_cell = zoom_table.cell(0, 4)
+    header_runs = list(header_criticity_cell.text_frame.paragraphs[0].runs)
+    assert header_runs
+    assert float(header_runs[0].font.size.pt) <= 9.0
+    tc_pr = first_data_key_cell._tc.tcPr
+    assert tc_pr.find(qn("a:lnL")) is not None
+    assert tc_pr.find(qn("a:lnR")) is not None
+    assert tc_pr.find(qn("a:lnT")) is not None
+    assert tc_pr.find(qn("a:lnB")) is not None
+
+
+def test_generate_country_period_followup_ppt_functionality_color_contrast_is_readable() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Pago no refleja movimiento",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Transferencias en tiempo real fallan",
+                "status": "Blocked",
+                "priority": "Medium",
+                "created": "2026-04-06T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+
+    dashboard_blob_shape = next(
+        shape
+        for shape in prs.slides[9].shapes
+        if getattr(shape, "has_text_frame", False)
+        and "INCIDENCIAS" in str(getattr(shape, "text", "") or "")
+        and "ABIERTAS" in str(getattr(shape, "text", "") or "")
+    )
+    dashboard_run = dashboard_blob_shape.text_frame.paragraphs[0].runs[0]
+    assert dashboard_run.font.color.rgb == RGBColor(255, 255, 255)
+
+    root_cause_shape = next(
+        shape
+        for shape in prs.slides[10].shapes
+        if getattr(shape, "has_text_frame", False)
+        and any(
+            token in str(getattr(shape, "text", "") or "").lower()
+            for token in ("causa", "sin incidencias")
+        )
+    )
+    root_run = root_cause_shape.text_frame.paragraphs[0].runs[0]
+    assert root_run.font.color.rgb == RGBColor(0, 19, 145)
 
 
 def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> None:

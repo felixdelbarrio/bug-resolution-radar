@@ -16,6 +16,8 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
@@ -54,6 +56,8 @@ _TABLE_LINK_RGB = (0, 81, 241)
 _TABLE_PADDING_X_PX = 12
 _TABLE_PADDING_Y_PX = 8
 _TABLE_LINE_SPACING_PX = 2
+_TABLE_BORDER_WIDTH_EMU = 10_160
+_ZOOM_TABLE_HEADER_FONT_SIZE_PT = 8.6
 _REPORT_FONT_DIR = (
     Path(__file__).resolve().parent.parent / "ui" / "assets" / "fonts" / "bbva"
 ).resolve()
@@ -721,6 +725,7 @@ def _set_table_cell_text(
     align: PP_ALIGN | None = None,
     bold: bool | None = None,
     color_rgb: RGBColor | None = None,
+    font_size_pt: float | None = None,
 ) -> None:
     if cell is None:
         return
@@ -752,6 +757,11 @@ def _set_table_cell_text(
     if color_rgb is not None:
         try:
             run.font.color.rgb = color_rgb
+        except Exception:
+            pass
+    if font_size_pt is not None:
+        try:
+            run.font.size = Pt(float(font_size_pt))
         except Exception:
             pass
     try:
@@ -853,6 +863,12 @@ def _set_table_rows(
             align=PP_ALIGN.LEFT,
             bold=True,
             color_rgb=RGBColor(*_TABLE_HEADER_FG_RGB),
+            font_size_pt=_ZOOM_TABLE_HEADER_FONT_SIZE_PT,
+        )
+        _set_table_cell_border(
+            header_cell,
+            color_rgb=RGBColor(*_TABLE_BORDER_RGB),
+            width_emu=_TABLE_BORDER_WIDTH_EMU,
         )
 
     hyperlinks = dict(hyperlink_by_row or {})
@@ -873,6 +889,58 @@ def _set_table_rows(
                 bold=False,
                 color_rgb=RGBColor(*_TABLE_BODY_FG_RGB),
             )
+            _set_table_cell_border(
+                body_cell,
+                color_rgb=RGBColor(*_TABLE_BORDER_RGB),
+                width_emu=_TABLE_BORDER_WIDTH_EMU,
+            )
+
+
+def _set_table_cell_border(
+    cell: Any,
+    *,
+    color_rgb: RGBColor,
+    width_emu: int,
+) -> None:
+    if cell is None:
+        return
+    tc = getattr(cell, "_tc", None)
+    if tc is None:
+        return
+    tc_pr = tc.get_or_add_tcPr()
+    color_hex = f"{int(color_rgb[0]):02X}{int(color_rgb[1]):02X}{int(color_rgb[2]):02X}"
+    for side in ("a:lnL", "a:lnR", "a:lnT", "a:lnB"):
+        existing = tc_pr.find(qn(side))
+        if existing is not None:
+            tc_pr.remove(existing)
+        ln = OxmlElement(side)
+        ln.set("w", str(max(int(width_emu or 0), 1)))
+        ln.set("cap", "flat")
+        ln.set("cmpd", "sng")
+        ln.set("algn", "ctr")
+
+        solid = OxmlElement("a:solidFill")
+        srgb = OxmlElement("a:srgbClr")
+        srgb.set("val", color_hex)
+        solid.append(srgb)
+        ln.append(solid)
+
+        dash = OxmlElement("a:prstDash")
+        dash.set("val", "solid")
+        ln.append(dash)
+
+        head = OxmlElement("a:headEnd")
+        head.set("type", "none")
+        head.set("w", "med")
+        head.set("len", "med")
+        ln.append(head)
+
+        tail = OxmlElement("a:tailEnd")
+        tail.set("type", "none")
+        tail.set("w", "med")
+        tail.set("len", "med")
+        ln.append(tail)
+        tc_pr.append(ln)
 
 
 def _table_body_font_size_pt(data_rows: int) -> float:
@@ -1841,6 +1909,7 @@ def _populate_functionality_dashboard_slide(
             else f"{int(summary.total_open_critical)} INCIDENCIAS  | ABIERTAS"
         ),
     )
+    _set_shape_font_color(slide, shape_index=5, color_rgb=RGBColor(255, 255, 255))
 
     top_rows = list(summary.top_rows or [])
     top_shapes = (6, 8, 10)
@@ -1924,7 +1993,7 @@ def _populate_functionality_zoom_slide(
         3,
         _trim_text(_root_cause_caption(zoom, critical_wording=critical_wording), max_chars=200),
     )
-    _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(255, 255, 255))
+    _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(*_TABLE_BODY_FG_RGB))
     _set_shape_text(
         slide,
         4,
