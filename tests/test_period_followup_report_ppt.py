@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
@@ -425,8 +426,88 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    # Slide 11 (0-based 10): primer zoom de funcionalidad.
-    zoom_table_shape = prs.slides[10].shapes[1]
-    assert zoom_table_shape.has_table
-    # Header + 2 incidencias de Login abiertas en quincena.
-    assert len(zoom_table_shape.table.rows) == 3
+    dashboard_slide = prs.slides[9]
+    assert not any(getattr(shape, "has_table", False) for shape in dashboard_slide.shapes)
+    dashboard_table_picture = [
+        shape
+        for shape in dashboard_slide.shapes
+        if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+        and int(getattr(shape, "width", 0)) >= 2_900_000
+        and int(getattr(shape, "height", 0)) >= 2_900_000
+    ]
+    assert dashboard_table_picture
+
+    # Slides 11-13 (0-based 10-12): zooms de funcionalidad.
+    for slide_idx in (10, 11, 12):
+        slide = prs.slides[slide_idx]
+        assert not any(getattr(shape, "has_table", False) for shape in slide.shapes)
+        zoom_table_picture = [
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+            and int(getattr(shape, "width", 0)) >= 2_900_000
+            and int(getattr(shape, "height", 0)) >= 2_900_000
+        ]
+        assert len(zoom_table_picture) == 1
+
+
+def test_generate_country_period_followup_ppt_functionality_wording_depends_on_priority_filter() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Pagos no refleja saldo",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Transferencias con timeout",
+                "status": "Blocked",
+                "priority": "Medium",
+                "created": "2026-04-06T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    out_default = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs_default = Presentation(BytesIO(out_default.content))
+    blob_default = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for idx in (8, 9, 10, 11, 12)
+        for shape in prs_default.slides[idx].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "incidencias críticas" not in blob_default
+
+    out_critical = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        functionality_priority_filters=["High", "Highest", "Supone un impedimento"],
+    )
+    prs_critical = Presentation(BytesIO(out_critical.content))
+    blob_critical = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for idx in (8, 9, 10, 11, 12)
+        for shape in prs_critical.slides[idx].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "incidencias críticas" in blob_critical

@@ -26,16 +26,17 @@ from bug_resolution_radar.ui.insights.backlog_people import render_backlog_peopl
 from bug_resolution_radar.ui.insights.duplicates import render_duplicates_tab
 from bug_resolution_radar.ui.insights.ops_health import render_ops_health_tab
 from bug_resolution_radar.ui.insights.period_summary import render_period_summary_tab
+from bug_resolution_radar.ui.insights.state import (
+    INSIGHTS_FUNCTIONALITY_KEY as _INSIGHTS_FUNCTIONALITY_KEY,
+    INSIGHTS_FUNCTIONALITY_WIDGET_KEY as _INSIGHTS_FUNCTIONALITY_WIDGET_KEY,
+    INSIGHTS_PRIORITY_KEY as _INSIGHTS_PRIORITY_KEY,
+    INSIGHTS_PRIORITY_WIDGET_KEY as _INSIGHTS_PRIORITY_WIDGET_KEY,
+    INSIGHTS_STATUS_KEY as _INSIGHTS_STATUS_KEY,
+    INSIGHTS_STATUS_WIDGET_KEY as _INSIGHTS_STATUS_WIDGET_KEY,
+    INSIGHTS_VIEW_MODE_KEY as _INSIGHTS_VIEW_MODE_KEY,
+    INSIGHTS_VIEW_MODE_WIDGET_KEY as _INSIGHTS_VIEW_MODE_WIDGET_KEY,
+)
 from bug_resolution_radar.ui.insights.top_topics import render_top_topics_tab
-
-_INSIGHTS_VIEW_MODE_KEY = "insights::combo::view_mode"
-_INSIGHTS_STATUS_KEY = "insights::combo::status_values"
-_INSIGHTS_PRIORITY_KEY = "insights::combo::priority_values"
-_INSIGHTS_FUNCTIONALITY_KEY = "insights::combo::functionality_values"
-_INSIGHTS_VIEW_MODE_WIDGET_KEY = f"{_INSIGHTS_VIEW_MODE_KEY}::widget"
-_INSIGHTS_STATUS_WIDGET_KEY = f"{_INSIGHTS_STATUS_KEY}::widget"
-_INSIGHTS_PRIORITY_WIDGET_KEY = f"{_INSIGHTS_PRIORITY_KEY}::widget"
-_INSIGHTS_FUNCTIONALITY_WIDGET_KEY = f"{_INSIGHTS_FUNCTIONALITY_KEY}::widget"
 
 
 def _safe_df(x: Any) -> pd.DataFrame:

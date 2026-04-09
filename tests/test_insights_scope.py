@@ -90,3 +90,40 @@ def test_insights_combo_context_applies_selected_functionalities() -> None:
     assert "__insights_theme" in ctx.filtered_df.columns
     assert set(ctx.filtered_df["__insights_theme"].tolist()) == {"Pagos"}
     assert ctx.filtered_df["key"].tolist() == ["A-1"]
+
+
+def test_insights_combo_context_default_status_uses_operational_order_and_excludes_discarded() -> None:
+    df = pd.DataFrame(
+        [
+            {"key": "A-1", "status": "Discarded", "priority": "High", "summary": "x"},
+            {"key": "A-2", "status": "Ready to Verify", "priority": "High", "summary": "x"},
+            {"key": "A-3", "status": "Blocked", "priority": "High", "summary": "x"},
+            {"key": "A-4", "status": "New", "priority": "High", "summary": "x"},
+            {"key": "A-5", "status": "To Rework", "priority": "High", "summary": "x"},
+            {"key": "A-6", "status": "In Progress", "priority": "High", "summary": "x"},
+            {"key": "A-7", "status": "Test", "priority": "High", "summary": "x"},
+            {"key": "A-8", "status": "Analysing", "priority": "High", "summary": "x"},
+            {"key": "A-9", "status": "Accepted", "priority": "High", "summary": "x"},
+        ]
+    )
+
+    ctx = build_insights_combo_context(
+        accumulated_df=df,
+        quincenal_df=df,
+        view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
+        selected_statuses=[],
+        selected_priorities=[],
+        selected_functionalities=[],
+        apply_default_status_when_empty=True,
+    )
+
+    assert list(ctx.selected_statuses) == [
+        "New",
+        "Analysing",
+        "In Progress",
+        "To Rework",
+        "Blocked",
+        "Test",
+        "Ready to Verify",
+    ]
+    assert "Discarded" not in ctx.selected_statuses

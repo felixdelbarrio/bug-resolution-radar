@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, List, Mapping, Sequence, cast
 
 import pandas as pd
+from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, MSO_SHAPE_TYPE
@@ -42,6 +43,21 @@ from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trend
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
 _FUNCTIONALITY_TEMPLATE_FILENAME = "Seguimiento de incidencias por funcionalidad.pptx"
+_TABLE_RENDER_DPI = 180
+_TABLE_HEADER_BG_RGB = (0, 19, 145)
+_TABLE_HEADER_FG_RGB = (255, 255, 255)
+_TABLE_BODY_BG_RGB = (255, 255, 255)
+_TABLE_BODY_FG_RGB = (0, 19, 145)
+_TABLE_BORDER_RGB = (211, 216, 225)
+_TABLE_LINK_RGB = (0, 81, 241)
+_TABLE_PADDING_X_PX = 12
+_TABLE_PADDING_Y_PX = 8
+_TABLE_LINE_SPACING_PX = 2
+_REPORT_FONT_DIR = (
+    Path(__file__).resolve().parent.parent / "ui" / "assets" / "fonts" / "bbva"
+).resolve()
+_REPORT_FONT_BOOK_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Book.ttf"
+_REPORT_FONT_BOLD_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Bold.ttf"
 
 
 @dataclass(frozen=True)
@@ -495,6 +511,121 @@ def _trim_text(value: object, *, max_chars: int) -> str:
     return txt[: max(0, max_chars - 3)].rstrip() + "..."
 
 
+def _emu_to_px(value: int | float, *, dpi: int = _TABLE_RENDER_DPI) -> int:
+    inches = max(float(value or 0) / _EMU_PER_INCH, 0.0)
+    return max(int(round(inches * float(dpi))), 1)
+
+
+def _load_report_font(*, size_px: int, bold: bool) -> Any:
+    preferred = [_REPORT_FONT_BOLD_PATH] if bold else [_REPORT_FONT_BOOK_PATH]
+    fallback = [_REPORT_FONT_BOOK_PATH] if bold else [_REPORT_FONT_BOLD_PATH]
+    for candidate in preferred + fallback:
+        try:
+            if candidate.exists():
+                return ImageFont.truetype(str(candidate), max(int(size_px), 1))
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _measure_text(draw: Any, text: str, font: Any) -> tuple[int, int]:
+    if not str(text or ""):
+        return 0, 0
+    left, top, right, bottom = draw.textbbox((0, 0), str(text), font=font)
+    return max(int(right - left), 0), max(int(bottom - top), 0)
+
+
+def _shorten_to_width(draw: Any, text: str, font: Any, *, max_width: int) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    if _measure_text(draw, raw, font)[0] <= max_width:
+        return raw
+
+    probe = raw
+    while probe:
+        probe = probe[:-1].rstrip()
+        candidate = f"{probe}..."
+        if _measure_text(draw, candidate, font)[0] <= max_width:
+            return candidate
+    return "..."
+
+
+def _wrap_text_to_width(draw: Any, text: str, font: Any, *, max_width: int) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return [""]
+
+    lines: list[str] = []
+    for block in raw.splitlines() or [""]:
+        words = block.split()
+        if not words:
+            lines.append("")
+            continue
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if _measure_text(draw, candidate, font)[0] <= max_width:
+                current = candidate
+                continue
+            lines.append(current)
+            current = word
+        lines.append(current)
+
+    return lines or [""]
+
+
+def _fit_lines_in_cell(
+    draw: Any,
+    text: str,
+    font: Any,
+    *,
+    max_width: int,
+    max_height: int,
+) -> list[str]:
+    lines = _wrap_text_to_width(draw, text, font, max_width=max_width)
+    line_h = max(_measure_text(draw, "Ag", font)[1], 1)
+    capacity = max(
+        int((max_height + _TABLE_LINE_SPACING_PX) / (line_h + _TABLE_LINE_SPACING_PX)),
+        1,
+    )
+    if len(lines) <= capacity:
+        return lines
+    if capacity == 1:
+        return [_shorten_to_width(draw, " ".join(lines), font, max_width=max_width)]
+    tail = " ".join(lines[capacity - 1 :])
+    return lines[: capacity - 1] + [
+        _shorten_to_width(draw, tail, font, max_width=max_width)
+    ]
+
+
+def _draw_table_cell_text(
+    draw: Any,
+    *,
+    text: str,
+    font: Any,
+    box: tuple[int, int, int, int],
+    fill: tuple[int, int, int],
+    align: str,
+) -> None:
+    x0, y0, x1, y1 = box
+    inner_w = max((x1 - x0) - (_TABLE_PADDING_X_PX * 2), 1)
+    inner_h = max((y1 - y0) - (_TABLE_PADDING_Y_PX * 2), 1)
+    lines = _fit_lines_in_cell(draw, text, font, max_width=inner_w, max_height=inner_h)
+    line_h = max(_measure_text(draw, "Ag", font)[1], 1)
+    total_h = (line_h * len(lines)) + (_TABLE_LINE_SPACING_PX * max(len(lines) - 1, 0))
+    start_y = y0 + max(int(((y1 - y0) - total_h) / 2), _TABLE_PADDING_Y_PX)
+
+    for idx, line in enumerate(lines):
+        line_w, _ = _measure_text(draw, line, font)
+        if align == "center":
+            tx = x0 + max(int(((x1 - x0) - line_w) / 2), _TABLE_PADDING_X_PX)
+        else:
+            tx = x0 + _TABLE_PADDING_X_PX
+        ty = start_y + idx * (line_h + _TABLE_LINE_SPACING_PX)
+        draw.text((tx, ty), line, font=font, fill=fill)
+
+
 def _set_table_cell_text(cell: Any, text: str, *, hyperlink: str = "") -> None:
     if cell is None:
         return
@@ -590,6 +721,17 @@ def _set_table_rows(
             )
 
 
+def _table_body_font_size_pt(data_rows: int) -> float:
+    rows = max(int(data_rows or 0), 1)
+    if rows <= 6:
+        return 10.0
+    if rows <= 10:
+        return 9.0
+    if rows <= 16:
+        return 8.0
+    return 7.2
+
+
 def _tune_table_font(
     slide: Any,
     *,
@@ -601,15 +743,7 @@ def _tune_table_font(
     if shape is None:
         return
     table = shape.table
-    rows = max(int(data_rows or 0), 1)
-    if rows <= 6:
-        base_size = 10.0
-    elif rows <= 10:
-        base_size = 9.0
-    elif rows <= 16:
-        base_size = 8.0
-    else:
-        base_size = 7.2
+    base_size = _table_body_font_size_pt(data_rows)
 
     for ridx in range(1, len(table.rows)):
         for cidx in range(len(table.columns)):
@@ -627,6 +761,163 @@ def _tune_table_font(
                 tf.word_wrap = True
             except Exception:
                 pass
+
+
+def _table_picture_payload(
+    table_shape: Any,
+    *,
+    rows: Sequence[Sequence[str]],
+    description_col_index: int | None = None,
+    left_align_cols: Sequence[int] = (),
+    hyperlink_by_row: Mapping[int, str] | None = None,
+) -> bytes:
+    table = table_shape.table
+    col_count = len(table.columns)
+    if col_count <= 0:
+        return b""
+
+    normalized_rows = [list(row)[:col_count] for row in list(rows or [])]
+    if not normalized_rows:
+        normalized_rows = [[""] * col_count]
+    normalized_rows = [row + ([""] * (col_count - len(row))) for row in normalized_rows]
+
+    width_px = _emu_to_px(int(table_shape.width))
+    height_px = _emu_to_px(int(table_shape.height))
+    image = Image.new("RGB", (width_px, height_px), _TABLE_BODY_BG_RGB)
+    draw = ImageDraw.Draw(image)
+
+    raw_col_widths = [int(getattr(col, "width", 0) or 0) for col in table.columns]
+    total_col_width = sum(width for width in raw_col_widths if width > 0)
+    if total_col_width <= 0:
+        raw_col_widths = [1] * col_count
+        total_col_width = col_count
+    col_widths_px = [
+        max(int(round((float(width) / float(total_col_width)) * float(width_px))), 1)
+        for width in raw_col_widths
+    ]
+    col_widths_px[-1] += width_px - sum(col_widths_px)
+
+    header_h_emu = int(table.rows[0].height or max(int(table_shape.height / (len(normalized_rows) + 1)), 1))
+    remaining_h_emu = max(int(table_shape.height) - header_h_emu, 1)
+    body_row_h_emu = max(int(remaining_h_emu / max(len(normalized_rows), 1)), 1)
+    header_h_px = _emu_to_px(header_h_emu)
+    body_row_h_px = max(int(round(float(height_px - header_h_px) / max(len(normalized_rows), 1))), 1)
+    body_row_h_px = max(body_row_h_px, _emu_to_px(body_row_h_emu))
+    header_h_px = max(height_px - (body_row_h_px * len(normalized_rows)), 1)
+
+    base_font_pt = _table_body_font_size_pt(len(normalized_rows))
+    header_font = _load_report_font(
+        size_px=max(_emu_to_px(Pt(base_font_pt + 0.8)), 12),
+        bold=True,
+    )
+
+    left_cols = {int(idx) for idx in left_align_cols}
+    headers = [str(table.cell(0, cidx).text or "").strip() for cidx in range(col_count)]
+    hyperlinks = {int(k): str(v).strip() for k, v in dict(hyperlink_by_row or {}).items() if str(v).strip()}
+
+    x = 0
+    for cidx, cell_w in enumerate(col_widths_px):
+        box = (x, 0, x + cell_w, header_h_px)
+        draw.rectangle(box, fill=_TABLE_HEADER_BG_RGB, outline=_TABLE_BORDER_RGB, width=2)
+        _draw_table_cell_text(
+            draw,
+            text=headers[cidx],
+            font=header_font,
+            box=box,
+            fill=_TABLE_HEADER_FG_RGB,
+            align="left",
+        )
+        x += cell_w
+
+    y = header_h_px
+    for ridx, row_values in enumerate(normalized_rows):
+        x = 0
+        row_link = hyperlinks.get(ridx, "")
+        for cidx, value in enumerate(row_values):
+            box = (x, y, x + col_widths_px[cidx], y + body_row_h_px)
+            draw.rectangle(box, fill=_TABLE_BODY_BG_RGB, outline=_TABLE_BORDER_RGB, width=2)
+            cell_font_pt = base_font_pt
+            if description_col_index is not None and cidx == int(description_col_index):
+                cell_font_pt = max(base_font_pt - 0.4, 7.0)
+            cell_font = _load_report_font(
+                size_px=max(_emu_to_px(Pt(cell_font_pt)), 10),
+                bold=False,
+            )
+            _draw_table_cell_text(
+                draw,
+                text=str(value or ""),
+                font=cell_font,
+                box=box,
+                fill=_TABLE_LINK_RGB if cidx == 0 and row_link else _TABLE_BODY_FG_RGB,
+                align="left" if cidx in left_cols else "center",
+            )
+            x += col_widths_px[cidx]
+        y += body_row_h_px
+
+    payload = BytesIO()
+    image.save(payload, format="PNG")
+    return payload.getvalue()
+
+
+def _replace_table_with_picture(
+    slide: Any,
+    *,
+    table_shape_index: int,
+    rows: Sequence[Sequence[str]],
+    description_col_index: int | None = None,
+    left_align_cols: Sequence[int] = (),
+    hyperlink_by_row: Mapping[int, str] | None = None,
+    target_geometry: tuple[int, int, int, int] | None = None,
+) -> None:
+    shape = _shape_table_or_none(slide, table_shape_index)
+    if shape is None:
+        return
+
+    payload = _table_picture_payload(
+        shape,
+        rows=rows,
+        description_col_index=description_col_index,
+        left_align_cols=left_align_cols,
+        hyperlink_by_row=hyperlink_by_row,
+    )
+    if not payload:
+        _set_table_rows(
+            slide,
+            table_shape_index=table_shape_index,
+            rows=rows,
+            hyperlink_by_row=hyperlink_by_row,
+        )
+        _tune_table_font(
+            slide,
+            table_shape_index=table_shape_index,
+            data_rows=len(list(rows or [])),
+            description_col_index=description_col_index,
+        )
+        return
+
+    left = int(shape.left)
+    top = int(shape.top)
+    width = int(shape.width)
+    height = int(shape.height)
+    if target_geometry is not None:
+        try:
+            g_left, g_top, g_width, g_height = target_geometry
+            if int(g_width) > 0 and int(g_height) > 0:
+                left = int(g_left)
+                top = int(g_top)
+                width = int(g_width)
+                height = int(g_height)
+        except Exception:
+            pass
+
+    slide.shapes.add_picture(
+        BytesIO(payload),
+        left,
+        top,
+        width=width,
+        height=height,
+    )
+    _remove_shape(shape)
 
 
 def _set_paragraph_value_after_colon(
@@ -1210,10 +1501,12 @@ def _top_row_line(row: FunctionalityTopRow) -> str:
     return _trim_text(line, max_chars=72)
 
 
-def _root_cause_caption(zoom: FunctionalityZoomSlide) -> str:
+def _root_cause_caption(zoom: FunctionalityZoomSlide, *, critical_wording: bool) -> str:
     issue_count = int(zoom.current_open_critical_count or 0)
     if issue_count <= 0:
-        return "Sin incidencias críticas abiertas de la quincena para esta funcionalidad."
+        if critical_wording:
+            return "Sin incidencias críticas abiertas de la quincena para esta funcionalidad."
+        return "Sin incidencias abiertas de la quincena para esta funcionalidad."
 
     roots = [
         item
@@ -1248,6 +1541,18 @@ def _populate_functionality_dashboard_slide(
     *,
     summary: PeriodFunctionalityFollowupSummary,
 ) -> None:
+    critical_wording = bool(getattr(summary, "is_critical_focus", False))
+    table_rows: list[list[str]] = []
+    for row in list(summary.tail_rows or []):
+        table_rows.append(
+            [
+                str(int(row.rank)),
+                str(row.functionality or ""),
+                str(int(row.new_count or 0)),
+                str(int(row.open_total or 0)),
+            ]
+        )
+
     _set_shape_text(
         slide,
         2,
@@ -1259,7 +1564,11 @@ def _populate_functionality_dashboard_slide(
     _set_shape_text_strict(
         slide,
         5,
-        f"{int(summary.total_open_critical)} INCIDENCIAS ALTAS  | ABIERTAS",
+        (
+            f"{int(summary.total_open_critical)} INCIDENCIAS CRÍTICAS  | ABIERTAS"
+            if critical_wording
+            else f"{int(summary.total_open_critical)} INCIDENCIAS  | ABIERTAS"
+        ),
     )
 
     top_rows = list(summary.top_rows or [])
@@ -1269,20 +1578,6 @@ def _populate_functionality_dashboard_slide(
             _set_shape_text(slide, shape_idx, _top_row_line(top_rows[idx]))
         else:
             _set_shape_text(slide, shape_idx, "Sin incidencias nuevas para esta posición.")
-
-    tail_rows = list(summary.tail_rows or [])
-    table_rows: list[list[str]] = []
-    for row in tail_rows:
-        table_rows.append(
-            [
-                str(int(row.rank)),
-                str(row.functionality or ""),
-                str(int(row.new_count or 0)),
-                str(int(row.open_total or 0)),
-            ]
-        )
-    _set_table_rows(slide, table_shape_index=1, rows=table_rows)
-    _tune_table_font(slide, table_shape_index=1, data_rows=len(table_rows), description_col_index=1)
 
     _set_shape_text_strict(
         slide,
@@ -1306,8 +1601,12 @@ def _populate_functionality_dashboard_slide(
         slide,
         20,
         (
-            "Incidencias críticas bloqueadas: "
-            f"{int(summary.mitigation_blocked.count)} / "
+            (
+                "Incidencias críticas bloqueadas: "
+                if critical_wording
+                else "Incidencias bloqueadas: "
+            )
+            + f"{int(summary.mitigation_blocked.count)} / "
             f"{_fmt_avg_days(summary.mitigation_blocked.avg_open_days)} días promedio"
         ),
     )
@@ -1320,12 +1619,20 @@ def _populate_functionality_dashboard_slide(
             f"{_fmt_avg_days(summary.mitigation_non_critical.avg_open_days)} días promedio"
         ),
     )
+    _replace_table_with_picture(
+        slide,
+        table_shape_index=1,
+        rows=table_rows,
+        description_col_index=1,
+        left_align_cols=(1,),
+    )
 
 
 def _populate_functionality_zoom_slide(
     slide: Any,
     *,
     zoom: FunctionalityZoomSlide,
+    critical_wording: bool,
 ) -> None:
     functionality = str(zoom.functionality or "").strip() or "Sin funcionalidad"
     _set_shape_text(
@@ -1333,7 +1640,18 @@ def _populate_functionality_zoom_slide(
         1,
         f"Incidencias, en {functionality}, abiertas en la quincena",
     )
-    _set_shape_text(slide, 3, _trim_text(_root_cause_caption(zoom), max_chars=200))
+    _set_shape_text(
+        slide,
+        3,
+        _trim_text(_root_cause_caption(zoom, critical_wording=critical_wording), max_chars=200),
+    )
+    _set_shape_text(
+        slide,
+        4,
+        "Zoom de incidencias críticas del periodo:"
+        if critical_wording
+        else "Zoom de incidencias del periodo:",
+    )
 
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
@@ -1350,8 +1668,30 @@ def _populate_functionality_zoom_slide(
         )
         if str(issue.url or "").strip():
             row_links[idx] = str(issue.url).strip()
-    _set_table_rows(slide, table_shape_index=2, rows=rows, hyperlink_by_row=row_links)
-    _tune_table_font(slide, table_shape_index=2, data_rows=len(rows), description_col_index=1)
+
+    table_shape = _shape_table_or_none(slide, 2)
+    caption_shape = _shape_or_none(slide, 3)
+    target_geometry: tuple[int, int, int, int] | None = None
+    if table_shape is not None and caption_shape is not None:
+        try:
+            target_geometry = (
+                int(caption_shape.left),
+                int(table_shape.top),
+                int(caption_shape.width),
+                int(table_shape.height),
+            )
+        except Exception:
+            target_geometry = None
+
+    _replace_table_with_picture(
+        slide,
+        table_shape_index=2,
+        rows=rows,
+        description_col_index=1,
+        left_align_cols=(0, 1, 2),
+        hyperlink_by_row=row_links,
+        target_geometry=target_geometry,
+    )
 
 
 def _append_functionality_followup_slides(
@@ -1360,6 +1700,7 @@ def _append_functionality_followup_slides(
     summary: PeriodFunctionalityFollowupSummary,
     period_label: str,
 ) -> None:
+    critical_wording = bool(getattr(summary, "is_critical_focus", False))
     template_path = _resolve_functionality_template_path()
     template_prs = Presentation(str(template_path))
     if len(template_prs.slides) < 5:
@@ -1373,8 +1714,26 @@ def _append_functionality_followup_slides(
 
     # Slide 1 (cabecera funcionalidad)
     _set_shape_text(appended[0], 3, str(period_label or "").strip())
+    _set_shape_text(
+        appended[0],
+        2,
+        (
+            "Detalle, de las incidencias críticas, abiertas por funcionalidad"
+            if critical_wording
+            else "Detalle, de las incidencias, abiertas por funcionalidad"
+        ),
+    )
 
     # Slide 2 (dashboard funcionalidad)
+    _set_shape_text(
+        appended[1],
+        3,
+        (
+            "Seguimiento de KPIs - Incidencias críticas por funcionalidad"
+            if critical_wording
+            else "Seguimiento de KPIs - Incidencias por funcionalidad"
+        ),
+    )
     _populate_functionality_dashboard_slide(appended[1], summary=summary)
 
     # Slides 3-5 (zoom top 3)
@@ -1389,7 +1748,11 @@ def _append_functionality_followup_slides(
             )
         )
     for idx in range(3):
-        _populate_functionality_zoom_slide(appended[idx + 2], zoom=zooms[idx])
+        _populate_functionality_zoom_slide(
+            appended[idx + 2],
+            zoom=zooms[idx],
+            critical_wording=critical_wording,
+        )
 
 
 def _load_or_scope_data(
@@ -1424,6 +1787,9 @@ def generate_country_period_followup_ppt(
     open_df_override: pd.DataFrame | None = None,
     template_path: str | None = None,
     applied_filter_summary: str = "",
+    functionality_status_filters: Sequence[str] | None = None,
+    functionality_priority_filters: Sequence[str] | None = None,
+    functionality_filters: Sequence[str] | None = None,
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     if len(clean_source_ids) < 2:
@@ -1554,6 +1920,10 @@ def generate_country_period_followup_ppt(
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
         jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
+        status_filters=list(functionality_status_filters or []),
+        priority_filters=list(functionality_priority_filters or []),
+        functionality_filters=list(functionality_filters or []),
+        apply_default_status_when_empty=True,
         top_n=3,
         top_root_causes=3,
     )

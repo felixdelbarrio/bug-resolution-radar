@@ -101,11 +101,13 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
     summary = build_period_functionality_followup_summary(
         scope_result=quincenal.aggregate,
         jira_base_url="https://jira.example",
+        priority_filters=["High", "Highest", "Supone un impedimento"],
         top_n=3,
         top_root_causes=3,
     )
 
     assert summary.total_open_critical == 5
+    assert summary.is_critical_focus
     assert len(summary.top_rows) == 3
     assert summary.top_rows[0].functionality == "Login y acceso"
     assert summary.top_rows[0].new_count == 2
@@ -114,7 +116,7 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
     assert summary.mitigation_ready_to_verify.count == 1
     assert summary.mitigation_new.count == 3
     assert summary.mitigation_blocked.count == 1
-    assert summary.mitigation_non_critical.count == 1
+    assert summary.mitigation_non_critical.count == 0
 
     assert len(summary.zoom_slides) == 3
     login_zoom = summary.zoom_slides[0]
