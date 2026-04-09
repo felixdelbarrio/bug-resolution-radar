@@ -350,7 +350,10 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
             },
         ]
     )
-    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        JIRA_BASE_URL="https://jira.example",
+    )
 
     called_chart_ids: list[str] = []
     tiny_png = base64.b64decode(
@@ -418,7 +421,10 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
             },
         ]
     )
-    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        JIRA_BASE_URL="https://jira.example",
+    )
     out = generate_country_period_followup_ppt(
         settings,
         country="México",
@@ -440,15 +446,82 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     # Slides 11-13 (0-based 10-12): zooms de funcionalidad.
     for slide_idx in (10, 11, 12):
         slide = prs.slides[slide_idx]
-        assert not any(getattr(shape, "has_table", False) for shape in slide.shapes)
-        zoom_table_picture = [
-            shape
-            for shape in slide.shapes
-            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
-            and int(getattr(shape, "width", 0)) >= 2_900_000
-            and int(getattr(shape, "height", 0)) >= 2_900_000
+        zoom_tables = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
+        assert len(zoom_tables) == 1
+
+    zoom_table = [shape for shape in prs.slides[10].shapes if getattr(shape, "has_table", False)][
+        0
+    ].table
+    first_data_key_cell = zoom_table.cell(1, 0)
+    runs = list(first_data_key_cell.text_frame.paragraphs[0].runs)
+    assert runs
+    assert str(runs[0].hyperlink.address or "").startswith("https://")
+
+
+def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    rows: list[dict[str, object]] = []
+    for idx in range(7):
+        rows.append(
+            {
+                "key": f"P-{idx + 1}",
+                "summary": (
+                    f"INC0001 - PAGOS / SENDA BNC / TRANSFERENCIAS EN TIEMPO REAL / CASO {idx + 1}"
+                ),
+                "status": "New",
+                "priority": "Medium",
+                "created": "2026-04-06T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            }
+        )
+    rows.extend(
+        [
+            {
+                "key": "M-1",
+                "summary": "Saldo monetarias no actualizado",
+                "status": "Analysing",
+                "priority": "Medium",
+                "created": "2026-04-06T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+            {
+                "key": "T-1",
+                "summary": "Transferencias con timeout intermitente",
+                "status": "Blocked",
+                "priority": "Medium",
+                "created": "2026-04-06T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
         ]
-        assert len(zoom_table_picture) == 1
+    )
+    dff = pd.DataFrame(rows)
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+    assert len(prs.slides) == 14
+    zoom_titles = [
+        str(getattr(shape, "text", "") or "").strip()
+        for slide_idx in (10, 11)
+        for shape in prs.slides[slide_idx].shapes
+        if getattr(shape, "has_text_frame", False)
+    ]
+    joined_titles = " | ".join(zoom_titles)
+    assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
+    assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
 
 
 def test_generate_country_period_followup_ppt_functionality_wording_depends_on_priority_filter() -> (
