@@ -9,7 +9,7 @@ import pandas as pd
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
@@ -456,6 +456,8 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     runs = list(first_data_key_cell.text_frame.paragraphs[0].runs)
     assert runs
     assert str(runs[0].hyperlink.address or "").startswith("https://")
+    assert first_data_key_cell.text_frame.paragraphs[0].alignment == PP_ALIGN.LEFT
+    assert first_data_key_cell.vertical_anchor == MSO_VERTICAL_ANCHOR.MIDDLE
 
 
 def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> None:

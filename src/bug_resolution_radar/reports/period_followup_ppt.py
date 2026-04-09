@@ -511,9 +511,86 @@ def _set_shape_text_strict(slide: Any, index_1_based: int, text: str) -> None:
 
 def _shape_table_or_none(slide: Any, index_1_based: int) -> Any | None:
     shape = _shape_or_none(slide, index_1_based)
-    if shape is None or not getattr(shape, "has_table", False):
+    if shape is not None and getattr(shape, "has_table", False):
+        return shape
+    table_shapes = [item for item in slide.shapes if getattr(item, "has_table", False)]
+    if not table_shapes:
         return None
-    return shape
+    return max(table_shapes, key=_shape_area_in2)
+
+
+def _normalize_column_widths(
+    widths: Sequence[int | float],
+    *,
+    total_width: int,
+) -> list[int]:
+    safe_total = max(int(total_width or 0), 1)
+    raw = [max(int(round(float(value or 0))), 1) for value in list(widths or [])]
+    if not raw:
+        return []
+    raw_sum = sum(raw)
+    if raw_sum <= 0:
+        even = max(int(round(safe_total / len(raw))), 1)
+        out = [even for _ in raw]
+    else:
+        out = [max(int(round((value / raw_sum) * safe_total)), 1) for value in raw]
+    out[-1] += safe_total - sum(out)
+    return out
+
+
+def _rebuild_table_shape_with_rows(
+    slide: Any,
+    *,
+    table_shape: Any,
+    target_rows: int,
+) -> Any:
+    table = table_shape.table
+    col_count = len(table.columns)
+    needed_rows = max(int(target_rows or 0), 2)
+    if col_count <= 0:
+        return table_shape
+    if len(table.rows) == needed_rows:
+        return table_shape
+
+    left = int(table_shape.left)
+    top = int(table_shape.top)
+    width = int(table_shape.width)
+    height = int(table_shape.height)
+
+    old_widths = [int(getattr(col, "width", 0) or 0) for col in table.columns]
+    header_texts = [str(table.cell(0, cidx).text or "") for cidx in range(col_count)]
+    header_h = int(
+        getattr(table.rows[0], "height", 0) or max(int(height / max(len(table.rows), 1)), 1)
+    )
+
+    new_shape = slide.shapes.add_table(needed_rows, col_count, left, top, width, height)
+    new_table = new_shape.table
+    normalized_widths = _normalize_column_widths(old_widths, total_width=width)
+    if len(normalized_widths) == col_count:
+        for col, col_width in zip(new_table.columns, normalized_widths):
+            try:
+                col.width = int(col_width)
+            except Exception:
+                continue
+
+    body_rows = max(needed_rows - 1, 1)
+    remaining_h = max(int(height) - int(header_h), 1)
+    body_h = max(int(round(remaining_h / body_rows)), 1)
+    try:
+        new_table.rows[0].height = int(header_h)
+    except Exception:
+        pass
+    for ridx in range(1, needed_rows):
+        try:
+            new_table.rows[ridx].height = int(body_h)
+        except Exception:
+            continue
+
+    for cidx, header in enumerate(header_texts):
+        _set_table_cell_text(new_table.cell(0, cidx), header, align=PP_ALIGN.LEFT)
+
+    _remove_shape(table_shape)
+    return new_shape
 
 
 def _trim_text(value: object, *, max_chars: int) -> str:
@@ -642,6 +719,8 @@ def _set_table_cell_text(
     *,
     hyperlink: str = "",
     align: PP_ALIGN | None = None,
+    bold: bool | None = None,
+    color_rgb: RGBColor | None = None,
 ) -> None:
     if cell is None:
         return
@@ -665,9 +744,27 @@ def _set_table_cell_text(
         runs = list(p0.runs)
     run = runs[0]
     run.text = str(text or "")
+    if bold is not None:
+        try:
+            run.font.bold = bool(bold)
+        except Exception:
+            pass
+    if color_rgb is not None:
+        try:
+            run.font.color.rgb = color_rgb
+        except Exception:
+            pass
     try:
         if hyperlink:
             run.hyperlink.address = str(hyperlink)
+            try:
+                run.font.color.rgb = RGBColor(*_TABLE_LINK_RGB)
+            except Exception:
+                pass
+            try:
+                run.font.underline = True
+            except Exception:
+                pass
         elif getattr(run, "hyperlink", None) is not None:
             run.hyperlink.address = None
     except Exception:
@@ -694,7 +791,14 @@ def _set_table_cell_text(
     except Exception:
         pass
     try:
-        cell.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
+        cell.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    try:
+        tf.margin_left = Pt(4.0)
+        tf.margin_right = Pt(3.0)
+        tf.margin_top = Pt(1.0)
+        tf.margin_bottom = Pt(1.0)
     except Exception:
         pass
 
@@ -712,23 +816,14 @@ def _set_table_rows(
     if shape is None:
         return
 
+    needed_rows = max(len(list(rows or [])) + 1, 2)
+    shape = _rebuild_table_shape_with_rows(slide, table_shape=shape, target_rows=needed_rows)
     table = shape.table
     col_count = len(table.columns)
     normalized_rows = [list(row)[:col_count] for row in list(rows or [])]
     if not normalized_rows:
         normalized_rows = [[""] * col_count]
     normalized_rows = [row + ([""] * (col_count - len(row))) for row in normalized_rows]
-
-    tbl_xml = table._tbl
-    tr_elements = list(getattr(tbl_xml, "tr_lst", []))
-    if len(tr_elements) < 2:
-        return
-    template_tr = deepcopy(tr_elements[1])
-    for tr in tr_elements[1:]:
-        tbl_xml.remove(tr)
-
-    for _ in normalized_rows:
-        tbl_xml.append(deepcopy(template_tr))
 
     # Compact rows so all issues fit in the visual container.
     total_rows = len(normalized_rows) + 1  # header + data
@@ -743,16 +838,40 @@ def _set_table_rows(
             except Exception:
                 continue
 
+    # Enforce a portable, explicit visual style to maximize compatibility
+    # across Keynote/PowerPoint/document viewers.
+    for cidx in range(col_count):
+        header_cell = table.cell(0, cidx)
+        try:
+            header_cell.fill.solid()
+            header_cell.fill.fore_color.rgb = RGBColor(*_TABLE_HEADER_BG_RGB)
+        except Exception:
+            pass
+        _set_table_cell_text(
+            header_cell,
+            str(header_cell.text or ""),
+            align=PP_ALIGN.LEFT,
+            bold=True,
+            color_rgb=RGBColor(*_TABLE_HEADER_FG_RGB),
+        )
+
     hyperlinks = dict(hyperlink_by_row or {})
-    left_cols = {int(idx) for idx in left_align_cols}
     for ridx, row_values in enumerate(normalized_rows, start=1):
         row_link = str(hyperlinks.get(ridx - 1, "") or "").strip()
         for cidx, value in enumerate(row_values):
+            body_cell = table.cell(ridx, cidx)
+            try:
+                body_cell.fill.solid()
+                body_cell.fill.fore_color.rgb = RGBColor(*_TABLE_BODY_BG_RGB)
+            except Exception:
+                pass
             _set_table_cell_text(
-                table.cell(ridx, cidx),
+                body_cell,
                 str(value or ""),
                 hyperlink=row_link if cidx == 0 else "",
-                align=PP_ALIGN.LEFT if cidx in left_cols else PP_ALIGN.CENTER,
+                align=PP_ALIGN.LEFT,
+                bold=False,
+                color_rgb=RGBColor(*_TABLE_BODY_FG_RGB),
             )
 
 
@@ -1805,6 +1924,7 @@ def _populate_functionality_zoom_slide(
         3,
         _trim_text(_root_cause_caption(zoom, critical_wording=critical_wording), max_chars=200),
     )
+    _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(255, 255, 255))
     _set_shape_text(
         slide,
         4,
