@@ -481,19 +481,6 @@ def _set_shape_text_strict(slide: Any, index_1_based: int, text: str) -> None:
     _set_shape_text_fit(shape)
 
 
-def _set_shape_run_color(slide: Any, index_1_based: int, *, color_rgb: RGBColor) -> None:
-    shape = _shape_or_none(slide, index_1_based)
-    if shape is None or not getattr(shape, "has_text_frame", False):
-        return
-    tf = shape.text_frame
-    for paragraph in list(tf.paragraphs):
-        for run in list(paragraph.runs):
-            try:
-                run.font.color.rgb = color_rgb
-            except Exception:
-                continue
-
-
 def _shape_table_or_none(slide: Any, index_1_based: int) -> Any | None:
     shape = _shape_or_none(slide, index_1_based)
     if shape is None or not getattr(shape, "has_table", False):
@@ -640,39 +627,6 @@ def _tune_table_font(
                 tf.word_wrap = True
             except Exception:
                 pass
-
-
-def _style_table_contrast(
-    slide: Any,
-    *,
-    table_shape_index: int,
-    header_bg_rgb: RGBColor = RGBColor(0, 19, 145),
-    header_text_rgb: RGBColor = RGBColor(255, 255, 255),
-    body_bg_rgb: RGBColor = RGBColor(255, 255, 255),
-    body_text_rgb: RGBColor = RGBColor(0, 19, 145),
-) -> None:
-    shape = _shape_table_or_none(slide, table_shape_index)
-    if shape is None:
-        return
-    table = shape.table
-    for ridx in range(len(table.rows)):
-        for cidx in range(len(table.columns)):
-            cell = table.cell(ridx, cidx)
-            try:
-                fill = cell.fill
-                fill.solid()
-                fill.fore_color.rgb = header_bg_rgb if ridx == 0 else body_bg_rgb
-            except Exception:
-                pass
-            tf = getattr(cell, "text_frame", None)
-            if tf is None:
-                continue
-            for paragraph in list(tf.paragraphs):
-                for run in list(paragraph.runs):
-                    try:
-                        run.font.color.rgb = header_text_rgb if ridx == 0 else body_text_rgb
-                    except Exception:
-                        continue
 
 
 def _set_paragraph_value_after_colon(
