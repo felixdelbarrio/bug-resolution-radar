@@ -287,7 +287,7 @@ def _extract_semantic_phrase(summary: object) -> str:
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if not cleaned or cleaned in _GENERIC_PATH_SEGMENTS:
             continue
-        words = [w for w in cleaned.split() if w not in _ROOT_CAUSE_STOPWORDS and len(w) >= 3]
+        words = [w for w in cleaned.split() if w not in _ROOT_CAUSE_STOPWORDS and len(w) >= 2]
         if len(words) < 2:
             continue
         candidate = " ".join(words[:6]).strip()
@@ -371,6 +371,7 @@ def build_root_cause_map(
 ) -> dict[str, str]:
     out: dict[str, str] = {}
     hints = dict(theme_hint_by_summary or {})
+    semantic_phrase_by_summary: dict[str, str] = {}
     for raw_summary in list(summaries or []):
         summary_txt = str(raw_summary or "")
         if summary_txt in out:
@@ -379,6 +380,15 @@ def build_root_cause_map(
             summary_txt,
             theme_hint=hints.get(summary_txt, ""),
         )
+        if out[summary_txt] == _ROOT_CAUSE_FALLBACK_LABEL or out[summary_txt].startswith(
+            _FALLBACK_THEME_PREFIX
+        ):
+            semantic_phrase_by_summary[summary_txt] = _extract_semantic_phrase(summary_txt)
+
+    for summary_txt, phrase in semantic_phrase_by_summary.items():
+        phrase_label = _format_semantic_phrase_label(phrase)
+        if phrase_label:
+            out[summary_txt] = phrase_label
     return out
 
 

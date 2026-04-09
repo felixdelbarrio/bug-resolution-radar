@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from bug_resolution_radar.analytics.topic_expandable_summary import (
+    build_root_cause_map,
     build_topic_expandable_summaries,
     infer_root_cause_label,
     summarize_root_causes,
@@ -27,6 +28,16 @@ def test_infer_root_cause_label_uses_theme_fallback_for_unknown_text() -> None:
         infer_root_cause_label("Error funcional no especificado en pagos")
         == "Fallo funcional en Pagos"
     )
+
+
+def test_build_root_cause_map_promotes_semantic_phrase_on_structured_summaries() -> None:
+    rows = [
+        "INC0001 - PAGOS / BBVA.MX / LIQUIDEZ A TU ALCANCE / 2026-04-01",
+        "INC0002 - PAGOS / BBVA.MX / LIQUIDEZ A TU ALCANCE / 2026-04-02",
+    ]
+    out = build_root_cause_map(rows)
+    assert out[rows[0]] == "Liquidez Tu Alcance"
+    assert out[rows[1]] == "Liquidez Tu Alcance"
 
 
 def test_summarize_root_causes_returns_top_k() -> None:
