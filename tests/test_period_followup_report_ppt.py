@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_AUTO_SIZE
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
@@ -87,11 +88,29 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 8
+    assert out.slide_count == 13
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
+    prs = Presentation(BytesIO(out.content))
+    assert len(prs.slides) == 13
+    s9_text = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[8].shapes
+        if getattr(shape, "has_text_frame", False)
+    )
+    s10_text = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[9].shapes
+        if getattr(shape, "has_text_frame", False)
+    )
+    assert "quincena" in s9_text.lower()
+    assert "funcionalidad" in s10_text.lower()
+    # Functional follow-up slides must preserve light background from source template.
+    bg_fill = prs.slides[9].background.fill
+    assert int(bg_fill.type or 0) == 1
+    assert bg_fill.fore_color.rgb == RGBColor(247, 248, 248)
 
 
 def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Path) -> None:
@@ -136,7 +155,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 8
+    assert out.slide_count == 13
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
@@ -357,3 +376,57 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     assert called_chart_ids.count("age_buckets") == 2
     assert called_chart_ids.count("resolution_hist") == 2
     assert called_chart_ids.count("open_priority_pie") == 2
+
+
+def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Login falla en acceso de usuario",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Login falla en acceso biometrico",
+                "status": "Ready To Verify",
+                "priority": "Highest",
+                "created": "2026-04-03T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "B-1",
+                "summary": "TAREAS PENDIENTES - No se visualiza dashboard",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-06T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+    # Slide 11 (0-based 10): primer zoom de funcionalidad.
+    zoom_table_shape = prs.slides[10].shapes[1]
+    assert zoom_table_shape.has_table
+    # Header + 2 incidencias de Login abiertas en quincena.
+    assert len(zoom_table_shape.table.rows) == 3

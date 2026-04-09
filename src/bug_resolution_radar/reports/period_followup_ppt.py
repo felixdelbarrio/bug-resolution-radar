@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, List, Sequence, cast
+from typing import Any, List, Mapping, Sequence, cast
 
 import pandas as pd
 from pptx import Presentation
@@ -19,6 +19,12 @@ from pptx.util import Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.analytics.period_functionality_followup import (
+    FunctionalityTopRow,
+    FunctionalityZoomSlide,
+    PeriodFunctionalityFollowupSummary,
+    build_period_functionality_followup_summary,
+)
 from bug_resolution_radar.analytics.period_summary import (
     OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
     QuincenalScopeResult,
@@ -35,6 +41,7 @@ from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trend
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
+_FUNCTIONALITY_TEMPLATE_FILENAME = "Seguimiento de incidencias por funcionalidad.pptx"
 
 
 @dataclass(frozen=True)
@@ -190,6 +197,17 @@ def _resolve_template_path(settings: Settings, explicit_path: str | None = None)
     return resolve_period_ppt_template_path(settings, explicit_path=explicit_path)
 
 
+def _resolve_functionality_template_path() -> Path:
+    path = (
+        Path(__file__).resolve().parent / "templates" / _FUNCTIONALITY_TEMPLATE_FILENAME
+    ).resolve()
+    if path.exists() and path.is_file():
+        return path
+    raise FileNotFoundError(
+        f"No se encontró la plantilla de seguimiento por funcionalidad. Ruta esperada: {path}"
+    )
+
+
 def _remove_slide(prs: Any, index: int) -> None:
     sld_id = prs.slides._sldIdLst[index]
     prs.part.drop_rel(sld_id.rId)
@@ -255,6 +273,78 @@ def _append_slide_clone(prs: Any, *, source_index: int) -> None:
                 if attr_name.startswith(_REL_NS) and attr_value in rid_map:
                     node.set(attr_name, rid_map[attr_value])
         dest.shapes._spTree.insert_element_before(clone, "p:extLst")
+
+
+def _append_slide_clone_from_source(prs: Any, *, source_slide: Any) -> Any:
+    dest = prs.slides.add_slide(prs.slide_layouts[6])
+
+    for shape in list(dest.shapes):
+        sp = shape.element
+        sp.getparent().remove(sp)
+
+    rid_map: dict[str, str] = {}
+    for rel in source_slide.part.rels.values():
+        if "slideLayout" in rel.reltype or "notesSlide" in rel.reltype or "comments" in rel.reltype:
+            continue
+        rel_target = rel.target_ref if rel.is_external else rel._target
+        rid_map[rel.rId] = dest.part.rels._add_relationship(
+            rel.reltype,
+            rel_target,
+            rel.is_external,
+        )
+
+    for shape in source_slide.shapes:
+        clone = deepcopy(shape.element)
+        for node in clone.iter():
+            for attr_name, attr_value in list(node.attrib.items()):
+                if attr_name.startswith(_REL_NS) and attr_value in rid_map:
+                    node.set(attr_name, rid_map[attr_value])
+        dest.shapes._spTree.insert_element_before(clone, "p:extLst")
+    _apply_effective_background_from_source(dest_slide=dest, source_slide=source_slide)
+    return dest
+
+
+def _solid_background_rgb(shape_container: Any) -> RGBColor | None:
+    if shape_container is None:
+        return None
+    try:
+        fill = shape_container.background.fill
+    except Exception:
+        return None
+    try:
+        if int(fill.type or 0) != 1:  # SOLID
+            return None
+    except Exception:
+        return None
+    try:
+        rgb = getattr(fill.fore_color, "rgb", None)
+    except Exception:
+        rgb = None
+    if rgb is None:
+        return None
+    return cast(RGBColor, rgb)
+
+
+def _effective_background_rgb(source_slide: Any) -> RGBColor:
+    for container in (
+        source_slide,
+        getattr(source_slide, "slide_layout", None),
+        getattr(getattr(source_slide, "slide_layout", None), "slide_master", None),
+    ):
+        rgb = _solid_background_rgb(container)
+        if rgb is not None:
+            return rgb
+    return RGBColor(247, 248, 248)
+
+
+def _apply_effective_background_from_source(*, dest_slide: Any, source_slide: Any) -> None:
+    rgb = _effective_background_rgb(source_slide)
+    try:
+        fill = dest_slide.background.fill
+        fill.solid()
+        fill.fore_color.rgb = rgb
+    except Exception:
+        return
 
 
 def _shape_or_none(slide: Any, index_1_based: int) -> Any | None:
@@ -348,6 +438,195 @@ def _set_shape_text_by_shape(shape: Any, text: str) -> None:
             run.text = ""
 
     _set_shape_text_fit(shape)
+
+
+def _set_shape_text_strict(slide: Any, index_1_based: int, text: str) -> None:
+    shape = _shape_or_none(slide, index_1_based)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    sample_run = None
+    try:
+        sample_run = tf.paragraphs[0].runs[0]
+    except Exception:
+        sample_run = None
+
+    tf.clear()
+    p = tf.paragraphs[0]
+    run = p.add_run()
+    run.text = str(text or "")
+    if sample_run is not None:
+        try:
+            run.font.bold = sample_run.font.bold
+        except Exception:
+            pass
+        try:
+            run.font.italic = sample_run.font.italic
+        except Exception:
+            pass
+        try:
+            run.font.size = sample_run.font.size
+        except Exception:
+            pass
+        try:
+            run.font.name = sample_run.font.name
+        except Exception:
+            pass
+        try:
+            rgb = getattr(getattr(sample_run.font, "color", None), "rgb", None)
+            if rgb is not None:
+                run.font.color.rgb = rgb
+        except Exception:
+            pass
+    _set_shape_text_fit(shape)
+
+
+def _shape_table_or_none(slide: Any, index_1_based: int) -> Any | None:
+    shape = _shape_or_none(slide, index_1_based)
+    if shape is None or not getattr(shape, "has_table", False):
+        return None
+    return shape
+
+
+def _trim_text(value: object, *, max_chars: int) -> str:
+    txt = str(value or "").strip()
+    if max_chars <= 0 or len(txt) <= max_chars:
+        return txt
+    return txt[: max(0, max_chars - 3)].rstrip() + "..."
+
+
+def _set_table_cell_text(cell: Any, text: str, *, hyperlink: str = "") -> None:
+    if cell is None:
+        return
+    tf = getattr(cell, "text_frame", None)
+    if tf is None:
+        return
+
+    paragraphs = list(tf.paragraphs)
+    if not paragraphs:
+        tf.add_paragraph()
+        paragraphs = list(tf.paragraphs)
+    p0 = paragraphs[0]
+    runs = list(p0.runs)
+    if not runs:
+        p0.add_run()
+        runs = list(p0.runs)
+    run = runs[0]
+    run.text = str(text or "")
+    try:
+        if hyperlink:
+            run.hyperlink.address = str(hyperlink)
+        elif getattr(run, "hyperlink", None) is not None:
+            run.hyperlink.address = None
+    except Exception:
+        pass
+    for extra in runs[1:]:
+        extra.text = ""
+
+    for extra_paragraph in paragraphs[1:]:
+        extra_runs = list(extra_paragraph.runs)
+        if not extra_runs:
+            extra_paragraph.add_run()
+            extra_runs = list(extra_paragraph.runs)
+        extra_runs[0].text = ""
+        for extra in extra_runs[1:]:
+            extra.text = ""
+
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+
+
+def _set_table_rows(
+    slide: Any,
+    *,
+    table_shape_index: int,
+    rows: Sequence[Sequence[str]],
+    hyperlink_by_row: Mapping[int, str] | None = None,
+) -> None:
+    shape = _shape_table_or_none(slide, table_shape_index)
+    if shape is None:
+        return
+
+    table = shape.table
+    col_count = len(table.columns)
+    normalized_rows = [list(row)[:col_count] for row in list(rows or [])]
+    if not normalized_rows:
+        normalized_rows = [[""] * col_count]
+    normalized_rows = [row + ([""] * (col_count - len(row))) for row in normalized_rows]
+
+    tbl_xml = table._tbl
+    tr_elements = list(getattr(tbl_xml, "tr_lst", []))
+    if len(tr_elements) < 2:
+        return
+    template_tr = deepcopy(tr_elements[1])
+    for tr in tr_elements[1:]:
+        tbl_xml.remove(tr)
+
+    for _ in normalized_rows:
+        tbl_xml.append(deepcopy(template_tr))
+
+    # Compact rows so all issues fit in the visual container.
+    total_rows = len(normalized_rows) + 1  # header + data
+    if total_rows > 1:
+        header_h = int(table.rows[0].height or max(int(shape.height / total_rows), 1))
+        remaining_h = max(int(shape.height) - header_h, 1)
+        row_h = max(int(remaining_h / max(len(normalized_rows), 1)), 1)
+        for ridx in range(1, len(table.rows)):
+            try:
+                table.rows[ridx].height = row_h
+            except Exception:
+                continue
+
+    hyperlinks = dict(hyperlink_by_row or {})
+    for ridx, row_values in enumerate(normalized_rows, start=1):
+        row_link = str(hyperlinks.get(ridx - 1, "") or "").strip()
+        for cidx, value in enumerate(row_values):
+            _set_table_cell_text(
+                table.cell(ridx, cidx),
+                str(value or ""),
+                hyperlink=row_link if cidx == 0 else "",
+            )
+
+
+def _tune_table_font(
+    slide: Any,
+    *,
+    table_shape_index: int,
+    data_rows: int,
+    description_col_index: int | None = None,
+) -> None:
+    shape = _shape_table_or_none(slide, table_shape_index)
+    if shape is None:
+        return
+    table = shape.table
+    rows = max(int(data_rows or 0), 1)
+    if rows <= 6:
+        base_size = 10.0
+    elif rows <= 10:
+        base_size = 9.0
+    elif rows <= 16:
+        base_size = 8.0
+    else:
+        base_size = 7.2
+
+    for ridx in range(1, len(table.rows)):
+        for cidx in range(len(table.columns)):
+            cell = table.cell(ridx, cidx)
+            tf = getattr(cell, "text_frame", None)
+            if tf is None:
+                continue
+            for paragraph in list(tf.paragraphs):
+                for run in list(paragraph.runs):
+                    size = base_size
+                    if description_col_index is not None and cidx == int(description_col_index):
+                        size = max(base_size - 0.4, 7.0)
+                    run.font.size = Pt(float(size))
+            try:
+                tf.word_wrap = True
+            except Exception:
+                pass
 
 
 def _set_paragraph_value_after_colon(
@@ -914,6 +1193,205 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
         return
 
 
+def _fmt_avg_days(value: float) -> str:
+    if pd.isna(value):
+        return "0"
+    safe = max(float(value or 0.0), 0.0)
+    return str(int(round(safe)))
+
+
+def _top_row_line(row: FunctionalityTopRow) -> str:
+    count = int(row.new_count or 0)
+    count_txt = "incidencia nueva" if count == 1 else "incidencias nuevas"
+    line = (
+        f"{count} {count_txt} en {str(row.functionality or '').strip()} "
+        f"(acumuladas {int(row.open_total or 0)})"
+    )
+    return _trim_text(line, max_chars=72)
+
+
+def _root_cause_caption(zoom: FunctionalityZoomSlide) -> str:
+    issue_count = int(zoom.current_open_critical_count or 0)
+    if issue_count <= 0:
+        return "Sin incidencias críticas abiertas de la quincena para esta funcionalidad."
+
+    roots = [
+        item
+        for item in list(zoom.root_causes or [])
+        if str(getattr(item, "label", "") or "").strip().lower() != "sin detalle suficiente"
+    ]
+    if not roots:
+        return f"{issue_count} incidencias sin señal suficiente de causa raíz predominante."
+
+    if len(roots) == 1:
+        item = roots[0]
+        cause = str(getattr(item, "label", "") or "").strip() or "Sin detalle"
+        qty = int(getattr(item, "count", 0) or 0)
+        noun = "incidencia" if qty == 1 else "incidencias"
+        verb = "fue causada" if qty == 1 else "fueron causadas"
+        return f"{qty} {noun} {verb} por {cause}."
+
+    chunks: list[str] = []
+    for item in roots:
+        count = int(getattr(item, "count", 0) or 0)
+        cause = str(getattr(item, "label", "") or "").strip() or "Sin detalle"
+        chunks.append(f"{count} por {cause}")
+    if len(chunks) == 2:
+        detail = f"{chunks[0]} y {chunks[1]}"
+    else:
+        detail = ", ".join(chunks[:-1]) + f" y {chunks[-1]}"
+    return f"Causas raíz detectadas: {detail}."
+
+
+def _populate_functionality_dashboard_slide(
+    slide: Any,
+    *,
+    summary: PeriodFunctionalityFollowupSummary,
+) -> None:
+    _set_shape_text(
+        slide,
+        2,
+        (
+            "Top tres de las incidencias por funcionalidad identificadas en la "
+            f"{str(summary.period_label or '').replace('Quincena ', 'quincena ')}"
+        ),
+    )
+    _set_shape_text_strict(
+        slide,
+        5,
+        f"{int(summary.total_open_critical)} INCIDENCIAS ALTAS  | ABIERTAS",
+    )
+
+    top_rows = list(summary.top_rows or [])
+    top_shapes = (6, 8, 10)
+    for idx, shape_idx in enumerate(top_shapes):
+        if idx < len(top_rows):
+            _set_shape_text(slide, shape_idx, _top_row_line(top_rows[idx]))
+        else:
+            _set_shape_text(slide, shape_idx, "Sin incidencias nuevas para esta posición.")
+
+    tail_rows = list(summary.tail_rows or [])
+    table_rows: list[list[str]] = []
+    for row in tail_rows:
+        table_rows.append(
+            [
+                str(int(row.rank)),
+                str(row.functionality or ""),
+                str(int(row.new_count or 0)),
+                str(int(row.open_total or 0)),
+            ]
+        )
+    _set_table_rows(slide, table_shape_index=1, rows=table_rows)
+    _tune_table_font(slide, table_shape_index=1, data_rows=len(table_rows), description_col_index=1)
+
+    _set_shape_text_strict(
+        slide,
+        13,
+        (
+            "Incidencias en la quincena en ready to verify: "
+            f"{int(summary.mitigation_ready_to_verify.count)} / "
+            f"{_fmt_avg_days(summary.mitigation_ready_to_verify.avg_open_days)} días promedio"
+        ),
+    )
+    _set_shape_text_strict(
+        slide,
+        19,
+        (
+            "Incidencias en New: "
+            f"{int(summary.mitigation_new.count)} / "
+            f"{_fmt_avg_days(summary.mitigation_new.avg_open_days)} días promedio"
+        ),
+    )
+    _set_shape_text_strict(
+        slide,
+        20,
+        (
+            "Incidencias críticas bloqueadas: "
+            f"{int(summary.mitigation_blocked.count)} / "
+            f"{_fmt_avg_days(summary.mitigation_blocked.avg_open_days)} días promedio"
+        ),
+    )
+    _set_shape_text_strict(
+        slide,
+        21,
+        (
+            "Resto de incidencias: "
+            f"{int(summary.mitigation_non_critical.count)} / "
+            f"{_fmt_avg_days(summary.mitigation_non_critical.avg_open_days)} días promedio"
+        ),
+    )
+
+
+def _populate_functionality_zoom_slide(
+    slide: Any,
+    *,
+    zoom: FunctionalityZoomSlide,
+) -> None:
+    functionality = str(zoom.functionality or "").strip() or "Sin funcionalidad"
+    _set_shape_text(
+        slide,
+        1,
+        f"Incidencias, en {functionality}, abiertas en la quincena",
+    )
+    _set_shape_text(slide, 3, _trim_text(_root_cause_caption(zoom), max_chars=200))
+
+    rows: list[list[str]] = []
+    row_links: dict[int, str] = {}
+    for idx, issue in enumerate(list(zoom.issues or [])):
+        rows.append(
+            [
+                str(issue.key or ""),
+                _trim_text(issue.summary, max_chars=120),
+                _trim_text(issue.root_cause, max_chars=42),
+                _trim_text(issue.status, max_chars=20),
+                _trim_text(issue.priority, max_chars=14),
+                f"{int(issue.open_days or 0)} días",
+            ]
+        )
+        if str(issue.url or "").strip():
+            row_links[idx] = str(issue.url).strip()
+    _set_table_rows(slide, table_shape_index=2, rows=rows, hyperlink_by_row=row_links)
+    _tune_table_font(slide, table_shape_index=2, data_rows=len(rows), description_col_index=1)
+
+
+def _append_functionality_followup_slides(
+    prs: Any,
+    *,
+    summary: PeriodFunctionalityFollowupSummary,
+    period_label: str,
+) -> None:
+    template_path = _resolve_functionality_template_path()
+    template_prs = Presentation(str(template_path))
+    if len(template_prs.slides) < 5:
+        raise ValueError(
+            "La plantilla de funcionalidad debe contener 5 slides (cabecera + dashboard + 3 zoom)."
+        )
+
+    appended: list[Any] = []
+    for source_slide in template_prs.slides:
+        appended.append(_append_slide_clone_from_source(prs, source_slide=source_slide))
+
+    # Slide 1 (cabecera funcionalidad)
+    _set_shape_text(appended[0], 3, str(period_label or "").strip())
+
+    # Slide 2 (dashboard funcionalidad)
+    _populate_functionality_dashboard_slide(appended[1], summary=summary)
+
+    # Slides 3-5 (zoom top 3)
+    zooms = list(summary.zoom_slides or [])
+    while len(zooms) < 3:
+        zooms.append(
+            FunctionalityZoomSlide(
+                functionality=f"Sin funcionalidad {len(zooms) + 1}",
+                current_open_critical_count=0,
+                root_causes=(),
+                issues=(),
+            )
+        )
+    for idx in range(3):
+        _populate_functionality_zoom_slide(appended[idx + 2], zoom=zooms[idx])
+
+
 def _load_or_scope_data(
     settings: Settings,
     *,
@@ -1071,6 +1549,18 @@ def generate_country_period_followup_ppt(
             open_df=source_b.open_df,
             chart_id="open_priority_pie",
         ),
+    )
+
+    functionality_followup = build_period_functionality_followup_summary(
+        scope_result=aggregate,
+        jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
+        top_n=3,
+        top_root_causes=3,
+    )
+    _append_functionality_followup_slides(
+        prs,
+        summary=functionality_followup,
+        period_label=functionality_followup.period_label,
     )
 
     buff = BytesIO()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
@@ -234,6 +235,11 @@ def _critical_priority_mask(df: pd.DataFrame) -> pd.Series:
     return normalized.isin(_CRITICAL_PRIORITY_TOKENS).fillna(False).astype(bool)
 
 
+def critical_priority_mask(df: pd.DataFrame) -> pd.Series:
+    """Public helper: high-criticality mask (Impedimento/High/Highest)."""
+    return _critical_priority_mask(df)
+
+
 def _is_truthy_flag(value: object) -> bool:
     token = _normalize_flag_token(value)
     if not token:
@@ -345,7 +351,35 @@ def _quincena_last_finished_only(settings: Settings) -> bool:
     )
 
 
-def _analysis_reference_day(*, reference_day: pd.Timestamp | None = None) -> pd.Timestamp:
+def _infer_reference_day_from_df(df: pd.DataFrame | None) -> pd.Timestamp | None:
+    safe = _safe_df(df)
+    if safe.empty:
+        return None
+
+    candidates: list[pd.Timestamp] = []
+    for column in ("updated", "resolved", "created"):
+        if column not in safe.columns:
+            continue
+        parsed = _to_dt_naive(safe[column]).dropna()
+        if parsed.empty:
+            continue
+        candidates.append(pd.Timestamp(parsed.max()))
+
+    if not candidates:
+        finalized = _to_dt_naive(effective_finalized_at(safe)).dropna()
+        if not finalized.empty:
+            candidates.append(pd.Timestamp(finalized.max()))
+
+    if not candidates:
+        return None
+    return max(candidates).normalize()
+
+
+def _analysis_reference_day(
+    *,
+    reference_day: pd.Timestamp | None = None,
+    df: pd.DataFrame | None = None,
+) -> pd.Timestamp:
     if reference_day is not None:
         ts = pd.Timestamp(reference_day)
         try:
@@ -356,6 +390,10 @@ def _analysis_reference_day(*, reference_day: pd.Timestamp | None = None) -> pd.
             except Exception:
                 pass
         return ts.normalize()
+
+    inferred = _infer_reference_day_from_df(df)
+    if inferred is not None:
+        return inferred
     return pd.Timestamp.now().normalize()
 
 
@@ -731,7 +769,18 @@ def build_country_quincenal_result(
     )
     labels = dict(source_label_by_id or source_label_map(settings, country=country_txt))
     scoped = _scope_df(df, country=country_txt, source_ids=selected_source_ids)
-    normalized_reference_day = _analysis_reference_day(reference_day=reference_day)
+    analysis_reference_day_fn = _analysis_reference_day
+    try:
+        supports_df_arg = "df" in inspect.signature(analysis_reference_day_fn).parameters
+    except (TypeError, ValueError):
+        supports_df_arg = False
+    if supports_df_arg:
+        normalized_reference_day = analysis_reference_day_fn(
+            reference_day=reference_day,
+            df=scoped,
+        )
+    else:
+        normalized_reference_day = analysis_reference_day_fn(reference_day=reference_day)
 
     aggregate = _scope_result(
         df=scoped,

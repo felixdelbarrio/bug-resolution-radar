@@ -8,6 +8,7 @@ from typing import Mapping, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.analytics.topic_expandable_summary import infer_root_cause_label
 from bug_resolution_radar.theme.design_tokens import BBVA_NEUTRAL_SOFT
 from bug_resolution_radar.ui.common import (
     chip_style_from_color,
@@ -158,6 +159,7 @@ def issue_card_html(
     age_days: Optional[float] = None,
     assignee: Optional[str] = None,
     source: Optional[str] = None,
+    root_cause: Optional[str] = None,
 ) -> str:
     k_html = key_html(key, url)
     if not k_html:
@@ -172,6 +174,8 @@ def issue_card_html(
         bits.append(neutral_chip_html(f"Origen: {source}"))
     bits.append(status_chip_html(status))
     bits.append(priority_chip_html(priority))
+    if root_cause:
+        bits.append(neutral_chip_html(f"Causa raíz: {root_cause}"))
     summary_html = f'<span class="ins-summary">{html.escape(summary)}</span>' if summary else ""
     return (
         '<div class="ins-card">'
@@ -190,6 +194,7 @@ def issue_cards_html_from_df(
     assignee_col: str = "assignee",
     age_days_col: str | None = None,
     source_col: str | None = None,
+    include_root_cause: bool = False,
     summary_max_chars: int = 160,
     limit: int | None = None,
 ) -> str:
@@ -236,6 +241,10 @@ def issue_cards_html_from_df(
         if summary_max_chars > 0 and len(summary_text) > summary_max_chars:
             summary_text = summary_text[: max(0, summary_max_chars - 3)] + "..."
 
+        root_cause = ""
+        if include_root_cause:
+            root_cause = infer_root_cause_label(summary_text)
+
         card_html = issue_card_html(
             key=issue_key,
             url=issue_url,
@@ -245,6 +254,7 @@ def issue_cards_html_from_df(
             age_days=age_days,
             assignee=assignee,
             source=source,
+            root_cause=root_cause,
         )
         if card_html:
             cards.append(card_html)
