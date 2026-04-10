@@ -10,7 +10,6 @@ import multiprocessing as mp
 import os
 import queue
 import re
-import tempfile
 import threading
 import time
 import warnings
@@ -24,7 +23,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 from plotly.subplots import make_subplots
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -37,13 +35,24 @@ from bug_resolution_radar.analytics.analysis_window import (
     effective_analysis_lookback_months,
     max_available_backlog_months,
 )
+from bug_resolution_radar.analytics.duplicate_insights import prepare_duplicates_payload
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
+from bug_resolution_radar.analytics.issues import normalize_text_col
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.status_semantics import (
     effective_closed_mask,
     is_finalist_status,
 )
+from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
+from bug_resolution_radar.analytics.trend_insights import (
+    ActionInsight,
+    InsightMetric,
+    TrendInsightPack,
+    build_trend_insight_pack,
+)
 from bug_resolution_radar.config import Settings, all_configured_sources
+from bug_resolution_radar.reports.plotly_png import render_plotly_figure_png
+from bug_resolution_radar.repositories.issues_store import load_issues_df
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_HEADLINE_PPT,
     BBVA_FONT_SANS_BOOK_PPT,
@@ -82,15 +91,7 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_REPORT_TEAL_TEXT,
     hex_to_rgba,
 )
-from bug_resolution_radar.ui.common import load_issues_df, normalize_text_col
-from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
-from bug_resolution_radar.ui.insights.engine import (
-    ActionInsight,
-    InsightMetric,
-    TrendInsightPack,
-    build_trend_insight_pack,
-)
-from bug_resolution_radar.ui.style import apply_plotly_bbva
+from bug_resolution_radar.theme.plotly_style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
 _T = TypeVar("_T")
@@ -697,7 +698,6 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
             prepare_open_theme_payload,
             sort_theme_table_by_volume,
         )
-        from bug_resolution_radar.ui.insights.duplicates import _prepare_duplicates_payload
     except Exception:
         return None
 
@@ -710,7 +710,7 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
     if not isinstance(top_tbl, pd.DataFrame):
         top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])
 
-    dup_payload = _prepare_duplicates_payload(open_df) if "key" in open_df.columns else {}
+    dup_payload = prepare_duplicates_payload(open_df) if "key" in open_df.columns else {}
     clusters = dup_payload.get("clusters") if isinstance(dup_payload, dict) else None
     clusters = clusters if isinstance(clusters, list) else []
 
@@ -1208,15 +1208,6 @@ def _default_ppt_render_workers() -> int:
     return 1
 
 
-def _kaleido_tmp_dir() -> str:
-    kaleido_tmp_dir = os.path.join(tempfile.gettempdir(), "bug-resolution-radar-kaleido")
-    try:
-        os.makedirs(kaleido_tmp_dir, exist_ok=True)
-    except Exception:
-        kaleido_tmp_dir = tempfile.gettempdir()
-    return kaleido_tmp_dir
-
-
 def _validate_plotly_fig_to_dict(fig_obj: go.Figure) -> dict[str, object]:
     try:
         from plotly.io._utils import validate_coerce_fig_to_dict
@@ -1291,67 +1282,15 @@ def _call_in_subprocess_with_timeout(
             pass
 
 
-def _kaleido_calc_fig_sync_png(
-    fig_dict: dict[str, object],
-    *,
-    scale: float,
-    export_width: int,
-    export_height: int,
-    timeout_s: int,
-    tmp_dir: str,
-) -> bytes:
-    """
-    Export Plotly figure to PNG using Kaleido with MathJax disabled.
-
-    In packaged builds, Kaleido/Chromium can hang while trying to start the
-    browser process or initialize a tab. Kaleido's internal timeout does not
-    always cover the full startup path, so callers wrap this in a hard timeout.
-    """
-    try:
-        import kaleido
-    except Exception:
-        return cast(
-            bytes,
-            pio.to_image(
-                fig_dict,
-                format="png",
-                width=export_width,
-                height=export_height,
-                scale=scale,
-                engine="kaleido",
-            ),
-        )
-
-    return cast(
-        bytes,
-        kaleido.calc_fig_sync(
-            fig_dict,
-            opts=dict(
-                format="png",
-                width=export_width,
-                height=export_height,
-                scale=scale,
-            ),
-            kopts=dict(
-                # Avoid CDN fetches (common source of hangs in locked-down environments).
-                mathjax=False,
-                timeout=timeout_s,
-                headless=True,
-                enable_gpu=False,
-                enable_sandbox=False,
-                tmp_dir=tmp_dir,
-            ),
-        ),
-    )
-
-
 def _kaleido_png_bytes(
     fig_obj: go.Figure, *, scale: float, export_width: int, export_height: int
 ) -> bytes:
-    timeout_s = max(5, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_TIMEOUT_S", 90))
-    hard_timeout_s = max(
-        timeout_s + 15, _int_env("BUG_RESOLUTION_RADAR_PPT_RENDER_HARD_TIMEOUT_S", timeout_s + 20)
-    )
+    """
+    Legacy name kept for compatibility.
+
+    Rendering is now resolved through the local Pillow backend, so report export
+    no longer needs Kaleido/Chromium.
+    """
     fig_dict = _validate_plotly_fig_to_dict(fig_obj)
     cache_key = _ppt_png_cache_key(
         fig_dict,
@@ -1363,37 +1302,12 @@ def _kaleido_png_bytes(
     if cached is not None:
         return cached
 
-    tmp_dir = _kaleido_tmp_dir()
-
-    use_isolated_process = _bool_env(
-        "BUG_RESOLUTION_RADAR_PPT_RENDER_ISOLATED_PROCESS",
-        # With the binary launcher passthrough in place, non-isolated rendering is
-        # faster and avoids spawning a fresh helper process for every chart. Keep
-        # the isolated path as an opt-in for environments that still need the hard
-        # timeout protection.
-        False,
+    rendered = render_plotly_figure_png(
+        go.Figure(fig_obj),
+        scale=scale,
+        export_width=export_width,
+        export_height=export_height,
     )
-    if not use_isolated_process:
-        rendered = _kaleido_calc_fig_sync_png(
-            fig_dict,
-            scale=scale,
-            export_width=export_width,
-            export_height=export_height,
-            timeout_s=timeout_s,
-            tmp_dir=tmp_dir,
-        )
-    else:
-        rendered = _call_in_subprocess_with_timeout(
-            _kaleido_calc_fig_sync_png,
-            fig_dict,
-            scale=scale,
-            export_width=export_width,
-            export_height=export_height,
-            timeout_s=timeout_s,
-            tmp_dir=tmp_dir,
-            hard_timeout_s=float(hard_timeout_s),
-        )
-
     _ppt_png_cache_put(cache_key, rendered)
     return rendered
 
@@ -2518,7 +2432,7 @@ def _add_chart_insight_slide(
         else:
             run.text = (
                 "No se pudo exportar la imagen del gráfico en este entorno. "
-                "Revisa que Chrome esté instalado y accesible."
+                "Revisa la configuración del renderizado local."
             )
         run.font.name = FONT_BODY_BOOK
         run.font.size = Pt(13)

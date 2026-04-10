@@ -21,15 +21,13 @@ PYINSTALLER_BUNDLE_ARGS = \
 	--collect-data streamlit \
 	--collect-data webview \
 	--collect-data plotly \
-	--collect-data kaleido \
 	--collect-data choreographer \
 	--collect-data browser_cookie3 \
 	--collect-submodules streamlit.runtime.scriptrunner \
 	--collect-submodules streamlit.runtime.scriptrunner_utils \
 	--copy-metadata streamlit \
 	--copy-metadata pywebview \
-	--copy-metadata plotly \
-	--copy-metadata kaleido
+	--copy-metadata plotly
 
 PYINSTALLER_NON_WINDOWS_EXCLUDE_ARGS = \
 	--exclude-module pandas.io.clipboard \
@@ -179,7 +177,7 @@ _ensure-build-tools:
 	fi
 
 _ensure-desktop-runtime-deps:
-	@$(PYTHON) -c "import importlib.util,sys;mods=('streamlit','webview','plotly','kaleido','choreographer','pptx');missing=[m for m in mods if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias críticas de runtime/reporting: '+', '.join(missing)+'. Ejecuta: make setup\\n') or sys.exit(2)) if missing else print('Runtime/reporting OK ('+', '.join(mods)+').')"
+	@$(PYTHON) -c "import importlib.util,sys;mods=('streamlit','webview','plotly','choreographer','pptx');missing=[m for m in mods if importlib.util.find_spec(m) is None];(sys.stderr.write('Faltan dependencias críticas de runtime/reporting: '+', '.join(missing)+'. Ejecuta: make setup\\n') or sys.exit(2)) if missing else print('Runtime/reporting OK ('+', '.join(mods)+').')"
 
 _sync-build-env: _ensure-build-tools
 	$(PIP) install -U pip

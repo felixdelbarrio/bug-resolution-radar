@@ -211,6 +211,20 @@ def period_ppt_template_candidates(
 
     candidates.append(bundled_period_ppt_template_path())
 
+    out: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+
+    # Fast path: when an explicit/configured/bundled template already exists,
+    # avoid scanning Downloads, which can be very expensive on large folders.
+    if any(candidate.exists() and candidate.is_file() for candidate in out):
+        return out
+
     downloads_dir = (Path.home() / "Downloads").expanduser()
     for name in _PERIOD_TEMPLATE_ALTERNATE_FILENAMES:
         candidates.append(downloads_dir / name)
@@ -220,8 +234,6 @@ def period_ppt_template_candidates(
             if "seguimiento" in name and "periodo" in name:
                 candidates.append(file_path)
 
-    out: List[Path] = []
-    seen: set[str] = set()
     for candidate in candidates:
         key = str(candidate)
         if key in seen:

@@ -9,8 +9,8 @@ from bug_resolution_radar.config import Settings, helix_sources, jira_sources, t
 from bug_resolution_radar.models.schema import IssuesDocument
 from bug_resolution_radar.models.schema_helix import HelixDocument
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
-from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
-from bug_resolution_radar.ui.insights.learning_store import (
+from bug_resolution_radar.repositories.issues_store import load_issues_doc, save_issues_doc
+from bug_resolution_radar.services.insights_learning_store import (
     InsightsLearningStore,
     default_learning_path,
 )

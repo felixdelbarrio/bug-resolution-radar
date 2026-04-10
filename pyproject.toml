@@ -17,7 +17,6 @@ dependencies = [
   "XlsxWriter>=3.2",
   "plotly>=5.20",
   "python-pptx>=1.0.2",
-  "kaleido>=1.2.0",
   "pywebview>=5.4",
   "pydantic>=2.6",
   "tenacity>=8.2",

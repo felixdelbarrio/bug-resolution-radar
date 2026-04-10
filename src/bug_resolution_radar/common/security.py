@@ -7,8 +7,6 @@ import re
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
-import streamlit as st
-
 SENSITIVE_PATTERNS = [
     re.compile(r"(?i)(authorization:)(\s*)(.+)"),
     re.compile(r"(?i)(cookie:)(\s*)(.+)"),
@@ -119,11 +117,3 @@ def sanitize_cookie_header(raw_cookie: Optional[str]) -> Optional[str]:
     if not clean_parts:
         return None
     return "; ".join(clean_parts)
-
-
-def consent_banner() -> None:
-    st.caption(
-        "🔒 Privacidad: La app corre localmente. "
-        "Si activas Jira por cookies: “Se leerán cookies locales del navegador solo para autenticar tu sesión personal hacia Jira. "
-        "No se envían a terceros.”"
-    )
