@@ -1,4 +1,5 @@
 import { downloadGet } from "../lib/api";
+import { cn } from "../lib/cn";
 import { neutralChipStyle, semanticChipStyle } from "../lib/semanticColors";
 
 type IssuesPanelProps = {
@@ -29,10 +30,6 @@ const sortOptions = [
   ["country", "Country"],
   ["source_type", "Origen"]
 ] as const;
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
 
 function formatDate(value: string) {
   return value ? value.slice(0, 10) : "";
@@ -136,7 +133,7 @@ export function IssuesPanel({
         <div className="issues-view-toggle">
           <button
             type="button"
-            className={classNames(
+            className={cn(
               "secondary-button",
               view === "Cards" && "issues-toggle-active"
             )}
@@ -146,7 +143,7 @@ export function IssuesPanel({
           </button>
           <button
             type="button"
-            className={classNames(
+            className={cn(
               "secondary-button",
               view === "Tabla" && "issues-toggle-active"
             )}

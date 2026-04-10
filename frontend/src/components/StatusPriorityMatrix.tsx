@@ -1,4 +1,5 @@
 import { semanticButtonStyle } from "../lib/semanticColors";
+import { cn } from "../lib/cn";
 
 type MatrixPayload = {
   title: string;
@@ -22,10 +23,6 @@ type StatusPriorityMatrixProps = {
 
 function priorityLabel(priority: string) {
   return priority === "Supone un impedimento" ? "Impedimento" : priority;
-}
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
 }
 
 export function StatusPriorityMatrix({ matrix, onChange }: StatusPriorityMatrixProps) {
@@ -91,7 +88,7 @@ export function StatusPriorityMatrix({ matrix, onChange }: StatusPriorityMatrixP
                 <th key={priority.priority}>
                   <button
                     type="button"
-                    className={classNames(
+                    className={cn(
                       "matrix-header-button",
                       selectedPriorities.includes(priority.priority) && "matrix-header-button-active"
                     )}
@@ -115,7 +112,7 @@ export function StatusPriorityMatrix({ matrix, onChange }: StatusPriorityMatrixP
                 <th>
                   <button
                     type="button"
-                    className={classNames(
+                    className={cn(
                       "matrix-header-button",
                       selectedStatuses.includes(row.status) && "matrix-header-button-active"
                     )}
@@ -134,7 +131,7 @@ export function StatusPriorityMatrix({ matrix, onChange }: StatusPriorityMatrixP
                   <td key={`${row.status}-${cell.priority}`}>
                     <button
                       type="button"
-                      className={classNames(
+                      className={cn(
                         "matrix-cell-button",
                         selectedStatuses.includes(row.status) &&
                           selectedPriorities.includes(cell.priority) &&

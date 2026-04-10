@@ -4,6 +4,7 @@ import {
   neutralChipStyle,
   semanticChipStyle
 } from "../lib/semanticColors";
+import { cn } from "../lib/cn";
 import { ChartFigure } from "./ChartFigure";
 
 type InsightsPanelProps = {
@@ -29,10 +30,6 @@ type FilterComboProps = {
   onChange: (next: string[]) => void;
 };
 
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
-
 function FilterCombo({
   label,
   options,
@@ -51,11 +48,11 @@ function FilterCombo({
         ? selected.join(" · ")
         : `${selected.length} seleccionados`;
   return (
-    <details className={classNames("filter-combo", "insights-combo", className)}>
+    <details className={cn("filter-combo", "insights-combo", className)}>
       <summary className="filter-combo-summary">
         <span>{label}</span>
         {kind && selected.length > 0 ? (
-          <div className={classNames("filter-summary-pill-row", summaryRowClassName)}>
+          <div className={cn("filter-summary-pill-row", summaryRowClassName)}>
             {selected.slice(0, maxVisiblePills).map((item) => (
               <span
                 key={item}
@@ -253,7 +250,7 @@ export function InsightsPanel({
             <button
               key={tab.id}
               type="button"
-              className={classNames("subtab-button", activeTab === tab.id && "subtab-button-active")}
+              className={cn("subtab-button", activeTab === tab.id && "subtab-button-active")}
               onClick={() => onChange({ insightsTab: tab.id })}
             >
               {tab.label}
@@ -477,7 +474,7 @@ export function InsightsPanel({
           <div className="soft-toggle-row">
             <button
               type="button"
-              className={classNames(
+              className={cn(
                 "soft-toggle-button",
                 duplicatesView === "title" && "soft-toggle-button-active"
               )}
@@ -487,7 +484,7 @@ export function InsightsPanel({
             </button>
             <button
               type="button"
-              className={classNames(
+              className={cn(
                 "soft-toggle-button",
                 duplicatesView === "heuristic" && "soft-toggle-button-active"
               )}

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useDashboardParams } from "../hooks/useDashboardParams";
 import { fetchJson, type BootstrapPayload, type WorkspaceData } from "../lib/api";
+import { cn } from "../lib/cn";
 
 const STORAGE_THEME_KEY = "bug-resolution-radar-theme";
 
@@ -21,10 +22,6 @@ export type ShellContextValue = {
   dashboardState: ReturnType<typeof useDashboardParams>;
   themeMode: "light" | "dark";
 };
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
 
 function persistedTheme(): "light" | "dark" | null {
   if (typeof window === "undefined") {
@@ -289,7 +286,7 @@ export function AppShell() {
             <button
               key={panel}
               type="button"
-              className={classNames(
+              className={cn(
                 "workspace-tab",
                 isDashboard && dashboardState.params.panel === panel && "workspace-tab-active"
               )}
@@ -303,7 +300,7 @@ export function AppShell() {
         <div className="workspace-nav-actions">
           <button
             type="button"
-            className={classNames(
+            className={cn(
               "workspace-action",
               isReports && reportMode === "executive" && "workspace-action-active"
             )}
@@ -316,7 +313,7 @@ export function AppShell() {
           {workspace?.hasCountryRollup ? (
             <button
               type="button"
-              className={classNames(
+              className={cn(
                 "workspace-action",
                 isReports && reportMode === "period" && "workspace-action-active"
               )}
@@ -329,7 +326,7 @@ export function AppShell() {
           ) : null}
           <button
             type="button"
-            className={classNames("workspace-action", isIngest && "workspace-action-active")}
+            className={cn("workspace-action", isIngest && "workspace-action-active")}
             title="Ingesta"
             aria-label="Ingesta"
             onClick={() => navigateWithParams("/ingest")}
@@ -350,7 +347,7 @@ export function AppShell() {
           </button>
           <button
             type="button"
-            className={classNames("workspace-action", isSettings && "workspace-action-active")}
+            className={cn("workspace-action", isSettings && "workspace-action-active")}
             title="Configuración"
             aria-label="Configuración"
             onClick={() => navigateWithParams("/settings")}
