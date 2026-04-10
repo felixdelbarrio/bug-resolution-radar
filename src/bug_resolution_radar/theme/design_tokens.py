@@ -249,3 +249,47 @@ def hex_with_alpha(hex_color: str, alpha: int, *, fallback: str = BBVA_LIGHT.ink
     token = _safe_hex(hex_color, fallback=fallback)
     alpha_i = max(0, min(255, int(alpha)))
     return f"#{token}{alpha_i:02X}"
+
+
+def frontend_theme_tokens() -> dict[str, dict[str, str]]:
+    """Return frontend CSS variables derived from the shared backend palette."""
+    return {
+        "light": {
+            "--bbva-primary": BBVA_LIGHT.electric_blue,
+            "--bbva-primary-strong": BBVA_LIGHT.core_blue,
+            "--bbva-midnight": BBVA_LIGHT.midnight,
+            "--bbva-surface": BBVA_LIGHT.white,
+            "--bbva-surface-2": BBVA_LIGHT.bg_light,
+            "--bbva-surface-elevated": hex_to_rgba(BBVA_LIGHT.white, 0.96),
+            "--bbva-border": hex_to_rgba(BBVA_LIGHT.midnight, 0.12),
+            "--bbva-border-strong": hex_to_rgba(BBVA_LIGHT.midnight, 0.18),
+            "--bbva-text": BBVA_LIGHT.ink,
+            "--bbva-text-muted": hex_to_rgba(BBVA_LIGHT.ink, 0.72),
+            "--bbva-on-primary": BBVA_LIGHT.white,
+            "--bbva-success": BBVA_SIGNAL_GREEN_1,
+            "--bbva-warning": BBVA_SIGNAL_ORANGE_1,
+            "--bbva-danger": BBVA_SIGNAL_RED_1,
+            "--bbva-tab-active-bg": BBVA_LIGHT.core_blue,
+            "--bbva-tab-active-text": BBVA_LIGHT.white,
+            "--bbva-tab-active-border": BBVA_LIGHT.midnight,
+        },
+        "dark": {
+            "--bbva-primary": BBVA_DARK.royal_blue,
+            "--bbva-primary-strong": BBVA_DARK.serene_blue,
+            "--bbva-midnight": BBVA_DARK.midnight,
+            "--bbva-surface": BBVA_DARK.core_blue,
+            "--bbva-surface-2": BBVA_DARK.bg_light,
+            "--bbva-surface-elevated": hex_to_rgba(BBVA_DARK.core_blue, 0.96),
+            "--bbva-border": hex_to_rgba(BBVA_DARK.white, 0.12),
+            "--bbva-border-strong": hex_to_rgba(BBVA_DARK.white, 0.20),
+            "--bbva-text": BBVA_DARK.ink,
+            "--bbva-text-muted": hex_to_rgba(BBVA_DARK.ink, 0.76),
+            "--bbva-on-primary": BBVA_DARK.white,
+            "--bbva-success": BBVA_SIGNAL_GREEN_1,
+            "--bbva-warning": BBVA_SIGNAL_ORANGE_1,
+            "--bbva-danger": BBVA_SIGNAL_RED_1,
+            "--bbva-tab-active-bg": BBVA_DARK.white,
+            "--bbva-tab-active-text": BBVA_DARK.midnight,
+            "--bbva-tab-active-border": BBVA_DARK.white,
+        },
+    }

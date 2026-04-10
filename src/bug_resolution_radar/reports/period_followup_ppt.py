@@ -21,6 +21,7 @@ from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.period_functionality_followup import (
     FunctionalityIssueRow,
@@ -40,8 +41,7 @@ from bug_resolution_radar.analytics.period_summary import (
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png
-from bug_resolution_radar.ui.common import load_issues_df
-from bug_resolution_radar.ui.dashboard.registry import ChartContext, build_trends_registry
+from bug_resolution_radar.repositories.issues_store import load_issues_df
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0

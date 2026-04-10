@@ -20,6 +20,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -30,9 +37,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          npm --prefix frontend install
 
       - name: Dependency integrity guard
         run: pip check
+
+      - name: Frontend build guard
+        run: npm --prefix frontend run build
 
       - name: Documentation integrity guard
         run: python scripts/check_docs_references.py
@@ -40,7 +51,8 @@ jobs:
       - name: Dead private helper guard
         run: python scripts/check_dead_private_helpers.py
 
-      - name: Critical PPT runtime regression guard
+      - name: Critical runtime/reporting regression guard
         run: |
-          pytest -q tests/test_run_streamlit_entrypoint.py -k "choreographer_wrapper_passthrough"
+          pytest -q tests/test_run_desktop_entrypoint.py
+          pytest -q tests/test_api_app.py
           pytest -q tests/test_executive_report_ppt.py -k "kaleido_png_bytes_uses_cache or prerender_section_images_populates_payload"
