@@ -55,7 +55,11 @@ export function AppShell() {
         country: dashboardState.params.country,
         sourceId: dashboardState.params.sourceId,
         scopeMode: dashboardState.params.scopeMode
-      })
+      }),
+    staleTime: 45_000,
+    gcTime: 300_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   });
 
   const workspace = bootstrap.data?.workspace;
@@ -82,6 +86,15 @@ export function AppShell() {
     document.documentElement.dataset.theme = themeMode;
     window.localStorage.setItem(STORAGE_THEME_KEY, themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void import("../pages/ReportsPage");
+      void import("../pages/IngestPage");
+      void import("../pages/SettingsPage");
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!workspace || !bootstrap.data) {

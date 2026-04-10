@@ -1784,6 +1784,7 @@ def render_hero(app_title: str) -> None:
         unsafe_allow_html=True,
     )
 
+
 def _workspace_dark_mode_enabled() -> bool:
     try:
         return bool(st.session_state.get("workspace_dark_mode", False))

@@ -68,8 +68,7 @@ def merge_sources_by_country(
 ) -> Dict[str, List[Dict[str, str]]]:
     """Merge grouped sources preserving primary order and appending unseen entries."""
     merged: Dict[str, List[Dict[str, str]]] = {
-        country: [dict(row) for row in rows]
-        for country, rows in dict(primary or {}).items()
+        country: [dict(row) for row in rows] for country, rows in dict(primary or {}).items()
     }
     seen = {
         (country, str(row.get("source_id") or "").strip())
@@ -95,7 +94,9 @@ def sources_with_results(
     configured_sources: List[Dict[str, str]] | None = None,
     df_all: pd.DataFrame | None = None,
 ) -> List[Dict[str, str]]:
-    source_rows = configured_sources if configured_sources is not None else all_configured_sources(settings)
+    source_rows = (
+        configured_sources if configured_sources is not None else all_configured_sources(settings)
+    )
     if not source_rows:
         return []
     if not isinstance(df_all, pd.DataFrame) or df_all.empty or "source_id" not in df_all.columns:
@@ -169,7 +170,8 @@ def apply_workspace_source_scope(
                 {
                     sid
                     for sid in df["source_id"].fillna("").astype(str).tolist()
-                    if sid and (
+                    if sid
+                    and (
                         not selected_country
                         or "country" not in df.columns
                         or df.loc[df["source_id"].fillna("").astype(str).eq(sid), "country"]

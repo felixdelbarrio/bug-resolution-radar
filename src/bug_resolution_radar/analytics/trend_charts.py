@@ -534,4 +534,3 @@ def list_trend_chart_options(registry: Dict[str, ChartSpec]) -> List[tuple[str, 
         if cid not in {x for x, _ in out}:
             out.append((cid, f"{spec.title} — {spec.subtitle}"))
     return out
-

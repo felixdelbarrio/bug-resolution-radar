@@ -49,6 +49,7 @@ export type DashboardPayload = {
     label: string;
     value: string;
     hint: string;
+    tone?: string;
   }>;
   focusCards: Array<{
     cardId: string;
@@ -205,6 +206,7 @@ export type IntelligencePayload = {
     } | null;
     topics: Array<{
       topic: string;
+      color: string;
       count: number;
       pct: number;
       dominantStatus: string;

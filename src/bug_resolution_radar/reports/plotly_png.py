@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable, List, Sequence, cast
+from typing import Any, List, Sequence, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -77,11 +78,9 @@ def _parse_color(value: object, *, default: str = "#004481") -> tuple[int, int, 
             txt = default
 
     try:
-        red, green, blue = ImageColor.getrgb(txt)
-        return (red, green, blue, 255)
+        return _parse_color(ImageColor.getrgb(txt), default=default)
     except Exception:
-        red, green, blue = ImageColor.getrgb(default)
-        return (red, green, blue, 255)
+        return _parse_color(ImageColor.getrgb(default), default=default)
 
 
 def _trace_values(trace: object, attr: str) -> list[object]:
@@ -141,10 +140,9 @@ def _normalize_text_payload(raw: object) -> list[str]:
         return []
     if isinstance(raw, str):
         return [raw]
-    try:
-        return [str(item or "") for item in list(raw)]
-    except Exception:
-        return [str(raw)]
+    if isinstance(raw, Iterable):
+        return [str(item or "") for item in cast(Iterable[object], raw)]
+    return [str(raw)]
 
 
 def _plain_text(value: object) -> str:
@@ -285,7 +283,9 @@ def _infer_x_axis(fig: go.Figure, traces: Sequence[object]) -> _AxisSpec:
     layout_axis = getattr(getattr(fig, "layout", None), "xaxis", None)
     tickvals = list(getattr(layout_axis, "tickvals", []) or [])
     ticktext = [str(value or "") for value in list(getattr(layout_axis, "ticktext", []) or [])]
-    categoryarray = [str(value or "") for value in list(getattr(layout_axis, "categoryarray", []) or [])]
+    categoryarray = [
+        str(value or "") for value in list(getattr(layout_axis, "categoryarray", []) or [])
+    ]
     all_x_values: list[object] = []
     for trace in traces:
         if str(getattr(trace, "type", "") or "").strip().lower() == "pie":
@@ -295,12 +295,18 @@ def _infer_x_axis(fig: go.Figure, traces: Sequence[object]) -> _AxisSpec:
     if tickvals:
         numeric_tickvals = [_to_float(value) for value in tickvals]
         if all(value is not None for value in numeric_tickvals):
-            labels = ticktext if len(ticktext) == len(tickvals) else [_stringify_tick(v) for v in tickvals]
+            labels = (
+                ticktext
+                if len(ticktext) == len(tickvals)
+                else [_stringify_tick(v) for v in tickvals]
+            )
             minimum = min(cast(float, value) for value in numeric_tickvals)
             maximum = max(cast(float, value) for value in numeric_tickvals)
             return _AxisSpec(
                 kind="numeric",
-                ticks=[(cast(float, numeric_tickvals[idx]), labels[idx]) for idx in range(len(labels))],
+                ticks=[
+                    (cast(float, numeric_tickvals[idx]), labels[idx]) for idx in range(len(labels))
+                ],
                 minimum=minimum,
                 maximum=maximum if maximum > minimum else minimum + 1.0,
                 categories=[],
@@ -387,10 +393,16 @@ def _infer_y_axis(fig: go.Figure, traces: Sequence[object], *, stacked_bars: boo
                     maximum = end
             if maximum <= minimum:
                 maximum = minimum + 1.0
-            labels = ticktext if len(ticktext) == len(tickvals) else [_stringify_tick(v) for v in tickvals]
+            labels = (
+                ticktext
+                if len(ticktext) == len(tickvals)
+                else [_stringify_tick(v) for v in tickvals]
+            )
             return _AxisSpec(
                 kind="numeric",
-                ticks=[(cast(float, numeric_tickvals[idx]), labels[idx]) for idx in range(len(labels))],
+                ticks=[
+                    (cast(float, numeric_tickvals[idx]), labels[idx]) for idx in range(len(labels))
+                ],
                 minimum=minimum,
                 maximum=maximum,
                 categories=[],
@@ -406,7 +418,10 @@ def _infer_y_axis(fig: go.Figure, traces: Sequence[object], *, stacked_bars: boo
                 maximum = minimum + 1.0
             tick_count = 5
             step = (maximum - minimum) / float(max(1, tick_count - 1))
-            ticks = [(minimum + (step * idx), f"{minimum + (step * idx):.0f}") for idx in range(tick_count)]
+            ticks = [
+                (minimum + (step * idx), f"{minimum + (step * idx):.0f}")
+                for idx in range(tick_count)
+            ]
             return _AxisSpec(
                 kind="numeric",
                 ticks=ticks,
@@ -533,7 +548,11 @@ def _draw_axes(
 ) -> None:
     axis_font = _load_font(int(16 * scale))
     title_font = _load_font(int(18 * scale), bold=True)
-    draw.line([(left, top + height), (left + width, top + height)], fill=axis_color, width=max(1, int(2 * scale)))
+    draw.line(
+        [(left, top + height), (left + width, top + height)],
+        fill=axis_color,
+        width=max(1, int(2 * scale)),
+    )
     draw.line([(left, top), (left, top + height)], fill=axis_color, width=max(1, int(2 * scale)))
 
     for tick_value, label in y_axis.ticks:
@@ -542,7 +561,12 @@ def _draw_axes(
             continue
         draw.line([(left, y_pos), (left + width, y_pos)], fill=grid_color, width=max(1, int(scale)))
         label_w, label_h = _text_bbox(draw, label, axis_font)
-        draw.text((left - label_w - int(14 * scale), y_pos - (label_h / 2)), label, font=axis_font, fill=text_color)
+        draw.text(
+            (left - label_w - int(14 * scale), y_pos - (label_h / 2)),
+            label,
+            font=axis_font,
+            fill=text_color,
+        )
 
     for tick_value, label in x_axis.ticks:
         if x_axis.kind == "category":
@@ -552,11 +576,21 @@ def _draw_axes(
         if x_pos is None:
             continue
         label_w, label_h = _text_bbox(draw, label, axis_font)
-        draw.text((x_pos - (label_w / 2), top + height + int(12 * scale)), label, font=axis_font, fill=text_color)
+        draw.text(
+            (x_pos - (label_w / 2), top + height + int(12 * scale)),
+            label,
+            font=axis_font,
+            fill=text_color,
+        )
 
     if x_title:
         label_w, label_h = _text_bbox(draw, x_title, title_font)
-        draw.text((left + (width - label_w) / 2, top + height + int(44 * scale)), x_title, font=title_font, fill=text_color)
+        draw.text(
+            (left + (width - label_w) / 2, top + height + int(44 * scale)),
+            x_title,
+            font=title_font,
+            fill=text_color,
+        )
         _ = label_h
     if y_title:
         rotated_x = max(0, int(left - (60 * scale)))
@@ -640,7 +674,10 @@ def _draw_bar_traces(
                 rect_height = max(0, rect[3] - rect[1])
                 if rect_height >= label_h + (8 * scale):
                     draw.text(
-                        (rect[0] + ((bar_width - label_w) / 2), rect[1] + ((rect_height - label_h) / 2)),
+                        (
+                            rect[0] + ((bar_width - label_w) / 2),
+                            rect[1] + ((rect_height - label_h) / 2),
+                        ),
                         label,
                         font=label_font,
                         fill=_contrast_text(bar_color),
@@ -688,7 +725,9 @@ def _draw_scatter_traces(
             points.append((x_pos, y_pos))
 
         if "lines" in mode_tokens and len(points) >= 2:
-            draw.line(points, fill=line_color, width=max(2, int((getattr(line, "width", 2) or 2) * scale)))
+            draw.line(
+                points, fill=line_color, width=max(2, int((getattr(line, "width", 2) or 2) * scale))
+            )
 
         if "markers" in mode_tokens:
             radius = max(2, int((marker_size / 2.0) * scale))
@@ -822,7 +861,11 @@ def _render_cartesian_chart(
     grid_color: tuple[int, int, int, int],
     axis_color: tuple[int, int, int, int],
 ) -> None:
-    traces = [trace for trace in list(getattr(fig, "data", []) or []) if str(getattr(trace, "type", "") or "").strip().lower() != "pie"]
+    traces = [
+        trace
+        for trace in list(getattr(fig, "data", []) or [])
+        if str(getattr(trace, "type", "") or "").strip().lower() != "pie"
+    ]
     if not traces:
         return
 
@@ -850,8 +893,12 @@ def _render_cartesian_chart(
         text_color=text_color,
         grid_color=grid_color,
         axis_color=axis_color,
-        x_title=str(getattr(getattr(getattr(fig.layout, "xaxis", None), "title", None), "text", "") or ""),
-        y_title=str(getattr(getattr(getattr(fig.layout, "yaxis", None), "title", None), "text", "") or ""),
+        x_title=str(
+            getattr(getattr(getattr(fig.layout, "xaxis", None), "title", None), "text", "") or ""
+        ),
+        y_title=str(
+            getattr(getattr(getattr(fig.layout, "yaxis", None), "title", None), "text", "") or ""
+        ),
         scale=scale,
     )
 
@@ -932,7 +979,10 @@ def render_plotly_figure_png(
         scale=render_scale,
     )
 
-    if any(str(getattr(trace, "type", "") or "").strip().lower() == "pie" for trace in list(getattr(fig, "data", []) or [])):
+    if any(
+        str(getattr(trace, "type", "") or "").strip().lower() == "pie"
+        for trace in list(getattr(fig, "data", []) or [])
+    ):
         _render_pie_chart(
             image,
             draw,

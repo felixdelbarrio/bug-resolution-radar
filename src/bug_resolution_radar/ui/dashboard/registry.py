@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Dict
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.trend_charts import (
@@ -31,23 +32,23 @@ def _ui_ctx(ctx: ChartContext) -> ChartContext:
     return replace(ctx, dark_mode=_workspace_dark_mode_enabled())
 
 
-def _render_timeseries(ctx: ChartContext):
+def _render_timeseries(ctx: ChartContext) -> go.Figure | None:
     return _render_timeseries_pure(_ui_ctx(ctx))
 
 
-def _render_age_buckets(ctx: ChartContext):
+def _render_age_buckets(ctx: ChartContext) -> go.Figure | None:
     return _render_age_buckets_pure(_ui_ctx(ctx))
 
 
-def _render_resolution_hist(ctx: ChartContext):
+def _render_resolution_hist(ctx: ChartContext) -> go.Figure | None:
     return _render_resolution_hist_pure(_ui_ctx(ctx))
 
 
-def _render_open_priority_pie(ctx: ChartContext):
+def _render_open_priority_pie(ctx: ChartContext) -> go.Figure | None:
     return _render_open_priority_pie_pure(_ui_ctx(ctx))
 
 
-def _render_open_status_bar(ctx: ChartContext):
+def _render_open_status_bar(ctx: ChartContext) -> go.Figure | None:
     return _render_open_status_bar_pure(_ui_ctx(ctx))
 
 

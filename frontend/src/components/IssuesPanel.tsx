@@ -121,19 +121,18 @@ export function IssuesPanel({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(total, page * pageSize);
+  const tableView = view === "Tabla";
+  const summaryLabel =
+    total === 0
+      ? "0 issues filtradas"
+      : tableView
+        ? `${total} issues filtradas`
+        : `Mostrando ${start}-${end} de ${total} issues filtradas`;
 
   return (
     <section className="page-stack">
       <section className="surface-panel issues-topbar">
-        <div>
-          <p className="section-kicker">Issues</p>
-          <h3>Backlog</h3>
-          <p className="minor-copy">
-            {total > 0
-              ? `Mostrando ${start}-${end} de ${total} issues filtradas`
-              : "0 issues filtradas"}
-          </p>
-        </div>
+        <p className="minor-copy issues-count-caption">{summaryLabel}</p>
         <div className="issues-view-toggle">
           <button
             type="button"
@@ -219,16 +218,14 @@ export function IssuesPanel({
             const ageDays = closed ? dayDiff(row.created, row.resolved) : dayDiff(row.created);
             return (
               <article className="issue-card" key={`${row.key}-${row.source_id}`}>
-                <div className="issue-card-topline">
-                  <button
-                    type="button"
-                    className="issue-key-button issue-key-anchor-button"
-                    onClick={() => onOpenIssue(row)}
-                  >
-                    {row.key}
-                  </button>
+                <button
+                  type="button"
+                  className="issue-primary-link"
+                  onClick={() => onOpenIssue(row)}
+                >
+                  <span className="issue-key-anchor-button">{row.key}</span>
                   <strong className="issue-card-title">{row.summary || "Sin título"}</strong>
-                </div>
+                </button>
                 {row.description ? <p className="issue-card-description">{row.description}</p> : null}
                 <div className="issue-card-badges">
                   <span
@@ -297,7 +294,13 @@ export function IssuesPanel({
                       </button>
                     </td>
                     <td className="issues-summary-cell">
-                      <strong>{row.summary || "—"}</strong>
+                      <button
+                        type="button"
+                        className="link-button issue-primary-link issue-primary-link-inline"
+                        onClick={() => onOpenIssue(row)}
+                      >
+                        <strong className="issue-primary-link-title">{row.summary || "—"}</strong>
+                      </button>
                     </td>
                     <td className="issues-description-cell">{row.description || "—"}</td>
                     <td>
@@ -331,13 +334,15 @@ export function IssuesPanel({
         </section>
       )}
 
-      <Pager
-        page={page}
-        totalPages={totalPages}
-        total={total}
-        pageSize={pageSize}
-        onChange={(next) => onChange({ issuePage: next })}
-      />
+      {!tableView ? (
+        <Pager
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          pageSize={pageSize}
+          onChange={(next) => onChange({ issuePage: next })}
+        />
+      ) : null}
     </section>
   );
 }

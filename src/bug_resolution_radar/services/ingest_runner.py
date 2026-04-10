@@ -55,8 +55,12 @@ def _is_closed_status(value: str) -> bool:
 
 def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
     status = str(item.status or "").strip() or "Open"
-    created = str(item.start_datetime or item.target_date or item.last_modified or "").strip() or None
-    updated = str(item.last_modified or item.closed_date or item.start_datetime or "").strip() or None
+    created = (
+        str(item.start_datetime or item.target_date or item.last_modified or "").strip() or None
+    )
+    updated = (
+        str(item.last_modified or item.closed_date or item.start_datetime or "").strip() or None
+    )
     closed_date = str(item.closed_date or "").strip() or None
     resolved = closed_date or (updated if _is_closed_status(status) else None)
     label = f"{str(item.matrix_service_n1 or '').strip()} {str(item.source_service_n1 or '').strip()}".strip()
@@ -85,12 +89,16 @@ def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
     )
 
 
-def run_jira_ingest(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> dict[str, Any]:
+def run_jira_ingest(
+    settings: Settings, *, selected_sources: List[Dict[str, str]]
+) -> dict[str, Any]:
     work_doc = load_issues_doc(settings.DATA_PATH)
     messages: list[dict[str, Any]] = []
     success_count = 0
     for src in list(selected_sources or []):
-        ok, msg, new_doc = ingest_jira(settings=settings, dry_run=False, existing_doc=work_doc, source=src)
+        ok, msg, new_doc = ingest_jira(
+            settings=settings, dry_run=False, existing_doc=work_doc, source=src
+        )
         if ok and new_doc is not None:
             work_doc = new_doc
             success_count += 1
@@ -101,7 +109,9 @@ def run_jira_ingest(settings: Settings, *, selected_sources: List[Dict[str, str]
 
     total_sources = len(list(selected_sources or []))
     return {
-        "state": "success" if success_count == total_sources and total_sources > 0 else ("partial" if success_count > 0 else "error"),
+        "state": "success"
+        if success_count == total_sources and total_sources > 0
+        else ("partial" if success_count > 0 else "error"),
         "summary": f"Reingesta Jira finalizada: {success_count}/{total_sources} fuentes OK.",
         "success_count": int(success_count),
         "total_sources": int(total_sources),
@@ -109,12 +119,16 @@ def run_jira_ingest(settings: Settings, *, selected_sources: List[Dict[str, str]
     }
 
 
-def run_helix_ingest(settings: Settings, *, selected_sources: List[Dict[str, str]]) -> dict[str, Any]:
+def run_helix_ingest(
+    settings: Settings, *, selected_sources: List[Dict[str, str]]
+) -> dict[str, Any]:
     helix_path = _get_helix_path(settings)
     helix_repo = HelixRepo(Path(helix_path))
     merged_helix = helix_repo.load() or HelixDocument.empty()
     issues_doc = load_issues_doc(settings.DATA_PATH)
-    helix_browser = str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip() or "chrome"
+    helix_browser = (
+        str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip() or "chrome"
+    )
     helix_proxy = str(getattr(settings, "HELIX_PROXY", "") or "").strip()
     helix_ssl_verify = str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip()
 
@@ -142,7 +156,9 @@ def run_helix_ingest(settings: Settings, *, selected_sources: List[Dict[str, str
             merged_helix.ingested_at = new_helix_doc.ingested_at
             merged_helix.helix_base_url = new_helix_doc.helix_base_url
             merged_helix.query = "multi-source"
-            issues_doc = _merge_issues(issues_doc, [_helix_item_to_issue(item) for item in new_helix_doc.items])
+            issues_doc = _merge_issues(
+                issues_doc, [_helix_item_to_issue(item) for item in new_helix_doc.items]
+            )
         if ok:
             success_count += 1
         messages.append({"ok": bool(ok), "message": str(msg or "").strip()})
@@ -154,7 +170,9 @@ def run_helix_ingest(settings: Settings, *, selected_sources: List[Dict[str, str
 
     total_sources = len(list(selected_sources or []))
     return {
-        "state": "success" if success_count == total_sources and total_sources > 0 else ("partial" if success_count > 0 else "error"),
+        "state": "success"
+        if success_count == total_sources and total_sources > 0
+        else ("partial" if success_count > 0 else "error"),
         "summary": f"Reingesta Helix finalizada: {success_count}/{total_sources} fuentes OK.",
         "success_count": int(success_count),
         "total_sources": int(total_sources),

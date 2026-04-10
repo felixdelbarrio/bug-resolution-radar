@@ -57,12 +57,12 @@ export function KanbanBoard({
               <article className="kanban-card" key={`${item.key}-${item.source_alias}`}>
                 <button
                   type="button"
-                  className="kanban-card-link issue-key-anchor-button"
+                  className="issue-primary-link kanban-card-main"
                   onClick={() => onOpenIssue(item)}
                 >
-                  {item.key}
+                  <span className="kanban-card-link issue-key-anchor-button">{item.key}</span>
+                  <p className="kanban-card-summary">{item.summary || "Sin resumen"}</p>
                 </button>
-                <p className="kanban-card-summary">{item.summary || "Sin resumen"}</p>
                 <div className="kanban-card-meta">
                   <span
                     className="issue-chip"

@@ -140,14 +140,16 @@ def prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
                     ]
                 ),
                 "status_dominante": (
-                    Counter([str(status or "") for status in getattr(cluster, "statuses", [])])
-                    .most_common(1)[0][0]
+                    Counter(
+                        [str(status or "") for status in getattr(cluster, "statuses", [])]
+                    ).most_common(1)[0][0]
                     if getattr(cluster, "statuses", [])
                     else ""
                 ),
                 "priority_dominante": (
-                    Counter([str(priority or "") for priority in getattr(cluster, "priorities", [])])
-                    .most_common(1)[0][0]
+                    Counter(
+                        [str(priority or "") for priority in getattr(cluster, "priorities", [])]
+                    ).most_common(1)[0][0]
                     if getattr(cluster, "priorities", [])
                     else ""
                 ),

@@ -205,9 +205,7 @@ def _select_sources(
     requested = {
         str(item).strip() for item in list(requested_source_ids or []) if str(item).strip()
     }
-    disabled = {
-        str(item).strip() for item in list(disabled_source_ids or []) if str(item).strip()
-    }
+    disabled = {str(item).strip() for item in list(disabled_source_ids or []) if str(item).strip()}
     selected: list[Dict[str, str]] = []
     for source in list(all_sources or []):
         source_id = str(source.get("source_id") or "").strip()
@@ -229,11 +227,7 @@ def _single_source_result(*, connector: str, ok: bool, message: str) -> dict[str
     connector_label = "Jira" if str(connector).strip().lower() == "jira" else "Helix"
     return {
         "state": "success" if ok else "error",
-        "summary": (
-            f"Test {connector_label} OK."
-            if ok
-            else f"Test {connector_label} con error."
-        ),
+        "summary": (f"Test {connector_label} OK." if ok else f"Test {connector_label} con error."),
         "success_count": int(bool(ok)),
         "total_sources": 1,
         "messages": [{"ok": bool(ok), "message": str(message or "").strip()}],
@@ -681,7 +675,7 @@ def create_app() -> FastAPI:
         issueSortCol: str = "",
         issueLikeQuery: str = "",
         offset: int = 0,
-        limit: int = Query(100, ge=1, le=1000),
+        limit: int = Query(100, ge=1, le=50000),
         sortBy: str = "updated",
         sortDir: str = "desc",
     ) -> dict[str, Any]:

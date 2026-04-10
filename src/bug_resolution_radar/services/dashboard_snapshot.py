@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -82,17 +82,26 @@ def _fig_payload(fig: Any) -> dict[str, Any] | None:
     try:
         import plotly.io as pio
 
-        return json.loads(pio.to_json(fig, pretty=False))
+        payload = json.loads(pio.to_json(fig, pretty=False))
+        return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
     except Exception:
         try:
-            return fig.to_plotly_json()  # type: ignore[no-any-return]
+            payload = fig.to_plotly_json()
+            return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
         except Exception:
             return None
 
 
 def _fmt_days(value: object) -> str:
-    try:
+    if isinstance(value, bool):
+        return f"{float(int(value)):.1f}d"
+    if isinstance(value, (int, float)):
         return f"{float(value):.1f}d"
+    token = str(value or "").strip()
+    if not token:
+        return "0.0d"
+    try:
+        return f"{float(token):.1f}d"
     except Exception:
         return "0.0d"
 
@@ -147,7 +156,9 @@ def build_dashboard_defaults(settings: Settings) -> dict[str, Any]:
     registry = build_trends_registry()
     chart_ids = list(registry.keys())
     summary_ids = _parse_summary_chart_ids(settings, registry_ids=chart_ids)
-    default_trend_chart = "open_status_bar" if "open_status_bar" in chart_ids else (chart_ids[0] if chart_ids else "")
+    default_trend_chart = (
+        "open_status_bar" if "open_status_bar" in chart_ids else (chart_ids[0] if chart_ids else "")
+    )
     return {
         "summaryChartIds": summary_ids,
         "defaultTrendChartId": default_trend_chart,
@@ -222,7 +233,9 @@ def build_overview_focus_cards(
         w14 = now - pd.Timedelta(days=14)
         created_14 = int((created_dt >= w14).sum())
         if "resolved" in dff.columns:
-            resolved_dt = pd.to_datetime(dff["resolved"], errors="coerce", utc=True).dt.tz_localize(None)
+            resolved_dt = pd.to_datetime(dff["resolved"], errors="coerce", utc=True).dt.tz_localize(
+                None
+            )
             resolved_14 = int((resolved_dt >= w14).sum())
 
     aged_30_pct = (aged_30_count / open_issues * 100.0) if open_issues else 0.0
@@ -250,7 +263,8 @@ def build_overview_focus_cards(
                 "title": "Salida finalista",
                 "metric": f"{exit_state_count:,}",
                 "detail": f"Estado: {exit_state}={exit_state_count:,} ({exit_state_pct:.1f}% del total filtrado).",
-                "score": float(exit_buffer_pct) + (8.0 if accepted_count > (ready_deploy_count * 1.5) else 0.0),
+                "score": float(exit_buffer_pct)
+                + (8.0 if accepted_count > (ready_deploy_count * 1.5) else 0.0),
                 "panel": "trends",
                 "target": "open_status_bar",
                 "kicker": "Tendencias · Estado",
@@ -395,7 +409,9 @@ def build_overview_focus_cards(
         },
     ]
 
-    focus_cards = sorted(focus_candidates, key=lambda row: float(row.get("score", 0.0)), reverse=True)[:4]
+    focus_cards = sorted(
+        focus_candidates, key=lambda row: float(row.get("score", 0.0)), reverse=True
+    )[:4]
     used_ids = {str(card.get("cardId") or "") for card in focus_cards}
     for fallback in fallback_cards:
         card_id = str(fallback.get("cardId") or "")
@@ -438,27 +454,40 @@ def build_overview_kpis_payload(
         if not value_counts.empty:
             dominant_priority = str(value_counts.index[0])
             dominant_priority_count = int(value_counts.iloc[0])
+    dominant_priority_token = dominant_priority.strip().lower()
+    if dominant_priority_token in {"supone un impedimento", "highest", "high"}:
+        dominant_priority_tone = "risk"
+    elif dominant_priority_token == "medium":
+        dominant_priority_tone = "warning"
+    elif dominant_priority_token in {"low", "lowest"}:
+        dominant_priority_tone = "flow"
+    else:
+        dominant_priority_tone = "quality"
 
     return [
         {
             "label": "Issues filtradas",
             "value": f"{total_issues:,}",
             "hint": "Base de análisis actual",
+            "tone": "quality",
         },
         {
             "label": "Backlog abierto",
             "value": f"{open_issues:,}",
             "hint": f"{open_pct:.1f}% del total",
+            "tone": "warning",
         },
         {
             "label": "En cola > 30 días",
             "value": f"{aged_30_count:,}",
             "hint": f"{aged_30_pct:.1f}% de abiertas",
+            "tone": "risk",
         },
         {
             "label": "Prioridad dominante",
             "value": dominant_priority,
             "hint": f"{dominant_priority_count:,} incidencias",
+            "tone": dominant_priority_tone,
         },
     ]
 
@@ -468,20 +497,41 @@ def build_status_priority_matrix_payload(
     *,
     active_filters: FilterState,
 ) -> dict[str, Any]:
-    if scoped_df is None or scoped_df.empty or "status" not in scoped_df.columns or "priority" not in scoped_df.columns:
-        return {"total": 0, "priorities": [], "rows": [], "selected": {"status": [], "priority": []}}
+    if (
+        scoped_df is None
+        or scoped_df.empty
+        or "status" not in scoped_df.columns
+        or "priority" not in scoped_df.columns
+    ):
+        return {
+            "total": 0,
+            "priorities": [],
+            "rows": [],
+            "selected": {"status": [], "priority": []},
+        }
 
     mx = scoped_df.assign(
         status=normalize_text_col(scoped_df["status"], "(sin estado)"),
         priority=normalize_text_col(scoped_df["priority"], "(sin priority)"),
     )
     statuses = order_statuses_canonical(mx["status"].value_counts().index.tolist())
-    priorities = sorted(mx["priority"].dropna().astype(str).unique().tolist(), key=lambda value: (priority_rank(value), value))
+    priorities = sorted(
+        mx["priority"].dropna().astype(str).unique().tolist(),
+        key=lambda value: (priority_rank(value), value),
+    )
     if "Supone un impedimento" in priorities:
-        priorities = ["Supone un impedimento"] + [value for value in priorities if value != "Supone un impedimento"]
+        priorities = ["Supone un impedimento"] + [
+            value for value in priorities if value != "Supone un impedimento"
+        ]
     counts = pd.crosstab(mx["status"], mx["priority"])
-    col_totals = {priority: int(counts[priority].sum()) if priority in counts.columns else 0 for priority in priorities}
-    row_totals = {status: int(counts.loc[status].sum()) if status in counts.index else 0 for status in statuses}
+    col_totals = {
+        priority: int(counts[priority].sum()) if priority in counts.columns else 0
+        for priority in priorities
+    }
+    row_totals = {
+        status: int(counts.loc[status].sum()) if status in counts.index else 0
+        for status in statuses
+    }
     rows = []
     for status in statuses:
         rows.append(
@@ -491,7 +541,9 @@ def build_status_priority_matrix_payload(
                 "cells": [
                     {
                         "priority": priority,
-                        "count": int(counts.at[status, priority]) if status in counts.index and priority in counts.columns else 0,
+                        "count": int(counts.at[status, priority])
+                        if status in counts.index and priority in counts.columns
+                        else 0,
                     }
                     for priority in priorities
                 ],
@@ -500,7 +552,9 @@ def build_status_priority_matrix_payload(
     return {
         "title": "Matriz Estado x Priority (filtradas)",
         "total": int(sum(row_totals.values())),
-        "priorities": [{"priority": priority, "count": col_totals.get(priority, 0)} for priority in priorities],
+        "priorities": [
+            {"priority": priority, "count": col_totals.get(priority, 0)} for priority in priorities
+        ],
         "rows": rows,
         "selected": {
             "status": list(active_filters.status or []),
@@ -514,8 +568,19 @@ def _norm_status_token(value: object) -> str:
 
 
 def _status_filter_has_terminal(status_filters: list[str]) -> bool:
-    terminal_tokens = ("closed", "resolved", "done", "deployed", "accepted", "cancelled", "canceled")
-    return any(any(token in _norm_status_token(status_name) for token in terminal_tokens) for status_name in list(status_filters or []))
+    terminal_tokens = (
+        "closed",
+        "resolved",
+        "done",
+        "deployed",
+        "accepted",
+        "cancelled",
+        "canceled",
+    )
+    return any(
+        any(token in _norm_status_token(status_name) for token in terminal_tokens)
+        for status_name in list(status_filters or [])
+    )
 
 
 def _effective_trends_open_scope(
@@ -583,13 +648,17 @@ def build_dashboard_snapshot(
     open_df = open_only(dff)
     kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=True)
     registry = build_trends_registry()
-    requested_ids = list(query.chart_ids) if query.chart_ids else [
-        "timeseries",
-        "age_buckets",
-        "open_status_bar",
-        "open_priority_pie",
-        "resolution_hist",
-    ]
+    requested_ids = (
+        list(query.chart_ids)
+        if query.chart_ids
+        else [
+            "timeseries",
+            "age_buckets",
+            "open_status_bar",
+            "open_priority_pie",
+            "resolution_hist",
+        ]
+    )
     ctx = ChartContext(dff=dff, open_df=open_df, kpis=kpis, dark_mode=query.dark_mode)
     charts: list[dict[str, Any]] = []
     for chart_id in requested_ids:
@@ -660,7 +729,9 @@ def build_issue_rows(
         like_query=query.issue_like_query,
     )
 
-    sort_column = sort_by if sort_by in dff.columns else ("updated" if "updated" in dff.columns else "key")
+    sort_column = (
+        sort_by if sort_by in dff.columns else ("updated" if "updated" in dff.columns else "key")
+    )
     ascending = str(sort_dir or "desc").strip().lower() == "asc"
     if sort_column in dff.columns:
         dff = dff.sort_values(sort_column, ascending=ascending, kind="mergesort")
@@ -742,7 +813,9 @@ def build_kanban_columns(
         kan["ageDays"] = 0.0
     status_counts = kan["status"].value_counts()
     if list(query.filters.status or []):
-        selected_statuses = [status for status in query.filters.status if status in status_counts.index]
+        selected_statuses = [
+            status for status in query.filters.status if status in status_counts.index
+        ]
         selected_statuses = order_statuses_canonical(selected_statuses)
     else:
         selected_statuses = order_statuses_canonical(status_counts.index.tolist()[:6])
@@ -753,7 +826,9 @@ def build_kanban_columns(
         if sub.empty:
             continue
         if "priority" in sub.columns:
-            sub["__prio_rank"] = sub["priority"].fillna("").astype(str).map(priority_rank).fillna(99)
+            sub["__prio_rank"] = (
+                sub["priority"].fillna("").astype(str).map(priority_rank).fillna(99)
+            )
         else:
             sub["__prio_rank"] = 99
         sort_columns = ["__prio_rank"]
@@ -779,15 +854,40 @@ def build_kanban_columns(
         for column in ("updated",):
             if column in items.columns:
                 items[column] = items[column].astype(str).replace({"NaT": "", "nan": ""})
-        for column in ("key", "summary", "status", "priority", "assignee", "source_alias", "source_type", "url"):
+        for column in (
+            "key",
+            "summary",
+            "status",
+            "priority",
+            "assignee",
+            "source_alias",
+            "source_type",
+            "url",
+        ):
             if column in items.columns:
                 items[column] = items[column].fillna("").astype(str)
-        items["ageDays"] = pd.to_numeric(items.get("ageDays", 0.0), errors="coerce").fillna(0.0).astype(float)
+        items["ageDays"] = (
+            pd.to_numeric(items.get("ageDays", 0.0), errors="coerce").fillna(0.0).astype(float)
+        )
         columns.append(
             {
                 "status": status,
                 "count": int(len(sub)),
-                "items": items.loc[:, ["key", "summary", "status", "priority", "assignee", "updated", "source_alias", "source_type", "url", "ageDays"]]
+                "items": items.loc[
+                    :,
+                    [
+                        "key",
+                        "summary",
+                        "status",
+                        "priority",
+                        "assignee",
+                        "updated",
+                        "source_alias",
+                        "source_type",
+                        "url",
+                        "ageDays",
+                    ],
+                ]
                 .fillna("")
                 .to_dict(orient="records"),
             }
@@ -815,7 +915,13 @@ def build_issue_keys(
     )
     if dff.empty or "key" not in dff.columns:
         return {"total": 0, "keys": []}
-    keys = sorted({str(item).strip() for item in dff["key"].dropna().astype(str).tolist() if str(item).strip()})
+    keys = sorted(
+        {
+            str(item).strip()
+            for item in dff["key"].dropna().astype(str).tolist()
+            if str(item).strip()
+        }
+    )
     return {"total": len(keys), "keys": keys}
 
 
@@ -869,7 +975,9 @@ def build_trend_detail(
             "group": spec.group,
             "figure": _fig_payload(spec.render(chart_context)),
         },
-        "metrics": [{"label": metric.label, "value": metric.value} for metric in list(pack.metrics or [])],
+        "metrics": [
+            {"label": metric.label, "value": metric.value} for metric in list(pack.metrics or [])
+        ],
         "cards": [
             {
                 "title": card.title,
@@ -1077,7 +1185,8 @@ def _issue_records_from_df(
         page[column] = page[column].fillna("").astype(str)
     page["ageDays"] = pd.to_numeric(page["ageDays"], errors="coerce").fillna(0.0).astype(float)
 
-    return (
+    return cast(
+        list[dict[str, Any]],
         page.loc[
             :,
             [
@@ -1097,7 +1206,7 @@ def _issue_records_from_df(
             ],
         ]
         .fillna("")
-        .to_dict(orient="records")
+        .to_dict(orient="records"),
     )
 
 
@@ -1114,9 +1223,7 @@ def _build_theme_trend_figure(
 
     x_col = "quincena_label" if use_accumulated_scope else "date_label"
     x_title = "Quincena" if use_accumulated_scope else "Día"
-    y_title = (
-        "Incidencias abiertas acumuladas" if use_accumulated_scope else "Incidencias abiertas"
-    )
+    y_title = "Incidencias abiertas acumuladas" if use_accumulated_scope else "Incidencias abiertas"
     axis_labels = safe[x_col].dropna().astype(str).drop_duplicates().tolist()
     if not axis_labels:
         return None
@@ -1126,11 +1233,13 @@ def _build_theme_trend_figure(
         for theme in safe.get("tema", pd.Series([], dtype=str)).astype(str).tolist()
         if str(theme).strip()
     }
-    ordered_themes = [str(theme).strip() for theme in list(theme_order or []) if str(theme).strip() in present_themes]
+    ordered_themes = [
+        str(theme).strip()
+        for theme in list(theme_order or [])
+        if str(theme).strip() in present_themes
+    ]
     theme_totals = (
-        safe.groupby("tema", dropna=False)["issues_value"]
-        .sum()
-        .sort_values(ascending=False)
+        safe.groupby("tema", dropna=False)["issues_value"].sum().sort_values(ascending=False)
     )
     if not ordered_themes:
         ordered_themes = order_theme_labels_by_volume(
@@ -1153,17 +1262,18 @@ def _build_theme_trend_figure(
     theme_color_map = build_theme_color_map(theme_order=legend_order, dark_mode=dark_mode)
     fig = go.Figure()
     totals = (
-        safe.groupby(x_col, dropna=False)["issues_value"].sum().reindex(axis_labels).fillna(0).astype(int)
+        safe.groupby(x_col, dropna=False)["issues_value"]
+        .sum()
+        .reindex(axis_labels)
+        .fillna(0)
+        .astype(int)
     )
     for theme in stacked_order:
         sub = safe.loc[safe["tema"].eq(theme)].copy(deep=False)
         if sub.empty:
             continue
         values = (
-            pd.to_numeric(sub["issues_value"], errors="coerce")
-            .fillna(0.0)
-            .astype(float)
-            .tolist()
+            pd.to_numeric(sub["issues_value"], errors="coerce").fillna(0.0).astype(float).tolist()
         )
         labels = sub[x_col].astype(str).tolist()
         total_custom = [[int(totals.get(label, 0))] for label in labels]
@@ -1245,7 +1355,11 @@ def _build_theme_trend_figure(
 def _active_source_ids(scoped_df: pd.DataFrame, *, query: DashboardQuery) -> list[str]:
     if query.workspace.source_id:
         return [str(query.workspace.source_id)]
-    if not isinstance(scoped_df, pd.DataFrame) or scoped_df.empty or "source_id" not in scoped_df.columns:
+    if (
+        not isinstance(scoped_df, pd.DataFrame)
+        or scoped_df.empty
+        or "source_id" not in scoped_df.columns
+    ):
         return []
     return sorted(
         {
@@ -1544,7 +1658,9 @@ def _build_functionality_payload(
         if "summary" in tmp_open.columns:
             tmp_open["summary"] = tmp_open["summary"].fillna("").astype(str)
         if "created" in tmp_open.columns:
-            created = pd.to_datetime(tmp_open["created"], errors="coerce", utc=True).dt.tz_localize(None)
+            created = pd.to_datetime(tmp_open["created"], errors="coerce", utc=True).dt.tz_localize(
+                None
+            )
             now = pd.Timestamp.utcnow().tz_localize(None)
             tmp_open["__age_days"] = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         else:
@@ -1561,7 +1677,12 @@ def _build_functionality_payload(
         for topic in top_tbl.get("tema", pd.Series([], dtype=str)).tolist()
         if str(topic).strip()
     ]
-    history_filtered = history_ctx.filtered_df if isinstance(history_ctx.filtered_df, pd.DataFrame) else pd.DataFrame()
+    theme_color_map = build_theme_color_map(theme_order=selected_themes, dark_mode=dark_mode)
+    history_filtered = (
+        history_ctx.filtered_df
+        if isinstance(history_ctx.filtered_df, pd.DataFrame)
+        else pd.DataFrame()
+    )
     topic_summaries = build_topic_expandable_summaries(
         history_df=history_filtered,
         open_df=tmp_open,
@@ -1598,7 +1719,11 @@ def _build_functionality_payload(
         topic = str(row.get("tema", "") or "").strip()
         if not topic:
             continue
-        sub = tmp_open.loc[tmp_open["__theme"].eq(topic)].copy(deep=False) if "__theme" in tmp_open.columns else pd.DataFrame()
+        sub = (
+            tmp_open.loc[tmp_open["__theme"].eq(topic)].copy(deep=False)
+            if "__theme" in tmp_open.columns
+            else pd.DataFrame()
+        )
         if not sub.empty:
             sub["__prio_rank"] = (
                 sub["priority"].astype(str).map(priority_rank).fillna(99).astype(int)
@@ -1617,6 +1742,7 @@ def _build_functionality_payload(
         topics.append(
             {
                 "topic": topic,
+                "color": str(theme_color_map.get(topic) or BBVA_LIGHT.serene_blue),
                 "count": int(row.get("open_count", 0) or 0),
                 "pct": float(row.get("pct_open", 0.0) or 0.0),
                 "dominantStatus": _dominant_value(sub, "status", "(sin estado)"),
@@ -1662,7 +1788,9 @@ def _build_functionality_payload(
         "chart": {
             "title": "Tendencia por funcionalidad",
             "subtitle": (
-                "Vista quincenal acumulada" if use_accumulated_scope else "Vista diaria de la quincena analizada"
+                "Vista quincenal acumulada"
+                if use_accumulated_scope
+                else "Vista diaria de la quincena analizada"
             ),
             "figure": chart_payload,
         }
@@ -1711,9 +1839,7 @@ def _build_duplicates_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
     heuristic_groups_payload: list[dict[str, Any]] = []
     for cluster in clusters[:12]:
         key_list = [
-            str(key).strip()
-            for key in list(getattr(cluster, "keys", []) or [])
-            if str(key).strip()
+            str(key).strip() for key in list(getattr(cluster, "keys", []) or []) if str(key).strip()
         ]
         if not key_list:
             continue
@@ -1786,9 +1912,7 @@ def _build_people_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
         crit_risk_pct = (w_bad / w_total * 100.0) if w_total > 0 else 0.0
         risk_score = 0.6 * flow_risk_pct + 0.4 * crit_risk_pct
         aging_p90_days = (
-            float(sub["age_days"].quantile(0.90))
-            if sub["age_days"].notna().any()
-            else None
+            float(sub["age_days"].quantile(0.90)) if sub["age_days"].notna().any() else None
         )
         recommendations = build_people_plan_recommendations(
             assignee=str(assignee),
@@ -1824,8 +1948,12 @@ def _build_people_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
                 "pushPct": _pct(b_salida, int(count)),
                 "blockedCount": b_bloq,
                 "aging": {
-                    "value": (f"{float(aging_p90_days):.0f}d" if aging_p90_days is not None else "—"),
-                    "caption": "Casos más lentos" if aging_p90_days is not None else "Sin fecha de creación",
+                    "value": (
+                        f"{float(aging_p90_days):.0f}d" if aging_p90_days is not None else "—"
+                    ),
+                    "caption": "Casos más lentos"
+                    if aging_p90_days is not None
+                    else "Sin fecha de creación",
                 },
                 "recommendations": list(recommendations[:4]),
                 "oldestIssues": _issue_records_from_df(oldest, limit=3, age_days_col="age_days"),

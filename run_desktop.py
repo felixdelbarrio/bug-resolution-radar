@@ -50,7 +50,11 @@ def _ensure_localhost_no_proxy_env() -> None:
 
 
 def _desktop_webview_enabled() -> bool:
-    token = str(os.environ.get("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true") or "true").strip().lower()
+    token = (
+        str(os.environ.get("BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW", "true") or "true")
+        .strip()
+        .lower()
+    )
     return token not in {"0", "false", "no", "off"}
 
 

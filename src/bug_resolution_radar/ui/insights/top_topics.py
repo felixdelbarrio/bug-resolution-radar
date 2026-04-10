@@ -26,7 +26,15 @@ from bug_resolution_radar.analytics.topic_expandable_summary import (
     build_topic_expandable_summaries,
 )
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT, hex_to_rgba
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_LIGHT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_RED_1,
+    BBVA_SIGNAL_RED_2,
+    BBVA_SIGNAL_YELLOW_1,
+    hex_to_rgba,
+)
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col, priority_rank
 from bug_resolution_radar.ui.dashboard.exports.downloads import render_minimal_export_actions
@@ -138,6 +146,8 @@ def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -
         columns=["__best_prio", "__critical_cnt", "__avg_prio", "__is_others"],
         errors="ignore",
     )
+
+
 def _topic_selection_token(*, topic: str, total_open: int) -> str:
     status = ",".join(sorted([str(x) for x in list(st.session_state.get(FILTER_STATUS_KEY) or [])]))
     priority = ",".join(

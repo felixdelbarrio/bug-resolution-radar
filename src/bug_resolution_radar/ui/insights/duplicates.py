@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, List
+from typing import Any, Callable, List
 
 import pandas as pd
 import streamlit as st
@@ -11,7 +11,11 @@ from bug_resolution_radar.analytics.duplicates import (
     ExactTitleDuplicateStats,
     exact_title_duplicate_stats,
 )
-from bug_resolution_radar.analytics.duplicate_insights import prepare_duplicates_payload
+from bug_resolution_radar.analytics.duplicate_insights import (
+    _dedupe_heuristic_clusters as _dedupe_heuristic_clusters_backend,
+    prepare_duplicates_payload as _prepare_duplicates_payload_backend,
+)
+from bug_resolution_radar.analytics.insights import SimilarityCluster
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.ui.cache import cached_by_signature, dataframe_signature
 from bug_resolution_radar.ui.common import normalize_text_col
@@ -57,6 +61,23 @@ def _inject_duplicates_view_toggle_css(*, scope_key: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _dedupe_heuristic_clusters(
+    *,
+    clusters: list[SimilarityCluster],
+    exact_title_groups: dict[str, list[str]],
+) -> list[SimilarityCluster]:
+    return _dedupe_heuristic_clusters_backend(
+        clusters=clusters,
+        exact_title_groups_payload=exact_title_groups,
+    )
+
+
+def _prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
+    return _prepare_duplicates_payload_backend(df2)
+
+
 def render_duplicates_tab(
     *,
     settings: Settings,
@@ -97,7 +118,7 @@ def render_duplicates_tab(
     payload, _ = cached_by_signature(
         "insights.duplicates",
         sig,
-        lambda: prepare_duplicates_payload(df2),
+        lambda: _prepare_duplicates_payload(df2),
         max_entries=12,
     )
 

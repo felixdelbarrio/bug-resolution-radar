@@ -21,6 +21,8 @@ AGE_BUCKET_LABELS_DAYS: dict[str, str] = {
     "15-30": "15-30 días",
     ">30": ">30 días",
 }
+
+
 def _to_dt_naive(s: pd.Series) -> pd.Series:
     """Convert to naive datetime64 for safe arithmetic/comparisons."""
     if s is None:

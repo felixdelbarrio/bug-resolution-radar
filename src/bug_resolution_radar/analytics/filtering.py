@@ -129,7 +129,12 @@ def apply_dashboard_issue_scope(
         if quincenal_label in options:
             scoped = apply_issue_key_scope(scoped, keys=options[quincenal_label])
 
-    if issue_keys and isinstance(scoped, pd.DataFrame) and not scoped.empty and "key" in scoped.columns:
+    if (
+        issue_keys
+        and isinstance(scoped, pd.DataFrame)
+        and not scoped.empty
+        and "key" in scoped.columns
+    ):
         scoped = apply_issue_key_scope(scoped, keys=issue_keys)
 
     return apply_text_like_filter(scoped, column=sort_col, query=like_query)

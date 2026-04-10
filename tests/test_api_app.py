@@ -383,9 +383,7 @@ def test_ingest_selection_endpoint_persists_source_selection(
     ) -> Settings:
         captured["connector"] = connector
         captured["selected_source_ids"] = list(selected_source_ids)
-        return current.model_copy(
-            update={"JIRA_INGEST_DISABLED_SOURCES_JSON": "[]"}
-        )
+        return current.model_copy(update={"JIRA_INGEST_DISABLED_SOURCES_JSON": "[]"})
 
     monkeypatch.setattr(api_app, "load_settings", lambda: settings)
     monkeypatch.setattr(api_app, "persist_ingest_selection", _fake_persist)

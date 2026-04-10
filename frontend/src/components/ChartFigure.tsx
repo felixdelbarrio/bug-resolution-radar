@@ -1,6 +1,7 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 
-const LazyChartFigurePlot = lazy(() => import("./ChartFigurePlot"));
+const loadChartFigurePlot = () => import("./ChartFigurePlot");
+const LazyChartFigurePlot = lazy(loadChartFigurePlot);
 
 type ChartFigureProps = {
   figure: Record<string, unknown> | null;
@@ -8,6 +9,10 @@ type ChartFigureProps = {
 };
 
 export function ChartFigure({ figure, height = 320 }: ChartFigureProps) {
+  useEffect(() => {
+    void loadChartFigurePlot();
+  }, []);
+
   if (!figure) {
     return <div className="empty-card">No hay gráfico disponible para este bloque.</div>;
   }

@@ -79,7 +79,11 @@ def save_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     merged_values = {**current_values, **incoming_values}
     merged_values["SUPPORTED_COUNTRIES"] = ",".join(
-        [str(item).strip() for item in list(payload.get("supportedCountries") or []) if str(item).strip()]
+        [
+            str(item).strip()
+            for item in list(payload.get("supportedCountries") or [])
+            if str(item).strip()
+        ]
     )
     merged_values["JIRA_SOURCES_JSON"] = to_env_json(
         _normalize_source_rows(list(payload.get("jiraSources") or []), source_type="jira")

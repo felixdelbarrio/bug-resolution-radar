@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { IntelligencePayload, IssueRecord } from "../lib/api";
 import {
   neutralChipStyle,
-  semanticButtonStyle,
   semanticChipStyle
 } from "../lib/semanticColors";
 import { ChartFigure } from "./ChartFigure";
@@ -23,6 +22,7 @@ type FilterComboProps = {
   options: string[];
   selected: string[];
   kind?: "status" | "priority";
+  emptyLabel?: string;
   onChange: (next: string[]) => void;
 };
 
@@ -30,13 +30,48 @@ function classNames(...tokens: Array<string | false | null | undefined>) {
   return tokens.filter(Boolean).join(" ");
 }
 
-function FilterCombo({ label, options, selected, kind, onChange }: FilterComboProps) {
-  const summary = selected.length > 0 ? selected.join(", ") : "Sin valor";
+function FilterCombo({
+  label,
+  options,
+  selected,
+  kind,
+  emptyLabel = "Todos",
+  onChange
+}: FilterComboProps) {
+  const compactSummary =
+    selected.length === 0
+      ? emptyLabel
+      : selected.length <= 2
+        ? selected.join(" · ")
+        : `${selected.length} seleccionados`;
   return (
     <details className="filter-combo insights-combo">
       <summary className="filter-combo-summary">
         <span>{label}</span>
-        <strong>{summary}</strong>
+        {kind && selected.length > 0 ? (
+          <div className="filter-summary-pill-row">
+            {selected.slice(0, 2).map((item) => (
+              <span
+                key={item}
+                className="filter-summary-pill"
+                style={semanticChipStyle(item, kind)}
+              >
+                {item}
+              </span>
+            ))}
+            {selected.length > 2 ? (
+              <span className="filter-summary-more">+{selected.length - 2}</span>
+            ) : null}
+          </div>
+        ) : (
+          <strong
+            className={
+              selected.length === 0 ? "filter-combo-summary-placeholder" : undefined
+            }
+          >
+            {compactSummary}
+          </strong>
+        )}
       </summary>
       <div className="filter-combo-menu">
         {options.length === 0 ? <span className="filter-empty">Sin opciones</span> : null}
@@ -73,6 +108,33 @@ function issueSubtitle(issue: IssueRecord) {
   return [issue.status, issue.priority, issue.assignee].filter(Boolean).join(" · ");
 }
 
+function periodTone(label: string) {
+  const token = String(label || "").trim().toLowerCase();
+  if (token.includes("creadas en la quincena actual")) return "risk";
+  if (token.includes("cerradas en la quincena") || token.includes("resolución")) return "flow";
+  if (token.includes("abiertas") || token.includes("quincena previa")) return "warning";
+  if (token.includes("mes actual")) return "quality";
+  return "quality";
+}
+
+function functionalityTone(topic: IntelligencePayload["functionality"]["topics"][number]) {
+  const priority = String(topic.dominantPriority || "").trim().toLowerCase();
+  if (priority === "highest" || priority === "high" || priority.includes("imped")) return "risk";
+  if (priority === "medium") return "warning";
+  if (priority === "low" || priority === "lowest") return "flow";
+  return "quality";
+}
+
+function accentStyle(color: string | undefined): CSSProperties | undefined {
+  const normalized = String(color || "").trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return {
+    "--insight-accent": normalized
+  } as CSSProperties;
+}
+
 function IssueList({
   issues,
   onOpenIssue,
@@ -92,10 +154,11 @@ function IssueList({
           <div className="insight-issue-copy">
             <button
               type="button"
-              className="issue-key-button insight-issue-key"
+              className="issue-primary-link insight-issue-trigger"
               onClick={() => void onOpenIssue(issue)}
             >
-              {issue.key}
+              <span className="issue-key-anchor-button insight-issue-key">{issue.key}</span>
+              <p className="issue-primary-link-title">{issue.summary || "(sin summary)"}</p>
             </button>
             <div className="issue-card-badges insight-issue-chip-row">
               <span className="issue-chip" style={semanticChipStyle(issue.status || "", "status")}>
@@ -116,17 +179,7 @@ function IssueList({
                 {issue.ageDays > 0 ? `${Math.round(issue.ageDays)}d` : "0d"}
               </span>
             </div>
-            <p>{issue.summary || "(sin summary)"}</p>
             <small>{issueSubtitle(issue)}</small>
-          </div>
-          <div className="insight-issue-meta">
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => void onOpenIssue(issue)}
-            >
-              Abrir
-            </button>
           </div>
         </article>
       ))}
@@ -192,49 +245,53 @@ export function InsightsPanel({
 
       {activeTab === "summary" ? (
         <section className="page-stack">
-          <section className="surface-panel page-stack">
-            <p className="inline-caption">{data.periodSummary.caption}</p>
-            <div className="period-card-grid">
-              {data.periodSummary.cards.map((card) => (
+          <p className="inline-caption">{data.periodSummary.caption}</p>
+          <div className="period-card-grid">
+            {data.periodSummary.cards.map((card) => (
+              <button
+                type="button"
+                key={card.cardId}
+                className="period-action-card"
+                data-tone={periodTone(card.quincenalScopeLabel || card.label)}
+                onClick={() => jumpToIssues(card.quincenalScopeLabel)}
+              >
+                <span>{card.kicker}</span>
+                <strong>{card.metric}</strong>
+                <p>{card.detail}</p>
+                <div className="period-action-card-footer">
+                  <em>{`${card.label} ↗`}</em>
+                  <b aria-hidden="true">→</b>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {data.periodSummary.groups.map((group) => (
+            <details
+              className="insight-detail-block"
+              data-tone={periodTone(group.quincenalScopeLabel || group.label)}
+              key={group.label}
+            >
+              <summary>
+                <span>{group.label}</span>
+                <strong>{group.count}</strong>
+              </summary>
+              {group.helpText ? <p className="inline-caption">{group.helpText}</p> : null}
+              <div className="detail-actions-row">
                 <button
                   type="button"
-                  key={card.cardId}
-                  className="period-action-card"
-                  onClick={() => jumpToIssues(card.quincenalScopeLabel)}
+                  className="ghost-button"
+                  onClick={() => jumpToIssues(group.quincenalScopeLabel)}
                 >
-                  <span>{card.kicker}</span>
-                  <strong>{card.metric}</strong>
-                  <p>{card.detail}</p>
-                  <small>{card.label}</small>
+                  Abrir en Issues
                 </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="surface-panel page-stack">
-            {data.periodSummary.groups.map((group) => (
-              <details className="insight-detail-block" key={group.label}>
-                <summary>
-                  <span>{group.label}</span>
-                  <strong>{group.count}</strong>
-                </summary>
-                {group.helpText ? <p className="inline-caption">{group.helpText}</p> : null}
-                <div className="detail-actions-row">
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => jumpToIssues(group.quincenalScopeLabel)}
-                  >
-                    Abrir en Issues
-                  </button>
-                </div>
-                <IssueList issues={group.items} onOpenIssue={onOpenIssue} />
-              </details>
-            ))}
-          </section>
+              </div>
+              <IssueList issues={group.items} onOpenIssue={onOpenIssue} />
+            </details>
+          ))}
 
           {data.periodSummary.sourceBreakdown.length > 0 ? (
-            <section className="surface-panel page-stack">
+            <section className="page-stack">
               <div className="panel-head">
                 <div>
                   <p className="section-kicker">Resumen</p>
@@ -270,83 +327,90 @@ export function InsightsPanel({
 
       {activeTab === "functionality" ? (
         <section className="page-stack">
-          <section className="surface-panel page-stack">
-            <div className="insights-filter-shell">
-              <div className="insights-filter-kicker">Filtros</div>
-              <div className="insights-filter-grid">
-                <label className="field">
-                  <span>Vista</span>
-                  <select
-                    value={combo.viewMode}
-                    onChange={(event) => handleViewModeChange(event.target.value)}
-                  >
-                    {combo.viewModeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <FilterCombo
-                  label="Estado"
-                  options={combo.statusOptions}
-                  selected={combo.selectedStatuses}
-                  kind="status"
-                  onChange={(next) =>
-                    onChange({
-                      insightsStatus: next,
-                      insightsStatusManual: "1"
-                    })
-                  }
-                />
-                <FilterCombo
-                  label="Prioridad"
-                  options={combo.priorityOptions}
-                  selected={combo.selectedPriorities}
-                  kind="priority"
-                  onChange={(next) => onChange({ insightsPriority: next })}
-                />
-                <FilterCombo
-                  label="Funcionalidades"
-                  options={combo.functionalityOptions}
-                  selected={combo.selectedFunctionalities}
-                  onChange={(next) => onChange({ insightsFunctionality: next })}
-                />
-              </div>
+          <div className="insights-filter-shell">
+            <div className="insights-filter-grid">
+              <label className="field">
+                <span>Vista</span>
+                <select
+                  value={combo.viewMode}
+                  onChange={(event) => handleViewModeChange(event.target.value)}
+                >
+                  {combo.viewModeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <FilterCombo
+                label="Estado"
+                options={combo.statusOptions}
+                selected={combo.selectedStatuses}
+                kind="status"
+                emptyLabel="Todos"
+                onChange={(next) =>
+                  onChange({
+                    insightsStatus: next,
+                    insightsStatusManual: "1"
+                  })
+                }
+              />
+              <FilterCombo
+                label="Prioridad"
+                options={combo.priorityOptions}
+                selected={combo.selectedPriorities}
+                kind="priority"
+                emptyLabel="Todas"
+                onChange={(next) => onChange({ insightsPriority: next })}
+              />
+              <FilterCombo
+                label="Funcionalidades"
+                options={combo.functionalityOptions}
+                selected={combo.selectedFunctionalities}
+                emptyLabel="Todas"
+                onChange={(next) => onChange({ insightsFunctionality: next })}
+              />
             </div>
+          </div>
 
-            {data.functionality.chart ? (
-              <article className="chart-card trend-chart-card">
-                <div className="chart-copy">
-                  <div>
-                    <p className="eyebrow">Insights</p>
-                    <h4>{data.functionality.chart.title}</h4>
-                    <p>{data.functionality.chart.subtitle}</p>
-                  </div>
+          {data.functionality.chart ? (
+            <article className="chart-card trend-chart-card">
+              <div className="chart-copy">
+                <div>
+                  <p className="eyebrow">Insights</p>
+                  <h4>{data.functionality.chart.title}</h4>
+                  <p>{data.functionality.chart.subtitle}</p>
                 </div>
-                {data.functionality.chart.figure ? (
-                  <ChartFigure figure={data.functionality.chart.figure} height={380} />
-                ) : (
-                  <p className="issue-list-empty">
-                    No hay histórico suficiente para construir la tendencia seleccionada.
-                  </p>
-                )}
-              </article>
-            ) : (
-              <section className="surface-panel empty-panel">
-                <h3>Sin tendencia disponible</h3>
-                <p>No hay histórico suficiente para construir la tendencia seleccionada.</p>
-              </section>
-            )}
-          </section>
+              </div>
+              {data.functionality.chart.figure ? (
+                <ChartFigure figure={data.functionality.chart.figure} height={380} />
+              ) : (
+                <p className="issue-list-empty">
+                  No hay histórico suficiente para construir la tendencia seleccionada.
+                </p>
+              )}
+            </article>
+          ) : (
+            <section className="surface-panel empty-panel">
+              <h3>Sin tendencia disponible</h3>
+              <p>No hay histórico suficiente para construir la tendencia seleccionada.</p>
+            </section>
+          )}
 
           {data.functionality.topics.map((topic) => (
-            <details className="insight-detail-block" key={topic.topic}>
+            <details
+              className="insight-detail-block topic-detail-block"
+              data-tone={functionalityTone(topic)}
+              key={topic.topic}
+              style={accentStyle(topic.color)}
+            >
               <summary>
-                <span>
-                  {topic.count} issues · {topic.pct.toFixed(1)}% · {topic.topic}
+                <span className="topic-summary-copy">
+                  <span className="topic-summary-meta">
+                    {topic.count} issues · {topic.pct.toFixed(1)}%
+                  </span>
+                  <span className="topic-summary-label">{topic.topic}</span>
                 </span>
-                <strong>{topic.dominantPriority}</strong>
               </summary>
               <div className="topic-meta-row">
                 <span className="issue-chip" style={semanticChipStyle(topic.dominantStatus || "", "status")}>
@@ -387,35 +451,37 @@ export function InsightsPanel({
 
       {activeTab === "duplicates" ? (
         <section className="page-stack">
-          <section className="surface-panel page-stack">
-            <p className="inline-caption">{data.duplicates.brief}</p>
-            <div className="soft-toggle-row">
-              <button
-                type="button"
-                className={classNames(
-                  "soft-toggle-button",
-                  duplicatesView === "title" && "soft-toggle-button-active"
-                )}
-                onClick={() => setDuplicatesView("title")}
-              >
-                Por título
-              </button>
-              <button
-                type="button"
-                className={classNames(
-                  "soft-toggle-button",
-                  duplicatesView === "heuristic" && "soft-toggle-button-active"
-                )}
-                onClick={() => setDuplicatesView("heuristic")}
-              >
-                Por heurística
-              </button>
-            </div>
-          </section>
+          <p className="inline-caption">{data.duplicates.brief}</p>
+          <div className="soft-toggle-row">
+            <button
+              type="button"
+              className={classNames(
+                "soft-toggle-button",
+                duplicatesView === "title" && "soft-toggle-button-active"
+              )}
+              onClick={() => setDuplicatesView("title")}
+            >
+              Por título
+            </button>
+            <button
+              type="button"
+              className={classNames(
+                "soft-toggle-button",
+                duplicatesView === "heuristic" && "soft-toggle-button-active"
+              )}
+              onClick={() => setDuplicatesView("heuristic")}
+            >
+              Por heurística
+            </button>
+          </div>
 
           {(duplicatesView === "title"
             ? data.duplicates.titleGroups.map((group) => (
-                <details className="insight-detail-block" key={`title-${group.summary}`}>
+                <details
+                  className="insight-detail-block"
+                  data-tone="neutral"
+                  key={`title-${group.summary}`}
+                >
                   <summary>
                     <span>{group.summary}</span>
                     <strong>{group.count}</strong>
@@ -424,7 +490,11 @@ export function InsightsPanel({
                 </details>
               ))
             : data.duplicates.heuristicGroups.map((group) => (
-                <details className="insight-detail-block" key={`heur-${group.summary}`}>
+                <details
+                  className="insight-detail-block"
+                  data-tone="neutral"
+                  key={`heur-${group.summary}`}
+                >
                   <summary>
                     <span>{group.summary}</span>
                     <strong>{group.count}</strong>
@@ -449,27 +519,28 @@ export function InsightsPanel({
       {activeTab === "people" ? (
         <section className="page-stack">
           {data.people.cards.map((card) => (
-            <details className="insight-detail-block" key={card.assignee}>
+            <details
+              className="insight-detail-block"
+              data-tone="neutral"
+              key={card.assignee}
+            >
               <summary>
-                <span>
-                  {card.assignee} · {card.openCount} abiertas · {card.sharePct.toFixed(1)}%
-                </span>
-                <strong>{card.risk.label}</strong>
+                <span>{card.assignee} · {card.openCount} abiertas · {card.sharePct.toFixed(1)}%</span>
               </summary>
-              <div className="people-state-grid-react">
+              <div className="people-state-chip-grid">
                 {card.statusBreakdown.map((bucket) => (
-                  <article
-                    className="people-state-tile"
-                    key={`${card.assignee}-${bucket.status}`}
-                    style={semanticButtonStyle(bucket.status, "status", false)}
-                  >
-                    <strong>{bucket.count}</strong>
-                    <span>{bucket.status}</span>
-                  </article>
+                  <div className="people-state-chip-row" key={`${card.assignee}-${bucket.status}`}>
+                    <span className="issue-chip" style={semanticChipStyle(bucket.status, "status")}>
+                      {bucket.status}
+                    </span>
+                    <span className="issue-chip issue-chip-neutral" style={neutralChipStyle()}>
+                      {bucket.count}
+                    </span>
+                  </div>
                 ))}
               </div>
               <div className="people-kpi-grid-react">
-                <article className="mini-kpi-card">
+                <article className="mini-kpi-card mini-kpi-card-neutral">
                   <span>Riesgo operativo</span>
                   <strong>{card.risk.label}</strong>
                   <small>
@@ -477,17 +548,17 @@ export function InsightsPanel({
                     {card.risk.criticalRiskPct.toFixed(0)}%
                   </small>
                 </article>
-                <article className="mini-kpi-card">
+                <article className="mini-kpi-card mini-kpi-card-neutral">
                   <span>Empuje a salida</span>
                   <strong>{card.pushPct.toFixed(0)}%</strong>
                   <small>Cuanto más alto, mejor ritmo</small>
                 </article>
-                <article className="mini-kpi-card">
+                <article className="mini-kpi-card mini-kpi-card-neutral">
                   <span>Bloqueadas</span>
                   <strong>{card.blockedCount}</strong>
                   <small>Prioridad alta para desbloqueo</small>
                 </article>
-                <article className="mini-kpi-card">
+                <article className="mini-kpi-card mini-kpi-card-neutral">
                   <span>Antigüedad crítica</span>
                   <strong>{card.aging.value}</strong>
                   <small>{card.aging.caption}</small>
@@ -516,29 +587,27 @@ export function InsightsPanel({
 
       {activeTab === "opsHealth" ? (
         <section className="page-stack">
-          <section className="surface-panel page-stack">
-            <div className="ops-kpi-grid-react">
-              {data.opsHealth.kpis.map((kpi) => (
-                <article className="mini-kpi-card" key={kpi.label}>
-                  <span>{kpi.label}</span>
-                  <strong>{kpi.value}</strong>
-                  <small>{kpi.detail}</small>
-                </article>
-              ))}
+          <div className="ops-kpi-grid-react">
+            {data.opsHealth.kpis.map((kpi) => (
+              <article className="mini-kpi-card mini-kpi-card-neutral" key={kpi.label}>
+                <span>{kpi.label}</span>
+                <strong>{kpi.value}</strong>
+                <small>{kpi.detail}</small>
+              </article>
+            ))}
+          </div>
+          {data.opsHealth.brief.length > 0 ? (
+            <div className="recommendation-card">
+              <strong>Lectura rápida</strong>
+              <ul className="signal-list">
+                {data.opsHealth.brief.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
             </div>
-            {data.opsHealth.brief.length > 0 ? (
-              <div className="recommendation-card">
-                <strong>Lectura rápida</strong>
-                <ul className="signal-list">
-                  {data.opsHealth.brief.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </section>
+          ) : null}
 
-          <section className="surface-panel page-stack">
+          <section className="page-stack">
             <div className="panel-head">
               <div>
                 <p className="section-kicker">Operativa</p>

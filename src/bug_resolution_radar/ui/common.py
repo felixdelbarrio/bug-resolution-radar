@@ -5,7 +5,11 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Dict, List, Tuple
 
-from bug_resolution_radar.analytics.issues import normalize_text_col, open_issues_only, priority_rank
+from bug_resolution_radar.analytics.issues import (
+    normalize_text_col,
+    open_issues_only,
+    priority_rank,
+)
 from bug_resolution_radar.models.schema import IssuesDocument
 from bug_resolution_radar.repositories.issues_store import (
     df_from_issues_doc,
