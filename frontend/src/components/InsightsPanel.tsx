@@ -23,6 +23,9 @@ type FilterComboProps = {
   selected: string[];
   kind?: "status" | "priority";
   emptyLabel?: string;
+  className?: string;
+  summaryRowClassName?: string;
+  maxVisiblePills?: number;
   onChange: (next: string[]) => void;
 };
 
@@ -36,21 +39,24 @@ function FilterCombo({
   selected,
   kind,
   emptyLabel = "Todos",
+  className,
+  summaryRowClassName,
+  maxVisiblePills = 2,
   onChange
 }: FilterComboProps) {
   const compactSummary =
     selected.length === 0
       ? emptyLabel
-      : selected.length <= 2
+      : selected.length <= maxVisiblePills
         ? selected.join(" · ")
         : `${selected.length} seleccionados`;
   return (
-    <details className="filter-combo insights-combo">
+    <details className={classNames("filter-combo", "insights-combo", className)}>
       <summary className="filter-combo-summary">
         <span>{label}</span>
         {kind && selected.length > 0 ? (
-          <div className="filter-summary-pill-row">
-            {selected.slice(0, 2).map((item) => (
+          <div className={classNames("filter-summary-pill-row", summaryRowClassName)}>
+            {selected.slice(0, maxVisiblePills).map((item) => (
               <span
                 key={item}
                 className="filter-summary-pill"
@@ -59,8 +65,8 @@ function FilterCombo({
                 {item}
               </span>
             ))}
-            {selected.length > 2 ? (
-              <span className="filter-summary-more">+{selected.length - 2}</span>
+            {selected.length > maxVisiblePills ? (
+              <span className="filter-summary-more">+{selected.length - maxVisiblePills}</span>
             ) : null}
           </div>
         ) : (
@@ -186,6 +192,28 @@ function flowLabel(direction: string) {
     return "Empeorando";
   }
   return "Estable";
+}
+
+function compactViewModeLabel(value: string, fallback: string) {
+  if (value === "quincenal") {
+    return "Quincena actual";
+  }
+  if (value === "acumulada") {
+    return "Vista acumulada";
+  }
+  return fallback;
+}
+
+function formatTopicIssueCount(count: number) {
+  const safeCount = Number.isFinite(count) ? Math.max(0, Math.round(count)) : 0;
+  return `${safeCount} ${safeCount === 1 ? "incidencia" : "incidencias"}`;
+}
+
+function formatTopicPercentage(pct: number) {
+  return `${new Intl.NumberFormat("es-ES", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(pct) ? pct : 0)}%`;
 }
 
 export function InsightsPanel({
@@ -318,7 +346,7 @@ export function InsightsPanel({
         <section className="page-stack">
           <div className="insights-filter-shell">
             <div className="insights-filter-grid">
-              <label className="field">
+              <label className="field insights-view-field">
                 <span>Vista</span>
                 <select
                   value={combo.viewMode}
@@ -326,7 +354,7 @@ export function InsightsPanel({
                 >
                   {combo.viewModeOptions.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {compactViewModeLabel(option.value, option.label)}
                     </option>
                   ))}
                 </select>
@@ -337,6 +365,8 @@ export function InsightsPanel({
                 selected={combo.selectedStatuses}
                 kind="status"
                 emptyLabel="Todos"
+                className="insights-status-combo"
+                summaryRowClassName="insights-status-summary"
                 onChange={(next) =>
                   onChange({
                     insightsStatus: next,
@@ -350,6 +380,7 @@ export function InsightsPanel({
                 selected={combo.selectedPriorities}
                 kind="priority"
                 emptyLabel="Todas"
+                className="insights-priority-combo"
                 onChange={(next) => onChange({ insightsPriority: next })}
               />
               <FilterCombo
@@ -357,6 +388,7 @@ export function InsightsPanel({
                 options={combo.functionalityOptions}
                 selected={combo.selectedFunctionalities}
                 emptyLabel="Todas"
+                className="insights-functionality-combo"
                 onChange={(next) => onChange({ insightsFunctionality: next })}
               />
             </div>
@@ -395,10 +427,11 @@ export function InsightsPanel({
             >
               <summary>
                 <span className="topic-summary-copy">
-                  <span className="topic-summary-meta">
-                    {topic.count} issues · {topic.pct.toFixed(1)}%
-                  </span>
                   <span className="topic-summary-label">{topic.topic}</span>
+                  <span className="topic-summary-separator">:</span>
+                  <span className="topic-summary-meta">
+                    {formatTopicIssueCount(topic.count)} - {formatTopicPercentage(topic.pct)}
+                  </span>
                 </span>
               </summary>
               <div className="topic-meta-row">
