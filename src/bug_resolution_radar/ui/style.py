@@ -32,7 +32,6 @@ from bug_resolution_radar.theme.design_tokens import (
 )
 from bug_resolution_radar.theme.plotly_style import (
     apply_plotly_bbva as _apply_plotly_bbva_pure,
-    plotly_template_without_scattermapbox as _plotly_template_without_scattermapbox_pure,
 )
 from bug_resolution_radar.ui.common import semantic_popover_css_rules
 
@@ -1784,12 +1783,6 @@ def render_hero(app_title: str) -> None:
         """,
         unsafe_allow_html=True,
     )
-
-
-@lru_cache(maxsize=2)
-def _plotly_template_without_scattermapbox(*, dark_mode: bool) -> Any:
-    return _plotly_template_without_scattermapbox_pure(dark_mode=dark_mode)
-
 
 def _workspace_dark_mode_enabled() -> bool:
     try:

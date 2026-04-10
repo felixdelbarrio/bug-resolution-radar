@@ -10,6 +10,20 @@ from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_DARK,
+    BBVA_GOAL_ACCENT_7,
+    BBVA_LIGHT,
+    BBVA_SIGNAL_GREEN_1,
+    BBVA_SIGNAL_GREEN_2,
+    BBVA_SIGNAL_GREEN_3,
+    BBVA_SIGNAL_ORANGE_1,
+    BBVA_SIGNAL_ORANGE_2,
+    BBVA_SIGNAL_RED_1,
+    BBVA_SIGNAL_RED_2,
+    BBVA_SIGNAL_YELLOW_1,
+)
+
 _WORD_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
 # Lightweight stopword list (ES + EN) to avoid clustering on glue words.
@@ -116,6 +130,10 @@ def _normalize_theme_token(value: object) -> str:
     txt = unicodedata.normalize("NFKD", txt)
     txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
     return txt
+
+
+def normalize_theme_key(value: object) -> str:
+    return _normalize_theme_token(value)
 
 
 def is_other_theme_label(value: object) -> bool:
@@ -263,6 +281,113 @@ def build_theme_render_order(
         display_order=display_order,
         stack_order_bottom_to_top=stack_order,
     )
+
+
+def theme_signal_palette(*, dark_mode: bool) -> tuple[str, ...]:
+    if dark_mode:
+        return (
+            BBVA_SIGNAL_RED_2,
+            BBVA_LIGHT.electric_blue,
+            BBVA_SIGNAL_ORANGE_2,
+            BBVA_GOAL_ACCENT_7,
+            BBVA_SIGNAL_YELLOW_1,
+            BBVA_LIGHT.aqua,
+            BBVA_SIGNAL_GREEN_2,
+            BBVA_LIGHT.serene_blue,
+            BBVA_SIGNAL_GREEN_3,
+            BBVA_LIGHT.white,
+        )
+    return (
+        BBVA_SIGNAL_RED_1,
+        BBVA_LIGHT.electric_blue,
+        BBVA_SIGNAL_ORANGE_1,
+        BBVA_GOAL_ACCENT_7,
+        BBVA_SIGNAL_YELLOW_1,
+        BBVA_LIGHT.aqua,
+        BBVA_SIGNAL_GREEN_1,
+        BBVA_LIGHT.royal_blue,
+        BBVA_LIGHT.serene_blue,
+        BBVA_LIGHT.core_blue,
+        BBVA_LIGHT.serene_dark_blue,
+        BBVA_LIGHT.midnight,
+    )
+
+
+def build_theme_color_map(*, theme_order: Sequence[str], dark_mode: bool) -> dict[str, str]:
+    out: dict[str, str] = {}
+    palette = theme_signal_palette(dark_mode=dark_mode)
+    semantic_map = (
+        {
+            "pagos": BBVA_SIGNAL_RED_2,
+            "tareas": BBVA_SIGNAL_ORANGE_2,
+            "monetarias": BBVA_SIGNAL_YELLOW_1,
+            "credito": BBVA_SIGNAL_GREEN_2,
+            "login y acceso": BBVA_LIGHT.electric_blue,
+            "softoken": BBVA_GOAL_ACCENT_7,
+            "transferencias": BBVA_LIGHT.serene_blue,
+            "notificaciones": BBVA_LIGHT.aqua,
+        }
+        if dark_mode
+        else {
+            "pagos": BBVA_SIGNAL_RED_1,
+            "tareas": BBVA_SIGNAL_ORANGE_1,
+            "monetarias": BBVA_SIGNAL_YELLOW_1,
+            "credito": BBVA_SIGNAL_GREEN_1,
+            "login y acceso": BBVA_LIGHT.electric_blue,
+            "softoken": BBVA_GOAL_ACCENT_7,
+            "transferencias": BBVA_LIGHT.serene_blue,
+            "notificaciones": BBVA_LIGHT.aqua,
+        }
+    )
+    others_color = BBVA_DARK.ink_muted if dark_mode else BBVA_LIGHT.ink_muted
+    fallback_idx = 0
+    used_colors: set[str] = set()
+    for theme in list(theme_order or []):
+        normalized = normalize_theme_key(theme)
+        if normalized == "otros":
+            out[str(theme)] = others_color
+            used_colors.add(others_color)
+            continue
+        semantic_color = semantic_map.get(normalized, "")
+        if semantic_color:
+            out[str(theme)] = semantic_color
+            used_colors.add(semantic_color)
+            continue
+        if not palette:
+            out[str(theme)] = BBVA_LIGHT.serene_blue
+            continue
+        for _ in range(len(palette)):
+            candidate = palette[fallback_idx % len(palette)]
+            fallback_idx += 1
+            if candidate in used_colors:
+                continue
+            out[str(theme)] = candidate
+            used_colors.add(candidate)
+            break
+        if str(theme) not in out:
+            out[str(theme)] = palette[fallback_idx % len(palette)]
+            fallback_idx += 1
+    return out
+
+
+def _hex_luminance(hex_color: str) -> float:
+    token = str(hex_color or "").strip().lstrip("#")
+    if len(token) != 6:
+        return 0.0
+    try:
+        r = int(token[0:2], 16) / 255.0
+        g = int(token[2:4], 16) / 255.0
+        b = int(token[4:6], 16) / 255.0
+    except ValueError:
+        return 0.0
+    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+
+
+def segment_text_color(fill_hex: str, *, dark_mode: bool) -> str:
+    luminance = _hex_luminance(fill_hex)
+    if luminance >= (0.58 if dark_mode else 0.64):
+        return BBVA_LIGHT.midnight
+    return BBVA_LIGHT.white
 
 
 def sort_theme_table_by_volume(

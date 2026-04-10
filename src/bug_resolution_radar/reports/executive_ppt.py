@@ -1246,7 +1246,7 @@ def _call_in_subprocess_with_timeout(
 
     safe_timeout_s = max(1.0, float(hard_timeout_s))
     # Keep a stable default method here. The packaged-app relaunch issue is solved
-    # at the binary entrypoint (run_streamlit.py), so we do not need start-method
+    # at the binary entrypoint (run_desktop.py), so we do not need start-method
     # branching or environment overrides in the report code anymore.
     ctx = cast(Any, mp.get_context("spawn"))
     result_queue = ctx.Queue(maxsize=1)

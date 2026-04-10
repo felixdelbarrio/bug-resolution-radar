@@ -8,7 +8,6 @@ version = "0.2.0"
 requires-python = ">=3.9"
 dependencies = [
   "streamlit>=1.36",
-  "watchdog>=4.0.0",
   "python-dotenv>=1.0",
   "requests>=2.31",
   "pandas>=2.0",
@@ -17,6 +16,8 @@ dependencies = [
   "XlsxWriter>=3.2",
   "plotly>=5.20",
   "python-pptx>=1.0.2",
+  "fastapi>=0.115",
+  "uvicorn>=0.32",
   "pywebview>=5.4",
   "pydantic>=2.6",
   "tenacity>=8.2",
@@ -32,6 +33,7 @@ dev = [
   "pytest-cov>=7.0",
   "pre-commit>=3.7",
   "pyinstaller>=6.0",
+  "httpx>=0.28",
   "types-requests>=2.31.0.20240406",
 ]
 ui-dev = [

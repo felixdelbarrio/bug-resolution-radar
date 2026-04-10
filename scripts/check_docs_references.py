@@ -36,7 +36,7 @@ STALE_DOC_TOKENS: Tuple[str, ...] = (
 )
 
 CODE_BLOCK_PATH_RE = re.compile(
-    r"`((?:src|tests|scripts|docs|\.github/workflows|assets)/[^`]+|README\.md|Makefile|pyproject\.toml|run_streamlit\.py|app\.py)`"
+    r"`((?:src|tests|scripts|docs|\.github/workflows|assets)/[^`]+|README\.md|Makefile|pyproject\.toml|run_api\.py|run_desktop\.py|app\.py)`"
 )
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 LOCAL_FILE_RE = re.compile(r"^(?:src|tests|scripts|docs|\.github/workflows|assets)/")
