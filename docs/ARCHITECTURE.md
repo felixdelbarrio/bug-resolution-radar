@@ -2,79 +2,53 @@
 
 ## Objective
 
-Definir un flujo único y explícito desde configuración hasta visualización/exportación, evitando caminos implícitos o contratos duplicados.
+Separar completamente presentación, runtime desktop y lógica de negocio:
+
+1. React renderiza la experiencia de usuario.
+2. FastAPI expone contratos estables para dashboard, insights, reportes, notas, ingestas y configuración.
+3. El backend concentra cálculo, normalización, persistencia y exportación.
+4. El contenedor desktop solo hospeda la SPA local y no ejecuta lógica de UI.
 
 ## Runtime Flow
 
-1. `run_streamlit.py` prepara runtime (modo local o binario).
-2. `src/bug_resolution_radar/ui/app.py` carga `Settings`, sincroniza `os.environ` y selecciona scope (`country` + `source_id`).
-3. `src/bug_resolution_radar/ui/pages/ingest_page.py` orquesta Jira/Helix por fuente, con merge incremental y persistencia local.
-4. Durante la ingesta, `IngestCircuitBreaker` decide fast-fail por fuente inestable y `IngestRunProfiler` captura métricas por fase.
-5. `src/bug_resolution_radar/ui/pages/dashboard_page.py` construye `DashboardDataContext` una sola vez por rerun.
-6. Tabs del dashboard consumen `dff/open_df/kpis` compartidos (sin recomputar por tab).
-7. Exportes (CSV/PPT) usan exactamente el mismo scope/filtros activos en UI.
+1. `run_desktop.py` arranca una API local interna y abre una shell desktop ligera con `pywebview`.
+2. `run_api.py` sirve `src/bug_resolution_radar/api/app.py`.
+3. La SPA React compilada en `frontend/dist` se sirve como estático local.
+4. React consume `/api/*` y mantiene el estado de filtros/scope en la URL.
+5. Ingesta, apertura de navegador y descargas solo ocurren bajo acción explícita del usuario.
 
 ## Module Layers
 
-- Configuración
-  - `src/bug_resolution_radar/config.py`
-  - Responsabilidad: parseo `.env`, validación de schema y persistencia de settings.
+- Frontend
+  - `frontend/src`
+  - Responsabilidad: navegación, estado de vista, maquetación, interacción y consumo de contratos HTTP.
 
-- Ingesta
-  - `src/bug_resolution_radar/ingest/jira_ingest.py`
-  - `src/bug_resolution_radar/ingest/helix_ingest.py`
-  - `src/bug_resolution_radar/ingest/browser_runtime.py`
-  - `src/bug_resolution_radar/ingest/cookie_utils.py`
-  - Responsabilidad: autenticación vía cookies de navegador, extracción y normalización inicial.
+- API
+  - `src/bug_resolution_radar/api/app.py`
+  - Responsabilidad: serialización, validación HTTP, descarga de artefactos y serving de la SPA.
 
-- Modelo y repositorios
-  - `src/bug_resolution_radar/models/schema.py`
-  - `src/bug_resolution_radar/models/schema_helix.py`
-  - `src/bug_resolution_radar/repositories/helix_repo.py`
+- Servicios backend
+  - `src/bug_resolution_radar/services`
+  - Responsabilidad: snapshots, orquestación de ingesta, settings, notas, exportes y mantenimiento.
 
 - Analítica
-  - `src/bug_resolution_radar/analytics/kpis.py`
-  - `src/bug_resolution_radar/analytics/analysis_window.py`
-  - `src/bug_resolution_radar/analytics/status_semantics.py`
-  - `src/bug_resolution_radar/analytics/insights.py`
+  - `src/bug_resolution_radar/analytics`
+  - Responsabilidad: filtros, scopes, KPIs, insights, duplicados y chart specs.
 
-- UI
-  - `src/bug_resolution_radar/ui/app.py`
-  - `src/bug_resolution_radar/ui/pages`
-  - `src/bug_resolution_radar/ui/dashboard`
-  - `src/bug_resolution_radar/ui/insights`
-  - `src/bug_resolution_radar/ui/components`
+- Persistencia y reporting
+  - `src/bug_resolution_radar/repositories`
+  - `src/bug_resolution_radar/reports`
+  - Responsabilidad: almacenamiento local y generación de PPT/artefactos.
 
-- Servicios de soporte
-  - `src/bug_resolution_radar/services/notes.py`
-  - `src/bug_resolution_radar/services/source_maintenance.py`
-  - `src/bug_resolution_radar/services/ingest_profiler.py`
-  - `src/bug_resolution_radar/services/ingest_circuit_breaker.py`
-  - Responsabilidad: persistencia de notas, mantenimiento de fuentes y hardening/observabilidad de ingesta.
+## Permission Policy
 
-- Reporting ejecutivo
-  - `src/bug_resolution_radar/reports/executive_ppt.py`
+- No se accede a carpetas de exportación durante render o carga inicial.
+- No se abren navegadores ni se consultan cookies salvo en acciones de ingesta o apertura explícita.
+- La descarga de informes se entrega como stream HTTP; la decisión de guardar ocurre en el clic del usuario.
 
-## Session State Contract
+## Packaging
 
-Claves canónicas:
-- Scope: `workspace_country`, `workspace_source_id`
-- Modo/sección: `workspace_mode`, `workspace_section`
-- Tema: `workspace_dark_mode`
-- Filtros globales: `filter_status`, `filter_priority`, `filter_assignee`
-
-Regla operativa: una única fuente de verdad por concepto. Si una sección necesita estado derivado, se recalcula desde el estado canónico.
-
-## Data Contracts
-
-- Ingesta persiste en JSON local con `source_id` obligatorio por issue/item.
-- Dashboard, Insights y Reporte operan sobre el mismo dataframe ya scopeado y filtrado.
-- `ANALYSIS_LOOKBACK_MONTHS` es la única palanca de profundidad temporal.
-- Observabilidad de ingesta persiste en:
-  - `data/observability/ingest_profiles.jsonl`
-  - `data/observability/ingest_circuit_state.json`
-
-## Non-Goals
-
-- No hay compatibilidad con rutas legacy de configuración.
-- No hay múltiples contratos para el mismo comportamiento.
+- `make run` compila React y abre la shell desktop autocontenida.
+- `make run-dev` levanta API y frontend Vite para desarrollo en navegador.
+- `make build` compila React y empaqueta `run_desktop.py`.
+- Los workflows de Linux, macOS y Windows construyen la SPA antes del binario.

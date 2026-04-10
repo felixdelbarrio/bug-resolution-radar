@@ -1,238 +1,38 @@
-"""Common data normalization and color mapping helpers for the UI layer."""
+"""Common helpers for the UI layer built on backend/shared modules."""
 
 from __future__ import annotations
 
-import re
 from functools import lru_cache
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
-import pandas as pd
-
-from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.analytics.issues import (
+    normalize_text_col,
+    open_issues_only,
+    priority_rank,
+)
 from bug_resolution_radar.models.schema import IssuesDocument
+from bug_resolution_radar.repositories.issues_store import (
+    df_from_issues_doc,
+    load_issues_df,
+    load_issues_doc,
+    save_issues_doc,
+)
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_GOAL_ACCENT_7,
     BBVA_GOAL_SURFACE_8,
     BBVA_NEUTRAL_SOFT,
-    BBVA_SIGNAL_GREEN_1,
-    BBVA_SIGNAL_GREEN_2,
-    BBVA_SIGNAL_GREEN_3,
-    BBVA_SIGNAL_ORANGE_2,
-    BBVA_SIGNAL_RED_1,
-    BBVA_SIGNAL_RED_2,
-    BBVA_SIGNAL_RED_3,
-    BBVA_SIGNAL_YELLOW_1,
     hex_to_rgba,
 )
-
-# ----------------------------
-# Persistence: IssuesDocument
-# ----------------------------
-
-
-@lru_cache(maxsize=8)
-def _load_issues_doc_cached(path: str, mtime_ns: int) -> IssuesDocument:
-    del mtime_ns  # cache invalidation key only
-    p = Path(path)
-    if not p.exists():
-        return IssuesDocument.empty()
-    try:
-        return IssuesDocument.model_validate_json(p.read_text(encoding="utf-8"))
-    except Exception:
-        # Robust fallback: avoid crashing the UI when the file is temporarily malformed.
-        return IssuesDocument.empty()
-
-
-def load_issues_doc(path: str) -> IssuesDocument:
-    """Load IssuesDocument from JSON file.
-
-    If the file doesn't exist, returns an empty document.
-    """
-    p = Path(path)
-    mtime_ns = p.stat().st_mtime_ns if p.exists() else -1
-    # Return a defensive copy to avoid mutable state leaks across callers.
-    return _load_issues_doc_cached(str(p.resolve()), mtime_ns).model_copy(deep=True)
-
-
-def save_issues_doc(path: str, doc: IssuesDocument) -> None:
-    """Save IssuesDocument to JSON file (UTF-8, pretty printed)."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(doc.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-# ----------------------------
-# DataFrame helpers
-# ----------------------------
-
-
-def _issues_to_dataframe(doc: IssuesDocument) -> pd.DataFrame:
-    rows: List[Dict[str, Any]] = [i.model_dump() for i in doc.issues]
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(rows)
-    for col in ["created", "updated", "resolved"]:
-        if col in df.columns:
-            df[col] = _parse_datetime_utc_mixed(df[col])
-    return df
-
-
-def _parse_datetime_utc_mixed(series: pd.Series) -> pd.Series:
-    """Parse mixed Jira/Helix datetime strings into UTC timestamps.
-
-    Jira and Helix payloads can coexist in the same column with different string
-    formats (e.g. Jira's "2026-01-01T12:34:56.000+0000" and Helix's ISO8601
-    "2026-01-01T12:34:56+00:00"). On pandas 2.x, mixed formats need
-    ``format='mixed'`` to avoid coercing one side to NaT.
-    """
-    try:
-        return pd.to_datetime(series, utc=True, errors="coerce", format="mixed")
-    except TypeError:
-        # Compatibility fallback for pandas versions without `format="mixed"`.
-        return pd.to_datetime(series, utc=True, errors="coerce")
-
-
-@lru_cache(maxsize=8)
-def _load_issues_df_cached(path: str, mtime_ns: int) -> pd.DataFrame:
-    doc = _load_issues_doc_cached(path, mtime_ns)
-    return _issues_to_dataframe(doc)
-
-
-def load_issues_df(path: str) -> pd.DataFrame:
-    """Load issues JSON as DataFrame with mtime-based cache invalidation.
-
-    Streamlit reruns frequently (filters, tabs, widgets). Caching avoids
-    repeating expensive model->rows->DataFrame conversion on each rerun.
-    """
-    p = Path(path)
-    mtime_ns = p.stat().st_mtime_ns if p.exists() else -1
-    # Shallow copy avoids mutating cached structure while reducing rerun memory churn.
-    return _load_issues_df_cached(str(p.resolve()), mtime_ns).copy(deep=False)
-
-
-def df_from_issues_doc(doc: IssuesDocument) -> pd.DataFrame:
-    """Convert IssuesDocument into a pandas DataFrame.
-
-    Ensures datetime columns are parsed as UTC timestamps when present.
-    """
-    return _issues_to_dataframe(doc)
-
-
-def open_issues_only(df: pd.DataFrame | None) -> pd.DataFrame:
-    """Return only open issues using unified closure semantics."""
-    if not isinstance(df, pd.DataFrame):
-        return pd.DataFrame()
-    if df.empty:
-        return df.copy(deep=False)
-    closed_mask = effective_closed_mask(df)
-    return df.loc[~closed_mask].copy(deep=False)
-
-
-def normalize_text_col(series: pd.Series, empty_label: str) -> pd.Series:
-    """Normalize a text-like column: replace NaN/empty strings with a label."""
-    if series is None:
-        return pd.Series([], dtype=str)
-    return series.fillna(empty_label).astype(str).replace("", empty_label)
-
-
-# ----------------------------
-# Priority helpers
-# ----------------------------
-
-
-def priority_rank(p: Optional[str]) -> int:
-    """Rank priority strings in a stable Jira-friendly order.
-
-    Lower rank = higher priority.
-
-    Known Jira names handled:
-      Highest, High, Medium, Low, Lowest
-    Everything else gets rank 99.
-    """
-    order = ["highest", "high", "medium", "low", "lowest"]
-    pl = (p or "").strip().lower()
-    if pl in order:
-        return order.index(pl)
-    return 99
-
-
-def _normalize_token(value: Optional[str]) -> str:
-    txt = (value or "").strip().lower()
-    txt = txt.replace("_", " ").replace("-", " ")
-    txt = re.sub(r"\s+", " ", txt).strip()
-    return txt
-
-
-_RED_1 = BBVA_SIGNAL_RED_1
-_RED_2 = BBVA_SIGNAL_RED_2
-_RED_3 = BBVA_SIGNAL_RED_3
-_ORANGE_2 = BBVA_SIGNAL_ORANGE_2
-_YELLOW_1 = BBVA_SIGNAL_YELLOW_1
-_GREEN_1 = BBVA_SIGNAL_GREEN_1
-_GREEN_2 = BBVA_SIGNAL_GREEN_2
-_GREEN_3 = BBVA_SIGNAL_GREEN_3
-_GOAL_ACCENT_7 = BBVA_GOAL_ACCENT_7
-_GOAL_SURFACE_8 = BBVA_GOAL_SURFACE_8
-_NEUTRAL = BBVA_NEUTRAL_SOFT
-
-
-_STATUS_COLOR_BY_KEY: Dict[str, str] = {
-    "new": _RED_3,
-    "ready": _RED_3,
-    "analysing": _RED_3,
-    "blocked": _RED_3,
-    "en progreso": _ORANGE_2,
-    "in progress": _ORANGE_2,
-    "to rework": _ORANGE_2,
-    "rework": _ORANGE_2,
-    "test": _ORANGE_2,
-    "ready to verify": _ORANGE_2,
-    "accepted": _GREEN_3,
-    "ready to deploy": _GREEN_3,
-    # Deployed is a goal state and uses a dedicated purple scale (7/8) for clear differentiation.
-    "deployed": _GOAL_ACCENT_7,
-    "closed": _GREEN_1,
-    "resolved": _GREEN_1,
-    "done": _GREEN_1,
-    "open": _YELLOW_1,
-    "created": _RED_3,
-}
-
-_PRIORITY_COLOR_BY_KEY: Dict[str, str] = {
-    "supone un impedimento": _RED_1,
-    "highest": _RED_1,
-    "high": _RED_2,
-    "medium": _ORANGE_2,
-    "low": _GREEN_2,
-    "lowest": _GREEN_1,
-}
-
-
-def status_color(status: Optional[str]) -> str:
-    return _STATUS_COLOR_BY_KEY.get(_normalize_token(status), _NEUTRAL)
-
-
-def priority_color(priority: Optional[str]) -> str:
-    return _PRIORITY_COLOR_BY_KEY.get(_normalize_token(priority), _NEUTRAL)
-
-
-def status_color_map(statuses: Optional[Iterable[str]] = None) -> Dict[str, str]:
-    if statuses is None:
-        return {}
-    return {str(s): status_color(str(s)) for s in statuses}
-
-
-def flow_signal_color_map() -> Dict[str, str]:
-    return {
-        "created": _RED_3,
-        "closed": _GREEN_2,
-        "resolved": _GREEN_2,
-        "deployed": _GOAL_ACCENT_7,
-        "open": _YELLOW_1,
-        "open_backlog_proxy": _YELLOW_1,
-    }
+from bug_resolution_radar.theme.semantic_colors import (
+    PRIORITY_COLOR_BY_KEY,
+    STATUS_COLOR_BY_KEY,
+    flow_signal_color_map,
+    normalize_semantic_token,
+    priority_color,
+    priority_color_map,
+    status_color,
+    status_color_map,
+)
 
 
 def _css_attr_value(txt: str) -> str:
@@ -242,7 +42,7 @@ def _css_attr_value(txt: str) -> str:
 def _group_tokens_by_color(token_color_map: Dict[str, str]) -> Dict[str, List[str]]:
     grouped: Dict[str, List[str]] = {}
     for raw_token, raw_color in token_color_map.items():
-        token = _normalize_token(raw_token)
+        token = normalize_semantic_token(raw_token)
         color = str(raw_color or "").strip()
         if not token or not color:
             continue
@@ -284,11 +84,11 @@ def _semantic_option_css_block(*, tokens: List[str], color: str) -> str:
 def semantic_popover_css_rules() -> str:
     """Build semantic option CSS from central status/priority token maps."""
     blocks: List[str] = []
-    for color, tokens in _group_tokens_by_color(_STATUS_COLOR_BY_KEY).items():
+    for color, tokens in _group_tokens_by_color(STATUS_COLOR_BY_KEY).items():
         block = _semantic_option_css_block(tokens=tokens, color=color)
         if block:
             blocks.append(block)
-    for color, tokens in _group_tokens_by_color(_PRIORITY_COLOR_BY_KEY).items():
+    for color, tokens in _group_tokens_by_color(PRIORITY_COLOR_BY_KEY).items():
         block = _semantic_option_css_block(tokens=tokens, color=color)
         if block:
             blocks.append(block)
@@ -297,29 +97,27 @@ def semantic_popover_css_rules() -> str:
 
 def chip_tone_for_color(hex_color: str) -> Tuple[float, float]:
     """Return border/bg alpha tuple for chip rendering by semantic color."""
-    normalized = (hex_color or "").strip().upper()
-    if normalized == _GOAL_ACCENT_7:
-        # Deployed uses explicit 7/8 palette; keep fallback alphas high for non-token contexts.
+    normalized = str(hex_color or "").strip().upper()
+    if normalized == BBVA_GOAL_ACCENT_7:
         return (0.78, 0.28)
     return (0.62, 0.16)
 
 
 def chip_palette_for_color(hex_color: str) -> Tuple[str, str, str]:
     """Return (text_color, border_color, background_color) for chip rendering."""
-    txt = (hex_color or "").strip()
+    txt = str(hex_color or "").strip()
     normalized = txt.upper()
-    if normalized == _GOAL_ACCENT_7:
-        # Explicit BBVA-like 7/8 pairing: text 7 over background 8.
+    if normalized == BBVA_GOAL_ACCENT_7:
         return (
-            _GOAL_ACCENT_7,
-            hex_to_rgba(_GOAL_ACCENT_7, 0.64, fallback=_NEUTRAL),
-            _GOAL_SURFACE_8,
+            BBVA_GOAL_ACCENT_7,
+            hex_to_rgba(BBVA_GOAL_ACCENT_7, 0.64, fallback=BBVA_NEUTRAL_SOFT),
+            BBVA_GOAL_SURFACE_8,
         )
     border_alpha, bg_alpha = chip_tone_for_color(txt)
     return (
         txt,
-        hex_to_rgba(txt, border_alpha, fallback=_NEUTRAL),
-        hex_to_rgba(txt, bg_alpha, fallback=_NEUTRAL),
+        hex_to_rgba(txt, border_alpha, fallback=BBVA_NEUTRAL_SOFT),
+        hex_to_rgba(txt, bg_alpha, fallback=BBVA_NEUTRAL_SOFT),
     )
 
 
@@ -338,17 +136,3 @@ def neutral_chip_style(*, font_size: str = "0.80rem") -> str:
         "background:color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2)); "
         f"border-radius:999px; padding:2px 10px; font-weight:700; font-size:{font_size};"
     )
-
-
-def priority_color_map() -> Dict[str, str]:
-    """Discrete color map used in charts with semantic traffic-light palette."""
-    return {
-        "Supone un impedimento": _RED_1,
-        "Highest": _RED_1,
-        "High": _RED_2,
-        "Medium": _ORANGE_2,
-        "Low": _GREEN_2,
-        "Lowest": _GREEN_1,
-        "(sin priority)": _NEUTRAL,
-        "": _NEUTRAL,
-    }

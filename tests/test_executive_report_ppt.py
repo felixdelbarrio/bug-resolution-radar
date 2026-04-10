@@ -301,14 +301,13 @@ def test_kaleido_png_bytes_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     fig = go.Figure(data=[go.Bar(x=["A"], y=[1])])
     calls = {"n": 0}
 
-    def _fake_calc(*args: object, **kwargs: object) -> bytes:
+    def _fake_render(*args: object, **kwargs: object) -> bytes:
         del args, kwargs
         calls["n"] += 1
         return b"fake-png-bytes"
 
     _clear_ppt_png_cache()
-    monkeypatch.setattr(executive_ppt_module, "_kaleido_calc_fig_sync_png", _fake_calc)
-    monkeypatch.setenv("BUG_RESOLUTION_RADAR_PPT_RENDER_ISOLATED_PROCESS", "0")
+    monkeypatch.setattr(executive_ppt_module, "render_plotly_figure_png", _fake_render)
 
     out1 = _kaleido_png_bytes(fig, scale=2, export_width=640, export_height=400)
     out2 = _kaleido_png_bytes(fig, scale=2, export_width=640, export_height=400)

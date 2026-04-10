@@ -17,11 +17,11 @@ from bug_resolution_radar.analytics.analysis_window import (
 )
 from bug_resolution_radar.config import Settings, all_configured_sources, rollup_source_ids
 from bug_resolution_radar.reports import (
-    generate_country_period_followup_ppt,
-    generate_scope_executive_ppt,
+    build_report_filters,
+    generate_executive_report_artifact,
+    generate_period_followup_report_artifact,
 )
 from bug_resolution_radar.ui.common import load_issues_df
-from bug_resolution_radar.ui.dashboard.data_context import build_dashboard_data_context
 from bug_resolution_radar.ui.dashboard.quincenal_scope import normalize_quincenal_scope_label
 from bug_resolution_radar.ui.dashboard.state import (
     FILTER_ASSIGNEE_KEY,
@@ -435,8 +435,17 @@ def _render_executive_report(settings: Settings) -> None:
         _clear_generated_report_state(scope_key)
         phase = "idle"
 
-    # Auto-genera el informe al entrar en la pantalla (o al cambiar scope/filtros).
-    if phase == "idle" and artifact is None:
+    run_generate = st.button(
+        "Regenerar informe" if artifact is not None else "Generar informe",
+        key=f"btn_generate_scope_ppt::{scope_key}",
+        type="primary",
+        width="stretch",
+        help=(
+            "Genera el informe desde el pipeline backend con el scope y filtros activos. "
+            + _report_export_help_text(settings)
+        ),
+    )
+    if run_generate:
         st.session_state.pop(_saved_path_state_key(scope_key), None)
         st.session_state[request_sig_key] = current_request_sig
         st.session_state[phase_key] = "generating"
@@ -445,8 +454,9 @@ def _render_executive_report(settings: Settings) -> None:
         _store_status(
             scope_key=scope_key,
             kind="info",
-            message="Generación automática del informe PPT iniciada.",
+            message="Generación del informe PPT iniciada.",
         )
+        phase = "generating"
 
     status_slot = st.empty()
 
@@ -457,19 +467,17 @@ def _render_executive_report(settings: Settings) -> None:
         run_save = st.button(
             "Guardar en disco",
             key=f"btn_save_scope_ppt::{scope_key}",
-            type="primary",
+            type="secondary",
             width="stretch",
             disabled=phase != "ready",
             help=(
-                "Se habilita cuando finalice la generación automática. "
+                "Se habilita cuando finalice la generación manual. "
                 + _report_export_help_text(settings)
             ),
         )
 
     if phase == "generating":
-        st.caption(
-            "Estado: generando informe. El botón 'Guardar en disco' se habilitará al finalizar."
-        )
+        st.caption("Estado: generando informe. El guardado en disco se habilitará al finalizar.")
     elif phase == "ready" and artifact is not None:
         file_name = str(artifact.get("file_name") or "informe.pptx")
         slide_count = _int_from_obj(artifact.get("slide_count"), default=0)
@@ -487,7 +495,7 @@ def _render_executive_report(settings: Settings) -> None:
                 kind="error",
                 message=(
                     "El informe preparado ya no coincide con el scope/filtros actuales. "
-                    "La pantalla iniciará una nueva generación automáticamente."
+                    "Pulsa 'Generar informe' para reconstruirlo."
                 ),
             )
         else:
@@ -517,32 +525,18 @@ def _render_executive_report(settings: Settings) -> None:
     if str(st.session_state.get(phase_key) or "").strip().lower() == "generating":
         try:
             with st.spinner("Generando el informe PPT del scope activo..."):
-                all_df = (
-                    all_df_for_scope
-                    if all_df_for_scope is not None
-                    else load_issues_df(settings.DATA_PATH)
-                )
-                scoped_df = _scope_df(all_df, country=country, source_id=source_id)
-                if scoped_df.empty:
-                    raise ValueError("No hay datos en el scope seleccionado.")
-
-                ctx = build_dashboard_data_context(
-                    df_all=scoped_df,
-                    settings=settings,
-                    include_kpis=False,
-                    include_timeseries_chart=False,
-                )
-
-                result = generate_scope_executive_ppt(
-                    settings,
-                    country=country,
-                    source_id=source_id,
+                filters = build_report_filters(
                     status_filters=status_filters,
                     priority_filters=priority_filters,
                     assignee_filters=assignee_filters,
-                    dff_override=ctx.dff,
-                    open_df_override=ctx.open_df,
-                    scoped_source_df_override=scoped_df,
+                    quincenal_scope=quincenal_scope,
+                )
+                result = generate_executive_report_artifact(
+                    settings,
+                    country=country,
+                    source_id=source_id,
+                    filters=filters,
+                    df_all=all_df_for_scope,
                 )
 
                 st.session_state[_artifact_state_key(scope_key)] = {
@@ -701,18 +695,6 @@ def _render_period_followup_report(settings: Settings) -> None:
         st.warning("No hay datos para los orígenes seleccionados.")
         return
 
-    ctx = build_dashboard_data_context(
-        df_all=scoped_df,
-        settings=settings,
-        include_kpis=False,
-        include_timeseries_chart=False,
-    )
-    if ctx.dff.empty:
-        st.warning(
-            "No hay incidencias en la ventana de análisis y filtros actuales para el informe."
-        )
-        return
-
     filters_summary = [
         _analysis_window_label(settings, scoped_df=scoped_df),
         _visible_filter_label(status_filters, name="Estado"),
@@ -740,12 +722,18 @@ def _render_period_followup_report(settings: Settings) -> None:
         help=_report_export_help_text(settings),
     ):
         try:
-            result = generate_country_period_followup_ppt(
+            filters = build_report_filters(
+                status_filters=status_filters,
+                priority_filters=priority_filters,
+                assignee_filters=assignee_filters,
+                quincenal_scope=quincenal_scope,
+            )
+            result = generate_period_followup_report_artifact(
                 settings,
                 country=country,
                 source_ids=selected_source_ids,
-                dff_override=ctx.dff,
-                open_df_override=ctx.open_df,
+                filters=filters,
+                df_all=df_all,
                 applied_filter_summary=(
                     f"{' | '.join(filters_summary)} || "
                     f"Funcionalidad (slides 10-13): {' | '.join(functionality_scope_summary)}"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import unicodedata
 from typing import Any, Callable, Dict
 
 import pandas as pd
@@ -11,12 +10,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bug_resolution_radar.analytics.insights import (
+    build_theme_color_map,
     build_theme_daily_trend,
     build_theme_fortnight_trend,
     build_theme_render_order,
     is_other_theme_label,
     order_theme_labels_by_volume,
     prepare_open_theme_payload,
+    segment_text_color,
     sort_theme_table_by_volume,
 )
 from bug_resolution_radar.analytics.topic_expandable_summary import (
@@ -26,14 +27,9 @@ from bug_resolution_radar.analytics.topic_expandable_summary import (
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.theme.design_tokens import (
-    BBVA_DARK,
-    BBVA_GOAL_ACCENT_7,
     BBVA_LIGHT,
     BBVA_SIGNAL_GREEN_1,
     BBVA_SIGNAL_GREEN_2,
-    BBVA_SIGNAL_GREEN_3,
-    BBVA_SIGNAL_ORANGE_1,
-    BBVA_SIGNAL_ORANGE_2,
     BBVA_SIGNAL_RED_1,
     BBVA_SIGNAL_RED_2,
     BBVA_SIGNAL_YELLOW_1,
@@ -152,44 +148,6 @@ def _priority_ordered_topics(top_tbl: pd.DataFrame, *, tmp_open: pd.DataFrame) -
     )
 
 
-def _normalize_theme_key(value: object) -> str:
-    txt = str(value or "").strip().lower()
-    if not txt:
-        return ""
-    txt = unicodedata.normalize("NFKD", txt)
-    return "".join(ch for ch in txt if not unicodedata.combining(ch))
-
-
-def _signal_palette(*, dark_mode: bool) -> tuple[str, ...]:
-    if dark_mode:
-        return (
-            BBVA_SIGNAL_RED_2,
-            BBVA_LIGHT.electric_blue,
-            BBVA_SIGNAL_ORANGE_2,
-            BBVA_GOAL_ACCENT_7,
-            BBVA_SIGNAL_YELLOW_1,
-            BBVA_LIGHT.aqua,
-            BBVA_SIGNAL_GREEN_2,
-            BBVA_LIGHT.serene_blue,
-            BBVA_SIGNAL_GREEN_3,
-            BBVA_LIGHT.white,
-        )
-    return (
-        BBVA_SIGNAL_RED_1,
-        BBVA_LIGHT.electric_blue,
-        BBVA_SIGNAL_ORANGE_1,
-        BBVA_GOAL_ACCENT_7,
-        BBVA_SIGNAL_YELLOW_1,
-        BBVA_LIGHT.aqua,
-        BBVA_SIGNAL_GREEN_1,
-        BBVA_LIGHT.royal_blue,
-        BBVA_LIGHT.serene_blue,
-        BBVA_LIGHT.core_blue,
-        BBVA_LIGHT.serene_dark_blue,
-        BBVA_LIGHT.midnight,
-    )
-
-
 def _topic_selection_token(*, topic: str, total_open: int) -> str:
     status = ",".join(sorted([str(x) for x in list(st.session_state.get(FILTER_STATUS_KEY) or [])]))
     priority = ",".join(
@@ -297,80 +255,11 @@ def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
 
 
 def _theme_color_map(*, theme_order: list[str], dark_mode: bool) -> dict[str, str]:
-    out: dict[str, str] = {}
-    palette = _signal_palette(dark_mode=dark_mode)
-    semantic_map = (
-        {
-            "pagos": BBVA_SIGNAL_RED_2,
-            "tareas": BBVA_SIGNAL_ORANGE_2,
-            "monetarias": BBVA_SIGNAL_YELLOW_1,
-            "credito": BBVA_SIGNAL_GREEN_2,
-            "login y acceso": BBVA_LIGHT.electric_blue,
-            "softoken": BBVA_GOAL_ACCENT_7,
-            "transferencias": BBVA_LIGHT.serene_blue,
-            "notificaciones": BBVA_LIGHT.aqua,
-        }
-        if dark_mode
-        else {
-            "pagos": BBVA_SIGNAL_RED_1,
-            "tareas": BBVA_SIGNAL_ORANGE_1,
-            "monetarias": BBVA_SIGNAL_YELLOW_1,
-            "credito": BBVA_SIGNAL_GREEN_1,
-            "login y acceso": BBVA_LIGHT.electric_blue,
-            "softoken": BBVA_GOAL_ACCENT_7,
-            "transferencias": BBVA_LIGHT.serene_blue,
-            "notificaciones": BBVA_LIGHT.aqua,
-        }
-    )
-    fallback_idx = 0
-    used_colors: set[str] = set()
-    others_color = BBVA_DARK.ink_muted if dark_mode else BBVA_LIGHT.ink_muted
-    for theme in theme_order:
-        norm_theme = _normalize_theme_key(theme)
-        if norm_theme == "otros":
-            out[theme] = others_color
-            used_colors.add(others_color)
-            continue
-        token_color = semantic_map.get(norm_theme, "")
-        if token_color:
-            out[theme] = token_color
-            used_colors.add(token_color)
-            continue
-        if not palette:
-            out[theme] = BBVA_LIGHT.serene_blue
-            continue
-        for _ in range(len(palette)):
-            candidate = palette[fallback_idx % len(palette)]
-            fallback_idx += 1
-            if candidate in used_colors:
-                continue
-            out[theme] = candidate
-            used_colors.add(candidate)
-            break
-        if theme not in out:
-            out[theme] = palette[fallback_idx % len(palette)]
-            fallback_idx += 1
-    return out
-
-
-def _hex_luminance(hex_color: str) -> float:
-    token = str(hex_color or "").strip().lstrip("#")
-    if len(token) != 6:
-        return 0.0
-    try:
-        r = int(token[0:2], 16) / 255.0
-        g = int(token[2:4], 16) / 255.0
-        b = int(token[4:6], 16) / 255.0
-    except ValueError:
-        return 0.0
-    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+    return build_theme_color_map(theme_order=theme_order, dark_mode=dark_mode)
 
 
 def _segment_text_color(fill_hex: str, *, dark_mode: bool) -> str:
-    lum = _hex_luminance(fill_hex)
-    if lum >= (0.58 if dark_mode else 0.64):
-        return BBVA_LIGHT.midnight
-    return BBVA_LIGHT.white
+    return segment_text_color(fill_hex, dark_mode=dark_mode)
 
 
 def _inject_topic_expander_color_css(
