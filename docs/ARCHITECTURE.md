@@ -49,6 +49,6 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
 ## Packaging
 
 - `make run` compila React y abre la shell desktop autocontenida.
-- `make run-dev` levanta API y frontend Vite para desarrollo en navegador.
+- `make CI` replica localmente los checks de GitHub (`format`, `typecheck`, `coverage`, `quality-gate`).
 - `make build` compila React y empaqueta `run_desktop.py`.
 - Los workflows de Linux, macOS y Windows construyen la SPA antes del binario.

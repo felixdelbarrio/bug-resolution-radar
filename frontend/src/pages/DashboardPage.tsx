@@ -25,6 +25,7 @@ import { IssuesPanel } from "../components/IssuesPanel";
 import { KanbanBoard } from "../components/KanbanBoard";
 import { NotesEditor } from "../components/NotesEditor";
 import { StatusPriorityMatrix } from "../components/StatusPriorityMatrix";
+import { cn } from "../lib/cn";
 
 type QueryParams = Record<string, string | number | boolean | string[]>;
 
@@ -69,10 +70,6 @@ function issueExportParams(
   darkMode: boolean
 ): QueryParams {
   return queryParams(params, params.issueLikeQuery, darkMode);
-}
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
 }
 
 function focusCardActionLabel(
@@ -441,7 +438,7 @@ export function DashboardPage() {
             {overview.data.focusCards.map((card) => (
               <button
                 type="button"
-                className={classNames("focus-card", `focus-card-${card.tone}`)}
+                className={cn("focus-card", `focus-card-${card.tone}`)}
                 key={card.cardId}
                 onClick={() => handleFocusCard(card)}
               >

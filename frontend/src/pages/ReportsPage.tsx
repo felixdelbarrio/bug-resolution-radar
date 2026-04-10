@@ -2,11 +2,8 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useLocation, useOutletContext } from "react-router-dom";
 import { postJson, type SavedReportPayload } from "../lib/api";
+import { cn } from "../lib/cn";
 import type { ShellContextValue } from "../components/AppShell";
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
 
 export function ReportsPage() {
   const { workspace, dashboardState } = useOutletContext<ShellContextValue>();
@@ -119,7 +116,7 @@ export function ReportsPage() {
 
       <div className="report-grid">
         <article
-          className={classNames(
+          className={cn(
             "surface-panel",
             reportMode === "executive" && "surface-panel-emphasis"
           )}
@@ -149,7 +146,7 @@ export function ReportsPage() {
 
         {workspace?.hasCountryRollup ? (
           <article
-            className={classNames(
+            className={cn(
               "surface-panel",
               reportMode === "period" && "surface-panel-emphasis"
             )}
@@ -180,7 +177,7 @@ export function ReportsPage() {
       </div>
 
       {feedback ? (
-        <section className={classNames("inline-notice", feedback.kind === "error" && "inline-notice-error")}>
+        <section className={cn("inline-notice", feedback.kind === "error" && "inline-notice-error")}>
           <strong>{feedback.message}</strong>
           {feedback.savedPath ? <p className="inline-caption">{feedback.savedPath}</p> : null}
           {feedback.savedPath ? (

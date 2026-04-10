@@ -11,7 +11,6 @@ FRONTEND_DIR := frontend
 FRONTEND_DIST := $(FRONTEND_DIR)/dist
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
-FRONTEND_URL ?= http://127.0.0.1:5173
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 ICON_SOURCE := assets/app_icon/source/BugResolutionRadarIcon.png
 ICON_PNG := assets/app_icon/bug-resolution-radar.png
@@ -39,7 +38,7 @@ PYINSTALLER_COLLECT_ARGS = \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test run run-dev run-back run-front kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
+.PHONY: help setup test run ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
 
 help:
 	@echo ""
@@ -47,9 +46,7 @@ help:
 	@echo ""
 	@echo "  make setup        Instala backend + frontend"
 	@echo "  make run          Compila frontend y abre la app desktop autocontenida"
-	@echo "  make run-dev      Arranca API + Vite para desarrollo en navegador"
-	@echo "  make run-back     Arranca solo la API FastAPI"
-	@echo "  make run-front    Arranca solo Vite/React"
+	@echo "  make CI           Replica local de checks GitHub (format/typecheck/coverage/quality)"
 	@echo "  make test         Ejecuta la suite Python seleccionada"
 	@echo "  make build        Compila frontend y empaqueta desktop"
 	@echo "  make kill         Detiene puertos 8000 y 5173"
@@ -91,20 +88,30 @@ test: _ensure-backend
 		tests/test_browser_runtime_permissions.py \
 		tests/test_security.py
 
-run-back: _ensure-backend
-	BUG_RESOLUTION_RADAR_FRONTEND_DEV_URL=$(FRONTEND_URL) PYTHONPATH=src $(PYTHON) run_api.py --host $(API_HOST) --port $(API_PORT)
-
-run-front: _ensure-frontend
-	$(NPM) --prefix $(FRONTEND_DIR) run dev
-
-run-dev: _ensure-frontend
-	@trap 'pids="$$(jobs -p)"; if [ -n "$$pids" ]; then kill $$pids 2>/dev/null || true; fi' EXIT INT TERM; \
-	BUG_RESOLUTION_RADAR_FRONTEND_DEV_URL=$(FRONTEND_URL) PYTHONPATH=src $(PYTHON) run_api.py --host $(API_HOST) --port $(API_PORT) & \
-	$(NPM) --prefix $(FRONTEND_DIR) run dev & \
-	wait
-
 run: _ensure-frontend _ensure-icon-assets build-frontend
 	PYTHONPATH=src $(PYTHON) run_desktop.py
+
+ci: ci-format ci-typecheck ci-coverage ci-quality
+
+CI: ci
+
+ci-format: _ensure-backend
+	PYTHONPATH=src $(PYTHON) -m ruff format --check .
+
+ci-typecheck: _ensure-backend
+	PYTHONPATH=src $(PYTHON) -m mypy src
+
+ci-coverage: _ensure-backend
+	PYTHONPATH=src $(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml
+
+ci-quality: _ensure-frontend
+	$(PYTHON) -m pip check
+	$(NPM) --prefix $(FRONTEND_DIR) run build
+	PYTHONPATH=src $(PYTHON) scripts/check_docs_references.py
+	PYTHONPATH=src $(PYTHON) scripts/check_dead_private_helpers.py
+	PYTHONPATH=src $(PYTEST) -q tests/test_run_desktop_entrypoint.py
+	PYTHONPATH=src $(PYTEST) -q tests/test_api_app.py
+	PYTHONPATH=src $(PYTEST) -q tests/test_executive_report_ppt.py -k "kaleido_png_bytes_uses_cache or prerender_section_images_populates_payload"
 
 build-frontend: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run build

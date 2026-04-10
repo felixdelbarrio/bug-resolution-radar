@@ -11,6 +11,7 @@ import {
   type SettingsPayload,
   type WorkspaceSource
 } from "../lib/api";
+import { cn } from "../lib/cn";
 
 type Connector = "jira" | "helix";
 
@@ -66,10 +67,6 @@ const CONNECTOR_COPY: Record<
     ]
   }
 };
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
 
 function resetLastIngest(
   connector: Connector,
@@ -167,7 +164,7 @@ function IngestSourceTable({
         return (
           <label
             key={source.source_id}
-            className={classNames(
+            className={cn(
               "ingest-source-row",
               checked && "ingest-source-row-selected"
             )}
@@ -434,7 +431,7 @@ export function IngestPage() {
             <button
               key={item}
               type="button"
-              className={classNames(
+              className={cn(
                 "subtab-button",
                 activeTab === item && "subtab-button-active"
               )}

@@ -11,6 +11,7 @@ import {
   type SettingsPayload,
   type WorkspaceSource
 } from "../lib/api";
+import { cn } from "../lib/cn";
 
 type SettingsTabId =
   | "preferences"
@@ -40,10 +41,6 @@ const trendChartCatalog = [
   ["open_priority_pie", "Issues abiertos por prioridad (pie)"],
   ["open_status_bar", "Issues por Estado (bar)"]
 ] as const;
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
 
 function asText(value: string | number | undefined) {
   return String(value ?? "");
@@ -270,7 +267,7 @@ function RollupSourceSelector({
               return (
                 <label
                   key={source.source_id}
-                  className={classNames(
+                  className={cn(
                     "filter-check rollup-select-option",
                     checked && "rollup-select-option-active",
                     maxReached && "rollup-select-option-disabled"
@@ -548,7 +545,7 @@ export function SettingsPage() {
             <button
               key={tab.id}
               type="button"
-              className={classNames("subtab-button", activeTab === tab.id && "subtab-button-active")}
+              className={cn("subtab-button", activeTab === tab.id && "subtab-button-active")}
               onClick={() => dashboardState.update({ settingsTab: tab.id })}
             >
               {tab.label}
@@ -566,7 +563,7 @@ export function SettingsPage() {
               <div className="toggle-group">
                 <button
                   type="button"
-                  className={classNames(
+                  className={cn(
                     "toggle-pill",
                     themeValue === "light" && "toggle-pill-active"
                   )}
@@ -576,7 +573,7 @@ export function SettingsPage() {
                 </button>
                 <button
                   type="button"
-                  className={classNames(
+                  className={cn(
                     "toggle-pill",
                     themeValue === "dark" && "toggle-pill-active"
                   )}

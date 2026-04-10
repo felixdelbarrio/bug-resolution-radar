@@ -1,4 +1,5 @@
 import type { KanbanPayload } from "../lib/api";
+import { cn } from "../lib/cn";
 import {
   kanbanHeaderStyle,
   neutralChipStyle,
@@ -11,10 +12,6 @@ type KanbanBoardProps = {
   selectedStatuses: string[];
   onStatusClick: (status: string) => void;
 };
-
-function classNames(...tokens: Array<string | false | null | undefined>) {
-  return tokens.filter(Boolean).join(" ");
-}
 
 function formatDate(value: string) {
   return value ? value.slice(0, 10) : "";
@@ -42,7 +39,7 @@ export function KanbanBoard({
           <header className="kanban-column-head">
             <button
               type="button"
-              className={classNames(
+              className={cn(
                 "kanban-column-button",
                 selectedStatuses.includes(column.status) && "kanban-column-button-active"
               )}

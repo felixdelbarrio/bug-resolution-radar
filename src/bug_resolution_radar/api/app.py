@@ -1160,7 +1160,7 @@ def create_app() -> FastAPI:
             return JSONResponse(
                 {
                     "message": (
-                        "Frontend no compilado. Ejecuta `make run-dev` o "
+                        "Frontend no compilado. Ejecuta `make run` o "
                         "`npm --prefix frontend run build`."
                     ),
                 },
