@@ -272,7 +272,9 @@ def _build_session_delta_lines(
     return [text for _, text in candidates[:3]]
 
 
-def _load_trend_baseline_snapshot(settings: Settings, *, workspace: WorkspaceSelection) -> dict[str, Any]:
+def _load_trend_baseline_snapshot(
+    settings: Settings, *, workspace: WorkspaceSelection
+) -> dict[str, Any]:
     scope = learning_scope_key(workspace.country, workspace.source_id)
     store = InsightsLearningStore(default_learning_path(settings))
     store.load()
@@ -1759,7 +1761,9 @@ def _build_period_summary_payload(
                 "label": "Días de resolución incidencias cerradas en la quincena actual",
                 "count": int(len(groups.resolved_now)),
                 "helpText": "cerradas quincena actual",
-                "tone": _period_tone("Días de resolución incidencias cerradas en la quincena actual"),
+                "tone": _period_tone(
+                    "Días de resolución incidencias cerradas en la quincena actual"
+                ),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
                 "issueKeys": _issue_keys(groups.resolved_now),
                 "items": _issue_records_from_df(
