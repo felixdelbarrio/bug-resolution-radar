@@ -13,6 +13,7 @@ from bug_resolution_radar.reports.executive_ppt import ExecutiveReportResult
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
 
 api_app = importlib.import_module("bug_resolution_radar.api.app")
+dashboard_snapshot = importlib.import_module("bug_resolution_radar.services.dashboard_snapshot")
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -200,6 +201,39 @@ def test_bootstrap_infers_workspace_sources_from_data_when_settings_are_empty(
     assert payload["workspace"]["hasCountryRollup"] is False
     assert payload["workspace"]["countryRollupSourceIds"] == []
     assert payload["workspace"]["filterOptions"]["quincenal"][0] == "Todas"
+    assert "designTokens" in payload
+    assert "theme" in payload["designTokens"]
+    assert "semantic" in payload["designTokens"]
+    assert payload["designTokens"]["semantic"]["statusByKey"]["new"] == "#E85D63"
+    assert "--bbva-primary" in payload["designTokens"]["theme"]["light"]
+
+
+def test_scope_context_cache_reuses_filtered_context_for_same_query(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    dashboard_snapshot._scope_context_cache.clear()
+
+    original_apply_filters = dashboard_snapshot.apply_filters
+    call_count = {"value": 0}
+
+    def _spy_apply_filters(*args, **kwargs):  # type: ignore[no-untyped-def]
+        call_count["value"] += 1
+        return original_apply_filters(*args, **kwargs)
+
+    monkeypatch.setattr(dashboard_snapshot, "apply_filters", _spy_apply_filters)
+
+    client = TestClient(api_app.create_app())
+    params = {"country": "España", "sourceId": source_id, "scopeMode": "source"}
+    dashboard_response = client.get("/api/dashboard", params=params)
+    issues_response = client.get("/api/issues", params=params)
+
+    assert dashboard_response.status_code == 200
+    assert issues_response.status_code == 200
+    assert call_count["value"] == 1
 
 
 def test_trend_detail_and_issue_keys_endpoints_return_filtered_contracts(

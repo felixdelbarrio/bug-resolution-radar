@@ -1,16 +1,62 @@
 import type { CSSProperties } from "react";
 
-const BBVA_SIGNAL_RED_1 = "#B4232A";
-const BBVA_SIGNAL_RED_2 = "#D64550";
-const BBVA_SIGNAL_RED_3 = "#E85D63";
-const BBVA_SIGNAL_ORANGE_2 = "#F59E0B";
-const BBVA_SIGNAL_YELLOW_1 = "#FBBF24";
-const BBVA_SIGNAL_GREEN_1 = "#15803D";
-const BBVA_SIGNAL_GREEN_2 = "#22A447";
-const BBVA_SIGNAL_GREEN_3 = "#4CAF50";
-const BBVA_GOAL_ACCENT_7 = "#5B3FD0";
-const BBVA_GOAL_SURFACE_8 = "#ECE6FF";
-const BBVA_NEUTRAL_SOFT = "#E2E6EE";
+type SemanticContractPayload = {
+  statusByKey?: Record<string, string>;
+  priorityByKey?: Record<string, string>;
+  neutral?: string;
+  goalAccent?: string;
+  goalSurface?: string;
+} | null;
+
+type SemanticConfig = {
+  statusByKey: Record<string, string>;
+  priorityByKey: Record<string, string>;
+  neutral: string;
+  goalAccent: string;
+  goalSurface: string;
+};
+
+const DEFAULT_SEMANTIC_CONFIG: SemanticConfig = {
+  statusByKey: {
+    new: "#E85D63",
+    ready: "#E85D63",
+    analysing: "#E85D63",
+    blocked: "#E85D63",
+    "en progreso": "#F59E0B",
+    "in progress": "#F59E0B",
+    "to rework": "#F59E0B",
+    rework: "#F59E0B",
+    test: "#F59E0B",
+    "ready to verify": "#F59E0B",
+    accepted: "#4CAF50",
+    "ready to deploy": "#4CAF50",
+    deployed: "#5B3FD0",
+    closed: "#15803D",
+    resolved: "#15803D",
+    done: "#15803D",
+    open: "#FBBF24",
+    created: "#E85D63"
+  },
+  priorityByKey: {
+    "supone un impedimento": "#B4232A",
+    highest: "#B4232A",
+    high: "#D64550",
+    medium: "#F59E0B",
+    low: "#22A447",
+    lowest: "#15803D"
+  },
+  neutral: "#E2E6EE",
+  goalAccent: "#5B3FD0",
+  goalSurface: "#ECE6FF"
+};
+
+let runtimeSemanticConfig: SemanticConfig = {
+  statusByKey: { ...DEFAULT_SEMANTIC_CONFIG.statusByKey },
+  priorityByKey: { ...DEFAULT_SEMANTIC_CONFIG.priorityByKey },
+  neutral: DEFAULT_SEMANTIC_CONFIG.neutral,
+  goalAccent: DEFAULT_SEMANTIC_CONFIG.goalAccent,
+  goalSurface: DEFAULT_SEMANTIC_CONFIG.goalSurface
+};
 
 function normalizeSemanticToken(value: string) {
   return String(value || "")
@@ -21,42 +67,63 @@ function normalizeSemanticToken(value: string) {
     .replace(/\s+/g, " ");
 }
 
-const STATUS_COLOR_BY_KEY: Record<string, string> = {
-  new: BBVA_SIGNAL_RED_3,
-  ready: BBVA_SIGNAL_RED_3,
-  analysing: BBVA_SIGNAL_RED_3,
-  blocked: BBVA_SIGNAL_RED_3,
-  "en progreso": BBVA_SIGNAL_ORANGE_2,
-  "in progress": BBVA_SIGNAL_ORANGE_2,
-  "to rework": BBVA_SIGNAL_ORANGE_2,
-  rework: BBVA_SIGNAL_ORANGE_2,
-  test: BBVA_SIGNAL_ORANGE_2,
-  "ready to verify": BBVA_SIGNAL_ORANGE_2,
-  accepted: BBVA_SIGNAL_GREEN_3,
-  "ready to deploy": BBVA_SIGNAL_GREEN_3,
-  deployed: BBVA_GOAL_ACCENT_7,
-  closed: BBVA_SIGNAL_GREEN_1,
-  resolved: BBVA_SIGNAL_GREEN_1,
-  done: BBVA_SIGNAL_GREEN_1,
-  open: BBVA_SIGNAL_YELLOW_1,
-  created: BBVA_SIGNAL_RED_3
-};
+function normalizeColorMap(
+  input: Record<string, string> | undefined,
+  fallback: Record<string, string>
+) {
+  const mapped: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input ?? {})) {
+    const token = normalizeSemanticToken(key);
+    const color = String(value || "").trim();
+    if (!token || !color) {
+      continue;
+    }
+    mapped[token] = color;
+  }
+  if (Object.keys(mapped).length > 0) {
+    return mapped;
+  }
+  return { ...fallback };
+}
 
-const PRIORITY_COLOR_BY_KEY: Record<string, string> = {
-  "supone un impedimento": BBVA_SIGNAL_RED_1,
-  highest: BBVA_SIGNAL_RED_1,
-  high: BBVA_SIGNAL_RED_2,
-  medium: BBVA_SIGNAL_ORANGE_2,
-  low: BBVA_SIGNAL_GREEN_2,
-  lowest: BBVA_SIGNAL_GREEN_1
-};
+export function configureSemanticColors(payload: SemanticContractPayload) {
+  if (!payload) {
+    runtimeSemanticConfig = {
+      statusByKey: { ...DEFAULT_SEMANTIC_CONFIG.statusByKey },
+      priorityByKey: { ...DEFAULT_SEMANTIC_CONFIG.priorityByKey },
+      neutral: DEFAULT_SEMANTIC_CONFIG.neutral,
+      goalAccent: DEFAULT_SEMANTIC_CONFIG.goalAccent,
+      goalSurface: DEFAULT_SEMANTIC_CONFIG.goalSurface
+    };
+    return;
+  }
+  runtimeSemanticConfig = {
+    statusByKey: normalizeColorMap(payload.statusByKey, DEFAULT_SEMANTIC_CONFIG.statusByKey),
+    priorityByKey: normalizeColorMap(
+      payload.priorityByKey,
+      DEFAULT_SEMANTIC_CONFIG.priorityByKey
+    ),
+    neutral: String(payload.neutral || "").trim() || DEFAULT_SEMANTIC_CONFIG.neutral,
+    goalAccent: String(payload.goalAccent || "").trim() || DEFAULT_SEMANTIC_CONFIG.goalAccent,
+    goalSurface: String(payload.goalSurface || "").trim() || DEFAULT_SEMANTIC_CONFIG.goalSurface
+  };
+}
 
 function hexToRgba(hexColor: string, alpha: number) {
   const token = String(hexColor || "")
     .trim()
     .replace(/^#/, "");
   if (!/^[0-9a-fA-F]{6}$/.test(token)) {
-    return `rgba(226,230,238,${alpha})`;
+    const fallback = runtimeSemanticConfig.neutral
+      .replace(/^#/, "")
+      .match(/^[0-9a-fA-F]{6}$/)
+      ? runtimeSemanticConfig.neutral
+      : "#E2E6EE";
+    const normalizedFallback = fallback.replace(/^#/, "");
+    const r = Number.parseInt(normalizedFallback.slice(0, 2), 16);
+    const g = Number.parseInt(normalizedFallback.slice(2, 4), 16);
+    const b = Number.parseInt(normalizedFallback.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
   const r = Number.parseInt(token.slice(0, 2), 16);
   const g = Number.parseInt(token.slice(2, 4), 16);
@@ -66,11 +133,12 @@ function hexToRgba(hexColor: string, alpha: number) {
 
 function chipPalette(color: string) {
   const normalized = String(color || "").trim().toUpperCase();
-  if (normalized === BBVA_GOAL_ACCENT_7) {
+  const goalAccent = runtimeSemanticConfig.goalAccent.toUpperCase();
+  if (normalized === goalAccent) {
     return {
-      color: BBVA_GOAL_ACCENT_7,
-      borderColor: hexToRgba(BBVA_GOAL_ACCENT_7, 0.64),
-      backgroundColor: BBVA_GOAL_SURFACE_8
+      color: runtimeSemanticConfig.goalAccent,
+      borderColor: hexToRgba(runtimeSemanticConfig.goalAccent, 0.64),
+      backgroundColor: runtimeSemanticConfig.goalSurface
     };
   }
   return {
@@ -81,11 +149,17 @@ function chipPalette(color: string) {
 }
 
 export function statusColor(status: string) {
-  return STATUS_COLOR_BY_KEY[normalizeSemanticToken(status)] ?? BBVA_NEUTRAL_SOFT;
+  return (
+    runtimeSemanticConfig.statusByKey[normalizeSemanticToken(status)] ??
+    runtimeSemanticConfig.neutral
+  );
 }
 
 export function priorityColor(priority: string) {
-  return PRIORITY_COLOR_BY_KEY[normalizeSemanticToken(priority)] ?? BBVA_NEUTRAL_SOFT;
+  return (
+    runtimeSemanticConfig.priorityByKey[normalizeSemanticToken(priority)] ??
+    runtimeSemanticConfig.neutral
+  );
 }
 
 export function semanticChipStyle(
