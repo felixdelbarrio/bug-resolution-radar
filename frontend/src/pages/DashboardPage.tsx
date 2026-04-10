@@ -250,42 +250,48 @@ export function DashboardPage() {
     }
     const timer = window.setTimeout(() => {
       void import("../components/ChartFigurePlot");
-      void queryClient.prefetchQuery({
-        queryKey: ["dashboard-overview", overviewQueryParams],
-        queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
-        staleTime: commonQueryOptions.staleTime,
-      });
-      if (trendChartId) {
+      if (activePanel === "overview") {
+        if (trendChartId) {
+          void queryClient.prefetchQuery({
+            queryKey: ["dashboard-trend-detail", trendDetailQueryParams],
+            queryFn: () =>
+              fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
+            staleTime: commonQueryOptions.staleTime
+          });
+        }
         void queryClient.prefetchQuery({
-          queryKey: ["dashboard-trend-detail", trendDetailQueryParams],
+          queryKey: ["dashboard-intelligence", intelligenceQueryParams],
           queryFn: () =>
-            fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
-          staleTime: commonQueryOptions.staleTime,
+            fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams),
+          staleTime: commonQueryOptions.staleTime
         });
+      } else if (activePanel === "trends") {
+        void queryClient.prefetchQuery({
+          queryKey: ["dashboard-overview", overviewQueryParams],
+          queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
+          staleTime: commonQueryOptions.staleTime
+        });
+      } else if (activePanel === "insights") {
+        void queryClient.prefetchQuery({
+          queryKey: ["dashboard-overview", overviewQueryParams],
+          queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
+          staleTime: commonQueryOptions.staleTime
+        });
+        if (trendChartId) {
+          void queryClient.prefetchQuery({
+            queryKey: ["dashboard-trend-detail", trendDetailQueryParams],
+            queryFn: () =>
+              fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
+            staleTime: commonQueryOptions.staleTime
+          });
+        }
       }
-      void queryClient.prefetchQuery({
-        queryKey: ["dashboard-intelligence", intelligenceQueryParams],
-        queryFn: () =>
-          fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams),
-        staleTime: commonQueryOptions.staleTime,
-      });
-      void queryClient.prefetchQuery({
-        queryKey: ["dashboard-issues", issuesPanelQueryParams],
-        queryFn: () =>
-          fetchJson<IssuesPayload>("/api/issues", issuesPanelQueryParams),
-        staleTime: commonQueryOptions.staleTime,
-      });
-      void queryClient.prefetchQuery({
-        queryKey: ["dashboard-kanban", sharedScopeParams],
-        queryFn: () =>
-          fetchJson<KanbanPayload>("/api/kanban", sharedScopeParams),
-        staleTime: commonQueryOptions.staleTime,
-      });
-    }, 90);
+    }, 160);
 
     return () => window.clearTimeout(timer);
   }, [
     workspace?.selectedCountry,
+    activePanel,
     queryClient,
     overviewQueryParams,
     trendDetailQueryParams,

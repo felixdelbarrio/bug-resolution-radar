@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useDashboardParams } from "../hooks/useDashboardParams";
 import { fetchJson, type BootstrapPayload, type WorkspaceData } from "../lib/api";
 import { cn } from "../lib/cn";
+import { configureSemanticColors } from "../lib/semanticColors";
 
 const STORAGE_THEME_KEY = "bug-resolution-radar-theme";
 
@@ -23,12 +24,35 @@ export type ShellContextValue = {
   themeMode: "light" | "dark";
 };
 
+type ThemeContract = NonNullable<BootstrapPayload["designTokens"]>["theme"];
+
 function persistedTheme(): "light" | "dark" | null {
   if (typeof window === "undefined") {
     return null;
   }
   const value = window.localStorage.getItem(STORAGE_THEME_KEY);
   return value === "dark" || value === "light" ? value : null;
+}
+
+function applyThemeContract(
+  contract: ThemeContract | undefined,
+  themeMode: "light" | "dark"
+) {
+  if (!contract) {
+    return;
+  }
+  const root = document.documentElement;
+  const knownKeys = new Set([
+    ...Object.keys(contract.light ?? {}),
+    ...Object.keys(contract.dark ?? {})
+  ]);
+  for (const tokenName of knownKeys) {
+    root.style.removeProperty(tokenName);
+  }
+  const selected = contract[themeMode] ?? {};
+  for (const [tokenName, tokenValue] of Object.entries(selected)) {
+    root.style.setProperty(tokenName, String(tokenValue));
+  }
 }
 
 export function AppShell() {
@@ -83,7 +107,12 @@ export function AppShell() {
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
     window.localStorage.setItem(STORAGE_THEME_KEY, themeMode);
-  }, [themeMode]);
+    applyThemeContract(bootstrap.data?.designTokens?.theme, themeMode);
+  }, [bootstrap.data?.designTokens?.theme, themeMode]);
+
+  useEffect(() => {
+    configureSemanticColors(bootstrap.data?.designTokens?.semantic ?? null);
+  }, [bootstrap.data?.designTokens?.semantic]);
 
   useEffect(() => {
     document.title = heroTitle;

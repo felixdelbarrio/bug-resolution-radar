@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from dataclasses import dataclass
+from pathlib import Path
+from threading import Lock
+from time import monotonic
 from typing import Any, Dict, List, Sequence, cast
 
 import pandas as pd
@@ -79,6 +83,13 @@ from bug_resolution_radar.services.insights_learning_store import (
 from bug_resolution_radar.services.workspace import WorkspaceSelection, apply_workspace_source_scope
 from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT
 from bug_resolution_radar.theme.plotly_style import apply_plotly_bbva
+
+_SCOPE_CONTEXT_CACHE_MAX_ENTRIES = 24
+_SCOPE_CONTEXT_CACHE_TTL_SECONDS = 12.0
+_scope_context_cache: OrderedDict[tuple[Any, ...], tuple[float, "DashboardScopeContext"]] = (
+    OrderedDict()
+)
+_scope_context_cache_lock = Lock()
 
 
 def _fig_payload(fig: Any) -> dict[str, Any] | None:
@@ -778,26 +789,53 @@ class DashboardQuery:
     dark_mode: bool = False
 
 
+@dataclass(frozen=True)
+class DashboardScopeContext:
+    scoped_df: pd.DataFrame
+    dff: pd.DataFrame
+    open_df: pd.DataFrame
+    source_ids: tuple[str, ...]
+    kpis: dict[str, Any]
+
+
 def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
     df = load_issues_df(settings.DATA_PATH)
     scoped_df = apply_workspace_source_scope(df, settings=settings, selection=query.workspace)
     return apply_analysis_depth_filter(scoped_df, settings=settings)
 
 
-def build_dashboard_snapshot(
-    settings: Settings,
-    *,
-    query: DashboardQuery,
-) -> dict[str, Any]:
+def _data_revision_key(settings: Settings) -> tuple[str, int, int]:
+    resolved = Path(str(settings.DATA_PATH)).expanduser()
+    try:
+        stats = resolved.stat()
+        return (str(resolved.resolve()), int(stats.st_mtime_ns), int(stats.st_size))
+    except Exception:
+        return (str(resolved.resolve()), -1, -1)
+
+
+def _scope_context_cache_key(settings: Settings, *, query: DashboardQuery) -> tuple[Any, ...]:
+    data_path, mtime_ns, size = _data_revision_key(settings)
+    return (
+        data_path,
+        mtime_ns,
+        size,
+        str(query.workspace.country or "").strip(),
+        str(query.workspace.source_id or "").strip(),
+        str(query.workspace.scope_mode or "").strip(),
+        tuple(str(item or "").strip() for item in list(query.filters.status or [])),
+        tuple(str(item or "").strip() for item in list(query.filters.priority or [])),
+        tuple(str(item or "").strip() for item in list(query.filters.assignee or [])),
+        str(query.quincenal_scope or "").strip(),
+        tuple(str(item or "").strip() for item in list(query.issue_scope_keys or [])),
+        str(query.issue_sort_col or "").strip(),
+        str(query.issue_like_query or "").strip(),
+    )
+
+
+def _build_scope_context(settings: Settings, *, query: DashboardQuery) -> DashboardScopeContext:
     scoped_df = load_workspace_dataframe(settings, query=query)
     dff = apply_filters(scoped_df, query.filters)
-    source_ids = []
-    if query.workspace.source_id:
-        source_ids = [query.workspace.source_id]
-    elif "source_id" in scoped_df.columns:
-        source_ids = sorted(
-            {sid for sid in scoped_df["source_id"].fillna("").astype(str).tolist() if sid}
-        )
+    source_ids = tuple(_active_source_ids(scoped_df, query=query))
     dff = apply_dashboard_issue_scope(
         dff,
         settings=settings,
@@ -810,6 +848,53 @@ def build_dashboard_snapshot(
     )
     open_df = open_only(dff)
     kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=True)
+    return DashboardScopeContext(
+        scoped_df=scoped_df,
+        dff=dff,
+        open_df=open_df,
+        source_ids=source_ids,
+        kpis=dict(kpis or {}),
+    )
+
+
+def _prune_scope_context_cache(now: float) -> None:
+    stale_keys = [
+        key
+        for key, (seen_at, _ctx) in _scope_context_cache.items()
+        if now - seen_at > _SCOPE_CONTEXT_CACHE_TTL_SECONDS
+    ]
+    for key in stale_keys:
+        _scope_context_cache.pop(key, None)
+    while len(_scope_context_cache) > _SCOPE_CONTEXT_CACHE_MAX_ENTRIES:
+        _scope_context_cache.popitem(last=False)
+
+
+def load_scope_context(settings: Settings, *, query: DashboardQuery) -> DashboardScopeContext:
+    cache_key = _scope_context_cache_key(settings, query=query)
+    now = monotonic()
+    with _scope_context_cache_lock:
+        cached = _scope_context_cache.get(cache_key)
+        if cached is not None and (now - cached[0]) <= _SCOPE_CONTEXT_CACHE_TTL_SECONDS:
+            _scope_context_cache.move_to_end(cache_key)
+            return cached[1]
+
+    context = _build_scope_context(settings, query=query)
+    with _scope_context_cache_lock:
+        _scope_context_cache[cache_key] = (now, context)
+        _scope_context_cache.move_to_end(cache_key)
+        _prune_scope_context_cache(now)
+    return context
+
+
+def build_dashboard_snapshot(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+) -> dict[str, Any]:
+    context = load_scope_context(settings, query=query)
+    dff = context.dff.copy(deep=False)
+    open_df = context.open_df.copy(deep=False)
+    kpis = dict(context.kpis or {})
     registry = build_trends_registry()
     requested_ids = (
         list(query.chart_ids)
@@ -878,19 +963,8 @@ def build_issue_rows(
     sort_by: str = "updated",
     sort_dir: str = "desc",
 ) -> dict[str, Any]:
-    scoped_df = load_workspace_dataframe(settings, query=query)
-    dff = apply_filters(scoped_df, query.filters)
-    source_ids = [query.workspace.source_id] if query.workspace.source_id else []
-    dff = apply_dashboard_issue_scope(
-        dff,
-        settings=settings,
-        country=query.workspace.country,
-        source_ids=source_ids,
-        quincenal_scope=query.quincenal_scope,
-        issue_keys=query.issue_scope_keys,
-        sort_col=query.issue_sort_col,
-        like_query=query.issue_like_query,
-    )
+    context = load_scope_context(settings, query=query)
+    dff = context.dff.copy(deep=False)
 
     sort_column = (
         sort_by if sort_by in dff.columns else ("updated" if "updated" in dff.columns else "key")
@@ -949,20 +1023,8 @@ def build_kanban_columns(
     *,
     query: DashboardQuery,
 ) -> list[dict[str, Any]]:
-    scoped_df = load_workspace_dataframe(settings, query=query)
-    dff = apply_filters(scoped_df, query.filters)
-    source_ids = [query.workspace.source_id] if query.workspace.source_id else []
-    dff = apply_dashboard_issue_scope(
-        dff,
-        settings=settings,
-        country=query.workspace.country,
-        source_ids=source_ids,
-        quincenal_scope=query.quincenal_scope,
-        issue_keys=query.issue_scope_keys,
-        sort_col=query.issue_sort_col,
-        like_query=query.issue_like_query,
-    )
-    open_df = open_only(dff)
+    context = load_scope_context(settings, query=query)
+    open_df = context.open_df.copy(deep=False)
     if open_df.empty or "status" not in open_df.columns:
         return []
 
@@ -1063,19 +1125,8 @@ def build_issue_keys(
     *,
     query: DashboardQuery,
 ) -> dict[str, Any]:
-    scoped_df = load_workspace_dataframe(settings, query=query)
-    dff = apply_filters(scoped_df, query.filters)
-    source_ids = [query.workspace.source_id] if query.workspace.source_id else []
-    dff = apply_dashboard_issue_scope(
-        dff,
-        settings=settings,
-        country=query.workspace.country,
-        source_ids=source_ids,
-        quincenal_scope=query.quincenal_scope,
-        issue_keys=query.issue_scope_keys,
-        sort_col=query.issue_sort_col,
-        like_query=query.issue_like_query,
-    )
+    context = load_scope_context(settings, query=query)
+    dff = context.dff.copy(deep=False)
     if dff.empty or "key" not in dff.columns:
         return {"total": 0, "keys": []}
     keys = sorted(
@@ -1094,20 +1145,9 @@ def build_trend_detail(
     query: DashboardQuery,
     chart_id: str,
 ) -> dict[str, Any]:
-    scoped_df = load_workspace_dataframe(settings, query=query)
-    dff = apply_filters(scoped_df, query.filters)
-    source_ids = [query.workspace.source_id] if query.workspace.source_id else []
-    dff = apply_dashboard_issue_scope(
-        dff,
-        settings=settings,
-        country=query.workspace.country,
-        source_ids=source_ids,
-        quincenal_scope=query.quincenal_scope,
-        issue_keys=query.issue_scope_keys,
-        sort_col=query.issue_sort_col,
-        like_query=query.issue_like_query,
-    )
-    open_df = open_only(dff)
+    context = load_scope_context(settings, query=query)
+    dff = context.dff.copy(deep=False)
+    open_df = context.open_df.copy(deep=False)
     trend_open_df, adapted_for_terminal = _effective_trends_open_scope(
         dff=dff,
         open_df=open_df,
@@ -1116,7 +1156,7 @@ def build_trend_detail(
     chart_context = ChartContext(
         dff=dff,
         open_df=trend_open_df,
-        kpis=compute_kpis(dff, settings=settings, include_timeseries_chart=True),
+        kpis=dict(context.kpis or {}),
         dark_mode=query.dark_mode,
     )
     registry = build_trends_registry()
@@ -2219,19 +2259,9 @@ def build_intelligence_snapshot(
     insights_functionality_filters: Sequence[str] | None = None,
     insights_status_manual: bool = False,
 ) -> dict[str, Any]:
-    scoped_df = load_workspace_dataframe(settings, query=query)
-    dff = apply_filters(scoped_df, query.filters)
-    source_ids = _active_source_ids(scoped_df, query=query)
-    dff = apply_dashboard_issue_scope(
-        dff,
-        settings=settings,
-        country=query.workspace.country,
-        source_ids=source_ids,
-        quincenal_scope=query.quincenal_scope,
-        issue_keys=query.issue_scope_keys,
-        sort_col=query.issue_sort_col,
-        like_query=query.issue_like_query,
-    )
+    context = load_scope_context(settings, query=query)
+    dff = context.dff.copy(deep=False)
+    source_ids = list(context.source_ids)
     dff_quincenal = _insights_quincenal_df(settings=settings, dff=dff)
     functionality = _build_functionality_payload(
         dff=dff,

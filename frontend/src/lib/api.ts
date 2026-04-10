@@ -40,6 +40,19 @@ export type BootstrapPayload = {
   };
   workspace: WorkspaceData;
   chartsCatalog: Array<{ id: string; label: string }>;
+  designTokens?: {
+    theme?: {
+      light?: Record<string, string>;
+      dark?: Record<string, string>;
+    };
+    semantic?: {
+      statusByKey?: Record<string, string>;
+      priorityByKey?: Record<string, string>;
+      neutral?: string;
+      goalAccent?: string;
+      goalSurface?: string;
+    };
+  };
   permissionsPolicy: Record<string, string>;
 };
 

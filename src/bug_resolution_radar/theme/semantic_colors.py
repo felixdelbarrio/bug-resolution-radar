@@ -7,6 +7,7 @@ from typing import Dict, Iterable, Optional
 
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_GOAL_ACCENT_7,
+    BBVA_GOAL_SURFACE_8,
     BBVA_NEUTRAL_SOFT,
     BBVA_SIGNAL_GREEN_1,
     BBVA_SIGNAL_GREEN_2,
@@ -92,4 +93,15 @@ def priority_color_map() -> Dict[str, str]:
         "Lowest": BBVA_SIGNAL_GREEN_1,
         "(sin priority)": BBVA_NEUTRAL_SOFT,
         "": BBVA_NEUTRAL_SOFT,
+    }
+
+
+def semantic_color_contract() -> Dict[str, object]:
+    """Return the frontend-consumable semantic token contract."""
+    return {
+        "statusByKey": dict(STATUS_COLOR_BY_KEY),
+        "priorityByKey": dict(PRIORITY_COLOR_BY_KEY),
+        "neutral": BBVA_NEUTRAL_SOFT,
+        "goalAccent": BBVA_GOAL_ACCENT_7,
+        "goalSurface": BBVA_GOAL_SURFACE_8,
     }
