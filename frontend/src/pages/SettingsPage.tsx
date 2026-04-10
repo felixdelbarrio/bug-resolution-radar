@@ -223,6 +223,83 @@ function SourceTable({
   );
 }
 
+function RollupSourceSelector({
+  country,
+  sources,
+  selectedIds,
+  onChange
+}: {
+  country: string;
+  sources: WorkspaceSource[];
+  selectedIds: string[];
+  onChange: (nextIds: string[]) => void;
+}) {
+  const selectedLabels = sources
+    .filter((source) => selectedIds.includes(source.source_id))
+    .map((source) => `${source.alias} · ${String(source.source_type || "").toUpperCase()}`);
+  const summary =
+    selectedLabels.length === 0
+      ? "Selecciona hasta 2 orígenes"
+      : selectedLabels.length === 1
+        ? selectedLabels[0]
+        : `${selectedLabels.length} orígenes seleccionados`;
+
+  return (
+    <article className="rollup-country-card">
+      <div>
+        <strong>{country}</strong>
+        <p>Selecciona hasta 2 orígenes por país.</p>
+      </div>
+
+      {sources.length === 0 ? (
+        <span className="issue-list-empty">Sin orígenes disponibles.</span>
+      ) : (
+        <details className="filter-combo rollup-select">
+          <summary className="filter-combo-summary">
+            <span>{country}</span>
+            <strong
+              className={selectedLabels.length === 0 ? "filter-combo-summary-placeholder" : undefined}
+            >
+              {summary}
+            </strong>
+          </summary>
+          <div className="filter-combo-menu rollup-select-menu">
+            {sources.map((source) => {
+              const checked = selectedIds.includes(source.source_id);
+              const maxReached = !checked && selectedIds.length >= 2;
+              return (
+                <label
+                  key={source.source_id}
+                  className={classNames(
+                    "filter-check rollup-select-option",
+                    checked && "rollup-select-option-active",
+                    maxReached && "rollup-select-option-disabled"
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={maxReached}
+                    onChange={() => {
+                      const nextIds = checked
+                        ? selectedIds.filter((item) => item !== source.source_id)
+                        : [...selectedIds, source.source_id].slice(0, 2);
+                      onChange(nextIds);
+                    }}
+                  />
+                  <span className="filter-check-value">
+                    {source.alias} · {String(source.source_type || "").toUpperCase()}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </details>
+      )}
+    </article>
+  );
+}
+
 export function SettingsPage() {
   const { dashboardState } = useOutletContext<ShellContextValue>();
   const queryClient = useQueryClient();
@@ -272,17 +349,22 @@ export function SettingsPage() {
 
   const configuredSourcesByCountry = useMemo(() => {
     const out = new Map<string, WorkspaceSource[]>();
-    const activeSources = [
-      ...(savedPayload?.jiraSources ?? []),
-      ...(savedPayload?.helixSources ?? [])
-    ];
+    const activeSources = Object.entries(savedPayload?.rollupEligibleSourcesByCountry ?? {}).flatMap(
+      ([country, rows]) =>
+        (rows ?? []).map((row) => ({
+          ...row,
+          country: row.country || country
+        }))
+    );
     activeSources.forEach((row) => {
       const existing = out.get(row.country) ?? [];
-      existing.push(row);
-      out.set(row.country, existing);
+      if (existing.some((source) => source.source_id === row.source_id)) {
+        return;
+      }
+      out.set(row.country, [...existing, row]);
     });
     return out;
-  }, [savedPayload?.helixSources, savedPayload?.jiraSources]);
+  }, [savedPayload?.rollupEligibleSourcesByCountry]);
 
   if (!draft || !savedPayload) {
     return (
@@ -324,9 +406,20 @@ export function SettingsPage() {
     setJiraRows(withSourceDrafts(normalized.jiraSources));
     setHelixRows(withSourceDrafts(normalized.helixSources));
     setFlashMessage(flash);
-    queryClient.invalidateQueries({ queryKey: ["settings"] });
-    queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-    queryClient.invalidateQueries({ queryKey: ["cache-inventory"] });
+    [
+      ["settings"],
+      ["settings-ingest"],
+      ["bootstrap-shell"],
+      ["dashboard-overview"],
+      ["dashboard-trend-detail"],
+      ["dashboard-intelligence"],
+      ["dashboard-issues"],
+      ["dashboard-kanban"],
+      ["dashboard-note-keys"],
+      ["cache-inventory"]
+    ].forEach((queryKey) => {
+      void queryClient.invalidateQueries({ queryKey });
+    });
   }
 
   async function purgeDeletedSources(sourceIds: string[]) {
@@ -747,61 +840,28 @@ export function SettingsPage() {
               Esta selección se usa en Vista País, Insights quincenal y el informe de seguimiento del periodo.
             </p>
             <p className="inline-caption">
-              Igual que en Streamlit, aquí solo aparecen orígenes ya guardados en Jira o Helix.
+              Igual que en Streamlit, aquí eliges hasta 2 orígenes por país.
             </p>
             <div className="rollup-country-stack">
               {countries.map((country) => {
                 const countrySources = configuredSourcesByCountry.get(country) ?? [];
                 const selectedIds = draft.countryRollupSources[country] ?? [];
-                const selectedSet = new Set(selectedIds);
                 return (
-                  <article className="rollup-country-card" key={country}>
-                    <div>
-                      <strong>{country}</strong>
-                      <p>Se recomienda 2 orígenes por país.</p>
-                    </div>
-                    <div className="rollup-source-grid">
-                      {countrySources.length === 0 ? (
-                        <span className="issue-list-empty">Sin orígenes configurados.</span>
-                      ) : (
-                        countrySources.map((source) => {
-                          const checked = selectedSet.has(source.source_id);
-                          const maxReached = !checked && selectedIds.length >= 2;
-                          return (
-                            <label
-                              className={classNames(
-                                "rollup-source-chip",
-                                checked && "rollup-source-chip-active",
-                                maxReached && "rollup-source-chip-disabled"
-                              )}
-                              key={source.source_id}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                disabled={maxReached}
-                                onChange={() => {
-                                  const nextIds = checked
-                                    ? selectedIds.filter((item) => item !== source.source_id)
-                                    : [...selectedIds, source.source_id].slice(0, 2);
-                                  setDraft({
-                                    ...draft,
-                                    countryRollupSources: {
-                                      ...draft.countryRollupSources,
-                                      [country]: nextIds
-                                    }
-                                  });
-                                }}
-                              />
-                              <span>
-                                {source.alias} · {String(source.source_type || "").toUpperCase()}
-                              </span>
-                            </label>
-                          );
-                        })
-                      )}
-                    </div>
-                  </article>
+                  <RollupSourceSelector
+                    key={country}
+                    country={country}
+                    sources={countrySources}
+                    selectedIds={selectedIds}
+                    onChange={(nextIds) =>
+                      setDraft({
+                        ...draft,
+                        countryRollupSources: {
+                          ...draft.countryRollupSources,
+                          [country]: nextIds
+                        }
+                      })
+                    }
+                  />
                 );
               })}
             </div>

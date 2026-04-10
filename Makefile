@@ -13,6 +13,10 @@ API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
 FRONTEND_URL ?= http://127.0.0.1:5173
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
+ICON_SOURCE := assets/app_icon/source/BugResolutionRadarIcon.png
+ICON_PNG := assets/app_icon/bug-resolution-radar.png
+ICON_ICO := assets/app_icon/bug-resolution-radar.ico
+ICON_ICNS := assets/app_icon/bug-resolution-radar.icns
 PYINSTALLER_COLLECT_ARGS = \
 	--paths "$(PWD)/src" \
 	--collect-all bug_resolution_radar.analytics \
@@ -35,7 +39,7 @@ PYINSTALLER_COLLECT_ARGS = \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test run run-dev run-back run-front kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _build-macos _build-linux
+.PHONY: help setup test run run-dev run-back run-front kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
 
 help:
 	@echo ""
@@ -68,6 +72,12 @@ _ensure-build: _ensure-backend
 	@if [ ! -x "$(PYINSTALLER)" ]; then echo "Falta pyinstaller. Ejecuta: make setup"; exit 1; fi
 	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then echo "Faltan dependencias frontend. Ejecuta: make setup"; exit 1; fi
 
+_ensure-icon-assets: _ensure-backend
+	@if [ ! -f "$(ICON_PNG)" ] || [ ! -f "$(ICON_ICO)" ] || [ ! -f "$(ICON_ICNS)" ]; then \
+		if [ ! -f "$(ICON_SOURCE)" ]; then echo "Falta icono fuente: $(ICON_SOURCE)"; exit 1; fi; \
+		PYTHONPATH=src $(PYTHON) scripts/update_app_icon.py --input "$(ICON_SOURCE)" --png-out "$(ICON_PNG)" --ico-out "$(ICON_ICO)" --icns-out "$(ICON_ICNS)"; \
+	fi
+
 test: _ensure-backend
 	PYTHONPATH=src $(PYTEST) -q \
 		tests/test_api_app.py \
@@ -93,13 +103,13 @@ run-dev: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run dev & \
 	wait
 
-run: _ensure-frontend build-frontend
+run: _ensure-frontend _ensure-icon-assets build-frontend
 	PYTHONPATH=src $(PYTHON) run_desktop.py
 
 build-frontend: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run build
 
-build: _ensure-build build-frontend test
+build: _ensure-build _ensure-icon-assets build-frontend test
 	@case "$(HOST_UNAME)" in \
 		Darwin) $(MAKE) _build-macos ;; \
 		Linux) $(MAKE) _build-linux ;; \
@@ -113,7 +123,7 @@ _build-macos:
 		--clean \
 		--windowed \
 		--name bug-resolution-radar \
-		--icon assets/app_icon/bug-resolution-radar.png \
+		--icon $(ICON_ICNS) \
 		--distpath dist_app \
 		--workpath build_app \
 		--specpath build_app \
@@ -135,7 +145,7 @@ _build-linux:
 		--onefile \
 		--windowed \
 		--name bug-resolution-radar \
-		--icon assets/app_icon/bug-resolution-radar.png \
+		--icon $(ICON_PNG) \
 		--workpath build \
 		--specpath build \
 		--distpath dist \

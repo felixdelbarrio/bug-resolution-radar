@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 from bug_resolution_radar.config import (
     Settings,
+    all_configured_sources,
     country_rollup_sources,
     helix_sources,
     jira_sources,
@@ -14,6 +15,11 @@ from bug_resolution_radar.config import (
     save_settings,
     supported_countries,
     to_env_json,
+)
+from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.services.workspace import (
+    available_sources_by_country,
+    merge_sources_by_country,
 )
 
 
@@ -55,6 +61,29 @@ def _normalize_disabled_source_ids(values: List[Any]) -> str:
     return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
 
 
+def _group_configured_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    for row in all_configured_sources(settings):
+        country = str(row.get("country") or "").strip()
+        source_id = str(row.get("source_id") or "").strip()
+        if not country or not source_id:
+            continue
+        grouped.setdefault(country, []).append(
+            {str(key): str(value).strip() for key, value in dict(row).items() if str(value).strip()}
+        )
+    return grouped
+
+
+def _rollup_eligible_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
+    configured = _group_configured_sources_by_country(settings)
+    try:
+        df_all = load_issues_df(settings.DATA_PATH)
+    except Exception:
+        df_all = None
+    inferred = available_sources_by_country(settings, df_all=df_all)
+    return merge_sources_by_country(configured, inferred)
+
+
 def load_settings_payload() -> Dict[str, Any]:
     settings = load_settings()
     return {
@@ -63,6 +92,7 @@ def load_settings_payload() -> Dict[str, Any]:
         "jiraSources": jira_sources(settings),
         "helixSources": helix_sources(settings),
         "countryRollupSources": country_rollup_sources(settings),
+        "rollupEligibleSourcesByCountry": _rollup_eligible_sources_by_country(settings),
         "jiraDisabledSourceIds": json.loads(
             str(getattr(settings, "JIRA_INGEST_DISABLED_SOURCES_JSON", "[]") or "[]")
         ),

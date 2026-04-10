@@ -152,6 +152,7 @@ export type TrendDetailPayload = {
     priorityFilters: string[];
     assigneeFilters: string[];
   }>;
+  sessionDelta: string[];
   executiveTip: string | null;
   adaptedForTerminal: boolean;
 };
@@ -165,6 +166,7 @@ export type IntelligencePayload = {
       kicker: string;
       metric: string;
       detail: string;
+      tone: string;
       label: string;
       quincenalScopeLabel: string;
       issueKeys: string[];
@@ -173,6 +175,7 @@ export type IntelligencePayload = {
       label: string;
       count: number;
       helpText: string;
+      tone: string;
       quincenalScopeLabel: string;
       issueKeys: string[];
       items: IssueRecord[];
@@ -273,6 +276,7 @@ export type SettingsPayload = {
   jiraSources: WorkspaceSource[];
   helixSources: WorkspaceSource[];
   countryRollupSources: Record<string, string[]>;
+  rollupEligibleSourcesByCountry: Record<string, WorkspaceSource[]>;
   jiraDisabledSourceIds: string[];
   helixDisabledSourceIds: string[];
 };
@@ -286,6 +290,7 @@ export function normalizeSettingsPayload(
     jiraSources: payload?.jiraSources ?? [],
     helixSources: payload?.helixSources ?? [],
     countryRollupSources: payload?.countryRollupSources ?? {},
+    rollupEligibleSourcesByCountry: payload?.rollupEligibleSourcesByCountry ?? {},
     jiraDisabledSourceIds: payload?.jiraDisabledSourceIds ?? [],
     helixDisabledSourceIds: payload?.helixDisabledSourceIds ?? []
   };

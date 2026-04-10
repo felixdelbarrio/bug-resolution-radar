@@ -32,6 +32,11 @@ def main() -> int:
         help="Output ICO path (default: assets/app_icon/bug-resolution-radar.ico).",
     )
     parser.add_argument(
+        "--icns-out",
+        default="assets/app_icon/bug-resolution-radar.icns",
+        help="Output ICNS path (default: assets/app_icon/bug-resolution-radar.icns).",
+    )
+    parser.add_argument(
         "--size",
         type=int,
         default=1024,
@@ -42,6 +47,7 @@ def main() -> int:
     in_path = Path(args.input).expanduser().resolve()
     png_out = Path(args.png_out)
     ico_out = Path(args.ico_out)
+    icns_out = Path(args.icns_out)
     size = int(args.size)
 
     if not in_path.exists():
@@ -65,8 +71,12 @@ def main() -> int:
     ico_out.parent.mkdir(parents=True, exist_ok=True)
     img.save(ico_out, format="ICO", sizes=sizes)
 
+    icns_out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(icns_out, format="ICNS")
+
     print(f"Wrote {png_out}")
     print(f"Wrote {ico_out}")
+    print(f"Wrote {icns_out}")
     return 0
 
 

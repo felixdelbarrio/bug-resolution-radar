@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Set
 from dotenv import dotenv_values
 from pydantic import BaseModel
 
+from bug_resolution_radar.repositories.issues_store import load_issues_df
+
 
 def _default_user_config_home() -> Path:
     """
@@ -569,6 +571,23 @@ def country_rollup_sources(settings: Settings) -> Dict[str, List[str]]:
             continue
         configured_by_country.setdefault(country, set()).add(sid)
 
+    available_by_country: Dict[str, set[str]] = {}
+    try:
+        df_all = load_issues_df(str(getattr(settings, "DATA_PATH", "") or ""))
+    except Exception:
+        df_all = None
+    if (
+        df_all is not None
+        and not df_all.empty
+        and {"country", "source_id"}.issubset(df_all.columns)
+    ):
+        for row in df_all[["country", "source_id"]].dropna().to_dict(orient="records"):
+            country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
+            sid = _coerce_str(row.get("source_id"))
+            if not country or not sid:
+                continue
+            available_by_country.setdefault(country, set()).add(sid)
+
     out: Dict[str, List[str]] = {}
     for row in rows:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
@@ -577,7 +596,9 @@ def country_rollup_sources(settings: Settings) -> Dict[str, List[str]]:
         source_ids = _parse_source_ids(row.get("source_ids"))
         if not source_ids:
             continue
-        allowed = configured_by_country.get(country, set())
+        allowed = configured_by_country.get(country, set()) | available_by_country.get(
+            country, set()
+        )
         normalized_ids = [sid for sid in source_ids if sid in allowed]
         if normalized_ids:
             out[country] = normalized_ids

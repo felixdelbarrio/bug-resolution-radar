@@ -37,6 +37,20 @@ def test_configure_webview_runtime_settings_enables_downloads() -> None:
     assert fake_webview.settings["ALLOW_DOWNLOADS"] is True
 
 
+def test_icon_asset_path_prefers_expected_file_type(tmp_path, monkeypatch) -> None:
+    icon_dir = tmp_path / "assets" / "app_icon"
+    icon_dir.mkdir(parents=True)
+    png_path = icon_dir / "bug-resolution-radar.png"
+    icns_path = icon_dir / "bug-resolution-radar.icns"
+    png_path.write_bytes(b"png")
+    icns_path.write_bytes(b"icns")
+
+    monkeypatch.setattr(run_desktop, "ROOT", tmp_path)
+
+    assert run_desktop._icon_asset_path() == png_path.resolve()
+    assert run_desktop._icon_asset_path(prefer_icns=True) == icns_path.resolve()
+
+
 def test_internal_mode_delegates_to_run_api(monkeypatch) -> None:
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_INTERNAL_API_SERVER", "1")
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_INTERNAL_API_PORT", "9876")

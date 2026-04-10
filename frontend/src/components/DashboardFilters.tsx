@@ -131,7 +131,7 @@ export function DashboardFilters({
         emptyLabel="Todos"
         onChange={(next) => onChange({ assignee: next, issuePage: "1" })}
       />
-      <label className="filter-select">
+      <label className="filter-combo filter-select filter-select-combo">
         <span>Quincenal</span>
         <select
           value={quincenalScope}

@@ -22,6 +22,7 @@ from run_api import main as run_api_main  # noqa: E402
 _INTERNAL_SERVER_ENV = "BUG_RESOLUTION_RADAR_INTERNAL_API_SERVER"
 _INTERNAL_SERVER_PORT_ENV = "BUG_RESOLUTION_RADAR_INTERNAL_API_PORT"
 _BROWSER_FALLBACK_ENV = "BUG_RESOLUTION_RADAR_DESKTOP_ALLOW_BROWSER_FALLBACK"
+_APP_TITLE = "Bug Resolution Radar"
 
 
 def _find_free_port() -> int:
@@ -67,6 +68,62 @@ def _configure_webview_runtime_settings(webview_module: object) -> None:
     settings = getattr(webview_module, "settings", None)
     if isinstance(settings, dict):
         settings["ALLOW_DOWNLOADS"] = True
+
+
+def _icon_asset_path(*, prefer_icns: bool = False) -> Path | None:
+    filenames = (
+        ["bug-resolution-radar.icns", "bug-resolution-radar.png"]
+        if prefer_icns
+        else [
+            "bug-resolution-radar.png",
+            "bug-resolution-radar.icns",
+        ]
+    )
+    candidates: list[Path] = []
+
+    for filename in filenames:
+        candidates.append(ROOT / "assets" / "app_icon" / filename)
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        for filename in filenames:
+            candidates.append(Path(meipass) / "assets" / "app_icon" / filename)
+
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        for filename in filenames:
+            candidates.append(exe_dir / "assets" / "app_icon" / filename)
+            candidates.append(exe_dir.parent / "assets" / "app_icon" / filename)
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _apply_macos_app_icon() -> None:
+    if sys.platform != "darwin":
+        return
+    icon_path = _icon_asset_path(prefer_icns=True)
+    if icon_path is None:
+        return
+    try:
+        from AppKit import NSApplication, NSImage
+
+        image = NSImage.alloc().initByReferencingFile_(str(icon_path))
+        if image is None:
+            return
+        app = NSApplication.sharedApplication()
+        app.setApplicationIconImage_(image)
+    except Exception:
+        return
 
 
 def _wait_for_api_ready(port: int, *, timeout_seconds: float = 30.0) -> None:
@@ -145,8 +202,9 @@ def _run_desktop_container() -> int:
             ) from exc
 
         _configure_webview_runtime_settings(webview)
+        _apply_macos_app_icon()
         webview.create_window(
-            "Bug Resolution Radar",
+            _APP_TITLE,
             url=url,
             min_size=(1200, 820),
             text_select=True,

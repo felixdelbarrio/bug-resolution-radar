@@ -222,13 +222,14 @@ export function IngestPage() {
 
   async function invalidateRadarData() {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
-      queryClient.invalidateQueries({ queryKey: ["workspace"] }),
+      queryClient.invalidateQueries({ queryKey: ["bootstrap-shell"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-trend-detail"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-intelligence"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-issues"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-kanban"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard-note-keys"] }),
+      queryClient.invalidateQueries({ queryKey: ["settings"] }),
       queryClient.invalidateQueries({ queryKey: ["settings-ingest"] }),
       queryClient.invalidateQueries({ queryKey: ["ingest-overview"] })
     ]);

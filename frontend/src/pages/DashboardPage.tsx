@@ -451,9 +451,6 @@ export function DashboardPage() {
                 <span className="focus-card-detail">{card.detail}</span>
                 <span className="focus-card-footer">
                   <span className="focus-card-action">{focusCardActionLabel(card)}</span>
-                  <span className="focus-card-arrow" aria-hidden="true">
-                    →
-                  </span>
                 </span>
               </button>
             ))}
@@ -506,7 +503,7 @@ export function DashboardPage() {
 
     return (
       <section className="page-stack">
-        <section className="surface-panel page-stack">
+        <section className="surface-panel trend-shell">
           <label className="field trend-selector-field">
             <span>Gráfico</span>
             <select
@@ -522,27 +519,24 @@ export function DashboardPage() {
           </label>
 
           {trendDetail.data.adaptedForTerminal ? (
-            <div className="inline-notice">
+            <p className="trend-inline-caption">
               Vista adaptada al estado finalista seleccionado: el gráfico conserva incidencias finalizadas para no perder señal.
-            </div>
+            </p>
           ) : null}
 
-          <article className="chart-card trend-chart-card">
-            <div className="chart-copy">
+          <section className="trend-chart-block">
+            <div className="trend-chart-head">
               <div>
                 <p className="eyebrow">{trendDetail.data.chart.id}</p>
                 <h4>{trendDetail.data.chart.title}</h4>
                 <p>{trendDetail.data.chart.subtitle}</p>
               </div>
-              {trendDetail.data.executiveTip ? (
-                <p className="trend-executive-tip">{trendDetail.data.executiveTip}</p>
-              ) : null}
             </div>
 
             {trendDetail.data.metrics.length > 0 ? (
-              <div className="trend-metrics-grid">
+              <div className="trend-metric-strip">
                 {trendDetail.data.metrics.map((metric) => (
-                  <article className="trend-metric-card" key={metric.label}>
+                  <article className="trend-metric-inline" key={metric.label}>
                     <span>{metric.label}</span>
                     <strong>{metric.value}</strong>
                   </article>
@@ -550,23 +544,46 @@ export function DashboardPage() {
               </div>
             ) : null}
 
-            <ChartFigure figure={trendDetail.data.chart.figure} height={380} />
-          </article>
-
-          {trendDetail.data.cards.length > 0 ? (
-            <div className="trend-insight-grid">
-              {trendDetail.data.cards.map((card, index) => (
-                <button
-                  type="button"
-                  className="trend-insight-card"
-                  key={`${card.title}-${index}`}
-                  onClick={() => handleTrendInsightFilters(card)}
-                >
-                  <strong>{card.title}</strong>
-                  <span>{card.body}</span>
-                </button>
-              ))}
+            <div className="trend-figure-shell">
+              <ChartFigure figure={trendDetail.data.chart.figure} height={380} />
             </div>
+          </section>
+
+          {trendDetail.data.sessionDelta.length > 0 ? (
+            <section className="trend-copy-section">
+              <h4>Que cambio desde tu ultima sesion</h4>
+              <ul className="trend-delta-list">
+                {trendDetail.data.sessionDelta.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {trendDetail.data.cards.length > 0 || trendDetail.data.executiveTip ? (
+            <section className="trend-copy-section">
+              {trendDetail.data.cards.length > 0 ? (
+                <>
+                  <h4>Insights accionables</h4>
+                  <div className="trend-action-grid">
+                    {trendDetail.data.cards.map((card, index) => (
+                      <button
+                        type="button"
+                        className="trend-action-card"
+                        key={`${card.title}-${index}`}
+                        onClick={() => handleTrendInsightFilters(card)}
+                      >
+                        <strong>{card.title} ↗</strong>
+                        <span>{card.body}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              {trendDetail.data.executiveTip ? (
+                <p className="trend-executive-tip">{trendDetail.data.executiveTip}</p>
+              ) : null}
+            </section>
           ) : null}
         </section>
       </section>

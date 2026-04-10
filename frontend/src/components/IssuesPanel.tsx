@@ -287,7 +287,7 @@ export function IssuesPanel({
                     <td className="issues-id-cell">
                       <button
                         type="button"
-                        className="link-button issue-key-anchor-button"
+                        className="issue-inline-link issue-key-anchor-button"
                         onClick={() => onOpenIssue(row)}
                       >
                         {row.key}
@@ -296,13 +296,16 @@ export function IssuesPanel({
                     <td className="issues-summary-cell">
                       <button
                         type="button"
-                        className="link-button issue-primary-link issue-primary-link-inline"
+                        className="issue-inline-link issue-primary-link issue-primary-link-inline"
                         onClick={() => onOpenIssue(row)}
+                        title={row.summary || ""}
                       >
                         <strong className="issue-primary-link-title">{row.summary || "—"}</strong>
                       </button>
                     </td>
-                    <td className="issues-description-cell">{row.description || "—"}</td>
+                    <td className="issues-description-cell" title={row.description || ""}>
+                      {row.description || "—"}
+                    </td>
                     <td>
                       <span
                         className="issue-chip issue-chip-table"

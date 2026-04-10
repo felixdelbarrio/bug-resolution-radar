@@ -108,15 +108,6 @@ function issueSubtitle(issue: IssueRecord) {
   return [issue.status, issue.priority, issue.assignee].filter(Boolean).join(" · ");
 }
 
-function periodTone(label: string) {
-  const token = String(label || "").trim().toLowerCase();
-  if (token.includes("creadas en la quincena actual")) return "risk";
-  if (token.includes("cerradas en la quincena") || token.includes("resolución")) return "flow";
-  if (token.includes("abiertas") || token.includes("quincena previa")) return "warning";
-  if (token.includes("mes actual")) return "quality";
-  return "quality";
-}
-
 function functionalityTone(topic: IntelligencePayload["functionality"]["topics"][number]) {
   const priority = String(topic.dominantPriority || "").trim().toLowerCase();
   if (priority === "highest" || priority === "high" || priority.includes("imped")) return "risk";
@@ -252,7 +243,7 @@ export function InsightsPanel({
                 type="button"
                 key={card.cardId}
                 className="period-action-card"
-                data-tone={periodTone(card.quincenalScopeLabel || card.label)}
+                data-tone={card.tone}
                 onClick={() => jumpToIssues(card.quincenalScopeLabel)}
               >
                 <span>{card.kicker}</span>
@@ -260,7 +251,6 @@ export function InsightsPanel({
                 <p>{card.detail}</p>
                 <div className="period-action-card-footer">
                   <em>{`${card.label} ↗`}</em>
-                  <b aria-hidden="true">→</b>
                 </div>
               </button>
             ))}
@@ -269,21 +259,20 @@ export function InsightsPanel({
           {data.periodSummary.groups.map((group) => (
             <details
               className="insight-detail-block"
-              data-tone={periodTone(group.quincenalScopeLabel || group.label)}
+              data-tone={group.tone}
               key={group.label}
             >
               <summary>
-                <span>{group.label}</span>
-                <strong>{group.count}</strong>
+                <span>{`${group.label}: ${group.count}`}</span>
               </summary>
               {group.helpText ? <p className="inline-caption">{group.helpText}</p> : null}
               <div className="detail-actions-row">
                 <button
                   type="button"
-                  className="ghost-button"
+                  className="detail-action-link"
                   onClick={() => jumpToIssues(group.quincenalScopeLabel)}
                 >
-                  Abrir en Issues
+                  Abrir en Issues ↗
                 </button>
               </div>
               <IssueList issues={group.items} onOpenIssue={onOpenIssue} />

@@ -68,6 +68,7 @@ export function AppShell() {
   const isIngest = location.pathname === "/ingest";
   const isSettings = location.pathname === "/settings";
   const reportMode = new URLSearchParams(location.search).get("reportMode") ?? "executive";
+  const heroTitle = bootstrap.data?.appTitle?.trim() || "Cuadro de mando de incidencias";
 
   useEffect(() => {
     const nextTheme = persistedTheme();
@@ -86,6 +87,10 @@ export function AppShell() {
     document.documentElement.dataset.theme = themeMode;
     window.localStorage.setItem(STORAGE_THEME_KEY, themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    document.title = heroTitle;
+  }, [heroTitle]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -177,18 +182,12 @@ export function AppShell() {
       .map((source) => `${source.alias} · ${String(source.source_type || "").toUpperCase()}`);
     return labels.join(" · ");
   }, [workspace]);
-
-  const heroTitle = bootstrap.data?.appTitle?.trim() || "Cuadro de mando de incidencias";
-
   return (
     <div className="app-shell">
       <header className="bbva-hero">
         <div className="bbva-hero-copy">
           <h1 className="bbva-hero-title">{heroTitle}</h1>
           <p className="bbva-hero-sub">Análisis y seguimiento de incidencias</p>
-        </div>
-        <div className="bbva-hero-mark" aria-hidden="true">
-          <img src="/brand/icons/spherica-no-draw.svg" alt="" />
         </div>
       </header>
 

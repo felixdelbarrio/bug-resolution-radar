@@ -71,6 +71,11 @@ from bug_resolution_radar.analytics.trend_insights import (
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.services.insights_learning_store import (
+    InsightsLearningStore,
+    default_learning_path,
+    learning_scope_key,
+)
 from bug_resolution_radar.services.workspace import WorkspaceSelection, apply_workspace_source_scope
 from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT
 from bug_resolution_radar.theme.plotly_style import apply_plotly_bbva
@@ -117,6 +122,162 @@ def _parse_settings_list(raw: object) -> list[str]:
     if isinstance(payload, list):
         return normalize_filter_tokens([str(item).strip() for item in payload if str(item).strip()])
     return normalize_filter_tokens([part.strip() for part in token.split(",") if part.strip()])
+
+
+def _safe_series_count(mask: pd.Series) -> int:
+    if not isinstance(mask, pd.Series) or mask.empty:
+        return 0
+    try:
+        return int(mask.fillna(False).sum())
+    except Exception:
+        return 0
+
+
+def _to_dt_naive(values: object) -> pd.Series:
+    series = values if isinstance(values, pd.Series) else pd.Series([], dtype=object)
+    ts = pd.to_datetime(series, errors="coerce", utc=True)
+    try:
+        return ts.dt.tz_localize(None)
+    except Exception:
+        try:
+            return ts.dt.tz_convert(None)
+        except Exception:
+            return pd.Series([], dtype="datetime64[ns]")
+
+
+def _fmt_pct(value: float) -> str:
+    return f"{value * 100.0:.1f}%"
+
+
+def _build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> dict[str, Any]:
+    safe_dff = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
+    safe_open = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
+
+    status = (
+        normalize_text_col(safe_open["status"], "(sin estado)").astype(str)
+        if (not safe_open.empty and "status" in safe_open.columns)
+        else pd.Series([], dtype=str)
+    )
+    priority = (
+        normalize_text_col(safe_open["priority"], "(sin priority)").astype(str)
+        if (not safe_open.empty and "priority" in safe_open.columns)
+        else pd.Series([], dtype=str)
+    )
+
+    created_open = (
+        _to_dt_naive(safe_open["created"])
+        if "created" in safe_open.columns
+        else pd.Series([], dtype="datetime64[ns]")
+    )
+    updated_open = (
+        _to_dt_naive(safe_open["updated"])
+        if "updated" in safe_open.columns
+        else pd.Series([], dtype="datetime64[ns]")
+    )
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    age_days = (
+        ((now - created_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
+        if not created_open.empty
+        else pd.Series([], dtype=float)
+    )
+    stale_days = (
+        ((now - updated_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
+        if not updated_open.empty
+        else pd.Series([], dtype=float)
+    )
+
+    blocked_count = (
+        _safe_series_count(status.str.lower().str.contains("blocked|bloque", regex=True))
+        if not status.empty
+        else 0
+    )
+    critical_mask = (
+        priority.map(priority_rank) <= 2 if not priority.empty else pd.Series([], dtype=bool)
+    )
+    critical_count = _safe_series_count(critical_mask) if not critical_mask.empty else 0
+    aged30_count = _safe_series_count(age_days > 30) if not age_days.empty else 0
+    stale_14_count = _safe_series_count(stale_days > 14) if not stale_days.empty else 0
+    open_total = int(len(safe_open))
+
+    created_all = (
+        _to_dt_naive(safe_dff["created"])
+        if "created" in safe_dff.columns
+        else pd.Series([], dtype="datetime64[ns]")
+    )
+    resolved_all = (
+        _to_dt_naive(safe_dff["resolved"])
+        if "resolved" in safe_dff.columns
+        else pd.Series([], dtype="datetime64[ns]")
+    )
+    from_14 = now - pd.Timedelta(days=14)
+    created_14 = _safe_series_count(created_all >= from_14) if not created_all.empty else 0
+    resolved_14 = _safe_series_count(resolved_all >= from_14) if not resolved_all.empty else 0
+
+    return {
+        "open_total": open_total,
+        "aged30_pct": (float(aged30_count) / float(open_total)) if open_total else 0.0,
+        "blocked_count": blocked_count,
+        "critical_count": critical_count,
+        "stale_14_pct": (float(stale_14_count) / float(open_total)) if open_total else 0.0,
+        "net_14": int(created_14 - resolved_14),
+    }
+
+
+def _build_session_delta_lines(
+    current_snapshot: dict[str, Any],
+    baseline_snapshot: dict[str, Any] | None,
+) -> list[str]:
+    cur = current_snapshot if isinstance(current_snapshot, dict) else {}
+    base = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
+    if not base:
+        return [
+            "No hay referencia previa guardada para este cliente. Esta sesión crea la primera línea base."
+        ]
+
+    candidates: list[tuple[float, str]] = []
+
+    def add_abs(key: str, label: str, *, pct: bool = False) -> None:
+        c = float(cur.get(key, 0.0) or 0.0)
+        b = float(base.get(key, 0.0) or 0.0)
+        delta = c - b
+        magnitude = abs(delta) * (100.0 if pct else 1.0)
+        if magnitude < (2.0 if pct else 1.0):
+            return
+        if pct:
+            candidates.append(
+                (
+                    magnitude,
+                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if delta > 0 else ''}{delta * 100.0:.1f} pp).",
+                )
+            )
+        else:
+            candidates.append(
+                (
+                    magnitude,
+                    f"{label}: {int(b)} -> {int(c)} ({'+' if delta > 0 else ''}{int(delta)}).",
+                )
+            )
+
+    add_abs("open_total", "Backlog abierto")
+    add_abs("aged30_pct", "Cola >30 dias", pct=True)
+    add_abs("blocked_count", "Bloqueadas activas")
+    add_abs("critical_count", "Criticas abiertas")
+    add_abs("stale_14_pct", "Sin movimiento >14 dias", pct=True)
+    add_abs("net_14", "Balance neto 14d")
+
+    if not candidates:
+        return ["Sin cambios materiales frente a la ultima sesion en este cliente."]
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [text for _, text in candidates[:3]]
+
+
+def _load_trend_baseline_snapshot(settings: Settings, *, workspace: WorkspaceSelection) -> dict[str, Any]:
+    scope = learning_scope_key(workspace.country, workspace.source_id)
+    store = InsightsLearningStore(default_learning_path(settings))
+    store.load()
+    _, _, snapshot = store.get_scope_bundle(scope)
+    return snapshot if isinstance(snapshot, dict) else {}
 
 
 def build_default_filters(settings: Settings) -> dict[str, list[str]]:
@@ -963,10 +1124,13 @@ def build_trend_detail(
             "chart": None,
             "metrics": [],
             "cards": [],
+            "sessionDelta": [],
             "executiveTip": None,
             "adaptedForTerminal": adapted_for_terminal,
         }
     pack = build_trend_insight_pack(str(chart_id or "").strip(), dff=dff, open_df=trend_open_df)
+    baseline_snapshot = _load_trend_baseline_snapshot(settings, workspace=query.workspace)
+    current_snapshot = _build_operational_snapshot(dff=dff, open_df=trend_open_df)
     return {
         "chart": {
             "id": str(chart_id or "").strip(),
@@ -989,6 +1153,7 @@ def build_trend_detail(
             }
             for card in list(pack.cards or [])
         ],
+        "sessionDelta": _build_session_delta_lines(current_snapshot, baseline_snapshot),
         "executiveTip": pack.executive_tip,
         "adaptedForTerminal": adapted_for_terminal,
     }
@@ -1398,6 +1563,33 @@ def _build_period_summary_payload(
             "sourceBreakdown": [],
         }
 
+    def _period_tone(label: str) -> str:
+        token = str(label or "").strip().lower()
+        if token == QUINCENAL_SCOPE_CREATED_CURRENT.lower():
+            return "risk"
+        if token in {
+            QUINCENAL_SCOPE_CLOSED_CURRENT.lower(),
+            QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT.lower(),
+        }:
+            return "flow"
+        if token == QUINCENAL_SCOPE_CREATED_MONTH.lower():
+            return "quality"
+        if "quincena actual" in token and "creadas" in token:
+            return "risk"
+        if "cerradas en la quincena" in token or "resolución" in token:
+            return "flow"
+        if (
+            "abiertas" in token
+            or "maestras" in token
+            or "criticidad alta" in token
+            or "otras incidencias" in token
+            or "quincena previa" in token
+        ):
+            return "warning"
+        if "mes actual" in token:
+            return "quality"
+        return "quality"
+
     labels = source_label_map(
         settings,
         country=str(query.workspace.country or "").strip(),
@@ -1431,6 +1623,7 @@ def _build_period_summary_payload(
                 if summary.new_delta_pct is not None
                 else "Sin referencia en quincena previa"
             ),
+            "tone": _period_tone(QUINCENAL_SCOPE_CREATED_CURRENT),
             "label": QUINCENAL_SCOPE_CREATED_CURRENT,
             "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_CURRENT,
             "issueKeys": _issue_keys(groups.new_now),
@@ -1444,6 +1637,7 @@ def _build_period_summary_payload(
                 if summary.closed_delta_pct is not None
                 else "Sin referencia en quincena previa"
             ),
+            "tone": _period_tone(QUINCENAL_SCOPE_CLOSED_CURRENT),
             "label": QUINCENAL_SCOPE_CLOSED_CURRENT,
             "quincenalScopeLabel": QUINCENAL_SCOPE_CLOSED_CURRENT,
             "issueKeys": _issue_keys(groups.closed_now),
@@ -1457,6 +1651,7 @@ def _build_period_summary_payload(
                 if summary.resolution_delta_pct is not None
                 else "Sin referencia en quincena previa"
             ),
+            "tone": _period_tone(QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT),
             "label": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
             "quincenalScopeLabel": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
             "issueKeys": _issue_keys(groups.resolved_now),
@@ -1466,6 +1661,7 @@ def _build_period_summary_payload(
             "kicker": "Insights · Abiertas totales",
             "metric": f"{int(summary.open_total):,}",
             "detail": "Backlog abierto en el scope actual",
+            "tone": _period_tone(QUINCENAL_SCOPE_OPEN_TOTAL),
             "label": QUINCENAL_SCOPE_OPEN_TOTAL,
             "quincenalScopeLabel": QUINCENAL_SCOPE_OPEN_TOTAL,
             "issueKeys": _issue_keys(open_total_group),
@@ -1479,6 +1675,7 @@ def _build_period_summary_payload(
                     "kicker": str(summary.open_focus_card_kicker),
                     "metric": f"{int(summary.open_focus_total):,}",
                     "detail": str(summary.open_focus_card_detail),
+                    "tone": _period_tone(str(summary.open_focus_label)),
                     "label": str(summary.open_focus_label),
                     "quincenalScopeLabel": str(summary.open_focus_label),
                     "issueKeys": _issue_keys(groups.open_focus),
@@ -1488,6 +1685,7 @@ def _build_period_summary_payload(
                     "kicker": str(summary.open_other_card_kicker),
                     "metric": f"{int(summary.open_other_total):,}",
                     "detail": str(summary.open_other_card_detail),
+                    "tone": _period_tone(str(summary.open_other_label)),
                     "label": str(summary.open_other_label),
                     "quincenalScopeLabel": str(summary.open_other_label),
                     "issueKeys": _issue_keys(groups.open_other),
@@ -1503,6 +1701,7 @@ def _build_period_summary_payload(
                     "label": str(summary.open_focus_label),
                     "count": int(summary.open_focus_total),
                     "helpText": "",
+                    "tone": _period_tone(str(summary.open_focus_label)),
                     "quincenalScopeLabel": str(summary.open_focus_label),
                     "issueKeys": _issue_keys(groups.open_focus),
                     "items": _issue_records_from_df(groups.open_focus, limit=20),
@@ -1511,6 +1710,7 @@ def _build_period_summary_payload(
                     "label": str(summary.open_other_label),
                     "count": int(summary.open_other_total),
                     "helpText": "",
+                    "tone": _period_tone(str(summary.open_other_label)),
                     "quincenalScopeLabel": str(summary.open_other_label),
                     "issueKeys": _issue_keys(groups.open_other),
                     "items": _issue_records_from_df(groups.open_other, limit=20),
@@ -1523,6 +1723,7 @@ def _build_period_summary_payload(
                 "label": "Creadas en la quincena previa",
                 "count": int(summary.new_before),
                 "helpText": "quincena previa",
+                "tone": _period_tone("Creadas en la quincena previa"),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_PREVIOUS,
                 "issueKeys": _issue_keys(groups.new_before),
                 "items": _issue_records_from_df(groups.new_before, limit=20),
@@ -1531,6 +1732,7 @@ def _build_period_summary_payload(
                 "label": "Creadas en la quincena actual",
                 "count": int(summary.new_now),
                 "helpText": "quincena actual",
+                "tone": _period_tone("Creadas en la quincena actual"),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_CURRENT,
                 "issueKeys": _issue_keys(groups.new_now),
                 "items": _issue_records_from_df(groups.new_now, limit=20),
@@ -1539,6 +1741,7 @@ def _build_period_summary_payload(
                 "label": "Creadas en el mes actual",
                 "count": int(summary.new_accumulated),
                 "helpText": "mes actual",
+                "tone": _period_tone("Creadas en el mes actual"),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_MONTH,
                 "issueKeys": _issue_keys(groups.new_accumulated),
                 "items": _issue_records_from_df(groups.new_accumulated, limit=20),
@@ -1547,6 +1750,7 @@ def _build_period_summary_payload(
                 "label": "Cerradas en la quincena",
                 "count": int(summary.closed_now),
                 "helpText": "quincena actual",
+                "tone": _period_tone("Cerradas en la quincena"),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_CLOSED_CURRENT,
                 "issueKeys": _issue_keys(groups.closed_now),
                 "items": _issue_records_from_df(groups.closed_now, limit=20),
@@ -1555,6 +1759,7 @@ def _build_period_summary_payload(
                 "label": "Días de resolución incidencias cerradas en la quincena actual",
                 "count": int(len(groups.resolved_now)),
                 "helpText": "cerradas quincena actual",
+                "tone": _period_tone("Días de resolución incidencias cerradas en la quincena actual"),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
                 "issueKeys": _issue_keys(groups.resolved_now),
                 "items": _issue_records_from_df(

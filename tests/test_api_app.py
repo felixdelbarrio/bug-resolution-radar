@@ -231,6 +231,7 @@ def test_trend_detail_and_issue_keys_endpoints_return_filtered_contracts(
 
     assert trend_response.status_code == 200
     assert trend_response.json()["chart"]["id"] == "open_status_bar"
+    assert isinstance(trend_response.json()["sessionDelta"], list)
     assert keys_response.status_code == 200
     assert keys_response.json() == {"total": 1, "keys": ["RAD-1"]}
 
