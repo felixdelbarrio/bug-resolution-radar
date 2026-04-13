@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
-from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT
+from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT, BBVA_REPORT_LINE, BBVA_REPORT_MIST
 
 _REPORT_FONT_DIR = (
     Path(__file__).resolve().parent.parent / "ui" / "assets" / "fonts" / "bbva"
@@ -367,6 +367,20 @@ def _is_line_dominant_cartesian(traces: Sequence[object]) -> bool:
     return scatter_with_lines >= 2 and bar_count == 0
 
 
+def _legend_prefers_bottom(fig: go.Figure) -> bool:
+    legend = getattr(getattr(fig, "layout", None), "legend", None)
+    orientation = str(getattr(legend, "orientation", "") or "").strip().lower()
+    if orientation == "h":
+        return True
+    y_value = getattr(legend, "y", None)
+    try:
+        if y_value is not None and float(y_value) <= 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _unique_categories(values: Iterable[object]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -687,8 +701,11 @@ def _draw_axes(
 
     if x_title:
         label_w, label_h = _text_bbox(draw, x_title, title_font)
+        x_title_offset = int(44 * scale)
+        if "quincena" in str(x_title or "").strip().lower():
+            x_title_offset += int(30 * scale)
         draw.text(
-            (left + (width - label_w) / 2, top + height + int(44 * scale)),
+            (left + (width - label_w) / 2, top + height + x_title_offset),
             x_title,
             font=title_font,
             fill=text_color,
@@ -978,20 +995,29 @@ def _render_cartesian_chart(
         return
 
     line_dominant = _is_line_dominant_cartesian(traces)
-    use_right_legend = line_dominant and len(legend_items) >= 2 and width >= int(780 * scale)
+    force_bottom_legend = _legend_prefers_bottom(fig)
+    use_right_legend = (
+        line_dominant
+        and len(legend_items) >= 2
+        and width >= int(780 * scale)
+        and not force_bottom_legend
+    )
     axis_font_multiplier = 1.0
     line_width_multiplier = 1.0
     marker_size_multiplier = 1.0
-    legend_font = _load_font(int(16 * scale))
+    legend_font_px = int(16 * scale)
+    if line_dominant and force_bottom_legend:
+        legend_font_px = int(19 * scale)
+    legend_font = _load_font(legend_font_px)
     legend_panel_width = 0
     if use_right_legend:
-        axis_font_multiplier = 1.55
-        line_width_multiplier = 2.15
-        marker_size_multiplier = 1.6
-        legend_font = _load_font(int(34 * scale), bold=True)
+        axis_font_multiplier = 1.18
+        line_width_multiplier = 1.55
+        marker_size_multiplier = 1.25
+        legend_font = _load_font(int(22 * scale), bold=True)
         legend_panel_width = min(
-            int(width * 0.36),
-            max(int(width * 0.24), int(330 * scale)),
+            int(width * 0.31),
+            max(int(width * 0.22), int(260 * scale)),
         )
 
     left = int(104 * scale)
@@ -1066,8 +1092,8 @@ def _render_cartesian_chart(
             font=legend_font,
             text_color=text_color,
             scale=scale,
-            panel_color=_parse_color("#F5F8FD"),
-            border_color=_parse_color("#D6E0F1"),
+            panel_color=_parse_color(BBVA_REPORT_MIST),
+            border_color=_parse_color(BBVA_REPORT_LINE),
         )
     else:
         _draw_legend(
@@ -1112,7 +1138,15 @@ def render_plotly_figure_png(
     image = Image.new("RGBA", (width, height), paper_bg)
     draw = ImageDraw.Draw(image)
     legend_items = _collect_legend_items(fig)
-    legend_font = _load_font(int(16 * render_scale))
+    non_pie_traces = [
+        trace
+        for trace in list(getattr(fig, "data", []) or [])
+        if str(getattr(trace, "type", "") or "").strip().lower() != "pie"
+    ]
+    legend_font_px = int(16 * render_scale)
+    if _is_line_dominant_cartesian(non_pie_traces) and _legend_prefers_bottom(fig):
+        legend_font_px = int(19 * render_scale)
+    legend_font = _load_font(legend_font_px)
     legend_height = _legend_height(
         draw,
         legend_items,

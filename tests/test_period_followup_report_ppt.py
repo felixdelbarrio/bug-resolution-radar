@@ -602,7 +602,7 @@ def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> N
         for shape in [dashboard_slide.shapes[idx - 1]]
         if getattr(shape, "has_text_frame", False)
     ).lower()
-    assert "d. promedio" in top_three_blob
+    assert "d. p." in top_three_blob
 
 
 def test_generate_country_period_followup_ppt_functionality_color_contrast_is_readable() -> None:
@@ -697,7 +697,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         )
     )
     root_run = root_cause_shape.text_frame.paragraphs[0].runs[0]
-    assert root_run.font.color.rgb == RGBColor(0, 19, 145)
+    assert root_run.font.color.rgb == RGBColor(*period_ppt_mod._TABLE_BODY_FG_RGB)
 
 
 def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> None:
