@@ -860,3 +860,135 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
         assert min_match is not None
         assert int(max_match.group(1)) == int(round(float(summary.resolution_days_max_now or 0.0)))
         assert int(min_match.group(1)) == int(round(float(summary.resolution_days_min_now or 0.0)))
+
+
+def test_period_followup_summary_metric_cards_keep_template_blue_text_color() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Issue A",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-08T10:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Issue A2",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": "2026-04-01T10:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": "2026-04-08T10:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "B-1",
+                "summary": "Issue B",
+                "status": "Resolved",
+                "priority": "High",
+                "created": "2026-04-02T10:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": "2026-04-10T10:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+
+    def _first_run_color(shape: Any) -> RGBColor | None:
+        if shape is None or not getattr(shape, "has_text_frame", False):
+            return None
+        for paragraph in list(shape.text_frame.paragraphs):
+            for run in list(paragraph.runs):
+                if not str(getattr(run, "text", "") or "").strip():
+                    continue
+                color = getattr(getattr(run, "font", None), "color", None)
+                rgb = getattr(color, "rgb", None)
+                if rgb is not None:
+                    return rgb
+        return None
+
+    for slide_idx in (2, 3, 4):
+        slide = prs.slides[slide_idx]
+        reference_color = _first_run_color(slide.shapes[15])  # shape 16: ANTES/AHORA/ACUMULADO
+        assert reference_color == RGBColor(4, 19, 139)
+        assert _first_run_color(slide.shapes[8]) == reference_color  # shape 9
+        assert _first_run_color(slide.shapes[11]) == reference_color  # shape 12
+        assert _first_run_color(slide.shapes[14]) == reference_color  # shape 15
+
+
+def test_period_followup_functionality_trend_title_matches_template_style() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Login falla en alta de usuario",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-08T10:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "B-1",
+                "summary": "Transferencias con timeout",
+                "status": "Blocked",
+                "priority": "Medium",
+                "created": "2026-04-02T10:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+    trend_slide = prs.slides[9]  # slide 10 (1-based)
+
+    title_shape = next(
+        (
+            shape
+            for shape in trend_slide.shapes
+            if getattr(shape, "has_text_frame", False)
+            and "Tendencia por funcionalidad" in str(getattr(shape, "text", "") or "")
+        ),
+        None,
+    )
+    assert title_shape is not None
+
+    first_run = None
+    for paragraph in title_shape.text_frame.paragraphs:
+        for run in paragraph.runs:
+            if str(getattr(run, "text", "") or "").strip():
+                first_run = run
+                break
+        if first_run is not None:
+            break
+    assert first_run is not None
+    assert first_run.font.name == "Source Serif 4"
+    assert first_run.font.color.rgb == RGBColor(4, 19, 139)

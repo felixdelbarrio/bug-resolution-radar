@@ -1716,13 +1716,16 @@ def _clear_slide_shapes(slide: Any) -> None:
         _remove_shape(shape)
 
 
-def _fig_to_png_exact(fig: Optional[go.Figure], *, width: int, height: int) -> bytes:
+def _fig_to_png_exact(
+    fig: Optional[go.Figure], *, width: int, height: int, scale: float = 2.0
+) -> bytes:
     if fig is None:
         return b""
+    safe_scale = max(float(scale or 0.0), 0.5)
     try:
         return _kaleido_png_bytes(
             fig_obj=fig,
-            scale=2.0,
+            scale=safe_scale,
             export_width=max(int(width), 640),
             export_height=max(int(height), 360),
         )
@@ -1782,6 +1785,7 @@ def _add_exec_textbox(
     text: str,
     font_size_pt: float,
     color_rgb: RGBColor,
+    font_name: str | None = None,
     bold: bool = False,
     align: PP_ALIGN = PP_ALIGN.LEFT,
 ) -> Any:
@@ -1808,6 +1812,8 @@ def _add_exec_textbox(
     run = p.add_run()
     run.text = str(text or "")
     run.font.size = Pt(float(font_size_pt))
+    if str(font_name or "").strip():
+        run.font.name = str(font_name).strip()
     run.font.bold = bool(bold)
     run.font.color.rgb = color_rgb
     return box
@@ -1911,18 +1917,18 @@ def _resolution_chart_png_executive(
         return b""
 
     fig.update_layout(
-        width=3200,
-        height=620,
+        width=1700,
+        height=331,
         xaxis_title="Rango en días",
         yaxis_title="Incidencias abiertas",
         xaxis=dict(
-            tickfont=dict(size=17, color="#1E2C46"),
-            title=dict(font=dict(size=20, color="#17253F")),
+            tickfont=dict(size=24, color="#1E2C46"),
+            title=dict(font=dict(size=25, color="#17253F")),
             gridcolor="rgba(155, 169, 196, 0.22)",
         ),
         yaxis=dict(
-            tickfont=dict(size=17, color="#1E2C46"),
-            title=dict(font=dict(size=19, color="#17253F")),
+            tickfont=dict(size=24, color="#1E2C46"),
+            title=dict(font=dict(size=24, color="#17253F")),
             gridcolor="rgba(155, 169, 196, 0.22)",
         ),
         legend=dict(
@@ -1932,12 +1938,12 @@ def _resolution_chart_png_executive(
             x=1.0,
             yanchor="top",
             y=-0.11,
-            font=dict(size=16, color="#1A2740"),
+            font=dict(size=20, color="#1A2740"),
             bgcolor="rgba(255,255,255,0.96)",
             bordercolor="rgba(188,198,216,0.95)",
             borderwidth=1,
         ),
-        margin=dict(l=48, r=30, t=18, b=86),
+        margin=dict(l=58, r=30, t=14, b=104),
         bargap=0.14,
         plot_bgcolor="#F6F8FC",
         paper_bgcolor="#F6F8FC",
@@ -1957,12 +1963,12 @@ def _resolution_chart_png_executive(
     fig.update_traces(
         selector=dict(type="bar"),
         textposition="inside",
-        textfont=dict(size=19, color="#FFFFFF"),
+        textfont=dict(size=25, color="#FFFFFF"),
         marker_line_color="#0A2E72",
         marker_line_width=1,
         cliponaxis=False,
     )
-    payload = _fig_to_png_exact(fig, width=3600, height=700)
+    payload = _fig_to_png_exact(fig, width=1700, height=331, scale=1.0)
     return payload or b""
 
 
@@ -2262,7 +2268,7 @@ def _priority_chart_png_executive(
                 text=[str(value) if value > 0 else ""],
                 textposition="inside",
                 insidetextanchor="middle",
-                textfont=dict(size=26, color="#FFFFFF"),
+                textfont=dict(size=32, color="#FFFFFF"),
                 cliponaxis=False,
                 hovertemplate="Prioridad: %{x}<br>Incidencias: %{y}<extra></extra>",
                 name=str(label),
@@ -2270,7 +2276,7 @@ def _priority_chart_png_executive(
             )
         )
     max_value = max(values) if values else 1
-    top_offset = max(max_value * 0.075, 2.2)
+    top_offset = max(max_value * 0.10, 3.2)
     fig.add_trace(
         go.Scatter(
             x=labels,
@@ -2278,35 +2284,35 @@ def _priority_chart_png_executive(
             mode="text",
             text=[f"{pct:.1f}%" if val > 0 else "" for pct, val in zip(percentages, values)],
             textposition="top center",
-            textfont=dict(size=28, color="#0C376E"),
+            textfont=dict(size=36, color="#0C376E"),
             hoverinfo="skip",
             showlegend=False,
         )
     )
     fig.update_layout(
-        width=3200,
-        height=620,
+        width=1700,
+        height=380,
         xaxis=dict(
-            tickfont=dict(size=18, color="#1E2C46"),
+            tickfont=dict(size=24, color="#1E2C46"),
             gridcolor="rgba(155, 169, 196, 0.22)",
             categoryorder="array",
             categoryarray=labels,
             title="",
         ),
         yaxis=dict(
-            tickfont=dict(size=18, color="#1E2C46"),
+            tickfont=dict(size=24, color="#1E2C46"),
             gridcolor="rgba(155, 169, 196, 0.22)",
-            range=[0, (max_value + top_offset) * 1.12 if values else 1.0],
+            range=[0, (max_value + top_offset) * 1.20 if values else 1.0],
             title="",
         ),
-        uniformtext=dict(minsize=20, mode="show"),
+        uniformtext=dict(minsize=26, mode="show"),
         bargap=0.38,
         showlegend=False,
-        margin=dict(l=36, r=24, t=28, b=58),
+        margin=dict(l=42, r=22, t=26, b=78),
         plot_bgcolor="#F6F8FC",
         paper_bgcolor="#F6F8FC",
     )
-    payload = _fig_to_png_exact(fig, width=3400, height=760)
+    payload = _fig_to_png_exact(fig, width=1700, height=380, scale=1.0)
     return payload or b""
 
 
@@ -2471,6 +2477,7 @@ def _populate_open_priority_executive_slide(
 
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
+    summary_metric_color = _first_run_color_rgb(_shape_or_none(slide, 16)) or RGBColor(4, 19, 139)
     _set_shape_text(slide, 3, title)
     _set_paragraph_value_after_colon(
         slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
@@ -2514,12 +2521,14 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         shape_index=15,
         value_text=str(int(summary.new_now)),
         label_text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
+        text_color_rgb=summary_metric_color,
     )
     _write_metric_card(
         slide,
         shape_index=9,
         value_text=str(int(summary.closed_now)),
         label_text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
+        text_color_rgb=summary_metric_color,
     )
     _add_metric_split_column(
         slide,
@@ -2537,6 +2546,7 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         extra_lines=[
             ("(EN PROMEDIO)", 9.5, True, True, 0.6),
         ],
+        text_color_rgb=summary_metric_color,
     )
     _set_paragraph_level(slide, shape_index=12, paragraph_index=1, level=1)
     _add_metric_split_column(
@@ -2988,7 +2998,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
                 marker=dict(color=color_hex, line=dict(color="#F2F5FA", width=0.8)),
                 text=value_text,
                 textposition="inside",
-                textfont=dict(size=14.5, color=text_color),
+                textfont=dict(size=22, color=text_color),
                 legendrank=int(legend_rank.get(theme, len(legend_rank))),
                 customdata=[[int(totals.get(lbl, 0))] for lbl in axis_labels],
                 hovertemplate=(
@@ -3008,21 +3018,21 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
             mode="text",
             text=[str(int(v)) for v in totals.tolist()],
             textposition="top center",
-            textfont=dict(size=19, color="#0B3E76"),
+            textfont=dict(size=30, color="#0B3E76"),
             showlegend=False,
             hoverinfo="skip",
         )
     )
     fig.update_layout(
-        width=1980,
-        height=940,
+        width=1700,
+        height=773,
         barmode="stack",
         bargap=0.19,
-        margin=dict(l=52, r=42, t=24, b=172),
+        margin=dict(l=64, r=40, t=24, b=188),
         xaxis_title="Quincena",
         yaxis_title="Incidencias abiertas acumuladas",
         hovermode="x",
-        uniformtext=dict(minsize=12, mode="hide"),
+        uniformtext=dict(minsize=18, mode="hide"),
         plot_bgcolor="#F6F8FC",
         paper_bgcolor="#F6F8FC",
         legend=dict(
@@ -3035,7 +3045,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
             bgcolor="rgba(255,255,255,0.96)",
             bordercolor="rgba(188,198,216,0.95)",
             borderwidth=1,
-            font=dict(size=15, color="#1A2740"),
+            font=dict(size=22, color="#1A2740"),
             traceorder="normal",
         ),
     )
@@ -3044,18 +3054,19 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         categoryorder="array",
         categoryarray=axis_labels,
         tickangle=0,
-        tickfont=dict(size=12.2, color="#1E2C46"),
+        tickfont=dict(size=22, color="#1E2C46"),
+        title_font=dict(size=24, color="#17253F"),
         automargin=True,
         gridcolor="rgba(155, 169, 196, 0.22)",
     )
     fig.update_yaxes(
         range=[0, max_total + (total_offset * 2.5) if max_total > 0 else 1.0],
-        tickfont=dict(size=14, color="#1E2C46"),
-        title_font=dict(size=20, color="#17253F"),
+        tickfont=dict(size=23, color="#1E2C46"),
+        title_font=dict(size=28, color="#17253F"),
         gridcolor="rgba(155, 169, 196, 0.24)",
     )
 
-    payload = _fig_to_png_exact(fig, width=2200, height=1000)
+    payload = _fig_to_png_exact(fig, width=1700, height=773, scale=1.0)
     return payload or b""
 
 
@@ -3087,8 +3098,9 @@ def _populate_functionality_trend_aggregate_slide(
         width=content_w,
         height=int(slide_h * 0.065),
         text="Tendencia por funcionalidad : vista agregada",
-        font_size_pt=30.0,
-        color_rgb=RGBColor(0, 19, 70),
+        font_size_pt=22.0,
+        color_rgb=RGBColor(4, 19, 139),
+        font_name="Source Serif 4",
         bold=True,
     )
 
