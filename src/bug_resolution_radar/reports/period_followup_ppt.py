@@ -251,15 +251,6 @@ def _fmt_days(value: float | None) -> int:
     return max(0, int(round(float(value))))
 
 
-def _fmt_delta_pct(value: float | None) -> str:
-    if value is None or pd.isna(value):
-        return "—"
-    pct = float(value) * 100.0
-    # Direction is already represented by template arrows/colors; keep compact
-    # absolute percentage text to avoid overflow in tiny delta placeholders.
-    return f"{abs(pct):.0f}%"
-
-
 def _summary_delta_badge(value: float | None) -> tuple[str, RGBColor]:
     if value is None or pd.isna(value):
         return ("—", _SUMMARY_DELTA_NEUTRAL_RGB)
@@ -1128,9 +1119,13 @@ def _table_picture_payload(
 
     raw_col_widths: list[int]
     if column_weights:
-        raw_col_widths = [max(int(round(float(value or 0) * 1000.0)), 1) for value in column_weights]
+        raw_col_widths = [
+            max(int(round(float(value or 0) * 1000.0)), 1) for value in column_weights
+        ]
         if len(raw_col_widths) < col_count:
-            raw_col_widths.extend([raw_col_widths[-1] if raw_col_widths else 1] * (col_count - len(raw_col_widths)))
+            raw_col_widths.extend(
+                [raw_col_widths[-1] if raw_col_widths else 1] * (col_count - len(raw_col_widths))
+            )
         raw_col_widths = raw_col_widths[:col_count]
     else:
         raw_col_widths = [int(getattr(col, "width", 0) or 0) for col in table.columns]
@@ -1166,7 +1161,15 @@ def _table_picture_payload(
     base_font_pt = _table_body_font_size_pt(len(normalized_rows)) + safe_font_boost
     header_font = _load_report_font(
         size_px=max(
-            _emu_to_px(Pt(float(header_font_size_pt if header_font_size_pt is not None else (base_font_pt + 0.8)))),
+            _emu_to_px(
+                Pt(
+                    float(
+                        header_font_size_pt
+                        if header_font_size_pt is not None
+                        else (base_font_pt + 0.8)
+                    )
+                )
+            ),
             12,
         ),
         bold=True,
@@ -1818,25 +1821,6 @@ def _configure_summary_delta_badge(
                 run.font.size = Pt(float(font_size_pt))
             except Exception:
                 pass
-
-
-def _set_paragraph_level(
-    slide: Any,
-    *,
-    shape_index: int,
-    paragraph_index: int,
-    level: int,
-) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None or not getattr(shape, "has_text_frame", False):
-        return
-    paragraphs = list(shape.text_frame.paragraphs)
-    if paragraph_index < 0 or paragraph_index >= len(paragraphs):
-        return
-    try:
-        paragraphs[paragraph_index].level = max(0, int(level))
-    except Exception:
-        return
 
 
 def _overlay_picture(
@@ -2855,15 +2839,9 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         value_suffix=" días",
     )
 
-    _set_shape_font_size(
-        slide, shape_index=10, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True
-    )
-    _set_shape_font_size(
-        slide, shape_index=13, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True
-    )
-    _set_shape_font_size(
-        slide, shape_index=19, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True
-    )
+    _set_shape_font_size(slide, shape_index=10, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    _set_shape_font_size(slide, shape_index=13, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    _set_shape_font_size(slide, shape_index=19, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
     _configure_summary_delta_badge(slide, shape_index=10, card_shape_index=9)
     _configure_summary_delta_badge(slide, shape_index=13, card_shape_index=12)
     _configure_summary_delta_badge(slide, shape_index=19, card_shape_index=15)
@@ -3028,9 +3006,7 @@ def _write_functionality_total_open_badge(
     number_size_pt = 40.0 if int(abs(total_open)) >= 100 else 44.0
     label_size_pt = 14.0 if critical_wording else 16.0
     label_lines = (
-        ("INCIDENCIAS CRÍTICAS", "ABIERTAS")
-        if critical_wording
-        else ("INCIDENCIAS ABIERTAS",)
+        ("INCIDENCIAS CRÍTICAS", "ABIERTAS") if critical_wording else ("INCIDENCIAS ABIERTAS",)
     )
 
     p0 = tf.paragraphs[0]
@@ -3062,11 +3038,7 @@ def _write_functionality_total_open_badge(
 
 
 def _top_row_line(row: FunctionalityTopRow) -> str:
-    line = (
-        format_top_row_label(row)
-        .replace("acumuladas", "acum.")
-        .replace("d. promedio", "d. p.")
-    )
+    line = format_top_row_label(row).replace("acumuladas", "acum.").replace("d. promedio", "d. p.")
     return _trim_text(line, max_chars=108)
 
 

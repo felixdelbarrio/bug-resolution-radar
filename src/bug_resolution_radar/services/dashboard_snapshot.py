@@ -2278,7 +2278,9 @@ def _build_functionality_followup_payload(
     apply_default_status_when_empty: bool,
 ) -> dict[str, Any]:
     country_txt = str(country or "").strip()
-    source_scope = [str(sid or "").strip() for sid in list(source_ids or []) if str(sid or "").strip()]
+    source_scope = [
+        str(sid or "").strip() for sid in list(source_ids or []) if str(sid or "").strip()
+    ]
     if not country_txt or not source_scope:
         return {"periodLabel": "", "isCriticalFocus": False, "topThree": []}
 
