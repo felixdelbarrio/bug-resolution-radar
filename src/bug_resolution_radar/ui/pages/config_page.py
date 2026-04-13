@@ -1632,6 +1632,8 @@ def render(settings: Settings) -> None:
                 theme_default = (
                     "dark" if bool(st.session_state.get("workspace_dark_mode", False)) else "light"
                 )
+            # Always show the currently persisted preference when entering Config.
+            st.session_state["cfg_workspace_theme_mode"] = theme_default
 
             with st.container(border=True, key="cfg_prefs_card_workspace"):
                 st.markdown("#### Ambiente de trabajo")

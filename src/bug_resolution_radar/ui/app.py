@@ -322,6 +322,8 @@ def _persist_theme_preference_in_env(is_dark: bool) -> None:
     desired_theme = "dark" if bool(is_dark) else "light"
     settings = load_settings()
     current_theme = str(getattr(settings, "THEME", "") or "").strip().lower()
+    # Keep Config page widget state aligned with the persisted preference.
+    st.session_state["cfg_workspace_theme_mode"] = desired_theme
     if current_theme == desired_theme:
         return
     save_settings(settings.model_copy(update={"THEME": desired_theme}))

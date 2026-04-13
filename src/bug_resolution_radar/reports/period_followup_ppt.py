@@ -1708,7 +1708,7 @@ def _format_quincena_axis_ym(start_value: object, end_value: object) -> str:
     end = pd.to_datetime(end_value, errors="coerce")
     if pd.isna(start) or pd.isna(end):
         return str(start_value or "")
-    return f"{int(start.month):02d} |<br>{int(start.day)}-{int(end.day)}"
+    return f"{int(start.month):02d} |\n{int(start.day)}-{int(end.day)}"
 
 
 def _clear_slide_shapes(slide: Any) -> None:
@@ -3100,10 +3100,10 @@ def _populate_functionality_trend_aggregate_slide(
         _overlay_picture_contain(
             slide,
             payload=chart_png,
-            frame_left=frame_left + 22_000,
-            frame_top=frame_top + 24_000,
-            frame_width=frame_width - 44_000,
-            frame_height=frame_height - 48_000,
+            frame_left=frame_left + 120_000,
+            frame_top=frame_top + 82_000,
+            frame_width=frame_width - 240_000,
+            frame_height=frame_height - 164_000,
         )
     else:
         _add_exec_textbox(
