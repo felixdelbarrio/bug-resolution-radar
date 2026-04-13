@@ -1688,6 +1688,8 @@ def _build_period_summary_payload(
             "cardId": "resolution_now",
             "kicker": "Insights · Resolución",
             "metric": _fmt_days(summary.resolution_days_now),
+            "maxDays": _fmt_days(summary.resolution_days_max_now),
+            "minDays": _fmt_days(summary.resolution_days_min_now),
             "detail": (
                 f"Δ {float(summary.resolution_delta_pct or 0.0) * 100.0:+.1f}% vs quincena previa"
                 if summary.resolution_delta_pct is not None
@@ -1841,6 +1843,8 @@ def _build_period_summary_payload(
                     "nuevasAhora": int(source_summary.new_now),
                     "cerradasAhora": int(source_summary.closed_now),
                     "resolucionAhora": _fmt_days(source_summary.resolution_days_now),
+                    "resolucionMaxAhora": _fmt_days(source_summary.resolution_days_max_now),
+                    "resolucionMinAhora": _fmt_days(source_summary.resolution_days_min_now),
                 }
             )
 

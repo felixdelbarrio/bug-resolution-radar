@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -293,6 +294,13 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
 
     prs = Presentation(BytesIO(out.content))
 
+    s3_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[2].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "seguimiento de incidencias - méxico (vista agregada)" in s3_blob
+
     # Regression guard: evolution slides must keep exactly 3 rendered chart panels.
     for slide_idx in (6, 7):  # slides 7 and 8 (0-based indexes)
         slide = prs.slides[slide_idx]
@@ -311,12 +319,62 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
     s4 = prs.slides[3]
     s4_closed = str(s4.shapes[8].text or "").upper().replace(" ", "")
     s4_days = str(s4.shapes[11].text or "").upper().replace(" ", "")
+    s4_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in s4.shapes
+        if getattr(shape, "has_text_frame", False)
+    ).upper()
     assert "CERRADASINCIDENCIA" not in s4_closed
     assert "RESOLUCIÓNDÍASDERESOLUCIÓN" not in s4_days
+    assert s4_blob.count("ALTAS:") == 1
+    assert s4_blob.count("RESTO:") == 1
+    assert "MAX:" in s4_blob
+    assert "MIN:" in s4_blob
+    assert "MAX: 7 DÍAS" in s4_blob
+    assert "MIN: 7 DÍAS" in s4_blob
 
     # Long titles should be marked for in-shape fit in PowerPoint.
     s5_title = prs.slides[4].shapes[2]
     assert s5_title.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+    # Cover period must be rendered only in the dedicated period placeholder.
+    cover_blob = " || ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[0].shapes
+        if getattr(shape, "has_text_frame", False)
+    )
+    cover_blob_lower = cover_blob.lower()
+    assert "periodo dd/mm - dd/mm 2026" not in cover_blob_lower
+    period_matches = re.findall(
+        r"periodo\s+\d{2}/\d{2}\s*-\s*\d{2}/\d{2}/\d{4}",
+        cover_blob_lower,
+    )
+    assert len(period_matches) == 1
+    assert "kpis, evolución y análisis del periodo" in cover_blob_lower
+
+    period_shape = next(
+        (
+            shape
+            for shape in prs.slides[0].shapes
+            if getattr(shape, "has_text_frame", False)
+            and re.search(
+                r"periodo\s+\d{2}/\d{2}\s*-\s*\d{2}/\d{2}/\d{4}",
+                str(getattr(shape, "text", "") or "").lower(),
+            )
+        ),
+        None,
+    )
+    assert period_shape is not None
+    period_run_size = None
+    for paragraph in period_shape.text_frame.paragraphs:
+        for run in paragraph.runs:
+            if str(getattr(run, "text", "") or "").strip():
+                period_run_size = run.font.size
+                break
+        if period_run_size is not None:
+            break
+    assert period_run_size is not None
+    assert float(period_run_size.pt) >= 11.0
 
 
 def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
@@ -515,8 +573,26 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         and "INCIDENCIAS" in str(getattr(shape, "text", "") or "")
         and "ABIERTAS" in str(getattr(shape, "text", "") or "")
     )
+    dashboard_blob_text = str(getattr(dashboard_blob_shape, "text", "") or "")
+    assert "|" not in dashboard_blob_text
+    assert "INCIDENCIAS\nABIERTAS" in dashboard_blob_text
     dashboard_run = dashboard_blob_shape.text_frame.paragraphs[0].runs[0]
     assert dashboard_run.font.color.rgb == RGBColor(255, 255, 255)
+
+    template_prs = Presentation(str(period_ppt_mod._resolve_functionality_template_path()))
+    template_table = template_prs.slides[1].shapes[0]
+    dashboard_table_picture = max(
+        (
+            shape
+            for shape in prs.slides[9].shapes
+            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+            and int(getattr(shape, "left", 0)) < 3_600_000
+        ),
+        key=lambda shape: int(getattr(shape, "width", 0)) * int(getattr(shape, "height", 0)),
+    )
+    assert int(dashboard_table_picture.top) < int(template_table.top)
+    assert int(dashboard_table_picture.height) > int(template_table.height)
+    assert int(dashboard_table_picture.top) > int(dashboard_blob_shape.top + dashboard_blob_shape.height)
 
     root_cause_shape = next(
         shape
@@ -642,6 +718,7 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         for shape in prs_default.slides[idx].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
+    assert "seguimiento de kpis - incidencias abiertas por funcionalidad" in blob_default
     assert "incidencias críticas" not in blob_default
 
     out_critical = generate_country_period_followup_ppt(
@@ -658,4 +735,5 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         for shape in prs_critical.slides[idx].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
+    assert "seguimiento de kpis - incidencias críticas abiertas por funcionalidad" in blob_critical
     assert "incidencias críticas" in blob_critical

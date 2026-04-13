@@ -149,6 +149,10 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
     assert summary.new_accumulated == 2
     assert summary.resolution_days_now is not None
     assert int(round(summary.resolution_days_now)) == 19
+    assert summary.resolution_days_min_now is not None
+    assert summary.resolution_days_max_now is not None
+    assert int(round(summary.resolution_days_min_now)) == 19
+    assert int(round(summary.resolution_days_max_now)) == 19
     assert set(result.by_source.keys()) == {"helix:mexico:senda", "helix:mexico:gema"}
 
 

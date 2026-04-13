@@ -65,6 +65,9 @@ _REPORT_FONT_BOOK_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Book.ttf"
 _REPORT_FONT_BOLD_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Bold.ttf"
 _ZOOM_TABLE_ROWS_PER_SLIDE = 5
 _ZOOM_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (1.9, 4.9, 2.3, 1.9, 1.5, 1.5)
+_FUNCTIONALITY_TABLE_TOP_SHIFT_RATIO = 0.048
+_FUNCTIONALITY_TABLE_TOP_GUARD_EMU = 32_000
+_FUNCTIONALITY_TABLE_FONT_BOOST_PT = 1.2
 
 
 @dataclass(frozen=True)
@@ -992,6 +995,7 @@ def _table_picture_payload(
     description_col_index: int | None = None,
     left_align_cols: Sequence[int] = (),
     hyperlink_by_row: Mapping[int, str] | None = None,
+    font_boost_pt: float = 0.0,
 ) -> bytes:
     table = table_shape.table
     col_count = len(table.columns)
@@ -1031,7 +1035,8 @@ def _table_picture_payload(
     body_row_h_px = max(body_row_h_px, _emu_to_px(body_row_h_emu))
     header_h_px = max(height_px - (body_row_h_px * len(normalized_rows)), 1)
 
-    base_font_pt = _table_body_font_size_pt(len(normalized_rows))
+    safe_font_boost = max(float(font_boost_pt or 0.0), 0.0)
+    base_font_pt = _table_body_font_size_pt(len(normalized_rows)) + safe_font_boost
     header_font = _load_report_font(
         size_px=max(_emu_to_px(Pt(base_font_pt + 0.8)), 12),
         bold=True,
@@ -1066,7 +1071,7 @@ def _table_picture_payload(
             draw.rectangle(box, fill=_TABLE_BODY_BG_RGB, outline=_TABLE_BORDER_RGB, width=2)
             cell_font_pt = base_font_pt
             if description_col_index is not None and cidx == int(description_col_index):
-                cell_font_pt = max(base_font_pt - 0.4, 7.0)
+                cell_font_pt = max(base_font_pt - 0.25, 7.0)
             cell_font = _load_report_font(
                 size_px=max(_emu_to_px(Pt(cell_font_pt)), 10),
                 bold=False,
@@ -1096,6 +1101,7 @@ def _replace_table_with_picture(
     left_align_cols: Sequence[int] = (),
     hyperlink_by_row: Mapping[int, str] | None = None,
     target_geometry: tuple[int, int, int, int] | None = None,
+    font_boost_pt: float = 0.0,
 ) -> None:
     shape = _shape_table_or_none(slide, table_shape_index)
     if shape is None:
@@ -1107,6 +1113,7 @@ def _replace_table_with_picture(
         description_col_index=description_col_index,
         left_align_cols=left_align_cols,
         hyperlink_by_row=hyperlink_by_row,
+        font_boost_pt=font_boost_pt,
     )
     if not payload:
         _set_table_rows(
@@ -1471,6 +1478,7 @@ def _add_metric_split_column(
     top_value: int,
     bottom_label: str,
     bottom_value: int,
+    value_suffix: str = "",
     text_color_rgb: RGBColor | None = None,
 ) -> None:
     card = _shape_or_none(slide, card_shape_index)
@@ -1533,7 +1541,7 @@ def _add_metric_split_column(
     p0 = tf.paragraphs[0]
     _set_paragraph_single_run(
         p0,
-        text=f"{str(top_label).strip()}: {int(top_value)}",
+        text=f"{str(top_label).strip()}: {int(top_value)}{str(value_suffix or '')}",
         size_pt=12.0,
         bold=True,
         color_rgb=base_color,
@@ -1541,7 +1549,7 @@ def _add_metric_split_column(
     p1 = tf.add_paragraph()
     _set_paragraph_single_run(
         p1,
-        text=f"{str(bottom_label).strip()}: {int(bottom_value)}",
+        text=f"{str(bottom_label).strip()}: {int(bottom_value)}{str(value_suffix or '')}",
         size_pt=12.0,
         bold=True,
         color_rgb=base_color,
@@ -1777,10 +1785,11 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _add_metric_split_column(
         slide,
         card_shape_index=12,
-        top_label=str(focus_split_label),
-        top_value=int(summary.resolved_focus_now),
-        bottom_label="RESTO",
-        bottom_value=int(summary.resolved_other_now),
+        top_label="MAX",
+        top_value=int(_fmt_days(summary.resolution_days_max_now)),
+        bottom_label="MIN",
+        bottom_value=int(_fmt_days(summary.resolution_days_min_now)),
+        value_suffix=" días",
     )
 
     _set_shape_font_size(slide, shape_index=10, font_size_pt=14.0, bold=True)
@@ -1813,14 +1822,94 @@ def _populate_evolution_slide(
 
 
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
+    candidates: list[tuple[int, Any]] = []
     for shape in slide.shapes:
         if not getattr(shape, "has_text_frame", False):
             continue
         text = str(getattr(shape, "text", "") or "")
-        if "Periodo" not in text and "periodo" not in text:
+        lower = text.lower()
+        if "periodo" not in lower:
             continue
-        _set_shape_text_by_shape(shape, str(period_label or "").strip())
+
+        score = 0
+        # Main template placeholder: "Periodo dd/mm - dd/mm yyyy".
+        if "dd/mm" in lower:
+            score += 100
+        if lower.strip().startswith("periodo"):
+            score += 20
+
+        # Corporate cover period ribbon is yellow and sits in lower area.
+        try:
+            fill = shape.fill
+            if int(fill.type or 0) == 1:
+                rgb = getattr(fill.fore_color, "rgb", None)
+                if rgb is not None:
+                    score += 40 if int(getattr(rgb, "blue", 255)) < 170 else 0
+        except Exception:
+            pass
+        try:
+            score += int(int(shape.top) / 100000)
+        except Exception:
+            pass
+
+        # Avoid replacing explanatory subtitle "...análisis del periodo".
+        if "kpi" in lower or "análisis" in lower or "analisis" in lower:
+            score -= 30
+        candidates.append((score, shape))
+
+    if not candidates:
         return
+    target = max(candidates, key=lambda item: item[0])[1]
+    if not getattr(target, "has_text_frame", False):
+        return
+
+    tf = target.text_frame
+    sample_run = None
+    try:
+        sample_run = tf.paragraphs[0].runs[0]
+    except Exception:
+        sample_run = None
+
+    tf.clear()
+    paragraph = tf.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.CENTER
+    run = paragraph.add_run()
+    run.text = str(period_label or "").strip()
+
+    if sample_run is not None:
+        try:
+            run.font.bold = sample_run.font.bold
+        except Exception:
+            pass
+        try:
+            run.font.italic = sample_run.font.italic
+        except Exception:
+            pass
+        try:
+            run.font.name = sample_run.font.name
+        except Exception:
+            pass
+        try:
+            rgb = getattr(getattr(sample_run.font, "color", None), "rgb", None)
+            if rgb is not None:
+                run.font.color.rgb = rgb
+        except Exception:
+            pass
+
+    # Keep the period text readable and centered inside the yellow ribbon.
+    run.font.size = Pt(15.0)
+    try:
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = False
+    except Exception:
+        pass
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
 
 
 def _fmt_avg_days(value: float) -> str:
@@ -1875,6 +1964,39 @@ def _root_cause_caption(zoom: FunctionalityZoomSlide, *, critical_wording: bool)
     return f"Causas raíz detectadas: {detail}."
 
 
+def _functionality_dashboard_table_target_geometry(
+    slide: Any,
+    *,
+    table_shape_index: int,
+) -> tuple[int, int, int, int] | None:
+    table_shape = _shape_table_or_none(slide, table_shape_index)
+    if table_shape is None:
+        return None
+
+    left = int(table_shape.left)
+    top = int(table_shape.top)
+    width = int(table_shape.width)
+    height = int(table_shape.height)
+    if width <= 0 or height <= 0:
+        return None
+
+    top_anchor_indexes = (2, 4, 5, 6, 8, 10)
+    top_anchor_bottom = 0
+    for idx in top_anchor_indexes:
+        anchor = _shape_or_none(slide, idx)
+        if anchor is None:
+            continue
+        top_anchor_bottom = max(top_anchor_bottom, int(anchor.top) + int(anchor.height))
+
+    guard_top = max(top_anchor_bottom + _FUNCTIONALITY_TABLE_TOP_GUARD_EMU, 0)
+    proposed_top = top - max(int(round(height * _FUNCTIONALITY_TABLE_TOP_SHIFT_RATIO)), 1)
+    new_top = max(proposed_top, guard_top)
+    if new_top >= top:
+        return None
+    delta = top - new_top
+    return (left, new_top, width, height + delta)
+
+
 def _populate_functionality_dashboard_slide(
     slide: Any,
     *,
@@ -1904,9 +2026,9 @@ def _populate_functionality_dashboard_slide(
         slide,
         5,
         (
-            f"{int(summary.total_open_critical)} INCIDENCIAS CRÍTICAS  | ABIERTAS"
+            f"{int(summary.total_open_critical)} INCIDENCIAS CRÍTICAS\nABIERTAS"
             if critical_wording
-            else f"{int(summary.total_open_critical)} INCIDENCIAS  | ABIERTAS"
+            else f"{int(summary.total_open_critical)} INCIDENCIAS\nABIERTAS"
         ),
     )
     _set_shape_font_color(slide, shape_index=5, color_rgb=RGBColor(255, 255, 255))
@@ -1960,12 +2082,18 @@ def _populate_functionality_dashboard_slide(
         ),
     )
     _set_shape_font_color(slide, shape_index=18, color_rgb=RGBColor(255, 255, 255))
+    table_target_geometry = _functionality_dashboard_table_target_geometry(
+        slide,
+        table_shape_index=1,
+    )
     _replace_table_with_picture(
         slide,
         table_shape_index=1,
         rows=table_rows,
         description_col_index=1,
         left_align_cols=(1,),
+        target_geometry=table_target_geometry,
+        font_boost_pt=_FUNCTIONALITY_TABLE_FONT_BOOST_PT,
     )
 
 
@@ -2071,9 +2199,9 @@ def _append_functionality_followup_slides(
         dashboard_slide,
         3,
         (
-            "Seguimiento de KPIs - Incidencias críticas por funcionalidad"
+            "Seguimiento de KPIs - Incidencias críticas abiertas por funcionalidad"
             if critical_wording
-            else "Seguimiento de KPIs - Incidencias por funcionalidad"
+            else "Seguimiento de KPIs - Incidencias abiertas por funcionalidad"
         ),
     )
     _populate_functionality_dashboard_slide(dashboard_slide, summary=summary)
@@ -2197,7 +2325,7 @@ def generate_country_period_followup_ppt(
     _update_cover_period(prs.slides[0], period_label=format_window_label(aggregate.summary.window))
     _populate_summary_slide(
         prs.slides[2],
-        title=f"Seguimiento de incidencias - {country_txt.upper()}",
+        title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)",
         scope_result=aggregate,
     )
     _populate_summary_slide(
