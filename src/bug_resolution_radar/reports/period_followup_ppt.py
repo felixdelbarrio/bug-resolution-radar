@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any, List, Mapping, Sequence, cast
 
 import pandas as pd
+import plotly.graph_objects as go
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -21,7 +23,15 @@ from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.insights import (
+    build_theme_color_map,
+    build_theme_fortnight_trend,
+    build_theme_render_order,
+    order_theme_labels_by_volume,
+    segment_text_color,
+)
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
+from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.period_functionality_followup import (
     FunctionalityIssueRow,
@@ -68,6 +78,12 @@ _ZOOM_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (1.9, 4.9, 2.3, 1.9, 1.5, 1.5)
 _FUNCTIONALITY_TABLE_TOP_SHIFT_RATIO = 0.048
 _FUNCTIONALITY_TABLE_TOP_GUARD_EMU = 32_000
 _FUNCTIONALITY_TABLE_FONT_BOOST_PT = 1.2
+_EXEC_BG_RGB = (9, 45, 117)
+_EXEC_TEXT_PRIMARY_RGB = (240, 246, 255)
+_EXEC_TEXT_SECONDARY_RGB = (164, 191, 236)
+_EXEC_ACCENT_BORDER_RGB = (75, 130, 220)
+_EXEC_CARD_BG_RGB = (16, 59, 134)
+_EXEC_CARD_TITLE_RGB = (160, 218, 255)
 
 
 @dataclass(frozen=True)
@@ -1712,6 +1728,701 @@ def _chart_png(
     return payload or b""
 
 
+def _normalize_lookup_token(value: object) -> str:
+    txt = str(value or "").strip().lower()
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    txt = re.sub(r"[^a-z0-9]+", " ", txt)
+    return re.sub(r"\s+", " ", txt).strip()
+
+
+def _clear_slide_shapes(slide: Any) -> None:
+    for shape in list(getattr(slide, "shapes", [])):
+        _remove_shape(shape)
+
+
+def _add_exec_textbox(
+    slide: Any,
+    *,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+    text: str,
+    font_size_pt: float,
+    color_rgb: RGBColor,
+    bold: bool = False,
+    align: PP_ALIGN = PP_ALIGN.LEFT,
+) -> Any:
+    box = slide.shapes.add_textbox(int(left), int(top), int(width), int(height))
+    tf = box.text_frame
+    tf.clear()
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
+        tf.margin_left = 0
+        tf.margin_right = 0
+        tf.margin_top = 0
+        tf.margin_bottom = 0
+    except Exception:
+        pass
+    p = tf.paragraphs[0]
+    p.alignment = align
+    p.space_before = Pt(0)
+    p.space_after = Pt(0)
+    run = p.add_run()
+    run.text = str(text or "")
+    run.font.size = Pt(float(font_size_pt))
+    run.font.bold = bool(bold)
+    run.font.color.rgb = color_rgb
+    return box
+
+
+def _write_exec_metric_block(
+    slide: Any,
+    *,
+    left: int,
+    top: int,
+    width: int,
+    kicker: str,
+    value: str,
+) -> None:
+    _add_exec_textbox(
+        slide,
+        left=left,
+        top=top,
+        width=width,
+        height=200_000,
+        text=str(kicker or "").upper(),
+        font_size_pt=12.0,
+        color_rgb=RGBColor(*_EXEC_TEXT_SECONDARY_RGB),
+        bold=True,
+    )
+    _add_exec_textbox(
+        slide,
+        left=left,
+        top=top + 140_000,
+        width=width,
+        height=290_000,
+        text=str(value or "—"),
+        font_size_pt=30.0,
+        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+        bold=True,
+    )
+
+
+def _extract_resolution_story_values(dff: pd.DataFrame, open_df: pd.DataFrame) -> tuple[str, str, str]:
+    pack = build_trend_insight_pack("resolution_hist", dff=dff, open_df=open_df)
+    metric_by_label = {
+        _normalize_lookup_token(getattr(metric, "label", "")): str(getattr(metric, "value", "—"))
+        for metric in list(getattr(pack, "metrics", []) or [])
+    }
+    habitual = metric_by_label.get(_normalize_lookup_token("Antigüedad habitual"), "—")
+    stalled = metric_by_label.get(_normalize_lookup_token("Casos más atascados"), "—")
+    over_30 = metric_by_label.get(_normalize_lookup_token(">30d abiertas"), "—")
+    return habitual, stalled, over_30
+
+
+def _resolution_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mapping[str, str]:
+    pack = build_trend_insight_pack("resolution_hist", dff=dff, open_df=open_df)
+    cards = list(getattr(pack, "cards", []) or [])
+    cards_by_token: dict[str, str] = {
+        _normalize_lookup_token(getattr(card, "title", "")): str(getattr(card, "body", "")).strip()
+        for card in cards
+    }
+    ordered_titles = (
+        "Incidencias críticas envejecidas",
+        "Brecha por prioridad",
+        "Riesgo real de envejecimiento",
+        "Cola extrema de antigüedad",
+    )
+    resolved: dict[str, str] = {}
+    for title in ordered_titles:
+        token = _normalize_lookup_token(title)
+        body = str(cards_by_token.get(token, "") or "").strip()
+        if body:
+            resolved[title] = body
+            continue
+        fallback = next(
+            (
+                str(getattr(card, "body", "") or "").strip()
+                for card in cards
+                if str(getattr(card, "body", "") or "").strip()
+                and str(getattr(card, "title", "") or "").strip() not in resolved
+            ),
+            "",
+        )
+        resolved[title] = fallback or "Sin datos suficientes para este insight en el scope seleccionado."
+    return resolved
+
+
+def _resolution_chart_png_executive(
+    settings: Settings,
+    *,
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+) -> bytes:
+    registry = build_trends_registry()
+    spec = registry.get("resolution_hist")
+    if spec is None:
+        return b""
+    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=False)
+    fig = spec.render(ChartContext(dff=dff, open_df=open_df, kpis=kpis, dark_mode=True))
+    if fig is None:
+        return b""
+
+    fig.update_layout(
+        xaxis_title="Rango en días",
+        yaxis_title="Incidencias abiertas",
+        xaxis=dict(
+            tickfont=dict(size=14, color="#EAF2FF"),
+            title=dict(font=dict(size=18, color="#EAF2FF")),
+            gridcolor="rgba(142, 177, 233, 0.18)",
+        ),
+        yaxis=dict(
+            tickfont=dict(size=14, color="#EAF2FF"),
+            title=dict(font=dict(size=17, color="#EAF2FF")),
+            gridcolor="rgba(142, 177, 233, 0.18)",
+        ),
+        legend=dict(
+            title_text="",
+            orientation="h",
+            xanchor="right",
+            x=1.0,
+            yanchor="top",
+            y=-0.20,
+            font=dict(size=14, color="#EAF2FF"),
+            bgcolor="rgba(12, 39, 100, 0.80)",
+            bordercolor="rgba(142, 177, 233, 0.55)",
+            borderwidth=1,
+        ),
+        margin=dict(l=48, r=32, t=20, b=136),
+        bargap=0.14,
+    )
+    fig.update_traces(
+        textposition="inside",
+        textfont=dict(size=14, color="#FFFFFF"),
+        marker_line_color="#0A2E72",
+        marker_line_width=1,
+        cliponaxis=False,
+    )
+    payload = _fig_to_png(fig)
+    return payload or b""
+
+
+def _add_exec_insight_card(
+    slide: Any,
+    *,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+    title: str,
+    body: str,
+) -> None:
+    card = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        int(left),
+        int(top),
+        int(width),
+        int(height),
+    )
+    card.fill.solid()
+    card.fill.fore_color.rgb = RGBColor(*_EXEC_CARD_BG_RGB)
+    card.line.color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
+    card.line.width = Pt(1.2)
+
+    tf = card.text_frame
+    tf.clear()
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
+        tf.margin_left = 80_000
+        tf.margin_right = 80_000
+        tf.margin_top = 58_000
+        tf.margin_bottom = 52_000
+    except Exception:
+        pass
+
+    p0 = tf.paragraphs[0]
+    p0.alignment = PP_ALIGN.LEFT
+    p0.space_before = Pt(0)
+    p0.space_after = Pt(0)
+    title_run = p0.add_run()
+    title_run.text = f"{str(title or '').strip()} ↗"
+    title_run.font.size = Pt(17.0)
+    title_run.font.bold = True
+    title_run.font.color.rgb = RGBColor(*_EXEC_CARD_TITLE_RGB)
+
+    p1 = tf.add_paragraph()
+    p1.alignment = PP_ALIGN.LEFT
+    p1.space_before = Pt(3.0)
+    p1.space_after = Pt(0)
+    body_run = p1.add_run()
+    body_run.text = str(body or "").strip()
+    body_run.font.size = Pt(12.8)
+    body_run.font.bold = False
+    body_run.font.color.rgb = RGBColor(*_EXEC_TEXT_PRIMARY_RGB)
+
+
+def _populate_open_aging_executive_slide(
+    slide: Any,
+    *,
+    settings: Settings,
+    scope_result: QuincenalScopeResult,
+) -> None:
+    _clear_slide_shapes(slide)
+
+    try:
+        fill = slide.background.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(*_EXEC_BG_RGB)
+    except Exception:
+        pass
+
+    slide_w = int(getattr(getattr(slide, "part", None), "slide_width", 12_192_000) or 12_192_000)
+    slide_h = int(getattr(getattr(slide, "part", None), "slide_height", 6_858_000) or 6_858_000)
+    margin_x = 300_000
+    content_w = max(slide_w - (2 * margin_x), 1)
+
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=145_000,
+        width=content_w,
+        height=280_000,
+        text="Visión agregada de incidencias abiertas : rango de días por prioridad",
+        font_size_pt=26.0,
+        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+        bold=True,
+    )
+
+    habitual, stalled, over_30 = _extract_resolution_story_values(
+        scope_result.dff,
+        scope_result.open_df,
+    )
+
+    metric_top = 460_000
+    metric_gap = 170_000
+    metric_w = int((content_w - (2 * metric_gap)) / 3)
+    _write_exec_metric_block(
+        slide,
+        left=margin_x,
+        top=metric_top,
+        width=metric_w,
+        kicker="Antigüedad habitual",
+        value=habitual,
+    )
+    _write_exec_metric_block(
+        slide,
+        left=margin_x + metric_w + metric_gap,
+        top=metric_top,
+        width=metric_w,
+        kicker="Casos más atascados",
+        value=stalled,
+    )
+    _write_exec_metric_block(
+        slide,
+        left=margin_x + (2 * (metric_w + metric_gap)),
+        top=metric_top,
+        width=metric_w,
+        kicker=">30d abiertas",
+        value=over_30,
+    )
+
+    divider = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        margin_x,
+        950_000,
+        content_w,
+        18_000,
+    )
+    divider.fill.solid()
+    divider.fill.fore_color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
+    divider.line.fill.background()
+
+    chart_frame_left = margin_x
+    chart_frame_top = 1_060_000
+    chart_frame_width = content_w
+    chart_frame_height = 2_970_000
+    chart_frame = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        chart_frame_left,
+        chart_frame_top,
+        chart_frame_width,
+        chart_frame_height,
+    )
+    chart_frame.fill.solid()
+    chart_frame.fill.fore_color.rgb = RGBColor(13, 54, 126)
+    chart_frame.line.color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
+    chart_frame.line.width = Pt(1.2)
+
+    chart_png = _resolution_chart_png_executive(
+        settings,
+        dff=scope_result.dff,
+        open_df=scope_result.open_df,
+    )
+    if chart_png:
+        slide.shapes.add_picture(
+            BytesIO(chart_png),
+            chart_frame_left + 18_000,
+            chart_frame_top + 12_000,
+            width=chart_frame_width - 36_000,
+            height=chart_frame_height - 24_000,
+        )
+    else:
+        _add_exec_textbox(
+            slide,
+            left=chart_frame_left + 55_000,
+            top=chart_frame_top + 1_250_000,
+            width=chart_frame_width - 110_000,
+            height=300_000,
+            text="No hay datos suficientes para renderizar el gráfico de antigüedad por prioridad.",
+            font_size_pt=17.0,
+            color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+            bold=False,
+            align=PP_ALIGN.CENTER,
+        )
+
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=4_180_000,
+        width=content_w,
+        height=210_000,
+        text="Insights accionables",
+        font_size_pt=19.0,
+        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+        bold=True,
+    )
+
+    insight_text = _resolution_cards_by_title(scope_result.dff, scope_result.open_df)
+    cards = [
+        ("Incidencias críticas envejecidas", insight_text.get("Incidencias críticas envejecidas", "")),
+        ("Brecha por prioridad", insight_text.get("Brecha por prioridad", "")),
+        ("Riesgo real de envejecimiento", insight_text.get("Riesgo real de envejecimiento", "")),
+        ("Cola extrema de antigüedad", insight_text.get("Cola extrema de antigüedad", "")),
+    ]
+
+    cards_top = 4_390_000
+    cards_gap_x = 180_000
+    cards_gap_y = 130_000
+    card_w = int((content_w - cards_gap_x) / 2)
+    card_h = int((slide_h - cards_top - cards_gap_y - 190_000) / 2)
+    card_h = max(card_h, 780_000)
+    coords = [
+        (margin_x, cards_top),
+        (margin_x + card_w + cards_gap_x, cards_top),
+        (margin_x, cards_top + card_h + cards_gap_y),
+        (margin_x + card_w + cards_gap_x, cards_top + card_h + cards_gap_y),
+    ]
+    for (left, top), (title, body) in zip(coords, cards):
+        _add_exec_insight_card(
+            slide,
+            left=left,
+            top=top,
+            width=card_w,
+            height=card_h,
+            title=title,
+            body=body,
+        )
+
+
+def _extract_priority_story_values(dff: pd.DataFrame, open_df: pd.DataFrame) -> tuple[str, str, str]:
+    pack = build_trend_insight_pack("open_priority_pie", dff=dff, open_df=open_df)
+    metric_by_label = {
+        _normalize_lookup_token(getattr(metric, "label", "")): str(getattr(metric, "value", "—"))
+        for metric in list(getattr(pack, "metrics", []) or [])
+    }
+    total = metric_by_label.get(_normalize_lookup_token("Total abiertas"), "—")
+    dominant = metric_by_label.get(_normalize_lookup_token("Prioridad dominante"), "—")
+    weighted = metric_by_label.get(_normalize_lookup_token("Riesgo ponderado"), "—")
+    return total, dominant, weighted
+
+
+def _priority_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mapping[str, str]:
+    pack = build_trend_insight_pack("open_priority_pie", dff=dff, open_df=open_df)
+    cards = list(getattr(pack, "cards", []) or [])
+    cards_by_token: dict[str, str] = {
+        _normalize_lookup_token(getattr(card, "title", "")): str(getattr(card, "body", "")).strip()
+        for card in cards
+    }
+    ordered_titles = (
+        "Inflación de prioridades altas",
+        "Concentración de prioridad",
+        "Incidencias de mayor impacto con antigüedad elevada",
+        "Incidencias de mayor impacto sin arrancar",
+        "Incidencias de mayor impacto sin movimiento reciente",
+    )
+    resolved: dict[str, str] = {}
+    for title in ordered_titles:
+        token = _normalize_lookup_token(title)
+        body = str(cards_by_token.get(token, "") or "").strip()
+        if body:
+            resolved[title] = body
+            continue
+        fallback = next(
+            (
+                str(getattr(card, "body", "") or "").strip()
+                for card in cards
+                if str(getattr(card, "body", "") or "").strip()
+                and str(getattr(card, "title", "") or "").strip() not in resolved
+            ),
+            "",
+        )
+        resolved[title] = fallback or "Sin datos suficientes para este insight en el scope seleccionado."
+    return resolved
+
+
+def _priority_chart_png_executive(
+    settings: Settings,
+    *,
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+) -> bytes:
+    registry = build_trends_registry()
+    spec = registry.get("open_priority_pie")
+    if spec is None:
+        return b""
+    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=False)
+    fig = spec.render(ChartContext(dff=dff, open_df=open_df, kpis=kpis, dark_mode=True))
+    if fig is None:
+        return b""
+
+    fig.update_layout(
+        legend=dict(
+            title_text="",
+            orientation="h",
+            xanchor="right",
+            x=1.0,
+            yanchor="top",
+            y=-0.20,
+            font=dict(size=14, color="#EAF2FF"),
+            bgcolor="rgba(12, 39, 100, 0.80)",
+            bordercolor="rgba(142, 177, 233, 0.55)",
+            borderwidth=1,
+        ),
+        margin=dict(l=24, r=24, t=20, b=120),
+    )
+    fig.update_traces(
+        textfont=dict(size=16, color="#FFFFFF"),
+        textinfo="percent",
+        sort=False,
+        hole=0.55,
+    )
+    payload = _fig_to_png(fig)
+    return payload or b""
+
+
+def _populate_open_priority_executive_slide(
+    slide: Any,
+    *,
+    settings: Settings,
+    scope_result: QuincenalScopeResult,
+) -> None:
+    _clear_slide_shapes(slide)
+    try:
+        fill = slide.background.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(*_EXEC_BG_RGB)
+    except Exception:
+        pass
+
+    slide_w = int(getattr(getattr(slide, "part", None), "slide_width", 12_192_000) or 12_192_000)
+    slide_h = int(getattr(getattr(slide, "part", None), "slide_height", 6_858_000) or 6_858_000)
+    margin_x = 300_000
+    content_w = max(slide_w - (2 * margin_x), 1)
+
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=145_000,
+        width=content_w,
+        height=280_000,
+        text="Visión agregada de Incidencias abiertas por prioridad",
+        font_size_pt=26.0,
+        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+        bold=True,
+    )
+
+    total_open, dominant_priority, weighted_risk = _extract_priority_story_values(
+        scope_result.dff,
+        scope_result.open_df,
+    )
+    metric_top = 460_000
+    metric_gap = 170_000
+    metric_w = int((content_w - (2 * metric_gap)) / 3)
+    _write_exec_metric_block(
+        slide,
+        left=margin_x,
+        top=metric_top,
+        width=metric_w,
+        kicker="Total abiertas",
+        value=total_open,
+    )
+    _write_exec_metric_block(
+        slide,
+        left=margin_x + metric_w + metric_gap,
+        top=metric_top,
+        width=metric_w,
+        kicker="Prioridad dominante",
+        value=dominant_priority,
+    )
+    _write_exec_metric_block(
+        slide,
+        left=margin_x + (2 * (metric_w + metric_gap)),
+        top=metric_top,
+        width=metric_w,
+        kicker="Riesgo ponderado",
+        value=weighted_risk,
+    )
+
+    divider = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        margin_x,
+        950_000,
+        content_w,
+        18_000,
+    )
+    divider.fill.solid()
+    divider.fill.fore_color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
+    divider.line.fill.background()
+
+    chart_frame_left = margin_x
+    chart_frame_top = 1_060_000
+    chart_frame_width = content_w
+    chart_frame_height = 2_660_000
+    chart_frame = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        chart_frame_left,
+        chart_frame_top,
+        chart_frame_width,
+        chart_frame_height,
+    )
+    chart_frame.fill.solid()
+    chart_frame.fill.fore_color.rgb = RGBColor(13, 54, 126)
+    chart_frame.line.color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
+    chart_frame.line.width = Pt(1.2)
+
+    chart_png = _priority_chart_png_executive(
+        settings,
+        dff=scope_result.dff,
+        open_df=scope_result.open_df,
+    )
+    if chart_png:
+        slide.shapes.add_picture(
+            BytesIO(chart_png),
+            chart_frame_left + 18_000,
+            chart_frame_top + 12_000,
+            width=chart_frame_width - 36_000,
+            height=chart_frame_height - 24_000,
+        )
+    else:
+        _add_exec_textbox(
+            slide,
+            left=chart_frame_left + 55_000,
+            top=chart_frame_top + 1_120_000,
+            width=chart_frame_width - 110_000,
+            height=300_000,
+            text="No hay datos suficientes para renderizar la distribución de prioridad.",
+            font_size_pt=17.0,
+            color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+            bold=False,
+            align=PP_ALIGN.CENTER,
+        )
+
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=3_780_000,
+        width=content_w,
+        height=210_000,
+        text="Insights accionables",
+        font_size_pt=19.0,
+        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
+        bold=True,
+    )
+
+    insight_text = _priority_cards_by_title(scope_result.dff, scope_result.open_df)
+    cards = [
+        ("Inflación de prioridades altas", insight_text.get("Inflación de prioridades altas", "")),
+        ("Concentración de prioridad", insight_text.get("Concentración de prioridad", "")),
+        (
+            "Incidencias de mayor impacto con antigüedad elevada",
+            insight_text.get("Incidencias de mayor impacto con antigüedad elevada", ""),
+        ),
+        (
+            "Incidencias de mayor impacto sin movimiento reciente",
+            insight_text.get("Incidencias de mayor impacto sin movimiento reciente", ""),
+        ),
+        (
+            "Incidencias de mayor impacto sin arrancar",
+            insight_text.get("Incidencias de mayor impacto sin arrancar", ""),
+        ),
+    ]
+
+    cards_top = 3_990_000
+    cards_gap_x = 180_000
+    cards_gap_y = 120_000
+    card_w = int((content_w - cards_gap_x) / 2)
+    card_h = 700_000
+    _add_exec_insight_card(
+        slide,
+        left=margin_x,
+        top=cards_top,
+        width=card_w,
+        height=card_h,
+        title=cards[0][0],
+        body=cards[0][1],
+    )
+    _add_exec_insight_card(
+        slide,
+        left=margin_x + card_w + cards_gap_x,
+        top=cards_top,
+        width=card_w,
+        height=card_h,
+        title=cards[2][0],
+        body=cards[2][1],
+    )
+    _add_exec_insight_card(
+        slide,
+        left=margin_x,
+        top=cards_top + card_h + cards_gap_y,
+        width=card_w,
+        height=card_h,
+        title=cards[1][0],
+        body=cards[1][1],
+    )
+    _add_exec_insight_card(
+        slide,
+        left=margin_x + card_w + cards_gap_x,
+        top=cards_top + card_h + cards_gap_y,
+        width=card_w,
+        height=card_h,
+        title=cards[3][0],
+        body=cards[3][1],
+    )
+    full_card_top = cards_top + (2 * (card_h + cards_gap_y))
+    full_card_h = max(slide_h - full_card_top - 135_000, 520_000)
+    _add_exec_insight_card(
+        slide,
+        left=margin_x,
+        top=full_card_top,
+        width=content_w,
+        height=full_card_h,
+        title=cards[4][0],
+        body=cards[4][1],
+    )
+
+
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     _set_shape_text(slide, 3, title)
@@ -2164,11 +2875,233 @@ def _populate_functionality_zoom_slide(
     )
 
 
+def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
+    safe_open = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
+    if safe_open.empty:
+        return b""
+
+    trend = build_theme_fortnight_trend(safe_open, cumulative=True)
+    if not isinstance(trend, pd.DataFrame) or trend.empty:
+        return b""
+
+    axis_labels = trend["quincena_label"].dropna().astype(str).drop_duplicates().tolist()
+    if not axis_labels:
+        return b""
+
+    theme_totals = (
+        trend.groupby("tema", dropna=False)["issues_value"]
+        .max()
+        .sort_values(ascending=False)
+        .fillna(0)
+    )
+    ordered_themes = order_theme_labels_by_volume(
+        theme_totals.index.tolist(),
+        counts_by_label=theme_totals,
+        others_last=True,
+    )
+    ordering = build_theme_render_order(
+        ordered_themes,
+        counts_by_label=theme_totals,
+        others_last=True,
+        others_at_x_axis=True,
+    )
+    legend_order = list(ordering.display_order)
+    stack_order = list(ordering.stack_order_bottom_to_top)
+    if not legend_order or not stack_order:
+        return b""
+    theme_color_map = build_theme_color_map(theme_order=legend_order, dark_mode=False)
+
+    totals = (
+        trend.groupby("quincena_label", dropna=False)["issues_value"]
+        .sum()
+        .reindex(axis_labels)
+        .fillna(0)
+        .astype(int)
+    )
+    fig = go.Figure()
+    legend_rank = {theme: idx for idx, theme in enumerate(legend_order)}
+    for theme in stack_order:
+        sub = trend.loc[trend["tema"].eq(theme)].copy(deep=False)
+        if sub.empty:
+            continue
+        labels = sub["quincena_label"].astype(str).tolist()
+        values = pd.to_numeric(sub["issues_value"], errors="coerce").fillna(0.0).astype(float).tolist()
+        color_hex = str(theme_color_map.get(theme) or "#7784A0")
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=values,
+                name=str(theme),
+                marker=dict(color=color_hex, line=dict(color="#F2F5FA", width=0.8)),
+                text=[str(int(v)) if float(v) > 0 else "" for v in values],
+                textposition="inside",
+                textfont=dict(color=segment_text_color(color_hex, dark_mode=False), size=12),
+                legendrank=int(legend_rank.get(theme, len(legend_rank))),
+                customdata=[[int(totals.get(lbl, 0))] for lbl in labels],
+                hovertemplate=(
+                    "Tema: %{fullData.name}<br>Quincena: %{x}<br>"
+                    "Incidencias abiertas acumuladas: %{y}<br>"
+                    "Total columna: %{customdata[0]}<extra></extra>"
+                ),
+            )
+        )
+
+    max_total = float(totals.max()) if not totals.empty else 0.0
+    total_offset = max(max_total * 0.062, 0.20)
+    fig.add_trace(
+        go.Scatter(
+            x=axis_labels,
+            y=[float(v) + total_offset for v in totals.tolist()],
+            mode="text",
+            text=[str(int(v)) for v in totals.tolist()],
+            textposition="top center",
+            textfont=dict(size=14, color="#0B1F3B"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.update_layout(
+        barmode="stack",
+        bargap=0.19,
+        height=440,
+        margin=dict(l=36, r=28, t=14, b=178),
+        xaxis_title="Quincena",
+        yaxis_title="Incidencias abiertas acumuladas",
+        hovermode="x",
+        uniformtext=dict(minsize=11, mode="hide"),
+        plot_bgcolor="#F4F6FA",
+        paper_bgcolor="#F4F6FA",
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.34,
+            xanchor="center",
+            x=0.5,
+            title=dict(text=""),
+            bgcolor="rgba(255,255,255,0.94)",
+            bordercolor="rgba(180,190,208,0.9)",
+            borderwidth=1,
+            font=dict(size=13, color="#1D2B43"),
+            traceorder="normal",
+        ),
+    )
+    fig.update_xaxes(
+        type="category",
+        categoryorder="array",
+        categoryarray=axis_labels,
+        tickangle=30,
+        tickfont=dict(size=12, color="#23324D"),
+        gridcolor="rgba(148, 160, 184, 0.25)",
+    )
+    fig.update_yaxes(
+        range=[0, max_total + (total_offset * 2.5) if max_total > 0 else 1.0],
+        tickfont=dict(size=12, color="#23324D"),
+        title_font=dict(size=16, color="#1A2A46"),
+        gridcolor="rgba(148, 160, 184, 0.28)",
+    )
+
+    payload = _fig_to_png(fig)
+    return payload or b""
+
+
+def _populate_functionality_trend_aggregate_slide(
+    slide: Any,
+    *,
+    open_df: pd.DataFrame,
+) -> None:
+    _clear_slide_shapes(slide)
+
+    try:
+        fill = slide.background.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(247, 248, 248)
+    except Exception:
+        pass
+
+    slide_w = int(getattr(getattr(slide, "part", None), "slide_width", 12_192_000) or 12_192_000)
+    margin_x = 280_000
+    content_w = max(slide_w - (2 * margin_x), 1)
+
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=120_000,
+        width=content_w,
+        height=165_000,
+        text="INSIGHTS",
+        font_size_pt=13.0,
+        color_rgb=RGBColor(96, 110, 136),
+        bold=True,
+    )
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=245_000,
+        width=content_w,
+        height=270_000,
+        text="Tendencia por funcionalidad : vista agregada",
+        font_size_pt=31.0,
+        color_rgb=RGBColor(0, 19, 70),
+        bold=True,
+    )
+    _add_exec_textbox(
+        slide,
+        left=margin_x,
+        top=560_000,
+        width=content_w,
+        height=170_000,
+        text="Vista quincenal acumulada",
+        font_size_pt=17.0,
+        color_rgb=RGBColor(77, 90, 118),
+        bold=False,
+    )
+
+    frame_left = margin_x
+    frame_top = 760_000
+    frame_width = content_w
+    frame_height = 5_720_000
+    frame = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        frame_left,
+        frame_top,
+        frame_width,
+        frame_height,
+    )
+    frame.fill.solid()
+    frame.fill.fore_color.rgb = RGBColor(247, 248, 252)
+    frame.line.color.rgb = RGBColor(214, 220, 232)
+    frame.line.width = Pt(1.0)
+
+    chart_png = _functionality_fortnight_trend_png(open_df=open_df)
+    if chart_png:
+        slide.shapes.add_picture(
+            BytesIO(chart_png),
+            frame_left + 24_000,
+            frame_top + 24_000,
+            width=frame_width - 48_000,
+            height=frame_height - 48_000,
+        )
+    else:
+        _add_exec_textbox(
+            slide,
+            left=frame_left + 60_000,
+            top=frame_top + 2_450_000,
+            width=frame_width - 120_000,
+            height=290_000,
+            text="No hay datos suficientes para construir la tendencia acumulada por funcionalidad.",
+            font_size_pt=16.0,
+            color_rgb=RGBColor(56, 67, 92),
+            bold=False,
+            align=PP_ALIGN.CENTER,
+        )
+
+
 def _append_functionality_followup_slides(
     prs: Any,
     *,
     summary: PeriodFunctionalityFollowupSummary,
     period_label: str,
+    open_df: pd.DataFrame,
 ) -> None:
     critical_wording = bool(getattr(summary, "is_critical_focus", False))
     template_path = _resolve_functionality_template_path()
@@ -2179,6 +3112,7 @@ def _append_functionality_followup_slides(
         )
 
     header_slide = _append_slide_clone_from_source(prs, source_slide=template_prs.slides[0])
+    trend_slide = _append_slide_clone_from_source(prs, source_slide=template_prs.slides[1])
     dashboard_slide = _append_slide_clone_from_source(prs, source_slide=template_prs.slides[1])
     zoom_template_slide = template_prs.slides[2]
 
@@ -2194,7 +3128,10 @@ def _append_functionality_followup_slides(
         ),
     )
 
-    # Slide 2 (dashboard funcionalidad)
+    # Slide 2 (tendencia funcionalidad agregada)
+    _populate_functionality_trend_aggregate_slide(trend_slide, open_df=open_df)
+
+    # Slide 3 (dashboard funcionalidad)
     _set_shape_text(
         dashboard_slide,
         3,
@@ -2364,49 +3301,15 @@ def generate_country_period_followup_ppt(
         replace_anchor=True,
     )
 
-    _populate_evolution_slide(
+    _populate_open_aging_executive_slide(
         prs.slides[6],
-        title=f"Seguimiento de KPIs - {source_a_label.split('·')[0].strip().upper()}",
-        backlog_png=_chart_png(
-            settings,
-            dff=source_a.dff,
-            open_df=source_a.open_df,
-            chart_id="age_buckets",
-        ),
-        resolution_png=_chart_png(
-            settings,
-            dff=source_a.dff,
-            open_df=source_a.open_df,
-            chart_id="resolution_hist",
-        ),
-        priority_png=_chart_png(
-            settings,
-            dff=source_a.dff,
-            open_df=source_a.open_df,
-            chart_id="open_priority_pie",
-        ),
+        settings=settings,
+        scope_result=aggregate,
     )
-    _populate_evolution_slide(
+    _populate_open_priority_executive_slide(
         prs.slides[7],
-        title=f"Seguimiento de KPIs - {source_b_label.split('·')[0].strip().upper()}",
-        backlog_png=_chart_png(
-            settings,
-            dff=source_b.dff,
-            open_df=source_b.open_df,
-            chart_id="age_buckets",
-        ),
-        resolution_png=_chart_png(
-            settings,
-            dff=source_b.dff,
-            open_df=source_b.open_df,
-            chart_id="resolution_hist",
-        ),
-        priority_png=_chart_png(
-            settings,
-            dff=source_b.dff,
-            open_df=source_b.open_df,
-            chart_id="open_priority_pie",
-        ),
+        settings=settings,
+        scope_result=aggregate,
     )
 
     functionality_followup = build_period_functionality_followup_summary(
@@ -2423,6 +3326,7 @@ def generate_country_period_followup_ppt(
         prs,
         summary=functionality_followup,
         period_label=functionality_followup.period_label,
+        open_df=aggregate.open_df,
     )
 
     buff = BytesIO()

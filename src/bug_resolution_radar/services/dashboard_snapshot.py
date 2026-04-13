@@ -23,7 +23,11 @@ from bug_resolution_radar.analytics.filtering import (
     normalize_filter_tokens,
     open_only,
 )
-from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
+from bug_resolution_radar.analytics.issues import (
+    normalize_text_col,
+    priority_rank,
+    sort_issues_for_display,
+)
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
     build_theme_daily_trend,
@@ -1342,7 +1346,14 @@ def _issue_records_from_df(
                 na_position="last",
             )
     elif "updated" in work.columns:
-        work = work.sort_values("updated", ascending=False, kind="mergesort", na_position="last")
+        work = sort_issues_for_display(
+            work,
+            priority_col="priority",
+            status_col="status",
+            updated_col="updated",
+            created_col="created",
+            key_col="key",
+        )
 
     page = work.head(max(int(limit), 1)).copy(deep=False)
     for column in (

@@ -247,3 +247,67 @@ def test_build_period_functionality_followup_summary_infers_root_cause_from_desc
     p1 = [issue for issue in issues if issue.key == "P-1"]
     assert len(p1) == 1
     assert p1[0].root_cause == "Conectividad / timeout"
+
+
+def test_build_period_functionality_followup_summary_orders_zoom_rows_by_priority_then_status() -> None:
+    settings = Settings()
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "PAY-RTV",
+                "summary": "PAGOS - caso listo para verificar",
+                "status": "Ready To Verify",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": "2026-04-10T09:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "PAY-ANA",
+                "summary": "PAGOS - caso en analisis",
+                "status": "Analysing",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": "2026-04-10T09:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "PAY-NEW",
+                "summary": "PAGOS - caso nuevo",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": "2026-04-10T09:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+        ]
+    )
+    labels = source_label_map(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda"],
+    )
+    quincenal = build_country_quincenal_result(
+        df=dff,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        source_label_by_id=labels,
+    )
+
+    summary = build_period_functionality_followup_summary(
+        scope_result=quincenal.aggregate,
+        jira_base_url="https://jira.example",
+        top_n=1,
+        top_root_causes=3,
+    )
+
+    assert len(summary.zoom_slides) == 1
+    keys = [issue.key for issue in summary.zoom_slides[0].issues]
+    assert keys == ["PAY-RTV", "PAY-ANA", "PAY-NEW"]

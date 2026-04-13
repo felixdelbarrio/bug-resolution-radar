@@ -366,3 +366,60 @@ def test_build_country_quincenal_result_infers_reference_day_from_scoped_data() 
     window = result.aggregate.summary.window
     assert window.current_start == pd.Timestamp("2026-03-16")
     assert window.current_end == pd.Timestamp("2026-03-31")
+
+
+def test_build_country_quincenal_result_orders_open_focus_by_priority_then_status() -> None:
+    now = pd.Timestamp("2026-03-15T00:00:00+00:00")
+    settings = Settings()
+    df = pd.DataFrame(
+        [
+            {
+                "key": "K-NEW",
+                "summary": "Caso nuevo",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-03-10T00:00:00+00:00",
+                "updated": "2026-03-14T00:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+            {
+                "key": "K-ANA",
+                "summary": "Caso en analisis",
+                "status": "Analysing",
+                "priority": "High",
+                "created": "2026-03-10T00:00:00+00:00",
+                "updated": "2026-03-14T00:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+            {
+                "key": "K-RTV",
+                "summary": "Caso listo para verificar",
+                "status": "Ready To Verify",
+                "priority": "High",
+                "created": "2026-03-10T00:00:00+00:00",
+                "updated": "2026-03-14T00:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+        ]
+    )
+
+    result = build_country_quincenal_result(
+        df=df,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:core"],
+        source_label_by_id={"jira:mexico:core": "Core · JIRA"},
+        reference_day=now,
+    )
+
+    open_focus = result.aggregate.groups.open_focus
+    assert open_focus["key"].tolist() == ["K-RTV", "K-ANA", "K-NEW"]

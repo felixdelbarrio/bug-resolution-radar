@@ -11,6 +11,7 @@ from typing import Dict, Iterable, List, Mapping, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.status_semantics import (
     effective_closed_mask,
     effective_finalized_at,
@@ -498,7 +499,14 @@ def _issue_listing(
     source_label_by_id: Mapping[str, str],
     resolution_col: str | None = None,
 ) -> pd.DataFrame:
-    safe = _safe_df(df)
+    safe = sort_issues_for_display(
+        _safe_df(df),
+        priority_col="priority",
+        status_col="status",
+        updated_col="updated",
+        created_col="created",
+        key_col="key",
+    )
     if safe.empty:
         cols = [
             "key",
@@ -551,14 +559,6 @@ def _issue_listing(
     if resolution_col and resolution_col in safe.columns:
         out["resolution_days"] = pd.to_numeric(safe[resolution_col], errors="coerce").round(1)
 
-    sort_cols: List[str] = []
-    ascending: List[bool] = []
-    if "created" in out.columns:
-        sort_cols.append("created")
-        ascending.append(False)
-    sort_cols.append("key")
-    ascending.append(True)
-    out = out.sort_values(by=sort_cols, ascending=ascending, na_position="last", kind="mergesort")
     return out.reset_index(drop=True)
 
 
