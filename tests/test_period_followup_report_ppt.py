@@ -608,7 +608,9 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     )
     assert int(dashboard_table_picture.top) < int(template_table.top)
     assert int(dashboard_table_picture.height) > int(template_table.height)
-    assert int(dashboard_table_picture.top) > int(dashboard_blob_shape.top + dashboard_blob_shape.height)
+    assert int(dashboard_table_picture.top) > int(
+        dashboard_blob_shape.top + dashboard_blob_shape.height
+    )
 
     root_cause_shape = next(
         shape

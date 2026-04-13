@@ -249,7 +249,9 @@ def test_build_period_functionality_followup_summary_infers_root_cause_from_desc
     assert p1[0].root_cause == "Conectividad / timeout"
 
 
-def test_build_period_functionality_followup_summary_orders_zoom_rows_by_priority_then_status() -> None:
+def test_build_period_functionality_followup_summary_orders_zoom_rows_by_priority_then_status() -> (
+    None
+):
     settings = Settings()
     dff = pd.DataFrame(
         [

@@ -452,9 +452,9 @@ def _delta_pct(now_value: float | int, before_value: float | int) -> float | Non
     return (now_val - before_val) / before_val
 
 
-def _resolution_days_stats(df: pd.DataFrame, *, column: str = "resolution_days") -> tuple[
-    float | None, float | None, float | None
-]:
+def _resolution_days_stats(
+    df: pd.DataFrame, *, column: str = "resolution_days"
+) -> tuple[float | None, float | None, float | None]:
     safe = _safe_df(df)
     if safe.empty or column not in safe.columns:
         return None, None, None

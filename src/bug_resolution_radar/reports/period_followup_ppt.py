@@ -1815,7 +1815,9 @@ def _write_exec_metric_block(
     )
 
 
-def _extract_resolution_story_values(dff: pd.DataFrame, open_df: pd.DataFrame) -> tuple[str, str, str]:
+def _extract_resolution_story_values(
+    dff: pd.DataFrame, open_df: pd.DataFrame
+) -> tuple[str, str, str]:
     pack = build_trend_insight_pack("resolution_hist", dff=dff, open_df=open_df)
     metric_by_label = {
         _normalize_lookup_token(getattr(metric, "label", "")): str(getattr(metric, "value", "—"))
@@ -1856,7 +1858,9 @@ def _resolution_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mapp
             ),
             "",
         )
-        resolved[title] = fallback or "Sin datos suficientes para este insight en el scope seleccionado."
+        resolved[title] = (
+            fallback or "Sin datos suficientes para este insight en el scope seleccionado."
+        )
     return resolved
 
 
@@ -2106,7 +2110,10 @@ def _populate_open_aging_executive_slide(
 
     insight_text = _resolution_cards_by_title(scope_result.dff, scope_result.open_df)
     cards = [
-        ("Incidencias críticas envejecidas", insight_text.get("Incidencias críticas envejecidas", "")),
+        (
+            "Incidencias críticas envejecidas",
+            insight_text.get("Incidencias críticas envejecidas", ""),
+        ),
         ("Brecha por prioridad", insight_text.get("Brecha por prioridad", "")),
         ("Riesgo real de envejecimiento", insight_text.get("Riesgo real de envejecimiento", "")),
         ("Cola extrema de antigüedad", insight_text.get("Cola extrema de antigüedad", "")),
@@ -2136,7 +2143,9 @@ def _populate_open_aging_executive_slide(
         )
 
 
-def _extract_priority_story_values(dff: pd.DataFrame, open_df: pd.DataFrame) -> tuple[str, str, str]:
+def _extract_priority_story_values(
+    dff: pd.DataFrame, open_df: pd.DataFrame
+) -> tuple[str, str, str]:
     pack = build_trend_insight_pack("open_priority_pie", dff=dff, open_df=open_df)
     metric_by_label = {
         _normalize_lookup_token(getattr(metric, "label", "")): str(getattr(metric, "value", "—"))
@@ -2178,7 +2187,9 @@ def _priority_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mappin
             ),
             "",
         )
-        resolved[title] = fallback or "Sin datos suficientes para este insight en el scope seleccionado."
+        resolved[title] = (
+            fallback or "Sin datos suficientes para este insight en el scope seleccionado."
+        )
     return resolved
 
 
@@ -2925,7 +2936,9 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         if sub.empty:
             continue
         labels = sub["quincena_label"].astype(str).tolist()
-        values = pd.to_numeric(sub["issues_value"], errors="coerce").fillna(0.0).astype(float).tolist()
+        values = (
+            pd.to_numeric(sub["issues_value"], errors="coerce").fillna(0.0).astype(float).tolist()
+        )
         color_hex = str(theme_color_map.get(theme) or "#7784A0")
         fig.add_trace(
             go.Bar(
