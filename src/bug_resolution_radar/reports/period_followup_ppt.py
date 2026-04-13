@@ -30,8 +30,6 @@ from bug_resolution_radar.analytics.insights import (
     order_theme_labels_by_volume,
 )
 from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
-from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
-from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 from bug_resolution_radar.analytics.kpis import compute_kpis
 from bug_resolution_radar.analytics.period_functionality_followup import (
     FunctionalityIssueRow,
@@ -39,6 +37,7 @@ from bug_resolution_radar.analytics.period_functionality_followup import (
     FunctionalityZoomSlide,
     PeriodFunctionalityFollowupSummary,
     build_period_functionality_followup_summary,
+    format_top_row_label,
 )
 from bug_resolution_radar.analytics.period_summary import (
     OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
@@ -49,20 +48,31 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
+from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.theme.design_tokens import (
+    BBVA_FONT_HEADLINE_PPT,
+    BBVA_FONT_SANS_BOOK_PPT,
+    BBVA_FONT_SANS_MEDIUM_PPT,
+    BBVA_LIGHT,
+    BBVA_REPORT_LINE,
+    hex_to_rgb,
+)
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
 _FUNCTIONALITY_TEMPLATE_FILENAME = "Seguimiento de incidencias por funcionalidad.pptx"
 _TABLE_RENDER_DPI = 180
-_TABLE_HEADER_BG_RGB = (0, 19, 145)
-_TABLE_HEADER_FG_RGB = (255, 255, 255)
-_TABLE_BODY_BG_RGB = (255, 255, 255)
-_TABLE_BODY_FG_RGB = (0, 19, 145)
-_TABLE_BORDER_RGB = (211, 216, 225)
-_TABLE_LINK_RGB = (0, 81, 241)
+_TABLE_HEADER_BG_RGB = hex_to_rgb(BBVA_LIGHT.core_blue)
+_TABLE_HEADER_FG_RGB = hex_to_rgb(BBVA_LIGHT.white)
+_TABLE_BODY_BG_RGB = hex_to_rgb(BBVA_LIGHT.white)
+_TABLE_BODY_ALT_BG_RGB = (248, 250, 255)
+_TABLE_BODY_FG_RGB = hex_to_rgb(BBVA_LIGHT.core_blue)
+_TABLE_BORDER_RGB = hex_to_rgb(BBVA_REPORT_LINE)
+_TABLE_LINK_RGB = hex_to_rgb(BBVA_LIGHT.electric_blue)
 _TABLE_PADDING_X_PX = 12
 _TABLE_PADDING_Y_PX = 8
 _TABLE_LINE_SPACING_PX = 2
@@ -74,16 +84,40 @@ _REPORT_FONT_DIR = (
 _REPORT_FONT_BOOK_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Book.ttf"
 _REPORT_FONT_BOLD_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Bold.ttf"
 _ZOOM_TABLE_ROWS_PER_SLIDE = 5
-_ZOOM_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (1.9, 4.9, 2.3, 1.9, 1.5, 1.5)
-_FUNCTIONALITY_TABLE_TOP_SHIFT_RATIO = 0.048
-_FUNCTIONALITY_TABLE_TOP_GUARD_EMU = 32_000
+_ZOOM_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (2.2, 4.6, 2.25, 1.85, 1.5, 1.5)
+_FUNCTIONALITY_DASHBOARD_TABLE_HEADERS: tuple[str, ...] = (
+    "#",
+    "Resto incidencias abiertas",
+    "Nuevas",
+    "Agregadas",
+    "Días promedio abiertas",
+)
+_FUNCTIONALITY_DASHBOARD_TABLE_HEADERS_RENDER: tuple[str, ...] = (
+    "#",
+    "Resto incidencias\nabiertas",
+    "Nuevas",
+    "Agregadas",
+    "Días promedio\nabiertas",
+)
+_FUNCTIONALITY_DASHBOARD_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (0.68, 3.05, 1.02, 1.12, 2.55)
+_FUNCTIONALITY_TABLE_GAP_TOP_EMU = 120_000
+_FUNCTIONALITY_TABLE_GAP_RIGHT_EMU = 185_000
+_FUNCTIONALITY_TABLE_BOTTOM_GAP_EMU = 24_000
 _FUNCTIONALITY_TABLE_FONT_BOOST_PT = 1.2
+_FUNCTIONALITY_TABLE_HEADER_FONT_SIZE_PT = 7.8
+_SUMMARY_DELTA_FONT_SIZE_PT = 8.8
+_SUMMARY_DELTA_UP_RGB = RGBColor(201, 67, 77)
+_SUMMARY_DELTA_DOWN_RGB = RGBColor(62, 133, 64)
+_SUMMARY_DELTA_NEUTRAL_RGB = RGBColor(95, 112, 142)
 _EXEC_BG_RGB = (7, 36, 96)
 _EXEC_TEXT_PRIMARY_RGB = (247, 251, 255)
 _EXEC_TEXT_SECONDARY_RGB = (170, 191, 226)
 _EXEC_ACCENT_BORDER_RGB = (104, 151, 222)
 _EXEC_CARD_BG_RGB = (12, 52, 118)
 _EXEC_CARD_TITLE_RGB = (186, 226, 252)
+_PPT_FONT_HEAD = BBVA_FONT_HEADLINE_PPT
+_PPT_FONT_BODY = BBVA_FONT_SANS_BOOK_PPT
+_PPT_FONT_BODY_MEDIUM = BBVA_FONT_SANS_MEDIUM_PPT
 
 
 @dataclass(frozen=True)
@@ -217,13 +251,16 @@ def _fmt_days(value: float | None) -> int:
     return max(0, int(round(float(value))))
 
 
-def _fmt_delta_pct(value: float | None) -> str:
+def _summary_delta_badge(value: float | None) -> tuple[str, RGBColor]:
     if value is None or pd.isna(value):
-        return "—"
-    pct = float(value) * 100.0
-    # Direction is already represented by template arrows/colors; keep compact
-    # absolute percentage text to avoid overflow in tiny delta placeholders.
-    return f"{abs(pct):.0f}%"
+        return ("—", _SUMMARY_DELTA_NEUTRAL_RGB)
+    raw = float(value)
+    pct = abs(raw * 100.0)
+    if raw > 0:
+        return (f"▲{pct:.0f}%", _SUMMARY_DELTA_UP_RGB)
+    if raw < 0:
+        return (f"▼{pct:.0f}%", _SUMMARY_DELTA_DOWN_RGB)
+    return (f"•{pct:.0f}%", _SUMMARY_DELTA_NEUTRAL_RGB)
 
 
 def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
@@ -626,6 +663,31 @@ def _trim_text(value: object, *, max_chars: int) -> str:
     return txt[: max(0, max_chars - 3)].rstrip() + "..."
 
 
+_HELIX_INC_RE = re.compile(r"\binc\d{5,}[a-z0-9-]*\b", flags=re.IGNORECASE)
+_ALPHANUM_KEY_RE = re.compile(r"\b[a-z][a-z0-9]+-\d+[a-z0-9-]*\b", flags=re.IGNORECASE)
+
+
+def _premium_sentence_case(value: object) -> str:
+    raw = re.sub(r"\s+", " ", str(value or "").strip())
+    if not raw:
+        return ""
+    clean = re.sub(r"\s*/\s*", " / ", raw).lower()
+    clean = re.sub(
+        r"^([\s\"'¿¡\(\[]*)([a-záéíóúñ])",
+        lambda match: f"{match.group(1)}{match.group(2).upper()}",
+        clean,
+        count=1,
+    )
+    clean = re.sub(
+        r"([.!?]\s+)([a-záéíóúñ])",
+        lambda match: f"{match.group(1)}{match.group(2).upper()}",
+        clean,
+    )
+    clean = _HELIX_INC_RE.sub(lambda match: str(match.group(0)).upper(), clean)
+    clean = _ALPHANUM_KEY_RE.sub(lambda match: str(match.group(0)).upper(), clean)
+    return clean
+
+
 def _emu_to_px(value: int | float, *, dpi: int = _TABLE_RENDER_DPI) -> int:
     inches = max(float(value or 0) / _EMU_PER_INCH, 0.0)
     return max(int(round(inches * float(dpi))), 1)
@@ -748,6 +810,8 @@ def _set_table_cell_text(
     bold: bool | None = None,
     color_rgb: RGBColor | None = None,
     font_size_pt: float | None = None,
+    font_name: str | None = None,
+    word_wrap: bool = True,
 ) -> None:
     if cell is None:
         return
@@ -771,6 +835,10 @@ def _set_table_cell_text(
         runs = list(p0.runs)
     run = runs[0]
     run.text = str(text or "")
+    try:
+        run.font.name = str(font_name or (_PPT_FONT_BODY_MEDIUM if bold else _PPT_FONT_BODY))
+    except Exception:
+        pass
     if bold is not None:
         try:
             run.font.bold = bool(bold)
@@ -819,7 +887,7 @@ def _set_table_cell_text(
             extra.text = ""
 
     try:
-        tf.word_wrap = True
+        tf.word_wrap = bool(word_wrap)
     except Exception:
         pass
     try:
@@ -886,6 +954,7 @@ def _set_table_rows(
             bold=True,
             color_rgb=RGBColor(*_TABLE_HEADER_FG_RGB),
             font_size_pt=_ZOOM_TABLE_HEADER_FONT_SIZE_PT,
+            font_name=_PPT_FONT_BODY_MEDIUM,
         )
         _set_table_cell_border(
             header_cell,
@@ -896,11 +965,12 @@ def _set_table_rows(
     hyperlinks = dict(hyperlink_by_row or {})
     for ridx, row_values in enumerate(normalized_rows, start=1):
         row_link = str(hyperlinks.get(ridx - 1, "") or "").strip()
+        row_bg = _TABLE_BODY_BG_RGB if (ridx % 2) else _TABLE_BODY_ALT_BG_RGB
         for cidx, value in enumerate(row_values):
             body_cell = table.cell(ridx, cidx)
             try:
                 body_cell.fill.solid()
-                body_cell.fill.fore_color.rgb = RGBColor(*_TABLE_BODY_BG_RGB)
+                body_cell.fill.fore_color.rgb = RGBColor(*row_bg)
             except Exception:
                 pass
             _set_table_cell_text(
@@ -910,6 +980,8 @@ def _set_table_rows(
                 align=PP_ALIGN.LEFT,
                 bold=False,
                 color_rgb=RGBColor(*_TABLE_BODY_FG_RGB),
+                font_name=_PPT_FONT_BODY,
+                word_wrap=(cidx != 0),
             )
             _set_table_cell_border(
                 body_cell,
@@ -1000,9 +1072,15 @@ def _tune_table_font(
                     size = base_size
                     if description_col_index is not None and cidx == int(description_col_index):
                         size = max(base_size - 0.4, 7.0)
+                    elif cidx == 0:
+                        size = max(base_size - 0.7, 7.0)
                     run.font.size = Pt(float(size))
+                    try:
+                        run.font.name = _PPT_FONT_BODY
+                    except Exception:
+                        pass
             try:
-                tf.word_wrap = True
+                tf.word_wrap = bool(cidx != 0)
             except Exception:
                 pass
 
@@ -1011,13 +1089,19 @@ def _table_picture_payload(
     table_shape: Any,
     *,
     rows: Sequence[Sequence[str]],
+    render_width_emu: int | None = None,
+    render_height_emu: int | None = None,
+    headers: Sequence[str] | None = None,
+    column_weights: Sequence[float] | None = None,
     description_col_index: int | None = None,
     left_align_cols: Sequence[int] = (),
     hyperlink_by_row: Mapping[int, str] | None = None,
     font_boost_pt: float = 0.0,
+    header_font_size_pt: float | None = None,
 ) -> bytes:
     table = table_shape.table
-    col_count = len(table.columns)
+    custom_headers = [str(item or "").strip() for item in list(headers or [])]
+    col_count = len(custom_headers) if custom_headers else len(table.columns)
     if col_count <= 0:
         return b""
 
@@ -1026,12 +1110,28 @@ def _table_picture_payload(
         normalized_rows = [[""] * col_count]
     normalized_rows = [row + ([""] * (col_count - len(row))) for row in normalized_rows]
 
-    width_px = _emu_to_px(int(table_shape.width))
-    height_px = _emu_to_px(int(table_shape.height))
+    render_width = int(render_width_emu or int(table_shape.width) or 0)
+    render_height = int(render_height_emu or int(table_shape.height) or 0)
+    width_px = _emu_to_px(render_width)
+    height_px = _emu_to_px(render_height)
     image = Image.new("RGB", (width_px, height_px), _TABLE_BODY_BG_RGB)
     draw = ImageDraw.Draw(image)
 
-    raw_col_widths = [int(getattr(col, "width", 0) or 0) for col in table.columns]
+    raw_col_widths: list[int]
+    if column_weights:
+        raw_col_widths = [
+            max(int(round(float(value or 0) * 1000.0)), 1) for value in column_weights
+        ]
+        if len(raw_col_widths) < col_count:
+            raw_col_widths.extend(
+                [raw_col_widths[-1] if raw_col_widths else 1] * (col_count - len(raw_col_widths))
+            )
+        raw_col_widths = raw_col_widths[:col_count]
+    else:
+        raw_col_widths = [int(getattr(col, "width", 0) or 0) for col in table.columns]
+        if len(raw_col_widths) < col_count:
+            raw_col_widths.extend([1] * (col_count - len(raw_col_widths)))
+        raw_col_widths = raw_col_widths[:col_count]
     total_col_width = sum(width for width in raw_col_widths if width > 0)
     if total_col_width <= 0:
         raw_col_widths = [1] * col_count
@@ -1042,10 +1142,13 @@ def _table_picture_payload(
     ]
     col_widths_px[-1] += width_px - sum(col_widths_px)
 
-    header_h_emu = int(
-        table.rows[0].height or max(int(table_shape.height / (len(normalized_rows) + 1)), 1)
+    source_table_height = max(int(table_shape.height or 0), 1)
+    source_header_h = int(
+        table.rows[0].height or max(int(source_table_height / (len(normalized_rows) + 1)), 1)
     )
-    remaining_h_emu = max(int(table_shape.height) - header_h_emu, 1)
+    header_ratio = min(max(float(source_header_h) / float(source_table_height), 0.06), 0.28)
+    header_h_emu = max(int(round(float(render_height) * header_ratio)), 1)
+    remaining_h_emu = max(int(render_height) - header_h_emu, 1)
     body_row_h_emu = max(int(remaining_h_emu / max(len(normalized_rows), 1)), 1)
     header_h_px = _emu_to_px(header_h_emu)
     body_row_h_px = max(
@@ -1057,12 +1160,27 @@ def _table_picture_payload(
     safe_font_boost = max(float(font_boost_pt or 0.0), 0.0)
     base_font_pt = _table_body_font_size_pt(len(normalized_rows)) + safe_font_boost
     header_font = _load_report_font(
-        size_px=max(_emu_to_px(Pt(base_font_pt + 0.8)), 12),
+        size_px=max(
+            _emu_to_px(
+                Pt(
+                    float(
+                        header_font_size_pt
+                        if header_font_size_pt is not None
+                        else (base_font_pt + 0.8)
+                    )
+                )
+            ),
+            12,
+        ),
         bold=True,
     )
 
     left_cols = {int(idx) for idx in left_align_cols}
-    headers = [str(table.cell(0, cidx).text or "").strip() for cidx in range(col_count)]
+    table_headers = (
+        custom_headers
+        if custom_headers
+        else [str(table.cell(0, cidx).text or "").strip() for cidx in range(col_count)]
+    )
     hyperlinks = {
         int(k): str(v).strip() for k, v in dict(hyperlink_by_row or {}).items() if str(v).strip()
     }
@@ -1073,7 +1191,7 @@ def _table_picture_payload(
         draw.rectangle(box, fill=_TABLE_HEADER_BG_RGB, outline=_TABLE_BORDER_RGB, width=2)
         _draw_table_cell_text(
             draw,
-            text=headers[cidx],
+            text=table_headers[cidx],
             font=header_font,
             box=box,
             fill=_TABLE_HEADER_FG_RGB,
@@ -1085,9 +1203,10 @@ def _table_picture_payload(
     for ridx, row_values in enumerate(normalized_rows):
         x = 0
         row_link = hyperlinks.get(ridx, "")
+        row_bg = _TABLE_BODY_BG_RGB if ((ridx + 1) % 2) else _TABLE_BODY_ALT_BG_RGB
         for cidx, value in enumerate(row_values):
             box = (x, y, x + col_widths_px[cidx], y + body_row_h_px)
-            draw.rectangle(box, fill=_TABLE_BODY_BG_RGB, outline=_TABLE_BORDER_RGB, width=2)
+            draw.rectangle(box, fill=row_bg, outline=_TABLE_BORDER_RGB, width=2)
             cell_font_pt = base_font_pt
             if description_col_index is not None and cidx == int(description_col_index):
                 cell_font_pt = max(base_font_pt - 0.25, 7.0)
@@ -1116,37 +1235,17 @@ def _replace_table_with_picture(
     *,
     table_shape_index: int,
     rows: Sequence[Sequence[str]],
+    headers: Sequence[str] | None = None,
+    column_weights: Sequence[float] | None = None,
     description_col_index: int | None = None,
     left_align_cols: Sequence[int] = (),
     hyperlink_by_row: Mapping[int, str] | None = None,
     target_geometry: tuple[int, int, int, int] | None = None,
     font_boost_pt: float = 0.0,
+    header_font_size_pt: float | None = None,
 ) -> None:
     shape = _shape_table_or_none(slide, table_shape_index)
     if shape is None:
-        return
-
-    payload = _table_picture_payload(
-        shape,
-        rows=rows,
-        description_col_index=description_col_index,
-        left_align_cols=left_align_cols,
-        hyperlink_by_row=hyperlink_by_row,
-        font_boost_pt=font_boost_pt,
-    )
-    if not payload:
-        _set_table_rows(
-            slide,
-            table_shape_index=table_shape_index,
-            rows=rows,
-            hyperlink_by_row=hyperlink_by_row,
-        )
-        _tune_table_font(
-            slide,
-            table_shape_index=table_shape_index,
-            data_rows=len(list(rows or [])),
-            description_col_index=description_col_index,
-        )
         return
 
     left = int(shape.left)
@@ -1163,6 +1262,34 @@ def _replace_table_with_picture(
                 height = int(g_height)
         except Exception:
             pass
+
+    payload = _table_picture_payload(
+        shape,
+        rows=rows,
+        render_width_emu=width,
+        render_height_emu=height,
+        headers=headers,
+        column_weights=column_weights,
+        description_col_index=description_col_index,
+        left_align_cols=left_align_cols,
+        hyperlink_by_row=hyperlink_by_row,
+        font_boost_pt=font_boost_pt,
+        header_font_size_pt=header_font_size_pt,
+    )
+    if not payload:
+        _set_table_rows(
+            slide,
+            table_shape_index=table_shape_index,
+            rows=rows,
+            hyperlink_by_row=hyperlink_by_row,
+        )
+        _tune_table_font(
+            slide,
+            table_shape_index=table_shape_index,
+            data_rows=len(list(rows or [])),
+            description_col_index=description_col_index,
+        )
+        return
 
     slide.shapes.add_picture(
         BytesIO(payload),
@@ -1246,6 +1373,38 @@ def _set_shape_font_color(
                 run.font.color.rgb = color_rgb
             except Exception:
                 continue
+
+
+def _set_shape_font_name(
+    slide: Any,
+    *,
+    shape_index: int,
+    font_name: str,
+) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    for paragraph in list(tf.paragraphs):
+        runs = list(paragraph.runs)
+        if not runs:
+            run = paragraph.add_run()
+            runs = [run]
+        for run in runs:
+            try:
+                run.font.name = str(font_name or "").strip() or _PPT_FONT_BODY
+            except Exception:
+                continue
+
+
+def _move_shape_off_canvas(slide: Any, *, shape_index: int) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None:
+        return
+    try:
+        shape.left = -int(shape.width or 100000) - 50_000
+    except Exception:
+        return
 
 
 def _set_table_column_widths(shape: Any, *, weights: Sequence[float]) -> None:
@@ -1366,11 +1525,16 @@ def _set_paragraph_single_run(
     italic: bool = False,
     space_before_pt: float = 0.0,
     color_rgb: RGBColor | None = None,
+    font_name: str | None = None,
 ) -> None:
     paragraph.clear()
     run = paragraph.add_run()
     run.text = str(text or "")
     run.font.size = Pt(float(size_pt))
+    try:
+        run.font.name = str(font_name or _PPT_FONT_BODY_MEDIUM)
+    except Exception:
+        pass
     run.font.bold = bool(bold)
     run.font.italic = bool(italic)
     if color_rgb is not None:
@@ -1387,17 +1551,27 @@ def _set_paragraph_value_label(
     value_size_pt: float,
     label_size_pt: float,
     color_rgb: RGBColor | None = None,
+    value_font_name: str | None = None,
+    label_font_name: str | None = None,
 ) -> None:
     paragraph.clear()
     value_run = paragraph.add_run()
     value_run.text = f"{str(value_text)} "
     value_run.font.size = Pt(float(value_size_pt))
+    try:
+        value_run.font.name = str(value_font_name or _PPT_FONT_BODY_MEDIUM)
+    except Exception:
+        pass
     value_run.font.bold = True
     if color_rgb is not None:
         value_run.font.color.rgb = color_rgb
     label_run = paragraph.add_run()
     label_run.text = str(label_text or "")
     label_run.font.size = Pt(float(label_size_pt))
+    try:
+        label_run.font.name = str(label_font_name or _PPT_FONT_BODY_MEDIUM)
+    except Exception:
+        pass
     label_run.font.bold = True
     if color_rgb is not None:
         label_run.font.color.rgb = color_rgb
@@ -1577,45 +1751,76 @@ def _add_metric_split_column(
 
 
 def _align_delta_badges_with_new_card(slide: Any) -> None:
-    ref_card = _shape_or_none(slide, 15)
-    ref_delta = _shape_or_none(slide, 19)
-    ref_marker = _shape_or_none(slide, 18)
-    if ref_card is None or ref_delta is None or ref_marker is None:
-        return
-    delta_dx = int(ref_delta.left) - int(ref_card.left)
-    delta_dy = int(ref_delta.top) - int(ref_card.top)
-    marker_dx = int(ref_marker.left) - int(ref_card.left)
-    marker_dy = int(ref_marker.top) - int(ref_card.top)
-
-    for card_idx, delta_idx, marker_idx in ((9, 10, 11), (12, 13, 14)):
-        card = _shape_or_none(slide, card_idx)
-        delta = _shape_or_none(slide, delta_idx)
-        marker = _shape_or_none(slide, marker_idx)
-        if card is not None and delta is not None:
-            delta.left = int(card.left) + delta_dx
-            delta.top = int(card.top) + delta_dy
-        if card is not None and marker is not None:
-            marker.left = int(card.left) + marker_dx
-            marker.top = int(card.top) + marker_dy
+    # Legacy template markers are replaced by single, explicit delta badges.
+    for marker_idx in (11, 14, 18):
+        _move_shape_off_canvas(slide, shape_index=marker_idx)
 
 
-def _set_paragraph_level(
+def _configure_summary_delta_badge(
     slide: Any,
     *,
     shape_index: int,
-    paragraph_index: int,
-    level: int,
+    card_shape_index: int | None = None,
+    font_size_pt: float = _SUMMARY_DELTA_FONT_SIZE_PT,
 ) -> None:
     shape = _shape_or_none(slide, shape_index)
     if shape is None or not getattr(shape, "has_text_frame", False):
         return
-    paragraphs = list(shape.text_frame.paragraphs)
-    if paragraph_index < 0 or paragraph_index >= len(paragraphs):
-        return
+
+    if card_shape_index is not None:
+        card = _shape_or_none(slide, int(card_shape_index))
+        if card is not None:
+            try:
+                divider_left = int(card.left) + int(card.width * 0.636)
+                badge_width = max(int(card.width * 0.106), 1)
+                badge_height = max(int(card.height * 0.152), 1)
+                badge_right = divider_left - int(card.width * 0.014)
+                shape.width = badge_width
+                shape.height = badge_height
+                min_left = int(card.left) + int(card.width * 0.418)
+                shape.left = max(badge_right - badge_width, min_left)
+                shape.top = int(card.top) + int(card.height * 0.088)
+            except Exception:
+                pass
+
+    tf = shape.text_frame
     try:
-        paragraphs[paragraph_index].level = max(0, int(level))
+        tf.word_wrap = False
     except Exception:
-        return
+        pass
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.margin_left = 0
+        tf.margin_right = 0
+        tf.margin_top = 0
+        tf.margin_bottom = 0
+    except Exception:
+        pass
+    try:
+        shape.text_frame.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+
+    for paragraph in list(tf.paragraphs):
+        try:
+            paragraph.alignment = PP_ALIGN.CENTER
+        except Exception:
+            pass
+        for run in list(paragraph.runs):
+            txt = str(getattr(run, "text", "") or "")
+            if not txt.strip():
+                continue
+            try:
+                run.font.bold = True
+            except Exception:
+                pass
+            try:
+                run.font.size = Pt(float(font_size_pt))
+            except Exception:
+                pass
 
 
 def _overlay_picture(
@@ -1668,14 +1873,83 @@ def _chart_png(
         return b""
     if chart_id == "timeseries":
         margin = getattr(getattr(fig, "layout", None), "margin", None)
-        left = int(getattr(margin, "l", 16) or 16)
-        right = int(getattr(margin, "r", 16) or 16)
-        top = int(getattr(margin, "t", 48) or 48)
-        bottom = max(int(getattr(margin, "b", 92) or 92), 144)
+        left = int(getattr(margin, "l", 34) or 34)
+        right = max(int(getattr(margin, "r", 34) or 34), 42)
+        top = int(getattr(margin, "t", 36) or 36)
+        bottom = max(int(getattr(margin, "b", 64) or 64), 128)
+        for trace in list(getattr(fig, "data", ())):
+            trace_type = str(getattr(trace, "type", "") or "").lower()
+            if trace_type in {"scatter", "scattergl"}:
+                try:
+                    trace.mode = "lines+markers"
+                except Exception:
+                    pass
+                try:
+                    base_width = 2.7
+                    token = str(getattr(trace, "name", "") or "").strip().lower()
+                    if "backlog" in token or "abierto" in token:
+                        base_width = 3.2
+                    trace.line.width = base_width
+                except Exception:
+                    pass
+                try:
+                    trace.line.dash = "solid"
+                except Exception:
+                    pass
+                try:
+                    trace.marker.size = 5.4
+                except Exception:
+                    pass
+                try:
+                    trace.marker.symbol = "circle"
+                except Exception:
+                    pass
+                try:
+                    trace.connectgaps = True
+                except Exception:
+                    pass
+                try:
+                    trace.opacity = 0.98
+                except Exception:
+                    pass
         fig.update_layout(
-            legend=dict(font=dict(size=18)),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.22,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=14, color="#0F2D86"),
+                bgcolor="rgba(255,255,255,0.92)",
+                bordercolor="#C9D4EA",
+                borderwidth=1,
+            ),
+            plot_bgcolor="#FFFFFF",
+            paper_bgcolor="#FFFFFF",
+            font=dict(size=14, color="#132A7B"),
             margin=dict(l=left, r=right, t=top, b=bottom),
         )
+        fig.update_xaxes(
+            showgrid=False,
+            showline=True,
+            linecolor="#C7D1E6",
+            linewidth=1.2,
+            tickfont=dict(size=11, color="#213A8F"),
+            nticks=8,
+        )
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor="#E7EDF8",
+            gridwidth=1.0,
+            showline=True,
+            linecolor="#C7D1E6",
+            linewidth=1.2,
+            tickfont=dict(size=11, color="#213A8F"),
+            nticks=6,
+            dtick=1,
+        )
+        payload = _fig_to_png_exact(fig, width=1900, height=1325, scale=1.2)
+        return payload or b""
     payload = _fig_to_png_exact(fig, width=3400, height=760)
     return payload or b""
 
@@ -1812,8 +2086,10 @@ def _add_exec_textbox(
     run = p.add_run()
     run.text = str(text or "")
     run.font.size = Pt(float(font_size_pt))
-    if str(font_name or "").strip():
-        run.font.name = str(font_name).strip()
+    try:
+        run.font.name = str(font_name).strip() if str(font_name or "").strip() else _PPT_FONT_BODY
+    except Exception:
+        pass
     run.font.bold = bool(bold)
     run.font.color.rgb = color_rgb
     return box
@@ -2017,7 +2293,7 @@ def _add_exec_insight_card(
     p0.space_before = Pt(0)
     p0.space_after = Pt(0)
     title_run = p0.add_run()
-    title_run.text = f"{str(title or '').strip()} ↗"
+    title_run.text = str(title or "").strip()
     title_run.font.size = Pt(float(title_font_size_pt))
     title_run.font.bold = True
     title_run.font.color.rgb = RGBColor(*_EXEC_CARD_TITLE_RGB)
@@ -2488,9 +2764,14 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _set_paragraph_value_after_colon(
         slide, shape_index=16, paragraph_index=2, value=int(summary.new_accumulated)
     )
-    _set_shape_text(slide, 10, _fmt_delta_pct(summary.closed_delta_pct))
-    _set_shape_text(slide, 13, _fmt_delta_pct(summary.resolution_delta_pct))
-    _set_shape_text(slide, 19, _fmt_delta_pct(summary.new_delta_pct))
+    delta_badges = {
+        10: _summary_delta_badge(summary.closed_delta_pct),
+        13: _summary_delta_badge(summary.resolution_delta_pct),
+        19: _summary_delta_badge(summary.new_delta_pct),
+    }
+    for shape_idx, (badge_text, badge_color) in delta_badges.items():
+        _set_shape_text(slide, shape_idx, badge_text)
+        _set_shape_font_color(slide, shape_index=shape_idx, color_rgb=badge_color)
     focus_split_label = (
         "MAESTRAS"
         if str(summary.open_group_mode or "").strip() == OPEN_ISSUES_FOCUS_MODE_MAESTRAS
@@ -2544,11 +2825,10 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         value_text=str(_fmt_days(summary.resolution_days_now)),
         label_text="DÍAS DE RESOLUCIÓN",
         extra_lines=[
-            ("(EN PROMEDIO)", 9.5, True, True, 0.6),
+            ("(EN PROM.)", 8.1, True, True, 0.0),
         ],
         text_color_rgb=summary_metric_color,
     )
-    _set_paragraph_level(slide, shape_index=12, paragraph_index=1, level=1)
     _add_metric_split_column(
         slide,
         card_shape_index=12,
@@ -2559,10 +2839,20 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         value_suffix=" días",
     )
 
-    _set_shape_font_size(slide, shape_index=10, font_size_pt=14.0, bold=True)
-    _set_shape_font_size(slide, shape_index=13, font_size_pt=14.0, bold=True)
-    _set_shape_font_size(slide, shape_index=19, font_size_pt=14.0, bold=True)
+    _set_shape_font_size(slide, shape_index=10, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    _set_shape_font_size(slide, shape_index=13, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    _set_shape_font_size(slide, shape_index=19, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    _configure_summary_delta_badge(slide, shape_index=10, card_shape_index=9)
+    _configure_summary_delta_badge(slide, shape_index=13, card_shape_index=12)
+    _configure_summary_delta_badge(slide, shape_index=19, card_shape_index=15)
+
+    _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_HEAD)
+    for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16, 19):
+        _set_shape_font_name(slide, shape_index=idx, font_name=_PPT_FONT_BODY_MEDIUM)
+
     _align_delta_badges_with_new_card(slide)
+    _move_shape_off_canvas(slide, shape_index=7)
+    _move_shape_off_canvas(slide, shape_index=8)
 
 
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
@@ -2663,14 +2953,93 @@ def _fmt_avg_days(value: float) -> str:
     return str(int(round(safe)))
 
 
-def _top_row_line(row: FunctionalityTopRow) -> str:
-    count = int(row.new_count or 0)
-    count_txt = "incidencia nueva" if count == 1 else "incidencias nuevas"
-    line = (
-        f"{count} {count_txt} en {str(row.functionality or '').strip()} "
-        f"(acumuladas {int(row.open_total or 0)})"
+def _fmt_avg_days_short(value: float) -> str:
+    return f"{_fmt_avg_days(value)} d. prom."
+
+
+def _write_functionality_total_open_badge(
+    slide: Any,
+    *,
+    card_shape_index: int,
+    shape_index: int,
+    total_open: int,
+    critical_wording: bool,
+) -> None:
+    card_shape = _shape_or_none(slide, card_shape_index)
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+
+    if card_shape is not None:
+        try:
+            horizontal_pad = int(card_shape.width * 0.045)
+            vertical_pad = int(card_shape.height * 0.058)
+            shape.left = int(card_shape.left) + horizontal_pad
+            shape.top = int(card_shape.top) + vertical_pad
+            shape.width = max(int(card_shape.width) - (2 * horizontal_pad), 1)
+            shape.height = max(int(card_shape.height) - (2 * vertical_pad), 1)
+        except Exception:
+            pass
+
+    tf = shape.text_frame
+    tf.clear()
+    try:
+        tf.word_wrap = False
+    except Exception:
+        pass
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.margin_left = 0
+        tf.margin_right = 0
+        tf.margin_top = 0
+        tf.margin_bottom = 0
+    except Exception:
+        pass
+    try:
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+
+    number_size_pt = 40.0 if int(abs(total_open)) >= 100 else 44.0
+    label_size_pt = 14.0 if critical_wording else 16.0
+    label_lines = (
+        ("INCIDENCIAS CRÍTICAS", "ABIERTAS") if critical_wording else ("INCIDENCIAS ABIERTAS",)
     )
-    return _trim_text(line, max_chars=72)
+
+    p0 = tf.paragraphs[0]
+    _set_paragraph_single_run(
+        p0,
+        text=str(int(total_open)),
+        size_pt=number_size_pt,
+        bold=True,
+        color_rgb=RGBColor(255, 255, 255),
+    )
+    try:
+        p0.alignment = PP_ALIGN.LEFT
+    except Exception:
+        pass
+
+    for line in label_lines:
+        p = tf.add_paragraph()
+        _set_paragraph_single_run(
+            p,
+            text=line,
+            size_pt=label_size_pt,
+            bold=True,
+            color_rgb=RGBColor(255, 255, 255),
+        )
+        try:
+            p.alignment = PP_ALIGN.LEFT
+        except Exception:
+            pass
+
+
+def _top_row_line(row: FunctionalityTopRow) -> str:
+    line = format_top_row_label(row).replace("acumuladas", "acum.").replace("d. promedio", "d. p.")
+    return _trim_text(line, max_chars=108)
 
 
 def _root_cause_caption(zoom: FunctionalityZoomSlide, *, critical_wording: bool) -> str:
@@ -2724,7 +3093,7 @@ def _functionality_dashboard_table_target_geometry(
     if width <= 0 or height <= 0:
         return None
 
-    top_anchor_indexes = (2, 4, 5, 6, 8, 10)
+    top_anchor_indexes = (6, 7, 8, 9, 10, 11)
     top_anchor_bottom = 0
     for idx in top_anchor_indexes:
         anchor = _shape_or_none(slide, idx)
@@ -2732,13 +3101,25 @@ def _functionality_dashboard_table_target_geometry(
             continue
         top_anchor_bottom = max(top_anchor_bottom, int(anchor.top) + int(anchor.height))
 
-    guard_top = max(top_anchor_bottom + _FUNCTIONALITY_TABLE_TOP_GUARD_EMU, 0)
-    proposed_top = top - max(int(round(height * _FUNCTIONALITY_TABLE_TOP_SHIFT_RATIO)), 1)
-    new_top = max(proposed_top, guard_top)
-    if new_top >= top:
+    new_top = max(top_anchor_bottom + _FUNCTIONALITY_TABLE_GAP_TOP_EMU, top)
+
+    mitigation_panel = _shape_or_none(slide, 12)
+    if mitigation_panel is not None:
+        right_limit = int(mitigation_panel.left) - _FUNCTIONALITY_TABLE_GAP_RIGHT_EMU
+        if right_limit > left + 150_000:
+            width = right_limit - left
+        bottom_limit = (
+            int(mitigation_panel.top)
+            + int(mitigation_panel.height)
+            - _FUNCTIONALITY_TABLE_BOTTOM_GAP_EMU
+        )
+    else:
+        bottom_limit = int(top + height)
+
+    if bottom_limit <= new_top:
         return None
-    delta = top - new_top
-    return (left, new_top, width, height + delta)
+    new_height = max(bottom_limit - new_top, 1)
+    return (left, new_top, width, new_height)
 
 
 def _populate_functionality_dashboard_slide(
@@ -2755,6 +3136,7 @@ def _populate_functionality_dashboard_slide(
                 str(row.functionality or ""),
                 str(int(row.new_count or 0)),
                 str(int(row.open_total or 0)),
+                _fmt_avg_days(float(row.avg_open_days)),
             ]
         )
 
@@ -2766,16 +3148,14 @@ def _populate_functionality_dashboard_slide(
             f"{str(summary.period_label or '').replace('Quincena ', 'quincena ')}"
         ),
     )
-    _set_shape_text_strict(
+    _set_shape_font_name(slide, shape_index=2, font_name=_PPT_FONT_BODY_MEDIUM)
+    _write_functionality_total_open_badge(
         slide,
-        5,
-        (
-            f"{int(summary.total_open_critical)} INCIDENCIAS CRÍTICAS\nABIERTAS"
-            if critical_wording
-            else f"{int(summary.total_open_critical)} INCIDENCIAS\nABIERTAS"
-        ),
+        card_shape_index=4,
+        shape_index=5,
+        total_open=int(summary.total_open_critical),
+        critical_wording=critical_wording,
     )
-    _set_shape_font_color(slide, shape_index=5, color_rgb=RGBColor(255, 255, 255))
 
     top_rows = list(summary.top_rows or [])
     top_shapes = (6, 8, 10)
@@ -2784,6 +3164,14 @@ def _populate_functionality_dashboard_slide(
             _set_shape_text(slide, shape_idx, _top_row_line(top_rows[idx]))
         else:
             _set_shape_text(slide, shape_idx, "Sin incidencias nuevas para esta posición.")
+        _set_shape_font_size(
+            slide,
+            shape_index=shape_idx,
+            font_size_pt=11.6,
+            bold=True,
+            disable_autofit=True,
+        )
+        _set_shape_font_name(slide, shape_index=shape_idx, font_name=_PPT_FONT_BODY_MEDIUM)
 
     _set_shape_text_strict(
         slide,
@@ -2791,7 +3179,7 @@ def _populate_functionality_dashboard_slide(
         (
             "Incidencias en la quincena en ready to verify: "
             f"{int(summary.mitigation_ready_to_verify.count)} / "
-            f"{_fmt_avg_days(summary.mitigation_ready_to_verify.avg_open_days)} días promedio"
+            f"{_fmt_avg_days_short(summary.mitigation_ready_to_verify.avg_open_days)}"
         ),
     )
     _set_shape_text_strict(
@@ -2800,7 +3188,7 @@ def _populate_functionality_dashboard_slide(
         (
             "Incidencias en New: "
             f"{int(summary.mitigation_new.count)} / "
-            f"{_fmt_avg_days(summary.mitigation_new.avg_open_days)} días promedio"
+            f"{_fmt_avg_days_short(summary.mitigation_new.avg_open_days)}"
         ),
     )
     _set_shape_text_strict(
@@ -2813,7 +3201,7 @@ def _populate_functionality_dashboard_slide(
                 else "Incidencias bloqueadas: "
             )
             + f"{int(summary.mitigation_blocked.count)} / "
-            f"{_fmt_avg_days(summary.mitigation_blocked.avg_open_days)} días promedio"
+            f"{_fmt_avg_days_short(summary.mitigation_blocked.avg_open_days)}"
         ),
     )
     _set_shape_text_strict(
@@ -2822,9 +3210,11 @@ def _populate_functionality_dashboard_slide(
         (
             "Resto de incidencias: "
             f"{int(summary.mitigation_non_critical.count)} / "
-            f"{_fmt_avg_days(summary.mitigation_non_critical.avg_open_days)} días promedio"
+            f"{_fmt_avg_days_short(summary.mitigation_non_critical.avg_open_days)}"
         ),
     )
+    for idx in (5, 13, 19, 20, 21):
+        _set_shape_font_name(slide, shape_index=idx, font_name=_PPT_FONT_BODY_MEDIUM)
     _set_shape_font_color(slide, shape_index=18, color_rgb=RGBColor(255, 255, 255))
     table_target_geometry = _functionality_dashboard_table_target_geometry(
         slide,
@@ -2834,10 +3224,13 @@ def _populate_functionality_dashboard_slide(
         slide,
         table_shape_index=1,
         rows=table_rows,
+        headers=_FUNCTIONALITY_DASHBOARD_TABLE_HEADERS_RENDER,
+        column_weights=_FUNCTIONALITY_DASHBOARD_TABLE_COLUMN_WEIGHTS,
         description_col_index=1,
         left_align_cols=(1,),
         target_geometry=table_target_geometry,
         font_boost_pt=_FUNCTIONALITY_TABLE_FONT_BOOST_PT,
+        header_font_size_pt=_FUNCTIONALITY_TABLE_HEADER_FONT_SIZE_PT,
     )
 
 
@@ -2860,12 +3253,14 @@ def _populate_functionality_zoom_slide(
         1,
         f"Incidencias, en {functionality}, abiertas en la quincena{page_suffix}",
     )
+    _set_shape_font_name(slide, shape_index=1, font_name=_PPT_FONT_BODY_MEDIUM)
     _set_shape_text(
         slide,
         3,
         _trim_text(_root_cause_caption(zoom, critical_wording=critical_wording), max_chars=200),
     )
     _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(*_TABLE_BODY_FG_RGB))
+    _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_BODY)
     _set_shape_text(
         slide,
         4,
@@ -2873,6 +3268,7 @@ def _populate_functionality_zoom_slide(
         if critical_wording
         else "Zoom de incidencias del periodo:",
     )
+    _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
 
     _configure_zoom_table_layout(slide, table_shape_index=2, caption_shape_index=3)
 
@@ -2880,11 +3276,14 @@ def _populate_functionality_zoom_slide(
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
     for idx, issue in enumerate(page_issues):
+        issue_key = str(issue.key or "").strip().upper()
+        issue_summary = _premium_sentence_case(str(issue.summary or ""))
+        issue_root_cause = _premium_sentence_case(str(issue.root_cause or ""))
         rows.append(
             [
-                str(issue.key or ""),
-                _trim_text(str(issue.summary or "").replace("/", " / "), max_chars=260),
-                _trim_text(str(issue.root_cause or "").replace("/", " / "), max_chars=120),
+                issue_key,
+                _trim_text(str(issue_summary or "").replace("/", " / "), max_chars=260),
+                _trim_text(str(issue_root_cause or "").replace("/", " / "), max_chars=120),
                 _trim_text(str(issue.status or ""), max_chars=48),
                 _trim_text(str(issue.priority or ""), max_chars=28),
                 f"{int(issue.open_days or 0)} días",
@@ -2955,7 +3354,13 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
     stack_order = list(ordering.stack_order_bottom_to_top)
     if not legend_order or not stack_order:
         return b""
-    theme_color_map = build_theme_color_map(theme_order=legend_order, dark_mode=False)
+    # Keep stack geometry untouched (bottom->top), but show legend in inverse
+    # order so the series closest to X axis appears last ("Otros").
+    legend_order = list(reversed(stack_order))
+    theme_color_map = build_theme_color_map(
+        theme_order=list(ordering.display_order),
+        dark_mode=False,
+    )
 
     trend_local = trend.copy(deep=False)
     trend_local["axis_label"] = [
