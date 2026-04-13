@@ -8,6 +8,7 @@ from typing import Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.insights import classify_theme, is_other_theme_label
 from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_QUINCENAL,
@@ -457,16 +458,24 @@ def build_period_functionality_followup_summary(
         else:
             work["__summary_len"] = 0
 
-        sort_cols = [
+        dedupe_sort_cols = [
             "__updated_sort",
             "__created_sort",
             "__summary_len",
             "__open_days",
             "__issue_key",
         ]
-        ascending = [False, False, False, False, True]
-        work = work.sort_values(sort_cols, ascending=ascending, kind="mergesort")
+        dedupe_ascending = [False, False, False, False, True]
+        work = work.sort_values(dedupe_sort_cols, ascending=dedupe_ascending, kind="mergesort")
         work = work.drop_duplicates(subset=["__issue_key"], keep="first")
+        work = sort_issues_for_display(
+            work,
+            priority_col=priority_col,
+            status_col=status_col,
+            updated_col="updated",
+            created_col=created_col,
+            key_col="__issue_key",
+        )
 
         issue_rows: list[FunctionalityIssueRow] = []
         for _, row in work.iterrows():

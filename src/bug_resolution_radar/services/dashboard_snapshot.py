@@ -23,7 +23,11 @@ from bug_resolution_radar.analytics.filtering import (
     normalize_filter_tokens,
     open_only,
 )
-from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
+from bug_resolution_radar.analytics.issues import (
+    normalize_text_col,
+    priority_rank,
+    sort_issues_for_display,
+)
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
     build_theme_daily_trend,
@@ -1342,7 +1346,14 @@ def _issue_records_from_df(
                 na_position="last",
             )
     elif "updated" in work.columns:
-        work = work.sort_values("updated", ascending=False, kind="mergesort", na_position="last")
+        work = sort_issues_for_display(
+            work,
+            priority_col="priority",
+            status_col="status",
+            updated_col="updated",
+            created_col="created",
+            key_col="key",
+        )
 
     page = work.head(max(int(limit), 1)).copy(deep=False)
     for column in (
@@ -1688,6 +1699,8 @@ def _build_period_summary_payload(
             "cardId": "resolution_now",
             "kicker": "Insights · Resolución",
             "metric": _fmt_days(summary.resolution_days_now),
+            "maxDays": _fmt_days(summary.resolution_days_max_now),
+            "minDays": _fmt_days(summary.resolution_days_min_now),
             "detail": (
                 f"Δ {float(summary.resolution_delta_pct or 0.0) * 100.0:+.1f}% vs quincena previa"
                 if summary.resolution_delta_pct is not None
@@ -1841,6 +1854,8 @@ def _build_period_summary_payload(
                     "nuevasAhora": int(source_summary.new_now),
                     "cerradasAhora": int(source_summary.closed_now),
                     "resolucionAhora": _fmt_days(source_summary.resolution_days_now),
+                    "resolucionMaxAhora": _fmt_days(source_summary.resolution_days_max_now),
+                    "resolucionMinAhora": _fmt_days(source_summary.resolution_days_min_now),
                 }
             )
 

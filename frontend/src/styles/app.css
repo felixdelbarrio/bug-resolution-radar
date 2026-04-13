@@ -1917,11 +1917,13 @@ textarea::placeholder {
 .insight-detail-block summary {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.5rem;
   padding: 0.9rem 1rem;
   cursor: pointer;
   list-style: none;
   font-weight: 700;
+  text-align: left;
   background: color-mix(in srgb, var(--insight-accent) 7%, var(--bbva-surface));
 }
 
@@ -1931,6 +1933,7 @@ textarea::placeholder {
 
 .insight-detail-block summary::after {
   content: "▸";
+  margin-left: auto;
   color: var(--insight-accent);
   font-size: 0.92rem;
   line-height: 1;
@@ -1942,11 +1945,13 @@ textarea::placeholder {
 
 .insight-detail-block summary span {
   color: color-mix(in srgb, var(--insight-accent) 86%, var(--bbva-text) 14%);
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  text-align: left;
 }
 
 .insight-detail-block summary strong {
   color: var(--insight-accent);
+  margin-left: 0.12rem;
 }
 
 .insight-detail-block > *:not(summary) {
@@ -2185,13 +2190,14 @@ textarea::placeholder {
 
 .topic-detail-block summary > span {
   color: var(--bbva-text);
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .topic-summary-copy {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
   justify-content: flex-start;
   text-align: left;

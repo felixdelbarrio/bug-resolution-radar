@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -90,13 +91,13 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 13
+    assert out.slide_count == 14
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 13
+    assert len(prs.slides) == 14
     s9_text = " ".join(
         str(getattr(shape, "text", "") or "")
         for shape in prs.slides[8].shapes
@@ -157,7 +158,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 13
+    assert out.slide_count == 14
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
@@ -293,7 +294,14 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
 
     prs = Presentation(BytesIO(out.content))
 
-    # Regression guard: evolution slides must keep exactly 3 rendered chart panels.
+    s3_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[2].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "seguimiento de incidencias - méxico (vista agregada)" in s3_blob
+
+    # Regression guard: redesigned slides 7/8 keep a single hero chart panel.
     for slide_idx in (6, 7):  # slides 7 and 8 (0-based indexes)
         slide = prs.slides[slide_idx]
         pic_shapes = []
@@ -305,18 +313,87 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
             area_in2 = float(shape.width) * float(shape.height) / (914400.0 * 914400.0)
             if area_in2 >= 1.0:
                 pic_shapes.append(shape)
-        assert len(pic_shapes) == 3
+        assert len(pic_shapes) == 1
+
+    s7_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[6].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "visión agregada de incidencias abiertas : rango de días por prioridad" in s7_blob
+    assert "insights accionables" not in s7_blob
+
+    s8_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[7].shapes
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "visión agregada de incidencias abiertas por prioridad" in s8_blob
+    assert "total abiertas" not in s8_blob
+    assert "prioridad dominante" not in s8_blob
+    assert "riesgo ponderado" not in s8_blob
+    assert "insights accionables" not in s8_blob
 
     # Regression guard: summary metrics should not concatenate duplicated labels.
     s4 = prs.slides[3]
     s4_closed = str(s4.shapes[8].text or "").upper().replace(" ", "")
     s4_days = str(s4.shapes[11].text or "").upper().replace(" ", "")
+    s4_blob = " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in s4.shapes
+        if getattr(shape, "has_text_frame", False)
+    ).upper()
     assert "CERRADASINCIDENCIA" not in s4_closed
     assert "RESOLUCIÓNDÍASDERESOLUCIÓN" not in s4_days
+    assert s4_blob.count("ALTAS:") == 1
+    assert s4_blob.count("RESTO:") == 1
+    assert "MAX:" in s4_blob
+    assert "MIN:" in s4_blob
+    assert "MAX: 7 DÍAS" in s4_blob
+    assert "MIN: 7 DÍAS" in s4_blob
 
     # Long titles should be marked for in-shape fit in PowerPoint.
     s5_title = prs.slides[4].shapes[2]
     assert s5_title.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+    # Cover period must be rendered only in the dedicated period placeholder.
+    cover_blob = " || ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in prs.slides[0].shapes
+        if getattr(shape, "has_text_frame", False)
+    )
+    cover_blob_lower = cover_blob.lower()
+    assert "periodo dd/mm - dd/mm 2026" not in cover_blob_lower
+    period_matches = re.findall(
+        r"periodo\s+\d{2}/\d{2}\s*-\s*\d{2}/\d{2}/\d{4}",
+        cover_blob_lower,
+    )
+    assert len(period_matches) == 1
+    assert "kpis, evolución y análisis del periodo" in cover_blob_lower
+
+    period_shape = next(
+        (
+            shape
+            for shape in prs.slides[0].shapes
+            if getattr(shape, "has_text_frame", False)
+            and re.search(
+                r"periodo\s+\d{2}/\d{2}\s*-\s*\d{2}/\d{2}/\d{4}",
+                str(getattr(shape, "text", "") or "").lower(),
+            )
+        ),
+        None,
+    )
+    assert period_shape is not None
+    period_run_size = None
+    for paragraph in period_shape.text_frame.paragraphs:
+        for run in paragraph.runs:
+            if str(getattr(run, "text", "") or "").strip():
+                period_run_size = run.font.size
+                break
+        if period_run_size is not None:
+            break
+    assert period_run_size is not None
+    assert float(period_run_size.pt) >= 11.0
 
 
 def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
@@ -378,9 +455,9 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     )
     assert out.content
     assert called_chart_ids[:3] == ["timeseries", "timeseries", "timeseries"]
-    assert called_chart_ids.count("age_buckets") == 2
-    assert called_chart_ids.count("resolution_hist") == 2
-    assert called_chart_ids.count("open_priority_pie") == 2
+    # Redesigned slides 7/8 render with dedicated executive chart builders and
+    # no longer call the generic _chart_png pipeline.
+    assert called_chart_ids == ["timeseries", "timeseries", "timeseries"]
 
 
 def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -> None:
@@ -433,7 +510,7 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    dashboard_slide = prs.slides[9]
+    dashboard_slide = prs.slides[10]
     assert not any(getattr(shape, "has_table", False) for shape in dashboard_slide.shapes)
     dashboard_table_picture = [
         shape
@@ -444,13 +521,13 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     ]
     assert dashboard_table_picture
 
-    # Slides 11-13 (0-based 10-12): zooms de funcionalidad.
-    for slide_idx in (10, 11, 12):
+    # Slides 12-14 (0-based 11-13): zooms de funcionalidad.
+    for slide_idx in (11, 12, 13):
         slide = prs.slides[slide_idx]
         zoom_tables = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
         assert len(zoom_tables) == 1
 
-    zoom_table = [shape for shape in prs.slides[10].shapes if getattr(shape, "has_table", False)][
+    zoom_table = [shape for shape in prs.slides[11].shapes if getattr(shape, "has_table", False)][
         0
     ].table
     first_data_key_cell = zoom_table.cell(1, 0)
@@ -510,17 +587,37 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
 
     dashboard_blob_shape = next(
         shape
-        for shape in prs.slides[9].shapes
+        for shape in prs.slides[10].shapes
         if getattr(shape, "has_text_frame", False)
         and "INCIDENCIAS" in str(getattr(shape, "text", "") or "")
         and "ABIERTAS" in str(getattr(shape, "text", "") or "")
     )
+    dashboard_blob_text = str(getattr(dashboard_blob_shape, "text", "") or "")
+    assert "|" not in dashboard_blob_text
+    assert "INCIDENCIAS\nABIERTAS" in dashboard_blob_text
     dashboard_run = dashboard_blob_shape.text_frame.paragraphs[0].runs[0]
     assert dashboard_run.font.color.rgb == RGBColor(255, 255, 255)
 
+    template_prs = Presentation(str(period_ppt_mod._resolve_functionality_template_path()))
+    template_table = template_prs.slides[1].shapes[0]
+    dashboard_table_picture = max(
+        (
+            shape
+            for shape in prs.slides[10].shapes
+            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+            and int(getattr(shape, "left", 0)) < 3_600_000
+        ),
+        key=lambda shape: int(getattr(shape, "width", 0)) * int(getattr(shape, "height", 0)),
+    )
+    assert int(dashboard_table_picture.top) < int(template_table.top)
+    assert int(dashboard_table_picture.height) > int(template_table.height)
+    assert int(dashboard_table_picture.top) > int(
+        dashboard_blob_shape.top + dashboard_blob_shape.height
+    )
+
     root_cause_shape = next(
         shape
-        for shape in prs.slides[10].shapes
+        for shape in prs.slides[11].shapes
         if getattr(shape, "has_text_frame", False)
         and any(
             token in str(getattr(shape, "text", "") or "").lower()
@@ -585,10 +682,10 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 14
+    assert len(prs.slides) == 15
     zoom_titles = [
         str(getattr(shape, "text", "") or "").strip()
-        for slide_idx in (10, 11)
+        for slide_idx in (11, 12)
         for shape in prs.slides[slide_idx].shapes
         if getattr(shape, "has_text_frame", False)
     ]
@@ -642,6 +739,7 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         for shape in prs_default.slides[idx].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
+    assert "seguimiento de kpis - incidencias abiertas por funcionalidad" in blob_default
     assert "incidencias críticas" not in blob_default
 
     out_critical = generate_country_period_followup_ppt(
@@ -658,4 +756,107 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         for shape in prs_critical.slides[idx].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
+    assert "seguimiento de kpis - incidencias críticas abiertas por funcionalidad" in blob_critical
     assert "incidencias críticas" in blob_critical
+
+
+def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortnight() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "S-1",
+                "summary": "Senda cerrada rápida",
+                "status": "Resolved",
+                "priority": "High",
+                "created": "2026-04-07T08:00:00+00:00",  # 1 día
+                "updated": now.isoformat(),
+                "resolved": "2026-04-08T08:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "S-2",
+                "summary": "Senda cerrada lenta",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": "2026-03-20T08:00:00+00:00",  # 21 días
+                "updated": now.isoformat(),
+                "resolved": "2026-04-10T08:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "G-1",
+                "summary": "Gema cerrada media",
+                "status": "Resolved",
+                "priority": "Low",
+                "created": "2026-03-31T08:00:00+00:00",  # 10 días
+                "updated": now.isoformat(),
+                "resolved": "2026-04-10T08:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+            {
+                "key": "S-OUT",
+                "summary": "Senda cerrada fuera de quincena",
+                "status": "Resolved",
+                "priority": "High",
+                "created": "2026-03-01T08:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": "2026-03-05T08:00:00+00:00",  # fuera de quincena actual
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "OPEN-1",
+                "summary": "Incidencia abierta no debe contar",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-09T08:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+
+    quincenal = period_ppt_mod.build_country_quincenal_result(
+        df=dff,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        source_label_by_id=period_ppt_mod.source_label_map(
+            settings,
+            country="México",
+            source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        ),
+    )
+    expected_by_slide = {
+        2: quincenal.aggregate.summary,
+        3: quincenal.by_source["jira:mexico:senda"].summary,
+        4: quincenal.by_source["jira:mexico:gema"].summary,
+    }
+
+    for slide_idx, summary in expected_by_slide.items():
+        slide_blob = " ".join(
+            str(getattr(shape, "text", "") or "")
+            for shape in prs.slides[slide_idx].shapes
+            if getattr(shape, "has_text_frame", False)
+        )
+        max_match = re.search(r"MAX:\s*(\d+)\s*d[ií]as", slide_blob, flags=re.IGNORECASE)
+        min_match = re.search(r"MIN:\s*(\d+)\s*d[ií]as", slide_blob, flags=re.IGNORECASE)
+        assert max_match is not None
+        assert min_match is not None
+        assert int(max_match.group(1)) == int(round(float(summary.resolution_days_max_now or 0.0)))
+        assert int(min_match.group(1)) == int(round(float(summary.resolution_days_min_now or 0.0)))
