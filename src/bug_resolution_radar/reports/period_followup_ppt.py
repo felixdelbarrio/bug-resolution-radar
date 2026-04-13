@@ -239,6 +239,15 @@ def _resolve_template_path(settings: Settings, explicit_path: str | None = None)
     return resolve_period_ppt_template_path(settings, explicit_path=explicit_path)
 
 
+def _safe_emu(value: Any, *, default: int) -> int:
+    try:
+        if value is None:
+            return int(default)
+        return int(cast(Any, value))
+    except Exception:
+        return int(default)
+
+
 def _resolve_functionality_template_path() -> Path:
     path = (
         Path(__file__).resolve().parent / "templates" / _FUNCTIONALITY_TEMPLATE_FILENAME
@@ -407,12 +416,6 @@ def _shape_or_none(slide: Any, index_1_based: int) -> Any | None:
 
 def _shape_area_in2(shape: Any) -> float:
     return float(shape.width) * float(shape.height) / (_EMU_PER_INCH * _EMU_PER_INCH)
-
-
-def _shape_center(shape: Any) -> tuple[float, float]:
-    cx = float(shape.left) + (float(shape.width) / 2.0)
-    cy = float(shape.top) + (float(shape.height) / 2.0)
-    return cx, cy
 
 
 def _picture_candidates(slide: Any, *, min_area_in2: float = 1.0) -> List[Any]:
@@ -1642,32 +1645,6 @@ def _overlay_picture(
     return rendered
 
 
-def _blank_shape_area(
-    slide: Any,
-    *,
-    anchor_shape: Any | None = None,
-    anchor_shape_index: int | None = None,
-    replace_anchor: bool = False,
-) -> None:
-    anchor = anchor_shape
-    if anchor is None and anchor_shape_index is not None:
-        anchor = _shape_or_none(slide, anchor_shape_index)
-    if anchor is None:
-        return
-    blank = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        anchor.left,
-        anchor.top,
-        anchor.width,
-        anchor.height,
-    )
-    blank.fill.solid()
-    blank.fill.fore_color.rgb = RGBColor(255, 255, 255)
-    blank.line.fill.background()
-    if replace_anchor:
-        _remove_shape(anchor)
-
-
 def _resolve_summary_chart_anchor(slide: Any) -> Any | None:
     # Prefer the main chart placeholder (largest picture in summary slide).
     picture_shapes = _picture_candidates(slide, min_area_in2=1.0)
@@ -1675,31 +1652,6 @@ def _resolve_summary_chart_anchor(slide: Any) -> Any | None:
         return max(picture_shapes, key=_shape_area_in2)
     # Backward compatibility with canonical corporate template.
     return _shape_or_none(slide, 20)
-
-
-def _resolve_evolution_chart_anchors(
-    slide: Any,
-) -> tuple[Any | None, Any | None, Any | None, List[Any]]:
-    """
-    Resolve anchors for (backlog, resolution, priority, extras) robustly.
-
-    Uses geometric placement so the renderer does not depend on mutable shape indexes.
-    """
-    picture_shapes = _picture_candidates(slide, min_area_in2=1.0)
-    if len(picture_shapes) >= 3:
-        priority_shape = max(picture_shapes, key=lambda s: _shape_center(s)[0])
-        remaining = [s for s in picture_shapes if s is not priority_shape]
-        backlog_shape = min(remaining, key=lambda s: _shape_center(s)[1]) if remaining else None
-        resolution_shape = max(remaining, key=lambda s: _shape_center(s)[1]) if remaining else None
-        used = {id(x) for x in (backlog_shape, resolution_shape, priority_shape) if x is not None}
-        extras = [shape for shape in picture_shapes if id(shape) not in used]
-        return backlog_shape, resolution_shape, priority_shape, extras
-
-    # Fallback to legacy index mapping.
-    backlog_shape = _shape_or_none(slide, 7)
-    resolution_shape = _shape_or_none(slide, 4)
-    priority_shape = _shape_or_none(slide, 9)
-    return backlog_shape, resolution_shape, priority_shape, []
 
 
 def _chart_png(
@@ -1751,35 +1703,12 @@ def _priority_order_key(value: object) -> tuple[int, str]:
     return (int(priority_rank(label)), label.lower())
 
 
-def _format_quincena_boardroom(start_value: object, end_value: object) -> str:
-    start = pd.to_datetime(start_value, errors="coerce")
-    end = pd.to_datetime(end_value, errors="coerce")
-    if pd.isna(start) or pd.isna(end):
-        return str(start_value or "")
-    month_names = (
-        "ene",
-        "feb",
-        "mar",
-        "abr",
-        "may",
-        "jun",
-        "jul",
-        "ago",
-        "sep",
-        "oct",
-        "nov",
-        "dic",
-    )
-    month = month_names[max(min(int(start.month) - 1, 11), 0)]
-    return f"{month} {int(start.day):02d}-{int(end.day):02d}"
-
-
 def _format_quincena_axis_ym(start_value: object, end_value: object) -> str:
     start = pd.to_datetime(start_value, errors="coerce")
     end = pd.to_datetime(end_value, errors="coerce")
     if pd.isna(start) or pd.isna(end):
         return str(start_value or "")
-    return f"{int(start.month):02d} | {int(start.day)}-{int(end.day)}"
+    return f"{int(start.month):02d} |<br>{int(start.day)}-{int(end.day)}"
 
 
 def _clear_slide_shapes(slide: Any) -> None:
@@ -2237,20 +2166,6 @@ def _populate_open_aging_executive_slide(
         )
 
 
-def _extract_priority_story_values(
-    dff: pd.DataFrame, open_df: pd.DataFrame
-) -> tuple[str, str, str]:
-    pack = build_trend_insight_pack("open_priority_pie", dff=dff, open_df=open_df)
-    metric_by_label = {
-        _normalize_lookup_token(getattr(metric, "label", "")): str(getattr(metric, "value", "—"))
-        for metric in list(getattr(pack, "metrics", []) or [])
-    }
-    total = metric_by_label.get(_normalize_lookup_token("Total abiertas"), "—")
-    dominant = metric_by_label.get(_normalize_lookup_token("Prioridad dominante"), "—")
-    weighted = metric_by_label.get(_normalize_lookup_token("Riesgo ponderado"), "—")
-    return total, dominant, weighted
-
-
 def _priority_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mapping[str, str]:
     pack = build_trend_insight_pack("open_priority_pie", dff=dff, open_df=open_df)
     cards = list(getattr(pack, "cards", []) or [])
@@ -2627,29 +2542,6 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _align_delta_badges_with_new_card(slide)
 
 
-def _populate_evolution_slide(
-    slide: Any,
-    *,
-    title: str,
-    backlog_png: bytes,
-    resolution_png: bytes,
-    priority_png: bytes,
-) -> None:
-    _set_shape_text(slide, 2, title)
-    backlog_anchor, resolution_anchor, priority_anchor, extra_anchors = (
-        _resolve_evolution_chart_anchors(slide)
-    )
-    _overlay_picture(slide, anchor_shape=backlog_anchor, payload=backlog_png, replace_anchor=True)
-    _overlay_picture(
-        slide, anchor_shape=resolution_anchor, payload=resolution_png, replace_anchor=True
-    )
-    _overlay_picture(slide, anchor_shape=priority_anchor, payload=priority_png, replace_anchor=True)
-
-    # If template includes extra chart slots, blank them for now.
-    for extra in extra_anchors:
-        _blank_shape_area(slide, anchor_shape=extra, replace_anchor=True)
-
-
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
     candidates: list[tuple[int, Any]] = []
     for shape in slide.shapes:
@@ -3017,7 +2909,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
     axis_label_map = {
         str(raw): str(lbl) for raw, lbl in zip(axis_meta["quincena_label"], axis_meta["axis_label"])
     }
-    axis_labels = [axis_label_map.get(lbl, lbl) for lbl in raw_axis_labels]
+    axis_labels = list(dict.fromkeys(axis_label_map.get(lbl, lbl) for lbl in raw_axis_labels))
 
     theme_totals = (
         trend.groupby("tema", dropna=False)["issues_value"]
@@ -3066,7 +2958,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
             .fillna(0.0)
         )
         values = values_series.astype(float).tolist()
-        value_text = [str(int(v)) if float(v) >= 4 else "" for v in values]
+        value_text = [str(int(v)) if float(v) >= 2 else "" for v in values]
         color_hex = str(theme_color_map.get(theme) or "#7784A0")
         text_color = "#FFFFFF"
         if _normalize_lookup_token(theme) in {
@@ -3083,7 +2975,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
                 marker=dict(color=color_hex, line=dict(color="#F2F5FA", width=0.8)),
                 text=value_text,
                 textposition="inside",
-                textfont=dict(size=13.5, color=text_color),
+                textfont=dict(size=14.5, color=text_color),
                 legendrank=int(legend_rank.get(theme, len(legend_rank))),
                 customdata=[[int(totals.get(lbl, 0))] for lbl in axis_labels],
                 hovertemplate=(
@@ -3117,7 +3009,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         xaxis_title="Quincena",
         yaxis_title="Incidencias abiertas acumuladas",
         hovermode="x",
-        uniformtext=dict(minsize=11, mode="hide"),
+        uniformtext=dict(minsize=12, mode="hide"),
         plot_bgcolor="#F6F8FC",
         paper_bgcolor="#F6F8FC",
         legend=dict(
@@ -3139,7 +3031,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         categoryorder="array",
         categoryarray=axis_labels,
         tickangle=0,
-        tickfont=dict(size=11.2, color="#1E2C46"),
+        tickfont=dict(size=12.2, color="#1E2C46"),
         automargin=True,
         gridcolor="rgba(155, 169, 196, 0.22)",
     )
@@ -3150,7 +3042,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         gridcolor="rgba(155, 169, 196, 0.24)",
     )
 
-    payload = _fig_to_png(fig)
+    payload = _fig_to_png_exact(fig, width=2200, height=1000)
     return payload or b""
 
 
@@ -3208,10 +3100,10 @@ def _populate_functionality_trend_aggregate_slide(
         _overlay_picture_contain(
             slide,
             payload=chart_png,
-            frame_left=frame_left + 34_000,
-            frame_top=frame_top + 30_000,
-            frame_width=frame_width - 68_000,
-            frame_height=frame_height - 56_000,
+            frame_left=frame_left + 22_000,
+            frame_top=frame_top + 24_000,
+            frame_width=frame_width - 44_000,
+            frame_height=frame_height - 48_000,
         )
     else:
         _add_exec_textbox(
@@ -3387,6 +3279,8 @@ def generate_country_period_followup_ppt(
     )
     template = _resolve_template_path(settings, explicit_path=template_path)
     prs = Presentation(str(template))
+    slide_width_emu = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
+    slide_height_emu = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
 
     # Normalize user template into canonical 8-slide structure.
     _normalize_period_template(prs)
@@ -3444,15 +3338,15 @@ def generate_country_period_followup_ppt(
         prs.slides[6],
         settings=settings,
         scope_result=aggregate,
-        slide_width=int(prs.slide_width),
-        slide_height=int(prs.slide_height),
+        slide_width=slide_width_emu,
+        slide_height=slide_height_emu,
     )
     _populate_open_priority_executive_slide(
         prs.slides[7],
         settings=settings,
         scope_result=aggregate,
-        slide_width=int(prs.slide_width),
-        slide_height=int(prs.slide_height),
+        slide_width=slide_width_emu,
+        slide_height=slide_height_emu,
     )
 
     functionality_followup = build_period_functionality_followup_summary(
@@ -3470,8 +3364,8 @@ def generate_country_period_followup_ppt(
         summary=functionality_followup,
         period_label=functionality_followup.period_label,
         open_df=aggregate.open_df,
-        slide_width=int(prs.slide_width),
-        slide_height=int(prs.slide_height),
+        slide_width=slide_width_emu,
+        slide_height=slide_height_emu,
     )
 
     buff = BytesIO()
