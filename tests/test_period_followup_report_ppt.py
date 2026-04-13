@@ -329,6 +329,9 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         if getattr(shape, "has_text_frame", False)
     ).lower()
     assert "visión agregada de incidencias abiertas por prioridad" in s8_blob
+    assert "total abiertas" not in s8_blob
+    assert "prioridad dominante" not in s8_blob
+    assert "riesgo ponderado" not in s8_blob
     assert "insights accionables" not in s8_blob
 
     # Regression guard: summary metrics should not concatenate duplicated labels.
