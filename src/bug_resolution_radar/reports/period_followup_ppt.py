@@ -2274,23 +2274,23 @@ def _priority_chart_png_executive(
         "lowest": "#1E8C45",
         "(sin priority)": "#7E8EA7",
     }
-    colors = [color_map.get(str(label).strip().lower(), "#4A7BD1") for label in labels]
-
-    fig = go.Figure(
-        data=[
+    fig = go.Figure()
+    for label, value in zip(labels, values):
+        color = color_map.get(str(label).strip().lower(), "#4A7BD1")
+        fig.add_trace(
             go.Bar(
-                x=labels,
-                y=values,
-                marker=dict(color=colors, line=dict(color="#0A2E72", width=1)),
-                text=[f"{v} ({(v / total) * 100:.1f}%)" if v > 0 else "" for v in values],
+                x=[label],
+                y=[value],
+                marker=dict(color=color, line=dict(color="#0A2E72", width=1)),
+                text=[f"{value} ({(value / total) * 100:.1f}%)" if value > 0 else ""],
                 textposition="outside",
                 textfont=dict(size=13, color="#EAF2FF"),
                 cliponaxis=False,
                 hovertemplate="Prioridad: %{x}<br>Incidencias: %{y}<extra></extra>",
-                name="Incidencias",
+                name=str(label),
+                showlegend=True,
             )
-        ]
-    )
+        )
     fig.update_layout(
         xaxis_title="Prioridad",
         yaxis_title="Incidencias abiertas",
@@ -2319,7 +2319,7 @@ def _priority_chart_png_executive(
             bordercolor="rgba(142, 177, 233, 0.48)",
             borderwidth=1,
         ),
-        showlegend=False,
+        showlegend=True,
         margin=dict(l=24, r=24, t=20, b=126),
         plot_bgcolor="#0B2E73",
         paper_bgcolor="#0B2E73",
