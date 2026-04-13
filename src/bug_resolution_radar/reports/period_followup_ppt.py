@@ -1927,6 +1927,8 @@ def _add_exec_insight_card(
     height: int,
     title: str,
     body: str,
+    title_font_size_pt: float = 17.0,
+    body_font_size_pt: float = 12.8,
 ) -> None:
     card = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
@@ -1962,7 +1964,7 @@ def _add_exec_insight_card(
     p0.space_after = Pt(0)
     title_run = p0.add_run()
     title_run.text = f"{str(title or '').strip()} ↗"
-    title_run.font.size = Pt(17.0)
+    title_run.font.size = Pt(float(title_font_size_pt))
     title_run.font.bold = True
     title_run.font.color.rgb = RGBColor(*_EXEC_CARD_TITLE_RGB)
 
@@ -1972,7 +1974,7 @@ def _add_exec_insight_card(
     p1.space_after = Pt(0)
     body_run = p1.add_run()
     body_run.text = str(body or "").strip()
-    body_run.font.size = Pt(12.8)
+    body_run.font.size = Pt(float(body_font_size_pt))
     body_run.font.bold = False
     body_run.font.color.rgb = RGBColor(*_EXEC_TEXT_PRIMARY_RGB)
 
@@ -1982,6 +1984,8 @@ def _populate_open_aging_executive_slide(
     *,
     settings: Settings,
     scope_result: QuincenalScopeResult,
+    slide_width: int,
+    slide_height: int,
 ) -> None:
     _clear_slide_shapes(slide)
 
@@ -1992,19 +1996,19 @@ def _populate_open_aging_executive_slide(
     except Exception:
         pass
 
-    slide_w = int(getattr(getattr(slide, "part", None), "slide_width", 12_192_000) or 12_192_000)
-    slide_h = int(getattr(getattr(slide, "part", None), "slide_height", 6_858_000) or 6_858_000)
-    margin_x = 300_000
+    slide_w = int(slide_width or 9_144_000)
+    slide_h = int(slide_height or 5_143_500)
+    margin_x = int(slide_w * 0.035)
     content_w = max(slide_w - (2 * margin_x), 1)
 
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=145_000,
+        top=int(slide_h * 0.028),
         width=content_w,
-        height=280_000,
+        height=int(slide_h * 0.065),
         text="Visión agregada de incidencias abiertas : rango de días por prioridad",
-        font_size_pt=26.0,
+        font_size_pt=23.0,
         color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
         bold=True,
     )
@@ -2014,8 +2018,8 @@ def _populate_open_aging_executive_slide(
         scope_result.open_df,
     )
 
-    metric_top = 460_000
-    metric_gap = 170_000
+    metric_top = int(slide_h * 0.095)
+    metric_gap = int(slide_w * 0.017)
     metric_w = int((content_w - (2 * metric_gap)) / 3)
     _write_exec_metric_block(
         slide,
@@ -2045,18 +2049,18 @@ def _populate_open_aging_executive_slide(
     divider = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
         margin_x,
-        950_000,
+        int(slide_h * 0.183),
         content_w,
-        18_000,
+        max(int(slide_h * 0.0028), 8_000),
     )
     divider.fill.solid()
     divider.fill.fore_color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
     divider.line.fill.background()
 
     chart_frame_left = margin_x
-    chart_frame_top = 1_060_000
+    chart_frame_top = int(slide_h * 0.204)
     chart_frame_width = content_w
-    chart_frame_height = 2_970_000
+    chart_frame_height = int(slide_h * 0.41)
     chart_frame = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         chart_frame_left,
@@ -2086,7 +2090,7 @@ def _populate_open_aging_executive_slide(
         _add_exec_textbox(
             slide,
             left=chart_frame_left + 55_000,
-            top=chart_frame_top + 1_250_000,
+            top=chart_frame_top + int(chart_frame_height * 0.42),
             width=chart_frame_width - 110_000,
             height=300_000,
             text="No hay datos suficientes para renderizar el gráfico de antigüedad por prioridad.",
@@ -2099,9 +2103,9 @@ def _populate_open_aging_executive_slide(
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=4_180_000,
+        top=int(slide_h * 0.62),
         width=content_w,
-        height=210_000,
+        height=int(slide_h * 0.04),
         text="Insights accionables",
         font_size_pt=19.0,
         color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
@@ -2119,12 +2123,12 @@ def _populate_open_aging_executive_slide(
         ("Cola extrema de antigüedad", insight_text.get("Cola extrema de antigüedad", "")),
     ]
 
-    cards_top = 4_390_000
-    cards_gap_x = 180_000
-    cards_gap_y = 130_000
+    cards_top = int(slide_h * 0.665)
+    cards_gap_x = int(slide_w * 0.018)
+    cards_gap_y = int(slide_h * 0.015)
     card_w = int((content_w - cards_gap_x) / 2)
-    card_h = int((slide_h - cards_top - cards_gap_y - 190_000) / 2)
-    card_h = max(card_h, 780_000)
+    card_h = int((slide_h - cards_top - cards_gap_y - int(slide_h * 0.018)) / 2)
+    card_h = max(card_h, int(slide_h * 0.13))
     coords = [
         (margin_x, cards_top),
         (margin_x + card_w + cards_gap_x, cards_top),
@@ -2139,7 +2143,9 @@ def _populate_open_aging_executive_slide(
             width=card_w,
             height=card_h,
             title=title,
-            body=body,
+            body=_trim_text(body, max_chars=168),
+            title_font_size_pt=12.2,
+            body_font_size_pt=9.4,
         )
 
 
@@ -2238,6 +2244,8 @@ def _populate_open_priority_executive_slide(
     *,
     settings: Settings,
     scope_result: QuincenalScopeResult,
+    slide_width: int,
+    slide_height: int,
 ) -> None:
     _clear_slide_shapes(slide)
     try:
@@ -2247,19 +2255,19 @@ def _populate_open_priority_executive_slide(
     except Exception:
         pass
 
-    slide_w = int(getattr(getattr(slide, "part", None), "slide_width", 12_192_000) or 12_192_000)
-    slide_h = int(getattr(getattr(slide, "part", None), "slide_height", 6_858_000) or 6_858_000)
-    margin_x = 300_000
+    slide_w = int(slide_width or 9_144_000)
+    slide_h = int(slide_height or 5_143_500)
+    margin_x = int(slide_w * 0.035)
     content_w = max(slide_w - (2 * margin_x), 1)
 
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=145_000,
+        top=int(slide_h * 0.028),
         width=content_w,
-        height=280_000,
+        height=int(slide_h * 0.065),
         text="Visión agregada de Incidencias abiertas por prioridad",
-        font_size_pt=26.0,
+        font_size_pt=23.0,
         color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
         bold=True,
     )
@@ -2268,8 +2276,8 @@ def _populate_open_priority_executive_slide(
         scope_result.dff,
         scope_result.open_df,
     )
-    metric_top = 460_000
-    metric_gap = 170_000
+    metric_top = int(slide_h * 0.095)
+    metric_gap = int(slide_w * 0.017)
     metric_w = int((content_w - (2 * metric_gap)) / 3)
     _write_exec_metric_block(
         slide,
@@ -2299,18 +2307,18 @@ def _populate_open_priority_executive_slide(
     divider = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
         margin_x,
-        950_000,
+        int(slide_h * 0.183),
         content_w,
-        18_000,
+        max(int(slide_h * 0.0028), 8_000),
     )
     divider.fill.solid()
     divider.fill.fore_color.rgb = RGBColor(*_EXEC_ACCENT_BORDER_RGB)
     divider.line.fill.background()
 
     chart_frame_left = margin_x
-    chart_frame_top = 1_060_000
+    chart_frame_top = int(slide_h * 0.204)
     chart_frame_width = content_w
-    chart_frame_height = 2_660_000
+    chart_frame_height = int(slide_h * 0.37)
     chart_frame = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         chart_frame_left,
@@ -2340,7 +2348,7 @@ def _populate_open_priority_executive_slide(
         _add_exec_textbox(
             slide,
             left=chart_frame_left + 55_000,
-            top=chart_frame_top + 1_120_000,
+            top=chart_frame_top + int(chart_frame_height * 0.42),
             width=chart_frame_width - 110_000,
             height=300_000,
             text="No hay datos suficientes para renderizar la distribución de prioridad.",
@@ -2353,9 +2361,9 @@ def _populate_open_priority_executive_slide(
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=3_780_000,
+        top=int(slide_h * 0.59),
         width=content_w,
-        height=210_000,
+        height=int(slide_h * 0.04),
         text="Insights accionables",
         font_size_pt=19.0,
         color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
@@ -2380,11 +2388,11 @@ def _populate_open_priority_executive_slide(
         ),
     ]
 
-    cards_top = 3_990_000
-    cards_gap_x = 180_000
-    cards_gap_y = 120_000
+    cards_top = int(slide_h * 0.635)
+    cards_gap_x = int(slide_w * 0.018)
+    cards_gap_y = int(slide_h * 0.012)
     card_w = int((content_w - cards_gap_x) / 2)
-    card_h = 700_000
+    card_h = int(slide_h * 0.108)
     _add_exec_insight_card(
         slide,
         left=margin_x,
@@ -2392,7 +2400,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[0][0],
-        body=cards[0][1],
+        body=_trim_text(cards[0][1], max_chars=154),
+        title_font_size_pt=11.8,
+        body_font_size_pt=9.2,
     )
     _add_exec_insight_card(
         slide,
@@ -2401,7 +2411,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[2][0],
-        body=cards[2][1],
+        body=_trim_text(cards[2][1], max_chars=154),
+        title_font_size_pt=11.8,
+        body_font_size_pt=9.2,
     )
     _add_exec_insight_card(
         slide,
@@ -2410,7 +2422,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[1][0],
-        body=cards[1][1],
+        body=_trim_text(cards[1][1], max_chars=154),
+        title_font_size_pt=11.8,
+        body_font_size_pt=9.2,
     )
     _add_exec_insight_card(
         slide,
@@ -2419,10 +2433,12 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[3][0],
-        body=cards[3][1],
+        body=_trim_text(cards[3][1], max_chars=154),
+        title_font_size_pt=11.8,
+        body_font_size_pt=9.2,
     )
     full_card_top = cards_top + (2 * (card_h + cards_gap_y))
-    full_card_h = max(slide_h - full_card_top - 135_000, 520_000)
+    full_card_h = max(slide_h - full_card_top - int(slide_h * 0.022), int(slide_h * 0.075))
     _add_exec_insight_card(
         slide,
         left=margin_x,
@@ -2430,7 +2446,9 @@ def _populate_open_priority_executive_slide(
         width=content_w,
         height=full_card_h,
         title=cards[4][0],
-        body=cards[4][1],
+        body=_trim_text(cards[4][1], max_chars=265),
+        title_font_size_pt=11.8,
+        body_font_size_pt=9.2,
     )
 
 
@@ -3021,6 +3039,8 @@ def _populate_functionality_trend_aggregate_slide(
     slide: Any,
     *,
     open_df: pd.DataFrame,
+    slide_width: int,
+    slide_height: int,
 ) -> None:
     _clear_slide_shapes(slide)
 
@@ -3031,16 +3051,17 @@ def _populate_functionality_trend_aggregate_slide(
     except Exception:
         pass
 
-    slide_w = int(getattr(getattr(slide, "part", None), "slide_width", 12_192_000) or 12_192_000)
-    margin_x = 280_000
+    slide_w = int(slide_width or 9_144_000)
+    slide_h = int(slide_height or 5_143_500)
+    margin_x = int(slide_w * 0.032)
     content_w = max(slide_w - (2 * margin_x), 1)
 
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=120_000,
+        top=int(slide_h * 0.023),
         width=content_w,
-        height=165_000,
+        height=int(slide_h * 0.035),
         text="INSIGHTS",
         font_size_pt=13.0,
         color_rgb=RGBColor(96, 110, 136),
@@ -3049,20 +3070,20 @@ def _populate_functionality_trend_aggregate_slide(
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=245_000,
+        top=int(slide_h * 0.048),
         width=content_w,
-        height=270_000,
+        height=int(slide_h * 0.055),
         text="Tendencia por funcionalidad : vista agregada",
-        font_size_pt=31.0,
+        font_size_pt=26.0,
         color_rgb=RGBColor(0, 19, 70),
         bold=True,
     )
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=560_000,
+        top=int(slide_h * 0.11),
         width=content_w,
-        height=170_000,
+        height=int(slide_h * 0.035),
         text="Vista quincenal acumulada",
         font_size_pt=17.0,
         color_rgb=RGBColor(77, 90, 118),
@@ -3070,9 +3091,9 @@ def _populate_functionality_trend_aggregate_slide(
     )
 
     frame_left = margin_x
-    frame_top = 760_000
+    frame_top = int(slide_h * 0.152)
     frame_width = content_w
-    frame_height = 5_720_000
+    frame_height = max(slide_h - frame_top - int(slide_h * 0.035), int(slide_h * 0.78))
     frame = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         frame_left,
@@ -3115,6 +3136,8 @@ def _append_functionality_followup_slides(
     summary: PeriodFunctionalityFollowupSummary,
     period_label: str,
     open_df: pd.DataFrame,
+    slide_width: int,
+    slide_height: int,
 ) -> None:
     critical_wording = bool(getattr(summary, "is_critical_focus", False))
     template_path = _resolve_functionality_template_path()
@@ -3142,7 +3165,12 @@ def _append_functionality_followup_slides(
     )
 
     # Slide 2 (tendencia funcionalidad agregada)
-    _populate_functionality_trend_aggregate_slide(trend_slide, open_df=open_df)
+    _populate_functionality_trend_aggregate_slide(
+        trend_slide,
+        open_df=open_df,
+        slide_width=slide_width,
+        slide_height=slide_height,
+    )
 
     # Slide 3 (dashboard funcionalidad)
     _set_shape_text(
@@ -3318,11 +3346,15 @@ def generate_country_period_followup_ppt(
         prs.slides[6],
         settings=settings,
         scope_result=aggregate,
+        slide_width=int(prs.slide_width),
+        slide_height=int(prs.slide_height),
     )
     _populate_open_priority_executive_slide(
         prs.slides[7],
         settings=settings,
         scope_result=aggregate,
+        slide_width=int(prs.slide_width),
+        slide_height=int(prs.slide_height),
     )
 
     functionality_followup = build_period_functionality_followup_summary(
@@ -3340,6 +3372,8 @@ def generate_country_period_followup_ppt(
         summary=functionality_followup,
         period_label=functionality_followup.period_label,
         open_df=aggregate.open_df,
+        slide_width=int(prs.slide_width),
+        slide_height=int(prs.slide_height),
     )
 
     buff = BytesIO()
