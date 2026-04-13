@@ -1942,7 +1942,20 @@ def _resolution_chart_png_executive(
         plot_bgcolor="#F6F8FC",
         paper_bgcolor="#F6F8FC",
     )
+    for trace in list(getattr(fig, "data", []) or []):
+        if str(getattr(trace, "type", "") or "").strip().lower() != "bar":
+            continue
+        raw_y = getattr(trace, "y", None)
+        if raw_y is None:
+            continue
+        try:
+            y_vals = [float(v) for v in list(raw_y)]
+        except Exception:
+            continue
+        trace.text = [str(int(round(v))) if float(v) > 0 else "" for v in y_vals]
+        trace.texttemplate = "%{text}"
     fig.update_traces(
+        selector=dict(type="bar"),
         textposition="inside",
         textfont=dict(size=19, color="#FFFFFF"),
         marker_line_color="#0A2E72",
