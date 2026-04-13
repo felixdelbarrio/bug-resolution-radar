@@ -16,6 +16,8 @@ ICON_SOURCE := assets/app_icon/source/BugResolutionRadarIcon.png
 ICON_PNG := assets/app_icon/bug-resolution-radar.png
 ICON_ICO := assets/app_icon/bug-resolution-radar.ico
 ICON_ICNS := assets/app_icon/bug-resolution-radar.icns
+ICON_PNG_ABS := $(PWD)/$(ICON_PNG)
+ICON_ICNS_ABS := $(PWD)/$(ICON_ICNS)
 PYINSTALLER_COLLECT_ARGS = \
 	--paths "$(PWD)/src" \
 	--collect-all bug_resolution_radar.analytics \
@@ -130,7 +132,7 @@ _build-macos:
 		--clean \
 		--windowed \
 		--name bug-resolution-radar \
-		--icon $(ICON_ICNS) \
+		--icon "$(ICON_ICNS_ABS)" \
 		--distpath dist_app \
 		--workpath build_app \
 		--specpath build_app \
@@ -152,7 +154,7 @@ _build-linux:
 		--onefile \
 		--windowed \
 		--name bug-resolution-radar \
-		--icon $(ICON_PNG) \
+		--icon "$(ICON_PNG_ABS)" \
 		--workpath build \
 		--specpath build \
 		--distpath dist \

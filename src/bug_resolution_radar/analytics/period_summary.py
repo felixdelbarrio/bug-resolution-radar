@@ -11,6 +11,7 @@ from typing import Dict, Iterable, List, Mapping, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.status_semantics import (
     effective_closed_mask,
     effective_finalized_at,
@@ -108,6 +109,8 @@ class QuincenalSummary:
     closed_before: int
     closed_delta_pct: float | None
     resolution_days_now: float | None
+    resolution_days_min_now: float | None
+    resolution_days_max_now: float | None
     resolved_focus_now: int
     resolved_other_now: int
     resolution_days_before: float | None
@@ -449,6 +452,18 @@ def _delta_pct(now_value: float | int, before_value: float | int) -> float | Non
     return (now_val - before_val) / before_val
 
 
+def _resolution_days_stats(
+    df: pd.DataFrame, *, column: str = "resolution_days"
+) -> tuple[float | None, float | None, float | None]:
+    safe = _safe_df(df)
+    if safe.empty or column not in safe.columns:
+        return None, None, None
+    values = pd.to_numeric(safe[column], errors="coerce").dropna()
+    if values.empty:
+        return None, None, None
+    return float(values.mean()), float(values.min()), float(values.max())
+
+
 def _focus_group_mask(
     df: pd.DataFrame,
     *,
@@ -484,7 +499,14 @@ def _issue_listing(
     source_label_by_id: Mapping[str, str],
     resolution_col: str | None = None,
 ) -> pd.DataFrame:
-    safe = _safe_df(df)
+    safe = sort_issues_for_display(
+        _safe_df(df),
+        priority_col="priority",
+        status_col="status",
+        updated_col="updated",
+        created_col="created",
+        key_col="key",
+    )
     if safe.empty:
         cols = [
             "key",
@@ -537,14 +559,6 @@ def _issue_listing(
     if resolution_col and resolution_col in safe.columns:
         out["resolution_days"] = pd.to_numeric(safe[resolution_col], errors="coerce").round(1)
 
-    sort_cols: List[str] = []
-    ascending: List[bool] = []
-    if "created" in out.columns:
-        sort_cols.append("created")
-        ascending.append(False)
-    sort_cols.append("key")
-    ascending.append(True)
-    out = out.sort_values(by=sort_cols, ascending=ascending, na_position="last", kind="mergesort")
     return out.reset_index(drop=True)
 
 
@@ -636,20 +650,18 @@ def _scope_result(
             finalized_norm.between(window.previous_start, window.previous_end, inclusive="both")
         ].copy(deep=False)
 
-    resolution_now_days = (
-        float(pd.to_numeric(resolved_now["resolution_days"], errors="coerce").mean())
-        if not resolved_now.empty
-        else None
+    resolution_now_days, resolution_now_min_days, resolution_now_max_days = _resolution_days_stats(
+        resolved_now,
+        column="resolution_days",
     )
     resolved_focus_now, resolved_other_now = _focus_other_counts(
         resolved_now,
         grouping=grouping,
         settings=settings,
     )
-    resolution_before_days = (
-        float(pd.to_numeric(resolved_before["resolution_days"], errors="coerce").mean())
-        if not resolved_before.empty
-        else None
+    resolution_before_days, _, _ = _resolution_days_stats(
+        resolved_before,
+        column="resolution_days",
     )
     resolution_delta_pct = (
         _delta_pct(resolution_now_days, resolution_before_days)
@@ -713,6 +725,8 @@ def _scope_result(
         closed_before=int(closed_before_mask.sum()),
         closed_delta_pct=_delta_pct(int(closed_now_mask.sum()), int(closed_before_mask.sum())),
         resolution_days_now=resolution_now_days,
+        resolution_days_min_now=resolution_now_min_days,
+        resolution_days_max_now=resolution_now_max_days,
         resolved_focus_now=int(resolved_focus_now),
         resolved_other_now=int(resolved_other_now),
         resolution_days_before=resolution_before_days,
