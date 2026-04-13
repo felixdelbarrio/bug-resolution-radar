@@ -112,6 +112,7 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
     assert summary.top_rows[0].functionality == "Login y acceso"
     assert summary.top_rows[0].new_count == 2
     assert summary.top_rows[0].open_total == 2
+    assert float(summary.top_rows[0].avg_open_days) > 5.0
 
     assert summary.mitigation_ready_to_verify.count == 1
     assert summary.mitigation_new.count == 3

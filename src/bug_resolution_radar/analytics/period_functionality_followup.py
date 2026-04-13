@@ -8,12 +8,12 @@ from typing import Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.insights import classify_theme, is_other_theme_label
 from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_QUINCENAL,
     build_insights_combo_context,
 )
+from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.period_summary import QuincenalScopeResult
 from bug_resolution_radar.analytics.topic_expandable_summary import (
     RootCauseRank,
@@ -53,6 +53,7 @@ class FunctionalityTopRow:
     functionality: str
     new_count: int
     open_total: int
+    avg_open_days: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,7 @@ def _rank_theme_rows(stats: pd.DataFrame) -> list[FunctionalityTopRow]:
 
     work["new_count"] = pd.to_numeric(work["new_count"], errors="coerce").fillna(0).astype(int)
     work["open_total"] = pd.to_numeric(work["open_total"], errors="coerce").fillna(0).astype(int)
+    work["avg_open_days"] = pd.to_numeric(work["avg_open_days"], errors="coerce").fillna(0.0)
     work["__is_other"] = work["functionality"].map(is_other_theme_label)
     work = work.sort_values(
         by=["__is_other", "new_count", "open_total", "functionality"],
@@ -263,6 +265,7 @@ def _rank_theme_rows(stats: pd.DataFrame) -> list[FunctionalityTopRow]:
                 functionality=str(row.get("functionality", "") or "").strip(),
                 new_count=int(row.get("new_count", 0) or 0),
                 open_total=int(row.get("open_total", 0) or 0),
+                avg_open_days=float(row.get("avg_open_days", 0.0) or 0.0),
             )
         )
     return out
@@ -376,6 +379,16 @@ def build_period_functionality_followup_summary(
     )
 
     open_current = open_filtered.loc[created_mask].copy(deep=False)
+    if created_col in open_filtered.columns:
+        created_for_stats = _to_dt_naive(open_filtered[created_col])
+        open_age_days = ((reference_day - created_for_stats).dt.total_seconds() / 86400.0).clip(
+            lower=0.0
+        )
+        open_filtered = open_filtered.copy(deep=False)
+        open_filtered["__open_days"] = pd.to_numeric(open_age_days, errors="coerce").fillna(0.0)
+    else:
+        open_filtered = open_filtered.copy(deep=False)
+        open_filtered["__open_days"] = 0.0
 
     theme_total = (
         open_filtered["__theme"].value_counts().rename_axis("functionality").rename("open_total")
@@ -387,7 +400,17 @@ def build_period_functionality_followup_summary(
         if not open_current.empty
         else pd.Series(dtype="int64", name="new_count")
     )
-    theme_stats = pd.concat([theme_new, theme_total], axis=1).fillna(0).reset_index()
+    theme_avg_open_days = (
+        open_filtered.groupby("__theme", dropna=False)["__open_days"]
+        .mean()
+        .rename_axis("functionality")
+        .rename("avg_open_days")
+        if not open_filtered.empty
+        else pd.Series(dtype="float64", name="avg_open_days")
+    )
+    theme_stats = (
+        pd.concat([theme_new, theme_total, theme_avg_open_days], axis=1).fillna(0).reset_index()
+    )
     theme_rows = _rank_theme_rows(theme_stats)
 
     top_n_safe = max(int(top_n or 3), 1)

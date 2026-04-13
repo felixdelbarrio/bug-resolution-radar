@@ -516,8 +516,9 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         shape
         for shape in dashboard_slide.shapes
         if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
-        and int(getattr(shape, "width", 0)) >= 2_900_000
-        and int(getattr(shape, "height", 0)) >= 2_900_000
+        and int(getattr(shape, "left", 0)) < 3_600_000
+        and int(getattr(shape, "width", 0)) >= 3_000_000
+        and int(getattr(shape, "height", 0)) >= 2_200_000
     ]
     assert dashboard_table_picture
 
@@ -594,12 +595,10 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     )
     dashboard_blob_text = str(getattr(dashboard_blob_shape, "text", "") or "")
     assert "|" not in dashboard_blob_text
-    assert "INCIDENCIAS\nABIERTAS" in dashboard_blob_text
+    assert "INCIDENCIAS ABIERTAS" in dashboard_blob_text.replace("\n", " ")
     dashboard_run = dashboard_blob_shape.text_frame.paragraphs[0].runs[0]
     assert dashboard_run.font.color.rgb == RGBColor(255, 255, 255)
 
-    template_prs = Presentation(str(period_ppt_mod._resolve_functionality_template_path()))
-    template_table = template_prs.slides[1].shapes[0]
     dashboard_table_picture = max(
         (
             shape
@@ -609,10 +608,26 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         ),
         key=lambda shape: int(getattr(shape, "width", 0)) * int(getattr(shape, "height", 0)),
     )
-    assert int(dashboard_table_picture.top) < int(template_table.top)
-    assert int(dashboard_table_picture.height) > int(template_table.height)
     assert int(dashboard_table_picture.top) > int(
         dashboard_blob_shape.top + dashboard_blob_shape.height
+    )
+    mitigation_panel = next(
+        (
+            shape
+            for shape in prs.slides[10].shapes
+            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.AUTO_SHAPE
+            and int(getattr(shape, "left", 0)) > 5_400_000
+            and int(getattr(shape, "width", 0)) >= 3_000_000
+            and int(getattr(shape, "height", 0)) >= 2_000_000
+        ),
+        None,
+    )
+    assert mitigation_panel is not None
+    assert int(dashboard_table_picture.left + dashboard_table_picture.width) < int(
+        mitigation_panel.left
+    )
+    assert int(dashboard_table_picture.top + dashboard_table_picture.height) <= int(
+        mitigation_panel.top + mitigation_panel.height
     )
 
     root_cause_shape = next(
@@ -692,6 +707,16 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     joined_titles = " | ".join(zoom_titles)
     assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
     assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
+
+
+def test_functionality_dashboard_table_headers_include_business_wording() -> None:
+    assert period_ppt_mod._FUNCTIONALITY_DASHBOARD_TABLE_HEADERS == (
+        "#",
+        "Resto incidencias abiertas",
+        "Nuevas",
+        "Agregadas",
+        "Días promedio abiertas",
+    )
 
 
 def test_generate_country_period_followup_ppt_functionality_wording_depends_on_priority_filter() -> (
