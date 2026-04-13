@@ -321,7 +321,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         if getattr(shape, "has_text_frame", False)
     ).lower()
     assert "visión agregada de incidencias abiertas : rango de días por prioridad" in s7_blob
-    assert "insights accionables" in s7_blob
+    assert "insights accionables" not in s7_blob
 
     s8_blob = " ".join(
         str(getattr(shape, "text", "") or "")
@@ -329,7 +329,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         if getattr(shape, "has_text_frame", False)
     ).lower()
     assert "visión agregada de incidencias abiertas por prioridad" in s8_blob
-    assert "insights accionables" in s8_blob
+    assert "insights accionables" not in s8_blob
 
     # Regression guard: summary metrics should not concatenate duplicated labels.
     s4 = prs.slides[3]

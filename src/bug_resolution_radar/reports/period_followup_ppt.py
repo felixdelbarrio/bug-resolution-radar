@@ -1779,6 +1779,47 @@ def _clear_slide_shapes(slide: Any) -> None:
         _remove_shape(shape)
 
 
+def _overlay_picture_contain(
+    slide: Any,
+    *,
+    payload: bytes,
+    frame_left: int,
+    frame_top: int,
+    frame_width: int,
+    frame_height: int,
+) -> None:
+    if not payload:
+        return
+    try:
+        img = Image.open(BytesIO(payload))
+        src_w = float(max(int(getattr(img, "width", 1) or 1), 1))
+        src_h = float(max(int(getattr(img, "height", 1) or 1), 1))
+    except Exception:
+        src_w, src_h = 16.0, 9.0
+
+    frame_w = float(max(int(frame_width or 1), 1))
+    frame_h = float(max(int(frame_height or 1), 1))
+    src_ratio = src_w / src_h
+    frame_ratio = frame_w / frame_h
+
+    if frame_ratio >= src_ratio:
+        pic_h = frame_h
+        pic_w = pic_h * src_ratio
+    else:
+        pic_w = frame_w
+        pic_h = pic_w / src_ratio
+
+    left = int(round(float(frame_left) + (frame_w - pic_w) / 2.0))
+    top = int(round(float(frame_top) + (frame_h - pic_h) / 2.0))
+    slide.shapes.add_picture(
+        BytesIO(payload),
+        left,
+        top,
+        width=int(round(pic_w)),
+        height=int(round(pic_h)),
+    )
+
+
 def _add_exec_textbox(
     slide: Any,
     *,
@@ -2046,11 +2087,11 @@ def _populate_open_aging_executive_slide(
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=int(slide_h * 0.034),
+        top=int(slide_h * 0.036),
         width=content_w,
-        height=int(slide_h * 0.061),
+        height=int(slide_h * 0.103),
         text="Visión agregada de incidencias abiertas : rango de días por prioridad",
-        font_size_pt=24.0,
+        font_size_pt=22.0,
         color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
         bold=True,
     )
@@ -2060,7 +2101,7 @@ def _populate_open_aging_executive_slide(
         scope_result.open_df,
     )
 
-    metric_top = int(slide_h * 0.123)
+    metric_top = int(slide_h * 0.183)
     metric_gap = int(slide_w * 0.018)
     metric_w = int((content_w - (2 * metric_gap)) / 3)
     _write_exec_metric_block(
@@ -2091,7 +2132,7 @@ def _populate_open_aging_executive_slide(
     divider = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
         margin_x,
-        int(slide_h * 0.215),
+        int(slide_h * 0.285),
         content_w,
         max(int(slide_h * 0.0028), 8_000),
     )
@@ -2100,9 +2141,9 @@ def _populate_open_aging_executive_slide(
     divider.line.fill.background()
 
     chart_frame_left = margin_x
-    chart_frame_top = int(slide_h * 0.237)
+    chart_frame_top = int(slide_h * 0.305)
     chart_frame_width = content_w
-    chart_frame_height = int(slide_h * 0.35)
+    chart_frame_height = int(slide_h * 0.322)
     chart_frame = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         chart_frame_left,
@@ -2121,12 +2162,13 @@ def _populate_open_aging_executive_slide(
         open_df=scope_result.open_df,
     )
     if chart_png:
-        slide.shapes.add_picture(
-            BytesIO(chart_png),
-            chart_frame_left + 18_000,
-            chart_frame_top + 12_000,
-            width=chart_frame_width - 36_000,
-            height=chart_frame_height - 24_000,
+        _overlay_picture_contain(
+            slide,
+            payload=chart_png,
+            frame_left=chart_frame_left + 18_000,
+            frame_top=chart_frame_top + 12_000,
+            frame_width=chart_frame_width - 36_000,
+            frame_height=chart_frame_height - 24_000,
         )
     else:
         _add_exec_textbox(
@@ -2142,18 +2184,6 @@ def _populate_open_aging_executive_slide(
             align=PP_ALIGN.CENTER,
         )
 
-    _add_exec_textbox(
-        slide,
-        left=margin_x,
-        top=int(slide_h * 0.605),
-        width=content_w,
-        height=int(slide_h * 0.04),
-        text="Insights accionables",
-        font_size_pt=20.0,
-        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
-        bold=True,
-    )
-
     insight_text = _resolution_cards_by_title(scope_result.dff, scope_result.open_df)
     cards = [
         (
@@ -2165,7 +2195,7 @@ def _populate_open_aging_executive_slide(
         ("Cola extrema de antigüedad", insight_text.get("Cola extrema de antigüedad", "")),
     ]
 
-    cards_top = int(slide_h * 0.652)
+    cards_top = int(slide_h * 0.643)
     cards_gap_x = int(slide_w * 0.021)
     cards_gap_y = int(slide_h * 0.017)
     card_w = int((content_w - cards_gap_x) / 2)
@@ -2275,52 +2305,58 @@ def _priority_chart_png_executive(
         "(sin priority)": "#7E8EA7",
     }
     fig = go.Figure()
+    percentages: list[float] = []
     for label, value in zip(labels, values):
         color = color_map.get(str(label).strip().lower(), "#4A7BD1")
+        pct = (value / total) * 100.0 if total else 0.0
+        percentages.append(pct)
         fig.add_trace(
             go.Bar(
                 x=[label],
                 y=[value],
                 marker=dict(color=color, line=dict(color="#0A2E72", width=1)),
-                text=[f"{value} ({(value / total) * 100:.1f}%)" if value > 0 else ""],
-                textposition="outside",
-                textfont=dict(size=13, color="#EAF2FF"),
+                text=[str(value) if value > 0 else ""],
+                textposition="inside",
+                insidetextanchor="middle",
+                textfont=dict(size=16, color="#F8FBFF"),
                 cliponaxis=False,
                 hovertemplate="Prioridad: %{x}<br>Incidencias: %{y}<extra></extra>",
                 name=str(label),
-                showlegend=True,
+                showlegend=False,
             )
         )
+    max_value = max(values) if values else 1
+    top_offset = max(max_value * 0.06, 2.0)
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=[float(v) + top_offset for v in values],
+            mode="text",
+            text=[f"{pct:.1f}%" if val > 0 else "" for pct, val in zip(percentages, values)],
+            textposition="top center",
+            textfont=dict(size=14, color="#EAF2FF"),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
     fig.update_layout(
-        xaxis_title="Prioridad",
-        yaxis_title="Incidencias abiertas",
         xaxis=dict(
             tickfont=dict(size=13, color="#EAF2FF"),
-            title=dict(font=dict(size=17, color="#EAF2FF")),
             gridcolor="rgba(168, 194, 236, 0.15)",
             categoryorder="array",
             categoryarray=labels,
+            title="",
         ),
         yaxis=dict(
             tickfont=dict(size=13, color="#EAF2FF"),
-            title=dict(font=dict(size=16, color="#EAF2FF")),
             gridcolor="rgba(168, 194, 236, 0.15)",
-            range=[0, max(values) * 1.32 if values else 1.0],
+            range=[0, (max_value + top_offset) * 1.12 if values else 1.0],
+            title="",
         ),
-        legend=dict(
-            title_text="",
-            orientation="h",
-            xanchor="center",
-            x=0.5,
-            yanchor="top",
-            y=-0.18,
-            font=dict(size=14, color="#EAF2FF"),
-            bgcolor="rgba(7, 29, 78, 0.82)",
-            bordercolor="rgba(142, 177, 233, 0.48)",
-            borderwidth=1,
-        ),
-        showlegend=True,
-        margin=dict(l=24, r=24, t=20, b=126),
+        uniformtext=dict(minsize=14, mode="show"),
+        bargap=0.38,
+        showlegend=False,
+        margin=dict(l=22, r=22, t=22, b=52),
         plot_bgcolor="#0B2E73",
         paper_bgcolor="#0B2E73",
     )
@@ -2426,12 +2462,13 @@ def _populate_open_priority_executive_slide(
         open_df=scope_result.open_df,
     )
     if chart_png:
-        slide.shapes.add_picture(
-            BytesIO(chart_png),
-            chart_frame_left + 18_000,
-            chart_frame_top + 12_000,
-            width=chart_frame_width - 36_000,
-            height=chart_frame_height - 24_000,
+        _overlay_picture_contain(
+            slide,
+            payload=chart_png,
+            frame_left=chart_frame_left + 18_000,
+            frame_top=chart_frame_top + 12_000,
+            frame_width=chart_frame_width - 36_000,
+            frame_height=chart_frame_height - 24_000,
         )
     else:
         _add_exec_textbox(
@@ -2446,18 +2483,6 @@ def _populate_open_priority_executive_slide(
             bold=False,
             align=PP_ALIGN.CENTER,
         )
-
-    _add_exec_textbox(
-        slide,
-        left=margin_x,
-        top=int(slide_h * 0.575),
-        width=content_w,
-        height=int(slide_h * 0.04),
-        text="Insights accionables",
-        font_size_pt=20.0,
-        color_rgb=RGBColor(*_EXEC_TEXT_PRIMARY_RGB),
-        bold=True,
-    )
 
     insight_text = _priority_cards_by_title(scope_result.dff, scope_result.open_df)
     cards = [
@@ -2477,11 +2502,11 @@ def _populate_open_priority_executive_slide(
         ),
     ]
 
-    cards_top = int(slide_h * 0.622)
+    cards_top = int(slide_h * 0.614)
     cards_gap_x = int(slide_w * 0.021)
     cards_gap_y = int(slide_h * 0.015)
     card_w = int((content_w - cards_gap_x) / 2)
-    card_h = int(slide_h * 0.102)
+    card_h = int(slide_h * 0.106)
     _add_exec_insight_card(
         slide,
         left=margin_x,
@@ -2489,9 +2514,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[0][0],
-        body=_boardroom_snippet(cards[0][1], max_chars=106),
+        body=_boardroom_snippet(cards[0][1], max_chars=74),
         title_font_size_pt=12.2,
-        body_font_size_pt=9.4,
+        body_font_size_pt=8.9,
     )
     _add_exec_insight_card(
         slide,
@@ -2500,9 +2525,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[2][0],
-        body=_boardroom_snippet(cards[2][1], max_chars=106),
+        body=_boardroom_snippet(cards[2][1], max_chars=74),
         title_font_size_pt=12.2,
-        body_font_size_pt=9.4,
+        body_font_size_pt=8.9,
     )
     _add_exec_insight_card(
         slide,
@@ -2511,9 +2536,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[1][0],
-        body=_boardroom_snippet(cards[1][1], max_chars=106),
+        body=_boardroom_snippet(cards[1][1], max_chars=74),
         title_font_size_pt=12.2,
-        body_font_size_pt=9.4,
+        body_font_size_pt=8.9,
     )
     _add_exec_insight_card(
         slide,
@@ -2522,9 +2547,9 @@ def _populate_open_priority_executive_slide(
         width=card_w,
         height=card_h,
         title=cards[3][0],
-        body=_boardroom_snippet(cards[3][1], max_chars=106),
+        body=_boardroom_snippet(cards[3][1], max_chars=74),
         title_font_size_pt=12.2,
-        body_font_size_pt=9.4,
+        body_font_size_pt=8.9,
     )
     full_card_top = cards_top + (2 * (card_h + cards_gap_y))
     full_card_h = max(slide_h - full_card_top - int(slide_h * 0.022), int(slide_h * 0.075))
@@ -2535,9 +2560,9 @@ def _populate_open_priority_executive_slide(
         width=content_w,
         height=full_card_h,
         title=cards[4][0],
-        body=_boardroom_snippet(cards[4][1], max_chars=166),
+        body=_boardroom_snippet(cards[4][1], max_chars=116),
         title_font_size_pt=12.2,
-        body_font_size_pt=9.4,
+        body_font_size_pt=8.9,
     )
 
 
@@ -3059,6 +3084,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         values = (
             pd.to_numeric(sub["issues_value"], errors="coerce").fillna(0.0).astype(float).tolist()
         )
+        value_text = [str(int(v)) if float(v) >= 3 else "" for v in values]
         color_hex = str(theme_color_map.get(theme) or "#7784A0")
         fig.add_trace(
             go.Bar(
@@ -3066,6 +3092,9 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
                 y=values,
                 name=str(theme),
                 marker=dict(color=color_hex, line=dict(color="#F2F5FA", width=0.8)),
+                text=value_text,
+                textposition="inside",
+                textfont=dict(size=10.5, color="#FFFFFF"),
                 legendrank=int(legend_rank.get(theme, len(legend_rank))),
                 customdata=[[int(totals.get(lbl, 0))] for lbl in labels],
                 hovertemplate=(
@@ -3085,7 +3114,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
             mode="text",
             text=[str(int(v)) for v in totals.tolist()],
             textposition="top center",
-            textfont=dict(size=13, color="#0B1F3B"),
+            textfont=dict(size=16, color="#0B1F3B"),
             showlegend=False,
             hoverinfo="skip",
         )
@@ -3093,8 +3122,8 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
     fig.update_layout(
         barmode="stack",
         bargap=0.19,
-        height=440,
-        margin=dict(l=36, r=28, t=14, b=178),
+        height=520,
+        margin=dict(l=52, r=42, t=24, b=182),
         xaxis_title="Quincena",
         yaxis_title="Incidencias abiertas acumuladas",
         hovermode="x",
@@ -3111,7 +3140,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
             bgcolor="rgba(255,255,255,0.96)",
             bordercolor="rgba(188,198,216,0.95)",
             borderwidth=1,
-            font=dict(size=13, color="#1A2740"),
+            font=dict(size=16, color="#1A2740"),
             traceorder="normal",
         ),
     )
@@ -3119,14 +3148,14 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         type="category",
         categoryorder="array",
         categoryarray=axis_labels,
-        tickangle=0,
-        tickfont=dict(size=11, color="#1E2C46"),
+        tickangle=-24,
+        tickfont=dict(size=13, color="#1E2C46"),
         gridcolor="rgba(155, 169, 196, 0.22)",
     )
     fig.update_yaxes(
         range=[0, max_total + (total_offset * 2.5) if max_total > 0 else 1.0],
-        tickfont=dict(size=12, color="#1E2C46"),
-        title_font=dict(size=16, color="#17253F"),
+        tickfont=dict(size=14, color="#1E2C46"),
+        title_font=dict(size=20, color="#17253F"),
         gridcolor="rgba(155, 169, 196, 0.24)",
     )
 
@@ -3158,41 +3187,19 @@ def _populate_functionality_trend_aggregate_slide(
     _add_exec_textbox(
         slide,
         left=margin_x,
-        top=int(slide_h * 0.023),
+        top=int(slide_h * 0.03),
         width=content_w,
-        height=int(slide_h * 0.035),
-        text="INSIGHTS",
-        font_size_pt=13.0,
-        color_rgb=RGBColor(96, 110, 136),
-        bold=True,
-    )
-    _add_exec_textbox(
-        slide,
-        left=margin_x,
-        top=int(slide_h * 0.048),
-        width=content_w,
-        height=int(slide_h * 0.055),
+        height=int(slide_h * 0.065),
         text="Tendencia por funcionalidad : vista agregada",
-        font_size_pt=26.0,
+        font_size_pt=30.0,
         color_rgb=RGBColor(0, 19, 70),
         bold=True,
     )
-    _add_exec_textbox(
-        slide,
-        left=margin_x,
-        top=int(slide_h * 0.11),
-        width=content_w,
-        height=int(slide_h * 0.035),
-        text="Vista quincenal acumulada",
-        font_size_pt=17.0,
-        color_rgb=RGBColor(77, 90, 118),
-        bold=False,
-    )
 
     frame_left = margin_x
-    frame_top = int(slide_h * 0.152)
+    frame_top = int(slide_h * 0.11)
     frame_width = content_w
-    frame_height = max(slide_h - frame_top - int(slide_h * 0.035), int(slide_h * 0.78))
+    frame_height = max(slide_h - frame_top - int(slide_h * 0.03), int(slide_h * 0.80))
     frame = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         frame_left,
@@ -3207,12 +3214,13 @@ def _populate_functionality_trend_aggregate_slide(
 
     chart_png = _functionality_fortnight_trend_png(open_df=open_df)
     if chart_png:
-        slide.shapes.add_picture(
-            BytesIO(chart_png),
-            frame_left + 24_000,
-            frame_top + 24_000,
-            width=frame_width - 48_000,
-            height=frame_height - 48_000,
+        _overlay_picture_contain(
+            slide,
+            payload=chart_png,
+            frame_left=frame_left + 58_000,
+            frame_top=frame_top + 52_000,
+            frame_width=frame_width - 116_000,
+            frame_height=frame_height - 98_000,
         )
     else:
         _add_exec_textbox(
