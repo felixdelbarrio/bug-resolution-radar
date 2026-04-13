@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from bug_resolution_radar.config import Settings, build_source_id
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
-from bug_resolution_radar.repositories.issues_store import save_issues_doc
 from bug_resolution_radar.reports.executive_ppt import ExecutiveReportResult
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
+from bug_resolution_radar.repositories.issues_store import save_issues_doc
 
 api_app = importlib.import_module("bug_resolution_radar.api.app")
 dashboard_snapshot = importlib.import_module("bug_resolution_radar.services.dashboard_snapshot")
@@ -303,6 +303,12 @@ def test_intelligence_endpoint_returns_streamlit_aligned_payload(
     assert payload["functionality"]["combo"]["viewMode"] == "quincenal"
     assert "statusOptions" in payload["functionality"]["combo"]
     assert isinstance(payload["functionality"]["topics"], list)
+    assert "followup" in payload["functionality"]
+    assert isinstance(payload["functionality"]["followup"]["topThree"], list)
+    if payload["functionality"]["followup"]["topThree"]:
+        first = payload["functionality"]["followup"]["topThree"][0]
+        assert "avgOpenDays" in first
+        assert "d. promedio" in str(first.get("label", ""))
     assert "brief" in payload["duplicates"]
     assert "cards" in payload["people"]
     assert "kpis" in payload["opsHealth"]

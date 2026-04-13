@@ -95,6 +95,19 @@ class PeriodFunctionalityFollowupSummary:
     zoom_slides: tuple[FunctionalityZoomSlide, ...]
 
 
+def format_top_row_label(row: FunctionalityTopRow) -> str:
+    count = int(getattr(row, "new_count", 0) or 0)
+    count_txt = "incidencia nueva" if count == 1 else "incidencias nuevas"
+    functionality = str(getattr(row, "functionality", "") or "").strip()
+    open_total = int(getattr(row, "open_total", 0) or 0)
+    avg_open_days = max(float(getattr(row, "avg_open_days", 0.0) or 0.0), 0.0)
+    avg_days_txt = int(round(avg_open_days))
+    return (
+        f"{count} {count_txt} en {functionality} "
+        f"(acumuladas {open_total} - {avg_days_txt} d. promedio)"
+    )
+
+
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 

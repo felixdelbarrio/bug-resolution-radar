@@ -548,6 +548,63 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     assert tc_pr.find(qn("a:lnB")) is not None
 
 
+def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Pagos no refleja saldo",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-03-11T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Pagos timeout intermitente",
+                "status": "New",
+                "priority": "Medium",
+                "created": "2026-03-21T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+            {
+                "key": "B-1",
+                "summary": "Transferencias fallan",
+                "status": "Ready To Verify",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+    dashboard_slide = prs.slides[10]
+    top_three_blob = " | ".join(
+        str(getattr(shape, "text", "") or "")
+        for idx in (5, 7, 9)
+        for shape in [dashboard_slide.shapes[idx - 1]]
+        if getattr(shape, "has_text_frame", False)
+    ).lower()
+    assert "d. promedio" in top_three_blob
+
+
 def test_generate_country_period_followup_ppt_functionality_color_contrast_is_readable() -> None:
     now = pd.Timestamp("2026-04-10T00:00:00+00:00")
     dff = pd.DataFrame(

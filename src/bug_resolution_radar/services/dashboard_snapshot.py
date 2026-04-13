@@ -8,25 +8,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from time import monotonic
-from typing import Any, Dict, List, Sequence, cast
+from typing import Any, Sequence, cast
 
 import pandas as pd
 import plotly.graph_objects as go
 
-from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.duplicate_insights import prepare_duplicates_payload
+from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.filtering import (
     FilterState,
     apply_dashboard_issue_scope,
     apply_filters,
     normalize_filter_tokens,
     open_only,
-)
-from bug_resolution_radar.analytics.issues import (
-    normalize_text_col,
-    priority_rank,
-    sort_issues_for_display,
 )
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
@@ -44,7 +39,16 @@ from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_OPTIONS,
     build_insights_combo_context,
 )
+from bug_resolution_radar.analytics.issues import (
+    normalize_text_col,
+    priority_rank,
+    sort_issues_for_display,
+)
 from bug_resolution_radar.analytics.kpis import compute_kpis
+from bug_resolution_radar.analytics.period_functionality_followup import (
+    build_period_functionality_followup_summary,
+    format_top_row_label,
+)
 from bug_resolution_radar.analytics.period_summary import (
     build_country_quincenal_result,
     format_window_label,
@@ -62,20 +66,18 @@ from bug_resolution_radar.analytics.quincenal_scope import (
     should_show_open_split,
 )
 from bug_resolution_radar.analytics.topic_expandable_summary import (
-    TopicExpandableSummary,
     build_topic_expandable_summaries,
 )
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_constants import (
-    canonical_status_order,
     order_statuses_canonical,
 )
 from bug_resolution_radar.analytics.trend_insights import (
-    build_trend_insight_pack,
     build_duplicates_brief,
     build_ops_health_brief,
     build_people_plan_recommendations,
     build_topic_brief,
+    build_trend_insight_pack,
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.repositories.issues_store import load_issues_df
@@ -2264,6 +2266,61 @@ def _build_ops_health_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _build_functionality_followup_payload(
+    *,
+    settings: Settings,
+    dff: pd.DataFrame,
+    country: str,
+    source_ids: Sequence[str],
+    status_filters: Sequence[str] | None,
+    priority_filters: Sequence[str] | None,
+    functionality_filters: Sequence[str] | None,
+    apply_default_status_when_empty: bool,
+) -> dict[str, Any]:
+    country_txt = str(country or "").strip()
+    source_scope = [str(sid or "").strip() for sid in list(source_ids or []) if str(sid or "").strip()]
+    if not country_txt or not source_scope:
+        return {"periodLabel": "", "isCriticalFocus": False, "topThree": []}
+
+    labels = source_label_map(settings, country=country_txt, source_ids=source_scope)
+    quincenal = build_country_quincenal_result(
+        df=dff,
+        settings=settings,
+        country=country_txt,
+        source_ids=source_scope,
+        source_label_by_id=labels,
+    )
+    followup = build_period_functionality_followup_summary(
+        scope_result=quincenal.aggregate,
+        jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
+        status_filters=list(status_filters or []),
+        priority_filters=list(priority_filters or []),
+        functionality_filters=list(functionality_filters or []),
+        apply_default_status_when_empty=bool(apply_default_status_when_empty),
+        top_n=3,
+        top_root_causes=3,
+    )
+
+    top_three: list[dict[str, Any]] = []
+    for row in list(followup.top_rows or [])[:3]:
+        top_three.append(
+            {
+                "rank": int(row.rank),
+                "functionality": str(row.functionality or ""),
+                "newCount": int(row.new_count or 0),
+                "openTotal": int(row.open_total or 0),
+                "avgOpenDays": int(round(float(row.avg_open_days or 0.0))),
+                "label": format_top_row_label(row),
+            }
+        )
+
+    return {
+        "periodLabel": str(followup.period_label or ""),
+        "isCriticalFocus": bool(getattr(followup, "is_critical_focus", False)),
+        "topThree": top_three,
+    }
+
+
 def build_intelligence_snapshot(
     settings: Settings,
     *,
@@ -2287,6 +2344,16 @@ def build_intelligence_snapshot(
         functionality_filters=insights_functionality_filters,
         apply_default_status_when_empty=not bool(insights_status_manual),
         dark_mode=bool(query.dark_mode),
+    )
+    functionality["followup"] = _build_functionality_followup_payload(
+        settings=settings,
+        dff=dff,
+        country=str(query.workspace.country or ""),
+        source_ids=source_ids,
+        status_filters=insights_status_filters,
+        priority_filters=insights_priority_filters,
+        functionality_filters=insights_functionality_filters,
+        apply_default_status_when_empty=not bool(insights_status_manual),
     )
     duplicates = _build_duplicates_payload(dff_quincenal)
     people = _build_people_payload(dff_quincenal)

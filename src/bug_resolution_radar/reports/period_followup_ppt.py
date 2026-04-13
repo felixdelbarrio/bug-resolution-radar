@@ -37,6 +37,7 @@ from bug_resolution_radar.analytics.period_functionality_followup import (
     FunctionalityZoomSlide,
     PeriodFunctionalityFollowupSummary,
     build_period_functionality_followup_summary,
+    format_top_row_label,
 )
 from bug_resolution_radar.analytics.period_summary import (
     OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
@@ -95,7 +96,7 @@ _FUNCTIONALITY_TABLE_GAP_RIGHT_EMU = 185_000
 _FUNCTIONALITY_TABLE_BOTTOM_GAP_EMU = 24_000
 _FUNCTIONALITY_TABLE_FONT_BOOST_PT = 1.2
 _FUNCTIONALITY_TABLE_HEADER_FONT_SIZE_PT = 7.8
-_SUMMARY_DELTA_FONT_SIZE_PT = 12.0
+_SUMMARY_DELTA_FONT_SIZE_PT = 8.8
 _SUMMARY_DELTA_UP_RGB = RGBColor(201, 67, 77)
 _SUMMARY_DELTA_DOWN_RGB = RGBColor(62, 133, 64)
 _SUMMARY_DELTA_NEUTRAL_RGB = RGBColor(95, 112, 142)
@@ -1676,10 +1677,15 @@ def _configure_summary_delta_badge(
         card = _shape_or_none(slide, int(card_shape_index))
         if card is not None:
             try:
-                shape.width = max(int(card.width * 0.22), 1)
-                shape.height = max(int(card.height * 0.32), 1)
-                shape.left = int(card.left) + int(card.width * 0.43)
-                shape.top = int(card.top) + int(card.height * 0.06)
+                divider_left = int(card.left) + int(card.width * 0.636)
+                badge_width = max(int(card.width * 0.106), 1)
+                badge_height = max(int(card.height * 0.152), 1)
+                badge_right = divider_left - int(card.width * 0.014)
+                shape.width = badge_width
+                shape.height = badge_height
+                min_left = int(card.left) + int(card.width * 0.418)
+                shape.left = max(badge_right - badge_width, min_left)
+                shape.top = int(card.top) + int(card.height * 0.088)
             except Exception:
                 pass
 
@@ -1706,7 +1712,7 @@ def _configure_summary_delta_badge(
 
     for paragraph in list(tf.paragraphs):
         try:
-            paragraph.alignment = PP_ALIGN.RIGHT
+            paragraph.alignment = PP_ALIGN.CENTER
         except Exception:
             pass
         for run in list(paragraph.runs):
@@ -1792,10 +1798,10 @@ def _chart_png(
         return b""
     if chart_id == "timeseries":
         margin = getattr(getattr(fig, "layout", None), "margin", None)
-        left = int(getattr(margin, "l", 26) or 26)
-        right = int(getattr(margin, "r", 26) or 26)
-        top = int(getattr(margin, "t", 58) or 58)
-        bottom = max(int(getattr(margin, "b", 126) or 126), 166)
+        left = int(getattr(margin, "l", 34) or 34)
+        right = max(int(getattr(margin, "r", 34) or 34), 248)
+        top = int(getattr(margin, "t", 36) or 36)
+        bottom = max(int(getattr(margin, "b", 64) or 64), 84)
         for trace in list(getattr(fig, "data", ())):
             trace_type = str(getattr(trace, "type", "") or "").lower()
             if trace_type in {"scatter", "scattergl"}:
@@ -1804,7 +1810,11 @@ def _chart_png(
                 except Exception:
                     pass
                 try:
-                    trace.line.width = 3.4
+                    base_width = 4.4
+                    token = str(getattr(trace, "name", "") or "").strip().lower()
+                    if "backlog" in token or "abierto" in token:
+                        base_width = 5.2
+                    trace.line.width = base_width
                 except Exception:
                     pass
                 try:
@@ -1812,7 +1822,7 @@ def _chart_png(
                 except Exception:
                     pass
                 try:
-                    trace.marker.size = 5.4
+                    trace.marker.size = 7.2
                 except Exception:
                     pass
                 try:
@@ -1829,36 +1839,41 @@ def _chart_png(
                     pass
         fig.update_layout(
             legend=dict(
-                orientation="h",
+                orientation="v",
                 yanchor="top",
-                y=-0.20,
+                y=0.98,
                 xanchor="left",
-                x=0.0,
-                font=dict(size=15),
+                x=1.01,
+                font=dict(size=15, color="#0F2D86"),
+                bgcolor="rgba(255,255,255,0.92)",
+                bordercolor="#C9D4EA",
+                borderwidth=1,
             ),
             plot_bgcolor="#FFFFFF",
             paper_bgcolor="#FFFFFF",
-            font=dict(size=15, color="#132A7B"),
+            font=dict(size=14, color="#132A7B"),
             margin=dict(l=left, r=right, t=top, b=bottom),
         )
         fig.update_xaxes(
             showgrid=False,
             showline=True,
             linecolor="#C7D1E6",
-            linewidth=1.5,
-            tickfont=dict(size=12, color="#213A8F"),
+            linewidth=1.2,
+            tickfont=dict(size=11, color="#213A8F"),
+            nticks=8,
         )
         fig.update_yaxes(
             showgrid=True,
-            gridcolor="#DFE6F3",
-            gridwidth=1.2,
+            gridcolor="#E7EDF8",
+            gridwidth=1.0,
             showline=True,
             linecolor="#C7D1E6",
-            linewidth=1.5,
-            tickfont=dict(size=12, color="#213A8F"),
+            linewidth=1.2,
+            tickfont=dict(size=11, color="#213A8F"),
             nticks=6,
+            dtick=1,
         )
-        payload = _fig_to_png_exact(fig, width=3200, height=2234, scale=2.0)
+        payload = _fig_to_png_exact(fig, width=1900, height=1325, scale=1.2)
         return payload or b""
     payload = _fig_to_png_exact(fig, width=3400, height=760)
     return payload or b""
@@ -2946,13 +2961,8 @@ def _write_functionality_total_open_badge(
 
 
 def _top_row_line(row: FunctionalityTopRow) -> str:
-    count = int(row.new_count or 0)
-    count_txt = "incidencia nueva" if count == 1 else "incidencias nuevas"
-    line = (
-        f"{count} {count_txt} en {str(row.functionality or '').strip()} "
-        f"(acumuladas {int(row.open_total or 0)})"
-    )
-    return _trim_text(line, max_chars=72)
+    line = format_top_row_label(row)
+    return _trim_text(line, max_chars=108)
 
 
 def _root_cause_caption(zoom: FunctionalityZoomSlide, *, critical_wording: bool) -> str:

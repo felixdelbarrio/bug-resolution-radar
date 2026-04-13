@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, List, Sequence, cast
+from typing import Any, Sequence, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -210,9 +210,10 @@ def _legend_height(
     usable_width = max(120, canvas_width - int(120 * scale))
     x_cursor = 0
     rows = 1
-    swatch = int(14 * scale)
-    gap = int(10 * scale)
-    item_gap = int(22 * scale)
+    font_height = max(12, _text_bbox(draw, "Hg", font)[1])
+    swatch = max(int(14 * scale), int(font_height * 0.78))
+    gap = max(int(8 * scale), int(font_height * 0.38))
+    item_gap = max(int(14 * scale), int(font_height * 0.84))
     for item in items:
         label_width, label_height = _text_bbox(draw, _plain_text(item.label), font)
         item_width = swatch + gap + label_width + item_gap
@@ -221,7 +222,7 @@ def _legend_height(
             x_cursor = 0
         x_cursor += item_width
         _ = label_height
-    row_height = int(max(20, _text_bbox(draw, "Hg", font)[1] + (10 * scale)))
+    row_height = int(max(20, max(swatch, font_height) + max((8 * scale), font_height * 0.30)))
     return max(int(36 * scale), rows * row_height + int(24 * scale))
 
 
@@ -238,10 +239,11 @@ def _draw_legend(
 ) -> None:
     if not items:
         return
-    swatch = int(14 * scale)
-    gap = int(10 * scale)
-    item_gap = int(22 * scale)
-    row_height = int(max(20, _text_bbox(draw, "Hg", font)[1] + (10 * scale)))
+    font_height = max(12, _text_bbox(draw, "Hg", font)[1])
+    swatch = max(int(14 * scale), int(font_height * 0.78))
+    gap = max(int(8 * scale), int(font_height * 0.38))
+    item_gap = max(int(14 * scale), int(font_height * 0.84))
+    row_height = int(max(20, max(swatch, font_height) + max((8 * scale), font_height * 0.30)))
     x_cursor = int(left)
     y_cursor = int(top)
     max_right = int(left + width)
@@ -265,6 +267,104 @@ def _draw_legend(
             fill=text_color,
         )
         x_cursor += item_width
+
+
+def _fit_text_to_width(
+    draw: ImageDraw.ImageDraw,
+    *,
+    text: str,
+    font: Any,
+    max_width: int,
+) -> str:
+    clean = _plain_text(text)
+    if max_width <= 0:
+        return ""
+    if _text_bbox(draw, clean, font)[0] <= max_width:
+        return clean
+    ellipsis = "…"
+    token = clean
+    while token and _text_bbox(draw, f"{token}{ellipsis}", font)[0] > max_width:
+        token = token[:-1]
+    return f"{token}{ellipsis}" if token else ellipsis
+
+
+def _draw_legend_vertical(
+    draw: ImageDraw.ImageDraw,
+    items: Sequence[_LegendItem],
+    *,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+    font: Any,
+    text_color: tuple[int, int, int, int],
+    scale: float,
+    panel_color: tuple[int, int, int, int],
+    border_color: tuple[int, int, int, int],
+) -> None:
+    if not items or width <= 20 or height <= 20:
+        return
+    font_height = max(12, _text_bbox(draw, "Hg", font)[1])
+    pad = max(int(12 * scale), int(font_height * 0.42))
+    swatch = max(int(14 * scale), int(font_height * 0.78))
+    gap = max(int(8 * scale), int(font_height * 0.40))
+    row_gap = max(int(7 * scale), int(font_height * 0.26))
+    row_height = max(swatch, font_height) + row_gap
+    panel_left = int(left)
+    panel_top = int(top)
+    panel_right = int(left + width)
+    panel_bottom = int(max(top + height, top + (2 * pad) + row_height))
+    draw.rounded_rectangle(
+        [panel_left, panel_top, panel_right, panel_bottom],
+        radius=max(4, int(8 * scale)),
+        fill=panel_color,
+        outline=border_color,
+        width=max(1, int(1.4 * scale)),
+    )
+
+    y_cursor = panel_top + pad
+    text_left = panel_left + pad + swatch + gap
+    max_label_width = max(24, panel_right - text_left - pad)
+    for item in items:
+        if y_cursor + row_height > panel_bottom - pad:
+            break
+        label = _fit_text_to_width(
+            draw,
+            text=item.label,
+            font=font,
+            max_width=max_label_width,
+        )
+        _, label_h = _text_bbox(draw, label, font)
+        swatch_top = y_cursor + max(0, (row_height - swatch) // 2)
+        draw.rounded_rectangle(
+            [panel_left + pad, swatch_top, panel_left + pad + swatch, swatch_top + swatch],
+            radius=max(2, int(3 * scale)),
+            fill=item.color,
+        )
+        draw.text(
+            (text_left, y_cursor + max(0, (row_height - label_h) // 2)),
+            label,
+            font=font,
+            fill=text_color,
+        )
+        y_cursor += row_height
+
+
+def _is_line_dominant_cartesian(traces: Sequence[object]) -> bool:
+    scatter_with_lines = 0
+    bar_count = 0
+    for trace in traces:
+        trace_type = str(getattr(trace, "type", "") or "").strip().lower()
+        if trace_type == "bar":
+            bar_count += 1
+            continue
+        if trace_type not in {"scatter", "scattergl"}:
+            continue
+        mode_raw = str(getattr(trace, "mode", "") or "").strip().lower()
+        mode_tokens = {token.strip() for token in mode_raw.split("+") if token.strip()}
+        if not mode_tokens or "lines" in mode_tokens:
+            scatter_with_lines += 1
+    return scatter_with_lines >= 2 and bar_count == 0
 
 
 def _unique_categories(values: Iterable[object]) -> list[str]:
@@ -545,9 +645,11 @@ def _draw_axes(
     x_title: str,
     y_title: str,
     scale: float,
+    axis_font_multiplier: float = 1.0,
 ) -> None:
-    axis_font = _load_font(int(16 * scale))
-    title_font = _load_font(int(18 * scale), bold=True)
+    safe_multiplier = max(0.8, float(axis_font_multiplier or 1.0))
+    axis_font = _load_font(int(16 * scale * safe_multiplier))
+    title_font = _load_font(int(18 * scale * max(1.0, safe_multiplier * 0.96)), bold=True)
     draw.line(
         [(left, top + height), (left + width, top + height)],
         fill=axis_color,
@@ -695,8 +797,12 @@ def _draw_scatter_traces(
     width: int,
     height: int,
     scale: float,
+    line_width_multiplier: float = 1.0,
+    marker_size_multiplier: float = 1.0,
 ) -> None:
     text_font = _load_font(int(16 * scale), bold=True)
+    safe_line_multiplier = max(0.8, float(line_width_multiplier or 1.0))
+    safe_marker_multiplier = max(0.8, float(marker_size_multiplier or 1.0))
     for trace in traces:
         trace_type = str(getattr(trace, "type", "") or "").strip().lower()
         if trace_type not in {"scatter", "scattergl"}:
@@ -725,12 +831,16 @@ def _draw_scatter_traces(
             points.append((x_pos, y_pos))
 
         if "lines" in mode_tokens and len(points) >= 2:
+            base_width = float(getattr(line, "width", 2) or 2)
+            line_width_px = int(base_width * scale * safe_line_multiplier)
             draw.line(
-                points, fill=line_color, width=max(2, int((getattr(line, "width", 2) or 2) * scale))
+                points,
+                fill=line_color,
+                width=max(int(2 * scale), line_width_px, int(3 * scale * safe_line_multiplier)),
             )
 
         if "markers" in mode_tokens:
-            radius = max(2, int((marker_size / 2.0) * scale))
+            radius = max(2, int((marker_size / 2.0) * scale * safe_marker_multiplier))
             outline = _parse_color(BBVA_LIGHT.white)
             for x_pos, y_pos in points:
                 draw.ellipse(
@@ -774,7 +884,6 @@ def _render_pie_chart(
     if not traces:
         return
     trace = traces[0]
-    labels = [str(label or "").strip() for label in _trace_values(trace, "labels")]
     values = [float(_to_float(value) or 0.0) for value in _trace_values(trace, "values")]
     colors = list(getattr(getattr(trace, "marker", None), "colors", []) or [])
     hole = max(0.0, min(0.85, float(getattr(trace, "hole", 0.0) or 0.0)))
@@ -800,7 +909,6 @@ def _render_pie_chart(
         color = _parse_color(colors[idx] if idx < len(colors) else BBVA_LIGHT.core_blue)
         draw.pieslice(bbox, start=start_angle, end=end_angle, fill=color)
 
-        label = labels[idx] if idx < len(labels) else ""
         share = value / total
         label_txt = ""
         if share >= 0.20:
@@ -869,10 +977,27 @@ def _render_cartesian_chart(
     if not traces:
         return
 
+    line_dominant = _is_line_dominant_cartesian(traces)
+    use_right_legend = line_dominant and len(legend_items) >= 2 and width >= int(780 * scale)
+    axis_font_multiplier = 1.0
+    line_width_multiplier = 1.0
+    marker_size_multiplier = 1.0
+    legend_font = _load_font(int(16 * scale))
+    legend_panel_width = 0
+    if use_right_legend:
+        axis_font_multiplier = 1.55
+        line_width_multiplier = 2.15
+        marker_size_multiplier = 1.6
+        legend_font = _load_font(int(34 * scale), bold=True)
+        legend_panel_width = min(
+            int(width * 0.36),
+            max(int(width * 0.24), int(330 * scale)),
+        )
+
     left = int(104 * scale)
     top = int(42 * scale)
-    right = int(44 * scale)
-    bottom = legend_height + int(94 * scale)
+    right = int(44 * scale) + (legend_panel_width if use_right_legend else 0)
+    bottom = int(94 * scale) if use_right_legend else legend_height + int(94 * scale)
     plot_width = max(120, width - left - right)
     plot_height = max(120, height - top - bottom)
     barmode = str(getattr(getattr(fig, "layout", None), "barmode", "") or "").strip().lower()
@@ -900,6 +1025,7 @@ def _render_cartesian_chart(
             getattr(getattr(getattr(fig.layout, "yaxis", None), "title", None), "text", "") or ""
         ),
         scale=scale,
+        axis_font_multiplier=axis_font_multiplier,
     )
 
     _draw_bar_traces(
@@ -925,19 +1051,35 @@ def _render_cartesian_chart(
         width=plot_width,
         height=plot_height,
         scale=scale,
+        line_width_multiplier=line_width_multiplier,
+        marker_size_multiplier=marker_size_multiplier,
     )
 
-    legend_font = _load_font(int(16 * scale))
-    _draw_legend(
-        draw,
-        legend_items,
-        left=left,
-        top=height - legend_height + int(10 * scale),
-        width=plot_width,
-        font=legend_font,
-        text_color=text_color,
-        scale=scale,
-    )
+    if use_right_legend:
+        _draw_legend_vertical(
+            draw,
+            legend_items,
+            left=left + plot_width + int(12 * scale),
+            top=top + int(4 * scale),
+            width=max(90, legend_panel_width - int(16 * scale)),
+            height=max(90, plot_height - int(4 * scale)),
+            font=legend_font,
+            text_color=text_color,
+            scale=scale,
+            panel_color=_parse_color("#F5F8FD"),
+            border_color=_parse_color("#D6E0F1"),
+        )
+    else:
+        _draw_legend(
+            draw,
+            legend_items,
+            left=left,
+            top=height - legend_height + int(10 * scale),
+            width=plot_width,
+            font=legend_font,
+            text_color=text_color,
+            scale=scale,
+        )
 
 
 def render_plotly_figure_png(
