@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useDashboardParams } from "../hooks/useDashboardParams";
-import { fetchJson, type BootstrapPayload, type WorkspaceData } from "../lib/api";
+import {
+  fetchJson,
+  normalizeSettingsPayload,
+  putJson,
+  type BootstrapPayload,
+  type SettingsPayload,
+  type WorkspaceData
+} from "../lib/api";
 import { cn } from "../lib/cn";
 import { configureSemanticColors } from "../lib/semanticColors";
 
@@ -56,6 +63,7 @@ function applyThemeContract(
 }
 
 export function AppShell() {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const dashboardState = useDashboardParams("overview");
@@ -90,6 +98,31 @@ export function AppShell() {
   const isSettings = location.pathname === "/settings";
   const reportMode = new URLSearchParams(location.search).get("reportMode") ?? "executive";
   const heroTitle = bootstrap.data?.appTitle?.trim() || "Cuadro de mando de incidencias";
+
+  const persistTheme = useMutation({
+    mutationFn: async (nextTheme: "light" | "dark") => {
+      const settings = normalizeSettingsPayload(
+        await fetchJson<SettingsPayload>("/api/settings")
+      );
+      const currentTheme = String(settings.values?.THEME ?? "").trim().toLowerCase();
+      if (currentTheme === nextTheme) {
+        return settings;
+      }
+      return normalizeSettingsPayload(
+        await putJson<SettingsPayload>("/api/settings", {
+          ...settings,
+          values: {
+            ...settings.values,
+            THEME: nextTheme
+          }
+        })
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap-shell"] });
+    }
+  });
 
   useEffect(() => {
     const nextTheme = persistedTheme();
@@ -196,6 +229,12 @@ export function AppShell() {
       priority: [],
       assignee: []
     });
+  }
+
+  function handleThemeToggle() {
+    const nextTheme = themeMode === "dark" ? "light" : "dark";
+    setThemeMode(nextTheme);
+    persistTheme.mutate(nextTheme);
   }
 
   const rollupPreview = useMemo(() => {
@@ -367,7 +406,7 @@ export function AppShell() {
             className="workspace-action"
             title={themeMode === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
             aria-label={themeMode === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
-            onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+            onClick={handleThemeToggle}
           >
             <img
               src={themeMode === "dark" ? "/brand/icons/sun.svg" : "/brand/icons/moon.svg"}
