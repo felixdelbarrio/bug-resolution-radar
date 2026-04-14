@@ -359,6 +359,22 @@ export type IngestResult = {
   messages: Array<{ ok: boolean; message: string }>;
 };
 
+export type IngestProgressPayload = {
+  connector: "jira" | "helix";
+  runId: number;
+  state: "idle" | "running" | "success" | "partial" | "error";
+  active: boolean;
+  startedAt: string;
+  finishedAt: string;
+  totalSources: number;
+  completedSources: number;
+  successCount: number;
+  summary: string;
+  messages: Array<{ ok: boolean; message: string }>;
+  result?: IngestResult | null;
+  started?: boolean;
+};
+
 export type SavedReportPayload = {
   fileName: string;
   savedPath: string;

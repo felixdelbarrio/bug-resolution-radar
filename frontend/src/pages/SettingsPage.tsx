@@ -24,6 +24,7 @@ type SettingsTabId =
   | "cache";
 
 type SourceDraftRow = WorkspaceSource & {
+  draftKey: string;
   markedForDeletion?: boolean;
 };
 
@@ -79,6 +80,27 @@ function normalizeBool(value: string | number | undefined, fallback = false) {
   return ["1", "true", "yes", "on"].includes(token);
 }
 
+let sourceDraftKeyCounter = 0;
+
+function nextSourceDraftKey() {
+  sourceDraftKeyCounter += 1;
+  return `source-draft-${sourceDraftKeyCounter}`;
+}
+
+function sortSourceRows<T extends { country: string; alias: string }>(rows: T[]) {
+  return [...rows].sort((left, right) => {
+    const byCountry = String(left.country || "").localeCompare(String(right.country || ""), "es", {
+      sensitivity: "base"
+    });
+    if (byCountry !== 0) {
+      return byCountry;
+    }
+    return String(left.alias || "").localeCompare(String(right.alias || ""), "es", {
+      sensitivity: "base"
+    });
+  });
+}
+
 function normalizeCookieSource(value: string | number | undefined, fallback = "browser") {
   const token = String(value ?? "")
     .trim()
@@ -90,11 +112,16 @@ function normalizeCookieSource(value: string | number | undefined, fallback = "b
 }
 
 function withSourceDrafts(rows: WorkspaceSource[]) {
-  return rows.map((row) => ({ ...row, markedForDeletion: false }));
+  return sortSourceRows(rows).map((row) => ({
+    ...row,
+    draftKey: nextSourceDraftKey(),
+    markedForDeletion: false
+  }));
 }
 
 function emptyJiraRow(country: string): SourceDraftRow {
   return {
+    draftKey: nextSourceDraftKey(),
     source_id: buildSourceId("jira", country, ""),
     source_type: "jira",
     country,
@@ -106,6 +133,7 @@ function emptyJiraRow(country: string): SourceDraftRow {
 
 function emptyHelixRow(country: string): SourceDraftRow {
   return {
+    draftKey: nextSourceDraftKey(),
     source_id: buildSourceId("helix", country, ""),
     source_type: "helix",
     country,
@@ -172,7 +200,7 @@ function SourceTable({
           {!isJira ? <span>Servicio Origen N2</span> : null}
         </div>
         {rows.map((row, index) => (
-          <div className="source-table-row" key={`${row.source_id}-${index}`}>
+          <div className="source-table-row" key={row.draftKey}>
             <label className="table-checkbox">
               <input
                 type="checkbox"
@@ -473,6 +501,11 @@ export function SettingsPage() {
     const deletedSourceIds = jiraRows
       .filter((row) => row.markedForDeletion)
       .map((row) => row.source_id);
+    const jiraRowsToSave = sortSourceRows(
+      jiraRows
+        .filter((row) => !row.markedForDeletion)
+        .map(({ draftKey: _draftKey, markedForDeletion: _markedForDeletion, ...row }) => row)
+    );
     const payload: SettingsPayload = {
       ...savedPayload,
       values: {
@@ -482,7 +515,7 @@ export function SettingsPage() {
         JIRA_COOKIE_SOURCE: normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser"),
         JIRA_COOKIE_HEADER: asText(values.JIRA_COOKIE_HEADER)
       },
-      jiraSources: jiraRows.filter((row) => !row.markedForDeletion),
+      jiraSources: jiraRowsToSave,
     };
     const saved = await saveSettings.mutateAsync(payload);
     await purgeDeletedSources(deletedSourceIds);
@@ -498,6 +531,11 @@ export function SettingsPage() {
     const deletedSourceIds = helixRows
       .filter((row) => row.markedForDeletion)
       .map((row) => row.source_id);
+    const helixRowsToSave = sortSourceRows(
+      helixRows
+        .filter((row) => !row.markedForDeletion)
+        .map(({ draftKey: _draftKey, markedForDeletion: _markedForDeletion, ...row }) => row)
+    );
     const payload: SettingsPayload = {
       ...savedPayload,
       values: {
@@ -509,7 +547,7 @@ export function SettingsPage() {
         HELIX_COOKIE_SOURCE: normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser"),
         HELIX_COOKIE_HEADER: asText(values.HELIX_COOKIE_HEADER)
       },
-      helixSources: helixRows.filter((row) => !row.markedForDeletion)
+      helixSources: helixRowsToSave
     };
     const saved = await saveSettings.mutateAsync(payload);
     await purgeDeletedSources(deletedSourceIds);

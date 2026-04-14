@@ -61,6 +61,10 @@ from bug_resolution_radar.services.ingest_contracts import (
     ingest_overview_payload,
     persist_ingest_selection,
 )
+from bug_resolution_radar.services.ingest_async import (
+    get_ingest_progress,
+    start_ingest_job,
+)
 from bug_resolution_radar.services.ingest_runner import run_helix_ingest, run_jira_ingest
 from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.services.settings_contracts import (
@@ -1079,6 +1083,24 @@ def create_app() -> FastAPI:
         with _sync_settings_to_process_env(settings):
             return run_jira_ingest(settings, selected_sources=sources)
 
+    @app.post("/api/ingest/jira/start")
+    def post_ingest_jira_start(payload: SourceSelectionRequest) -> dict[str, Any]:
+        settings = load_settings()
+        sources = _select_sources(
+            list(jira_sources(settings)),
+            requested_source_ids=payload.sourceIds,
+            disabled_source_ids=_json_list_from_settings(
+                getattr(settings, "JIRA_INGEST_DISABLED_SOURCES_JSON", "[]")
+            ),
+        )
+        if not sources:
+            raise HTTPException(status_code=400, detail="No hay fuentes Jira seleccionadas.")
+        return start_ingest_job("jira", settings=settings, selected_sources=sources)
+
+    @app.get("/api/ingest/jira/progress")
+    def get_ingest_jira_progress() -> dict[str, Any]:
+        return get_ingest_progress("jira")
+
     @app.post("/api/ingest/helix")
     def post_ingest_helix(payload: SourceSelectionRequest) -> dict[str, Any]:
         settings = load_settings()
@@ -1093,6 +1115,24 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="No hay fuentes Helix seleccionadas.")
         with _sync_settings_to_process_env(settings):
             return run_helix_ingest(settings, selected_sources=sources)
+
+    @app.post("/api/ingest/helix/start")
+    def post_ingest_helix_start(payload: SourceSelectionRequest) -> dict[str, Any]:
+        settings = load_settings()
+        sources = _select_sources(
+            list(helix_sources(settings)),
+            requested_source_ids=payload.sourceIds,
+            disabled_source_ids=_json_list_from_settings(
+                getattr(settings, "HELIX_INGEST_DISABLED_SOURCES_JSON", "[]")
+            ),
+        )
+        if not sources:
+            raise HTTPException(status_code=400, detail="No hay fuentes Helix seleccionadas.")
+        return start_ingest_job("helix", settings=settings, selected_sources=sources)
+
+    @app.get("/api/ingest/helix/progress")
+    def get_ingest_helix_progress() -> dict[str, Any]:
+        return get_ingest_progress("helix")
 
     @app.post("/api/reports/executive")
     def executive_report(payload: ReportRequest) -> Response:
