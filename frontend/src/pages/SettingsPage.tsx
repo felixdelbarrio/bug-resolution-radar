@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import type { ShellContextValue } from "../components/AppShell";
 import {
+  downloadSourcesExcel,
   fetchJson,
+  importSourcesExcel,
   normalizeSettingsPayload,
   postJson,
   putJson,
   type CacheInventoryRow,
+  type SettingsSourcesImportPayload,
   type SettingsPayload,
   type WorkspaceSource
 } from "../lib/api";
@@ -319,6 +322,8 @@ export function SettingsPage() {
   const [jiraRows, setJiraRows] = useState<SourceDraftRow[]>([]);
   const [helixRows, setHelixRows] = useState<SourceDraftRow[]>([]);
   const [flashMessage, setFlashMessage] = useState<string>("");
+  const [helixExcelBusy, setHelixExcelBusy] = useState<boolean>(false);
+  const [helixExcelInputKey, setHelixExcelInputKey] = useState<number>(0);
 
   useEffect(() => {
     if (!settings.data) {
@@ -500,6 +505,33 @@ export function SettingsPage() {
         ? "Configuración Helix y saneado de fuentes aplicados."
         : "Configuración Helix guardada."
     );
+  }
+
+  async function downloadHelixSourcesExcel() {
+    await downloadSourcesExcel("helix", "fuentes_helix.xlsx");
+  }
+
+  async function importHelixSourcesExcel(file: File | null) {
+    if (!file) {
+      return;
+    }
+    setHelixExcelBusy(true);
+    try {
+      const imported: SettingsSourcesImportPayload = await importSourcesExcel("helix", file);
+      setHelixRows(withSourceDrafts(imported.rows));
+      const warnings = imported.warnings.length;
+      setFlashMessage(
+        `Excel Helix cargado: ${imported.importedRows} filas importadas, ` +
+          `${imported.skippedRows} omitidas${warnings > 0 ? `, ${warnings} advertencias` : ""}. ` +
+          "Revisa y guarda la configuración."
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? "Error desconocido");
+      setFlashMessage(`No se pudo cargar el Excel Helix: ${detail}`);
+    } finally {
+      setHelixExcelBusy(false);
+      setHelixExcelInputKey((prev) => prev + 1);
+    }
   }
 
   async function saveRollups() {
@@ -799,6 +831,35 @@ export function SettingsPage() {
                 <input
                   value={asText(values.HELIX_DASHBOARD_URL)}
                   onChange={(event) => setValue("HELIX_DASHBOARD_URL", event.target.value)}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="surface-card page-stack">
+            <h3>Excel de Fuentes Helix</h3>
+            <p className="inline-caption">
+              Descarga la configuración actual o carga un Excel para reemplazar la tabla de fuentes.
+            </p>
+            <div className="settings-actions-row">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={helixExcelBusy}
+                onClick={() => void downloadHelixSourcesExcel()}
+              >
+                Descargar Excel
+              </button>
+              <label className={cn("secondary-button", "file-upload-button", helixExcelBusy && "is-disabled")}>
+                {helixExcelBusy ? "Cargando..." : "Cargar Excel"}
+                <input
+                  key={helixExcelInputKey}
+                  type="file"
+                  accept=".xlsx"
+                  disabled={helixExcelBusy}
+                  onChange={(event) =>
+                    void importHelixSourcesExcel(event.target.files?.[0] ?? null)
+                  }
                 />
               </label>
             </div>

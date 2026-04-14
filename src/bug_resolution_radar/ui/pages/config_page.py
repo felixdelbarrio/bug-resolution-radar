@@ -40,6 +40,9 @@ from bug_resolution_radar.services.source_maintenance import (
     purge_source_cache,
     reset_cache_store,
 )
+from bug_resolution_radar.services.sources_excel import (
+    import_sources_from_excel_bytes,
+)
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_LIGHT,
     BBVA_SIGNAL_GREEN_1,
@@ -48,14 +51,14 @@ from bug_resolution_radar.theme.design_tokens import (
 )
 from bug_resolution_radar.ui.cache import clear_signature_cache
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.exports.downloads import (
+    build_download_filename,
+    df_to_excel_bytes,
+)
 from bug_resolution_radar.ui.dashboard.performance import (
     clear_perf_history,
     list_perf_snapshots,
     perf_history_rows,
-)
-from bug_resolution_radar.ui.dashboard.exports.downloads import (
-    build_download_filename,
-    df_to_excel_bytes,
 )
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
@@ -203,6 +206,80 @@ def _render_sources_excel_download(
         disabled=disabled,
         width="stretch",
     )
+
+
+def _editor_rows_from_source_rows(
+    rows: List[Dict[str, str]], *, source_type: str
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for row in list(rows or []):
+        payload: Dict[str, Any] = {
+            "__delete__": False,
+            "__source_id__": _as_str(row.get("source_id")),
+            "country": _as_str(row.get("country")),
+            "alias": _as_str(row.get("alias")),
+        }
+        if source_type == "jira":
+            payload["jql"] = _as_str(row.get("jql"))
+        else:
+            payload["service_origin_buug"] = _as_str(row.get("service_origin_buug"))
+            payload["service_origin_n1"] = _as_str(row.get("service_origin_n1"))
+            payload["service_origin_n2"] = _as_str(row.get("service_origin_n2"))
+        out.append(payload)
+    return out
+
+
+def _render_sources_excel_import(
+    *,
+    source_type: str,
+    countries: List[str],
+    rows_state_key: str,
+    file_uploader_key: str,
+    apply_button_key: str,
+) -> None:
+    uploader = st.file_uploader(
+        "Cargar Excel",
+        type=["xlsx"],
+        key=file_uploader_key,
+        width="stretch",
+        help="Carga un Excel con columnas equivalentes a la exportación.",
+    )
+    apply_upload = st.button(
+        "Aplicar Excel",
+        key=apply_button_key,
+        disabled=uploader is None,
+        width="stretch",
+    )
+    if not apply_upload:
+        return
+    if uploader is None:
+        st.error("Selecciona un archivo Excel antes de aplicar la carga.")
+        return
+    try:
+        payload = uploader.getvalue()
+        result = import_sources_from_excel_bytes(
+            payload,
+            source_type=source_type,
+            countries=countries,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    except Exception as exc:
+        st.error(f"No se pudo cargar el Excel: {type(exc).__name__}: {exc}")
+        return
+
+    st.session_state[rows_state_key] = _editor_rows_from_source_rows(
+        result.rows,
+        source_type=source_type,
+    )
+    st.success(
+        "Excel cargado: "
+        f"{int(result.imported_rows)} fila(s) importada(s), "
+        f"{int(result.skipped_rows)} omitida(s)."
+    )
+    for warning in list(result.warnings or []):
+        st.warning(warning)
 
 
 def _merge_purge_stats(acc: Dict[str, int], nxt: Dict[str, int]) -> Dict[str, int]:
@@ -1532,13 +1609,24 @@ def render(settings: Settings) -> None:
             },
         )
         st.session_state[helix_rows_state_key] = helix_editor.to_dict(orient="records")
-        _render_sources_excel_download(
-            helix_editor,
-            source_type="helix",
-            key="cfg_export_helix_sources_xlsx",
-            filename_prefix="fuentes_helix",
-            sheet_name="Fuentes Helix",
-        )
+        st.caption("Descarga o carga fuentes Helix en formato Excel.")
+        c_h_export, c_h_import = st.columns(2)
+        with c_h_export:
+            _render_sources_excel_download(
+                helix_editor,
+                source_type="helix",
+                key="cfg_export_helix_sources_xlsx",
+                filename_prefix="fuentes_helix",
+                sheet_name="Fuentes Helix",
+            )
+        with c_h_import:
+            _render_sources_excel_import(
+                source_type="helix",
+                countries=countries,
+                rows_state_key=helix_rows_state_key,
+                file_uploader_key="cfg_import_helix_sources_xlsx",
+                apply_button_key="cfg_apply_helix_sources_xlsx",
+            )
 
         helix_delete_ids, helix_delete_labels = _selected_sources_from_editor(
             helix_editor, source_type="helix"
