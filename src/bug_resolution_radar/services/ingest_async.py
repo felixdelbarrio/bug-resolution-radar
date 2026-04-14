@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List
@@ -28,10 +29,39 @@ class _IngestProgress:
     messages: List[Dict[str, Any]] = field(default_factory=list)
     summary: str = ""
     result: Dict[str, Any] | None = None
+    started_monotonic: float = 0.0
+    max_run_seconds: int = 0
 
 
 _LOCK = threading.Lock()
 _PROGRESS: Dict[str, _IngestProgress] = {}
+_RUNNING_WORKERS: Dict[str, tuple[int, threading.Thread]] = {}
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return int(default)
+
+
+def _resolve_max_run_seconds(settings: Settings, *, connector: str, total_sources: int) -> int:
+    token = str(connector or "").strip().lower()
+    env_specific = str(os.getenv(f"INGEST_ASYNC_MAX_RUN_SECONDS_{token.upper()}", "")).strip()
+    env_general = str(os.getenv("INGEST_ASYNC_MAX_RUN_SECONDS", "")).strip()
+    configured = _coerce_int(env_specific or env_general, 0)
+    if configured > 0:
+        return max(60, configured)
+
+    safe_sources = max(1, int(total_sources or 0))
+    if token == "helix":
+        per_source = _coerce_int(getattr(settings, "HELIX_MAX_INGEST_SECONDS", 900), 900)
+        grace = 180
+    else:
+        per_source = _coerce_int(os.getenv("JIRA_MAX_INGEST_SECONDS", "600"), 600)
+        grace = 120
+    per_source = max(60, per_source)
+    return min(24 * 3600, per_source * safe_sources + grace)
 
 
 def _normalize_connector(connector: str) -> str:
@@ -63,6 +93,7 @@ def _snapshot(entry: _IngestProgress) -> Dict[str, Any]:
         "completedSources": int(entry.completed_sources),
         "successCount": int(entry.success_count),
         "summary": str(entry.summary or ""),
+        "maxRunSeconds": int(entry.max_run_seconds or 0),
         "messages": [dict(msg) for msg in list(entry.messages or [])],
         "result": dict(entry.result or {}) if isinstance(entry.result, dict) else entry.result,
     }
@@ -90,15 +121,22 @@ def _sync_settings_to_process_env(settings: Settings) -> Iterator[None]:
                 os.environ.pop(env_key, None)
 
 
-def _start_progress(connector: str, *, total_sources: int) -> tuple[int, Dict[str, Any]] | None:
+def _start_progress(
+    connector: str,
+    *,
+    total_sources: int,
+    max_run_seconds: int,
+) -> tuple[int, Dict[str, Any]] | None:
     key = _normalize_connector(connector)
+    started_at_iso = now_iso()
+    started_monotonic = time.monotonic()
     with _LOCK:
         entry = _entry(key)
         if entry.state == "running":
             return None
         entry.run_id = int(entry.run_id) + 1
         entry.state = "running"
-        entry.started_at = now_iso()
+        entry.started_at = started_at_iso
         entry.finished_at = ""
         entry.total_sources = max(0, int(total_sources))
         entry.completed_sources = 0
@@ -106,7 +144,63 @@ def _start_progress(connector: str, *, total_sources: int) -> tuple[int, Dict[st
         entry.messages = []
         entry.summary = ""
         entry.result = None
+        entry.started_monotonic = float(started_monotonic)
+        entry.max_run_seconds = max(0, int(max_run_seconds))
         return int(entry.run_id), _snapshot(entry)
+
+
+def _clear_running_worker(connector: str, *, run_id: int) -> None:
+    worker_state = _RUNNING_WORKERS.get(connector)
+    if worker_state is None:
+        return
+    worker_run_id, _ = worker_state
+    if int(worker_run_id) != int(run_id):
+        return
+    _RUNNING_WORKERS.pop(connector, None)
+
+
+def _recover_stuck_run_if_needed(connector: str) -> bool:
+    key = _normalize_connector(connector)
+    with _LOCK:
+        entry = _entry(key)
+        if entry.state != "running":
+            return False
+
+        worker_state = _RUNNING_WORKERS.get(key)
+        worker_is_alive = False
+        if worker_state is not None:
+            worker_run_id, worker = worker_state
+            worker_is_alive = int(worker_run_id) == int(entry.run_id) and bool(worker.is_alive())
+
+        now_mono = time.monotonic()
+        max_run = max(0, int(entry.max_run_seconds or 0))
+        elapsed = max(0.0, now_mono - float(entry.started_monotonic or now_mono))
+        timed_out = max_run > 0 and elapsed > float(max_run)
+        orphaned = not worker_is_alive
+        if not timed_out and not orphaned:
+            return False
+
+        detail = (
+            f"Ingesta {key.upper()} marcada como huérfana; se liberó para relanzar."
+            if orphaned and not timed_out
+            else (
+                f"Ingesta {key.upper()} superó el máximo de ejecución "
+                f"({int(elapsed)}s > {max_run}s); se liberó para relanzar."
+            )
+        )
+        entry.messages.append({"ok": False, "message": detail})
+        entry.state = "error"
+        entry.finished_at = now_iso()
+        entry.summary = "La ingesta se detuvo por watchdog de ejecución."
+        entry.result = {
+            "state": "error",
+            "summary": entry.summary,
+            "success_count": int(entry.success_count),
+            "total_sources": int(entry.total_sources),
+            "messages": [dict(msg) for msg in list(entry.messages or [])],
+        }
+        _clear_running_worker(key, run_id=int(entry.run_id))
+        return True
 
 
 def _append_progress(
@@ -158,6 +252,7 @@ def _finish_progress(connector: str, *, run_id: int, result: Dict[str, Any]) -> 
                 for item in list(normalized_result.get("messages") or [])
             ]
         entry.result = normalized_result
+        _clear_running_worker(key, run_id=run_id)
 
 
 def _fail_progress(connector: str, *, run_id: int, detail: str) -> None:
@@ -177,10 +272,12 @@ def _fail_progress(connector: str, *, run_id: int, detail: str) -> None:
             "total_sources": int(entry.total_sources),
             "messages": [dict(msg) for msg in list(entry.messages or [])],
         }
+        _clear_running_worker(key, run_id=run_id)
 
 
 def get_ingest_progress(connector: str) -> Dict[str, Any]:
     key = _normalize_connector(connector)
+    _recover_stuck_run_if_needed(key)
     with _LOCK:
         return _snapshot(_entry(key))
 
@@ -193,7 +290,17 @@ def start_ingest_job(
 ) -> Dict[str, Any]:
     key = _normalize_connector(connector)
     sources = [dict(source) for source in list(selected_sources or [])]
-    started = _start_progress(key, total_sources=len(sources))
+    _recover_stuck_run_if_needed(key)
+    max_run_seconds = _resolve_max_run_seconds(
+        settings,
+        connector=key,
+        total_sources=len(sources),
+    )
+    started = _start_progress(
+        key,
+        total_sources=len(sources),
+        max_run_seconds=max_run_seconds,
+    )
     if started is None:
         snapshot = get_ingest_progress(key)
         return {"started": False, **snapshot}
@@ -238,5 +345,8 @@ def start_ingest_job(
                 detail=f"Error inesperado de orquestación {key.upper()}: {type(exc).__name__}: {exc}",
             )
 
-    threading.Thread(target=_worker, name=f"{key}-ingest-worker", daemon=True).start()
+    worker_thread = threading.Thread(target=_worker, name=f"{key}-ingest-worker", daemon=True)
+    with _LOCK:
+        _RUNNING_WORKERS[key] = (run_id, worker_thread)
+    worker_thread.start()
     return {"started": True, **initial_snapshot}
