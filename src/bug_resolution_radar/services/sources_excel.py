@@ -40,8 +40,14 @@ _REQUIRED_COLUMNS: dict[str, list[str]] = {
     "helix": ["country", "alias"],
 }
 _TRANSVERSAL_KEYS_BY_SOURCE: dict[str, list[str]] = {
-    "jira": ["JIRA_BASE_URL", "JIRA_BROWSER"],
-    "helix": ["HELIX_PROXY", "HELIX_BROWSER", "HELIX_SSL_VERIFY", "HELIX_DASHBOARD_URL"],
+    "jira": ["JIRA_BASE_URL", "JIRA_BROWSER", "JIRA_COOKIE_SOURCE"],
+    "helix": [
+        "HELIX_PROXY",
+        "HELIX_BROWSER",
+        "HELIX_SSL_VERIFY",
+        "HELIX_DASHBOARD_URL",
+        "HELIX_COOKIE_SOURCE",
+    ],
 }
 _HEADER_ALIASES: dict[str, dict[str, str]] = {
     "jira": {
@@ -358,7 +364,14 @@ def _parse_source_rows_from_frame(
 
     if not rows:
         raise ValueError("No se encontraron filas válidas en el Excel para importar.")
-    return rows, int(skipped_rows), warnings
+    rows_sorted = sorted(
+        rows,
+        key=lambda row: (
+            _normalize_token(str(row.get("country") or "")),
+            _normalize_token(str(row.get("alias") or "")),
+        ),
+    )
+    return rows_sorted, int(skipped_rows), warnings
 
 
 def _parse_transversal_rows_from_frame(

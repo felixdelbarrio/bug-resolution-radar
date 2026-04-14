@@ -336,6 +336,8 @@ class Settings(BaseModel):
     JIRA_SOURCES_JSON: str = "[]"
     JIRA_INGEST_DISABLED_SOURCES_JSON: str = "[]"
     JIRA_BROWSER: str = "chrome"
+    JIRA_COOKIE_SOURCE: str = "browser"  # "browser", "manual"
+    JIRA_COOKIE_HEADER: str = ""
     JIRA_BROWSER_LOGIN_URL: str = ""
     JIRA_BROWSER_LOGIN_WAIT_SECONDS: int = 90
     JIRA_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
@@ -346,6 +348,8 @@ class Settings(BaseModel):
     HELIX_SOURCES_JSON: str = "[]"
     HELIX_INGEST_DISABLED_SOURCES_JSON: str = "[]"
     HELIX_BROWSER: str = "chrome"
+    HELIX_COOKIE_SOURCE: str = "browser"  # "browser", "manual"
+    HELIX_COOKIE_HEADER: str = ""
     HELIX_DATA_PATH: str = "data/helix_dump.json"
     HELIX_DASHBOARD_URL: str = (
         "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"

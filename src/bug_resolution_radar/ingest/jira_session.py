@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
+from ..common.security import sanitize_cookie_header
 from .cookie_utils import (
     build_cookie_header_for_hosts,
     candidate_domains_from_host,
     load_cookie_jar,
 )
+
+
+def _cookie_source() -> str:
+    raw = str(os.getenv("JIRA_COOKIE_SOURCE", "browser") or "").strip().lower()
+    if raw == "manual":
+        return raw
+    return "browser"
+
+
+def _manual_cookie() -> Optional[str]:
+    cookie = sanitize_cookie_header(str(os.getenv("JIRA_COOKIE_HEADER", "") or "").strip())
+    return cookie or None
 
 
 def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
@@ -18,6 +32,12 @@ def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
 
     No requiere configurar dominio: se autodetecta desde el host de JIRA_BASE_URL.
     """
+    source = _cookie_source()
+    manual_cookie = _manual_cookie()
+    if source == "manual":
+        if manual_cookie:
+            return manual_cookie
+        raise ValueError("JIRA_COOKIE_SOURCE=manual requiere JIRA_COOKIE_HEADER no vacío.")
     if not host:
         return None
 

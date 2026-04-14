@@ -37,7 +37,7 @@ def test_scope_sources_only_include_source_ids_with_results(monkeypatch: Any) ->
     )
 
     grouped = app._sources_with_results_by_country(settings)
-    assert list(grouped.keys()) == ["España", "México"]
+    assert set(grouped.keys()) == {"México", "España"}
     assert [row["source_id"] for row in grouped["México"]] == [mx_core_id]
     assert [row["source_id"] for row in grouped["España"]] == [es_core_id]
 

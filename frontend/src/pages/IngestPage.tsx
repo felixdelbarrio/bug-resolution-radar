@@ -183,7 +183,10 @@ function IngestSourceTable({
   onToggle: (sourceId: string) => void;
 }) {
   const copy = CONNECTOR_COPY[connector];
-  const gridTemplateColumns = `96px repeat(${copy.columns.length}, minmax(0, 1fr))`;
+  const gridTemplateColumns =
+    connector === "jira"
+      ? "96px minmax(110px,0.85fr) minmax(180px,1fr) minmax(260px,1.8fr)"
+      : "96px minmax(110px,0.7fr) minmax(180px,1fr) minmax(170px,0.9fr) minmax(220px,1.3fr) minmax(240px,1.5fr)";
   if (sources.length === 0) {
     return <p className="issue-list-empty">Sin orígenes configurados.</p>;
   }
@@ -217,7 +220,11 @@ function IngestSourceTable({
               />
             </span>
             {copy.columns.map((column) => (
-              <span key={`${source.source_id}-${String(column.key)}`}>
+              <span
+                key={`${source.source_id}-${String(column.key)}`}
+                className={`ingest-source-cell ingest-source-cell-${String(column.key)}`}
+                title={String(source[column.key] ?? "").trim()}
+              >
                 {String(source[column.key] ?? "").trim() || "—"}
               </span>
             ))}
