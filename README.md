@@ -60,7 +60,15 @@ Guía detallada por tema:
 
 Variables recomendadas para ejecución local/desktop:
 - `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true` (contenedor embebido)
-- `BUG_RESOLUTION_RADAR_HOME=/ruta/escribible` (opcional, para datos/config fuera del repo)
+- `BUG_RESOLUTION_RADAR_HOME=/ruta/escribible` (opcional, fuerza carpeta persistente)
+- `BUG_RESOLUTION_RADAR_HOME_IN_REPO=true|false` (opcional; solo en desarrollo)
+
+Persistencia por defecto:
+- macOS: `~/Library/Application Support/bug-resolution-radar`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/bug-resolution-radar`
+- Windows: `%APPDATA%\\bug-resolution-radar`
+
+En distribuciones no-repo también se usa almacenamiento por perfil de usuario y se intenta migrar `.env` + `data/` desde instalaciones antiguas.
 
 ## Configuration
 
@@ -115,10 +123,11 @@ Firma/notarización (opcional, macOS):
 
 ## Local Data
 
-- Issues: `data/issues.json`
-- Helix dump: `data/helix_dump.json`
-- Insights learning: `data/insights_learning.json`
-- Notas: `data/notes.json`
+- Home runtime: ver sección `Desktop Runtime` (o `BUG_RESOLUTION_RADAR_HOME`)
+- Issues: `<HOME>/data/issues.json`
+- Helix dump: `<HOME>/data/helix_dump.json`
+- Insights learning: `<HOME>/data/insights_learning.json`
+- Notas: `<HOME>/data/notes.json`
 - Observabilidad de ingesta:
-  - `data/observability/ingest_profiles.jsonl`
-  - `data/observability/ingest_circuit_state.json`
+  - `<HOME>/data/observability/ingest_profiles.jsonl`
+  - `<HOME>/data/observability/ingest_circuit_state.json`

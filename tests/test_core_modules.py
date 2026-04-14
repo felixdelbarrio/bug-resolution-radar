@@ -89,6 +89,45 @@ def test_config_ensure_env_from_example_and_load_save(monkeypatch: Any, tmp_path
     assert "linea 1\\nlinea 2" in saved
 
 
+def test_runtime_home_uses_user_profile_outside_repo(monkeypatch: Any, tmp_path: Path) -> None:
+    fake_package_root = tmp_path / "site-packages" / "bug_resolution_radar"
+    fake_package_root.mkdir(parents=True, exist_ok=True)
+    fake_config_file = fake_package_root / "config.py"
+    fake_config_file.write_text("# test", encoding="utf-8")
+
+    monkeypatch.delenv("BUG_RESOLUTION_RADAR_HOME", raising=False)
+    monkeypatch.delenv("BUG_RESOLUTION_RADAR_HOME_IN_REPO", raising=False)
+    monkeypatch.setattr(cfg, "__file__", str(fake_config_file))
+
+    assert cfg._runtime_home() == cfg._default_user_config_home().resolve()
+
+
+def test_config_ensure_env_migrates_legacy_runtime_state(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    legacy_home = tmp_path / "legacy-build"
+    legacy_data_dir = legacy_home / "data"
+    legacy_data_dir.mkdir(parents=True, exist_ok=True)
+    (legacy_home / ".env").write_text("APP_TITLE=Migrated Radar\nDATA_PATH=data/issues.json\n", encoding="utf-8")
+    (legacy_data_dir / "issues.json").write_text('{"schema_version":"1.0","issues":[]}', encoding="utf-8")
+
+    runtime_home = tmp_path / "runtime-home"
+    env_path = runtime_home / ".env"
+    env_example = runtime_home / ".env.example"
+    monkeypatch.setattr(cfg, "DEFAULT_CONFIG_HOME", runtime_home)
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setattr(cfg, "_legacy_runtime_home_candidates", lambda: [legacy_home])
+    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [])
+
+    cfg.ensure_env()
+
+    assert env_path.exists()
+    migrated_env = env_path.read_text(encoding="utf-8")
+    assert "APP_TITLE=Migrated Radar" in migrated_env
+    assert (runtime_home / "data" / "issues.json").exists()
+
+
 def test_config_resolves_relative_data_paths_against_env_location(
     monkeypatch: Any, tmp_path: Path
 ) -> None:

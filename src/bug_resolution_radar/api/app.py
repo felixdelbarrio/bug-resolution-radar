@@ -27,6 +27,7 @@ from bug_resolution_radar.analytics.quincenal_scope import (
 from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
+    config_home,
     country_rollup_sources,
     helix_sources,
     jira_sources,
@@ -539,6 +540,7 @@ def create_app() -> FastAPI:
             "ok": True,
             "frontendDist": str(_frontend_dist_dir() or ""),
             "frontendDevUrl": _frontend_dev_url(),
+            "configHome": str(config_home()),
         }
 
     @app.get("/api/bootstrap")

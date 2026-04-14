@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 import unicodedata
 from pathlib import Path
@@ -37,15 +38,106 @@ def _runtime_home() -> Path:
     override = str(os.getenv("BUG_RESOLUTION_RADAR_HOME", "") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
+    user_home = _default_user_config_home().resolve()
     if getattr(sys, "frozen", False):
         # In frozen builds, always use a user-writable location (not inside the app bundle).
-        return _default_user_config_home().resolve()
-    return Path(__file__).resolve().parents[2]
+        return user_home
+
+    repo_home = Path(__file__).resolve().parents[2].resolve()
+    repo_mode = str(os.getenv("BUG_RESOLUTION_RADAR_HOME_IN_REPO", "auto") or "auto").strip().lower()
+    if repo_mode in {"1", "true", "yes", "on"}:
+        return repo_home
+    if repo_mode in {"0", "false", "no", "off"}:
+        return user_home
+
+    # Default behavior:
+    # - keep repo-local home for dev checkouts
+    # - use user profile storage for packaged/non-repo distributions
+    if (repo_home / ".git").exists():
+        return repo_home
+    return user_home
 
 
 DEFAULT_CONFIG_HOME = _runtime_home()
 ENV_PATH = DEFAULT_CONFIG_HOME / ".env"
 ENV_EXAMPLE_PATH = DEFAULT_CONFIG_HOME / ".env.example"
+
+
+def _legacy_runtime_home_candidates() -> List[Path]:
+    candidates: List[Path] = []
+    try:
+        candidates.append(Path(__file__).resolve().parents[2])
+    except Exception:
+        pass
+
+    if getattr(sys, "frozen", False):
+        try:
+            exe_dir = Path(sys.executable).resolve().parent
+            candidates.append(exe_dir)
+            candidates.append(exe_dir.parent)
+        except Exception:
+            pass
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            try:
+                candidates.append(Path(meipass))
+            except Exception:
+                pass
+
+    out: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate.expanduser())
+    return out
+
+
+def _migrate_legacy_runtime_state() -> Path | None:
+    """
+    Best-effort one-time migration from legacy install-local runtime directories.
+
+    Older builds could persist `.env`/`data/*` next to the executable or source tree.
+    When runtime home moves to user profile storage, we copy that state forward.
+    """
+    target_home = config_home()
+    if ENV_PATH.exists():
+        return None
+    try:
+        expected_env_path = (DEFAULT_CONFIG_HOME / ".env").expanduser().resolve()
+        current_env_path = ENV_PATH.expanduser().resolve()
+        if current_env_path != expected_env_path:
+            return None
+    except Exception:
+        return None
+
+    target_home.mkdir(parents=True, exist_ok=True)
+    target_home_resolved = target_home.resolve()
+    for legacy_home in _legacy_runtime_home_candidates():
+        legacy = legacy_home.expanduser()
+        try:
+            legacy_resolved = legacy.resolve()
+        except Exception:
+            continue
+        if legacy_resolved == target_home_resolved:
+            continue
+
+        legacy_env = legacy_resolved / ".env"
+        legacy_env_example = legacy_resolved / ".env.example"
+        legacy_data_dir = legacy_resolved / "data"
+        if not legacy_env.exists() and not legacy_data_dir.exists():
+            continue
+
+        if legacy_env.exists() and not ENV_PATH.exists():
+            shutil.copy2(legacy_env, ENV_PATH)
+        if legacy_env_example.exists() and not ENV_EXAMPLE_PATH.exists():
+            shutil.copy2(legacy_env_example, ENV_EXAMPLE_PATH)
+        if legacy_data_dir.exists():
+            shutil.copytree(legacy_data_dir, target_home / "data", dirs_exist_ok=True)
+        return legacy_resolved
+    return None
 
 
 def _candidate_env_example_paths() -> List[Path]:
@@ -399,6 +491,7 @@ class Settings(BaseModel):
 
 def ensure_env() -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_runtime_state()
     if not ENV_PATH.exists():
         example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
         if example_path is not None:
@@ -418,6 +511,7 @@ def restore_env_from_example() -> Path:
 
 
 def load_settings() -> Settings:
+    ensure_env()
     vals = {k: v for k, v in dotenv_values(ENV_PATH).items() if v is not None}
     settings = Settings.model_validate(vals)
 
