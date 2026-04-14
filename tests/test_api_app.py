@@ -211,6 +211,42 @@ def test_bootstrap_infers_workspace_sources_from_data_when_settings_are_empty(
     assert "--bbva-primary" in payload["designTokens"]["theme"]["light"]
 
 
+def test_bootstrap_enables_country_rollup_for_multi_source_country_without_explicit_config(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        APP_TITLE="Radar",
+        DATA_PATH=str((tmp_path / "issues.json").resolve()),
+        NOTES_PATH=str((tmp_path / "notes.json").resolve()),
+        INSIGHTS_LEARNING_PATH=str((tmp_path / "learning.json").resolve()),
+        HELIX_DATA_PATH=str((tmp_path / "helix.json").resolve()),
+        JIRA_SOURCES_JSON=(
+            '[{"country":"México","alias":"Core MX","jql":"project = CORE"},'
+            '{"country":"México","alias":"Retail MX","jql":"project = RETAIL"}]'
+        ),
+        HELIX_SOURCES_JSON="[]",
+        COUNTRY_ROLLUP_SOURCES_JSON="[]",
+        REPORT_PPT_DOWNLOAD_DIR=str((tmp_path / "exports").resolve()),
+    )
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get("/api/bootstrap", params={"country": "México", "scopeMode": "country"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    workspace = payload["workspace"]
+    expected_ids = [
+        build_source_id("jira", "México", "Core MX"),
+        build_source_id("jira", "México", "Retail MX"),
+    ]
+    assert workspace["selectedCountry"] == "México"
+    assert workspace["hasCountryRollup"] is True
+    assert workspace["scopeMode"] == "country"
+    assert workspace["countryRollupSourceIds"] == expected_ids
+
+
 def test_scope_context_cache_reuses_filtered_context_for_same_query(
     monkeypatch,
     tmp_path: Path,

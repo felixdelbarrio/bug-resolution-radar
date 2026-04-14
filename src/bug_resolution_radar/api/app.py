@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, Sequence
 
@@ -32,6 +32,7 @@ from bug_resolution_radar.config import (
     jira_sources,
     load_settings,
     restore_env_from_example,
+    rollup_source_ids,
     supported_countries,
 )
 from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_browser
@@ -57,13 +58,13 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_kanban_columns,
     build_trend_detail,
 )
-from bug_resolution_radar.services.ingest_contracts import (
-    ingest_overview_payload,
-    persist_ingest_selection,
-)
 from bug_resolution_radar.services.ingest_async import (
     get_ingest_progress,
     start_ingest_job,
+)
+from bug_resolution_radar.services.ingest_contracts import (
+    ingest_overview_payload,
+    persist_ingest_selection,
 )
 from bug_resolution_radar.services.ingest_runner import run_helix_ingest, run_jira_ingest
 from bug_resolution_radar.services.notes import NotesStore
@@ -356,13 +357,24 @@ def _workspace_payload(
         for sid in country_rollup_sources(settings).get(selected_country, [])
         if sid in source_ids
     ]
+    fallback_rollup = [
+        sid
+        for sid in rollup_source_ids(
+            settings,
+            country=selected_country,
+            available_source_ids=source_ids,
+        )
+        if sid in source_ids
+    ]
+    has_country_rollup = bool(configured_rollup) or len(source_ids) > 1
+    country_rollup_ids = list(fallback_rollup if has_country_rollup else [])
     selected_source_id = str(source_id or "").strip()
     if selected_source_id not in source_ids:
         selected_source_id = source_ids[0] if source_ids else ""
     normalized_scope_mode = str(scope_mode or "source").strip().lower() or "source"
     if normalized_scope_mode not in {"country", "source"}:
         normalized_scope_mode = "source"
-    if normalized_scope_mode == "country" and not configured_rollup:
+    if normalized_scope_mode == "country" and not has_country_rollup:
         normalized_scope_mode = "source"
 
     workspace = _workspace_query(
@@ -374,7 +386,7 @@ def _workspace_payload(
     active_source_ids = (
         [selected_source_id]
         if workspace.scope_mode == "source" and selected_source_id
-        else list(configured_rollup or source_ids)
+        else list(country_rollup_ids or source_ids)
     )
     filter_options = _filter_options(scoped_df)
     filter_options["quincenal"] = list(
@@ -398,8 +410,8 @@ def _workspace_payload(
         "selectedCountry": selected_country,
         "selectedSourceId": selected_source_id,
         "scopeMode": workspace.scope_mode,
-        "hasCountryRollup": bool(configured_rollup),
-        "countryRollupSourceIds": configured_rollup,
+        "hasCountryRollup": bool(has_country_rollup),
+        "countryRollupSourceIds": country_rollup_ids,
         "hasData": bool(isinstance(df_all, pd.DataFrame) and not df_all.empty),
         "filterOptions": filter_options,
     }
@@ -570,12 +582,12 @@ def create_app() -> FastAPI:
                 "theme": frontend_theme_tokens(),
                 "semantic": semantic_color_contract(),
             },
-                "permissionsPolicy": {
-                    "reports": "Solo se genera o descarga bajo acción explícita del usuario.",
-                    "browser": "Operaciones externas solo se ejecutan bajo acción explícita.",
-                    "filesystem": "No se escribe en disco durante renderizado o carga inicial.",
-                },
-            }
+            "permissionsPolicy": {
+                "reports": "Solo se genera o descarga bajo acción explícita del usuario.",
+                "browser": "Operaciones externas solo se ejecutan bajo acción explícita.",
+                "filesystem": "No se escribe en disco durante renderizado o carga inicial.",
+            },
+        }
 
     @app.get("/api/workspace")
     def workspace_options(

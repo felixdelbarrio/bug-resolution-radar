@@ -225,6 +225,15 @@ export function AppShell() {
       .map((source) => `${source.alias} · ${String(source.source_type || "").toUpperCase()}`);
     return labels.join(" · ");
   }, [workspace]);
+  const hasCountryRollup = Boolean(workspace?.hasCountryRollup);
+  const sourceOptions = workspace?.sources ?? [];
+  const selectedSourceId = sourceOptions.some(
+    (source) => source.source_id === dashboardState.params.sourceId
+  )
+    ? dashboardState.params.sourceId
+    : (workspace?.selectedSourceId ?? "");
+  const isCountryScope = hasCountryRollup && dashboardState.params.scopeMode === "country";
+
   return (
     <div className="app-shell">
       <header className="bbva-hero">
@@ -258,71 +267,53 @@ export function AppShell() {
           </select>
         </div>
 
-        <div className="workspace-scope-detail">
-          {workspace?.hasCountryRollup ? (
-            <>
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={(workspace?.scopeMode ?? "source") === "country"}
-                  onChange={(event) =>
-                    handleScopeChange({
-                      scopeMode: event.target.checked ? "country" : "source"
-                    })
-                  }
-                />
-                <span>Vista agregada</span>
-              </label>
+        <div className="workspace-rollup-field">
+          <label
+            className={cn(
+              "checkbox-field workspace-rollup-toggle",
+              !hasCountryRollup && "workspace-rollup-toggle-placeholder"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={isCountryScope}
+              disabled={!hasCountryRollup}
+              onChange={(event) =>
+                handleScopeChange({
+                  scopeMode: event.target.checked ? "country" : "source",
+                  sourceId: selectedSourceId
+                })
+              }
+            />
+            <span>Vista agregada</span>
+          </label>
+        </div>
 
-              {(workspace?.scopeMode ?? "source") === "source" ? (
-                <div className="workspace-source-field">
-                  <label className="field-label" htmlFor="workspace-source">
-                    Origen
-                  </label>
-                  <select
-                    id="workspace-source"
-                    value={workspace?.selectedSourceId ?? ""}
-                    onChange={(event) =>
-                      handleScopeChange({
-                        sourceId: event.target.value
-                      })
-                    }
-                  >
-                    {(workspace?.sources ?? []).map((source) => (
-                      <option key={source.source_id} value={source.source_id}>
-                        {source.alias} · {String(source.source_type || "").toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <p className="workspace-rollup-caption">
-                  {rollupPreview ? `Agregado país activo: ${rollupPreview}` : "Agregado país activo"}
-                </p>
-              )}
-            </>
-          ) : (
-            <div className="workspace-source-field">
-              <label className="field-label" htmlFor="workspace-source">
-                Origen
-              </label>
-              <select
-                id="workspace-source"
-                value={workspace?.selectedSourceId ?? ""}
-                onChange={(event) =>
-                  handleScopeChange({
-                    sourceId: event.target.value
-                  })
-                }
-              >
-                {(workspace?.sources ?? []).map((source) => (
-                  <option key={source.source_id} value={source.source_id}>
-                    {source.alias} · {String(source.source_type || "").toUpperCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+        <div className="workspace-source-field">
+          <label className="field-label" htmlFor="workspace-source">
+            Origen
+          </label>
+          <select
+            id="workspace-source"
+            value={selectedSourceId}
+            disabled={isCountryScope || sourceOptions.length <= 0}
+            onChange={(event) =>
+              handleScopeChange({
+                sourceId: event.target.value
+              })
+            }
+          >
+            {sourceOptions.map((source) => (
+              <option key={source.source_id} value={source.source_id}>
+                {source.alias} · {String(source.source_type || "").toUpperCase()}
+              </option>
+            ))}
+          </select>
+          {isCountryScope ? (
+            <p className="workspace-rollup-caption">
+              {rollupPreview ? `Agregado país activo: ${rollupPreview}` : "Agregado país activo"}
+            </p>
+          ) : null}
         </div>
       </section>
 

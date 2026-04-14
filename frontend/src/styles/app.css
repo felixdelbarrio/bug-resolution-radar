@@ -202,19 +202,11 @@ button {
 
 .workspace-scope-bar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(0, 3.3fr);
+  grid-template-columns: minmax(220px, 1fr) max-content minmax(280px, 1fr);
   gap: 0.85rem;
   align-items: end;
   margin-bottom: 0.35rem;
   border-radius: var(--bbva-radius-lg);
-}
-
-.workspace-scope-detail {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 0.85rem;
-  min-height: 78px;
 }
 
 .workspace-country-field,
@@ -224,8 +216,20 @@ button {
   min-width: 0;
 }
 
+.workspace-country-field {
+  justify-self: start;
+}
+
+.workspace-rollup-field {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  min-height: 78px;
+}
+
 .workspace-source-field {
-  width: min(100%, 360px);
+  width: min(100%, 420px);
+  justify-self: end;
 }
 
 .field-label,
@@ -332,6 +336,15 @@ textarea::placeholder {
   gap: 0.55rem;
   padding-bottom: 0.42rem;
   white-space: nowrap;
+}
+
+.workspace-rollup-toggle {
+  padding-bottom: 0.58rem;
+}
+
+.workspace-rollup-toggle-placeholder {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .checkbox-field input {
@@ -2625,6 +2638,16 @@ textarea::placeholder {
 
   .workspace-nav-actions {
     justify-content: flex-end;
+  }
+
+  .workspace-rollup-field {
+    justify-content: flex-start;
+    min-height: auto;
+  }
+
+  .workspace-source-field {
+    width: 100%;
+    justify-self: stretch;
   }
 }
 
