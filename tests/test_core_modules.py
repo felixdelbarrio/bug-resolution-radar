@@ -438,3 +438,27 @@ def test_multi_country_sources_parsing_and_ids() -> None:
     assert jira_cfg[0]["source_id"] == "jira:mexico:core-mx"
     assert helix_cfg[0]["country"] == "España"
     assert helix_cfg[0]["source_id"] == "helix:espana:smartit-es"
+
+
+def test_sources_are_returned_sorted_by_country_alias() -> None:
+    settings = cfg.Settings(
+        SUPPORTED_COUNTRIES="México,España",
+        JIRA_SOURCES_JSON=(
+            '[{"country":"México","alias":"Zulu","jql":"status = Open"},'
+            '{"country":"España","alias":"Alpha","jql":"project = ES"}]'
+        ),
+        HELIX_SOURCES_JSON=(
+            '[{"country":"México","alias":"Zulu"},{"country":"España","alias":"Alpha"}]'
+        ),
+    )
+
+    jira_cfg = cfg.jira_sources(settings)
+    helix_cfg = cfg.helix_sources(settings)
+    assert [f"{row['country']}::{row['alias']}" for row in jira_cfg] == [
+        "España::Alpha",
+        "México::Zulu",
+    ]
+    assert [f"{row['country']}::{row['alias']}" for row in helix_cfg] == [
+        "España::Alpha",
+        "México::Zulu",
+    ]

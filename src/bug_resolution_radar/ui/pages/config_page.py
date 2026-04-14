@@ -132,6 +132,22 @@ def _as_str(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_cookie_source(value: Any, *, default: str = "browser") -> str:
+    token = str(value or "").strip().lower()
+    if token in {"browser", "manual", "auto"}:
+        return token
+    return default
+
+
+def _cookie_source_label(value: str) -> str:
+    token = _normalize_cookie_source(value)
+    if token == "manual":
+        return "Manual (sin leer cookies del navegador)"
+    if token == "auto":
+        return "Auto (manual si existe; si no browser)"
+    return "Browser (lectura local de sesión)"
+
+
 def _render_purge_stats(stats: Dict[str, int]) -> None:
     issues_removed = int(stats.get("issues_removed", 0) or 0)
     helix_items_removed = int(stats.get("helix_items_removed", 0) or 0)
@@ -1381,7 +1397,11 @@ def render(settings: Settings) -> None:
     with t_jira:
         st.markdown("### Jira global")
 
-        c1, c2 = st.columns(2)
+        jira_cookie_source_default = _normalize_cookie_source(
+            getattr(settings, "JIRA_COOKIE_SOURCE", "browser"),
+            default="browser",
+        )
+        c1, c2, c3 = st.columns([1.8, 1.0, 1.4])
         with c1:
             jira_base = st.text_input(
                 "Jira Base URL (global)",
@@ -1394,6 +1414,29 @@ def render(settings: Settings) -> None:
                 options=["chrome", "edge"],
                 index=0 if settings.JIRA_BROWSER == "chrome" else 1,
                 key="cfg_jira_browser",
+            )
+        with c3:
+            jira_cookie_source = st.selectbox(
+                "Modo sesión Jira",
+                options=["browser", "auto", "manual"],
+                index=["browser", "auto", "manual"].index(jira_cookie_source_default),
+                format_func=_cookie_source_label,
+                key="cfg_jira_cookie_source",
+            )
+        jira_cookie_header = _as_str(st.session_state.get("cfg_jira_cookie_header", ""))
+        if not jira_cookie_header:
+            jira_cookie_header = _as_str(getattr(settings, "JIRA_COOKIE_HEADER", ""))
+            st.session_state["cfg_jira_cookie_header"] = jira_cookie_header
+        if jira_cookie_source != "browser":
+            jira_cookie_header = st.text_input(
+                "Cookie Jira manual (opcional, solo modo manual/auto)",
+                value=jira_cookie_header,
+                key="cfg_jira_cookie_header",
+                type="password",
+                help=(
+                    "Si eliges modo manual, pega aquí el header Cookie completo de Jira. "
+                    "No se exporta a Excel por seguridad."
+                ),
             )
 
         st.markdown("### Fuentes Jira por país")
@@ -1446,6 +1489,7 @@ def render(settings: Settings) -> None:
                 transversal_values={
                     "JIRA_BASE_URL": jira_base,
                     "JIRA_BROWSER": jira_browser,
+                    "JIRA_COOKIE_SOURCE": jira_cookie_source,
                 },
             )
         with c_j_import:
@@ -1461,12 +1505,18 @@ def render(settings: Settings) -> None:
                 imported_browser = _as_str(
                     imported_jira_settings.get("JIRA_BROWSER", jira_browser)
                 ).lower()
+                imported_cookie_source = _normalize_cookie_source(
+                    imported_jira_settings.get("JIRA_COOKIE_SOURCE", jira_cookie_source),
+                    default=jira_cookie_source,
+                )
                 if imported_browser not in {"chrome", "edge"}:
                     imported_browser = jira_browser
                 st.session_state["cfg_jira_base"] = imported_base
                 st.session_state["cfg_jira_browser"] = imported_browser
+                st.session_state["cfg_jira_cookie_source"] = imported_cookie_source
                 jira_base = imported_base
                 jira_browser = imported_browser
+                jira_cookie_source = imported_cookie_source
 
         jira_delete_ids, jira_delete_labels = _selected_sources_from_editor(
             jira_editor, source_type="jira"
@@ -1502,6 +1552,8 @@ def render(settings: Settings) -> None:
                 {
                     "JIRA_BASE_URL": str(jira_base).strip(),
                     "JIRA_BROWSER": str(jira_browser).strip(),
+                    "JIRA_COOKIE_SOURCE": _normalize_cookie_source(jira_cookie_source),
+                    "JIRA_COOKIE_HEADER": str(jira_cookie_header).strip(),
                     "JIRA_SOURCES_JSON": to_env_json(jira_clean),
                 },
             )
@@ -1553,7 +1605,11 @@ def render(settings: Settings) -> None:
         st.markdown("### Helix")
         st.caption("Configuración común de conexión y autenticación para todas las fuentes Helix.")
 
-        h1, h2, h3 = st.columns([1.2, 1.0, 1.0])
+        helix_cookie_source_default = _normalize_cookie_source(
+            getattr(settings, "HELIX_COOKIE_SOURCE", "browser"),
+            default="browser",
+        )
+        h1, h2, h3, h4 = st.columns([1.2, 1.0, 1.0, 1.4])
         with h1:
             helix_default_proxy = st.text_input(
                 "Proxy",
@@ -1577,6 +1633,14 @@ def render(settings: Settings) -> None:
                 ),
                 key="cfg_helix_ssl_default",
             )
+        with h4:
+            helix_cookie_source = st.selectbox(
+                "Modo sesión Helix",
+                options=["browser", "auto", "manual"],
+                index=["browser", "auto", "manual"].index(helix_cookie_source_default),
+                format_func=_cookie_source_label,
+                key="cfg_helix_cookie_source",
+            )
 
         helix_dashboard_url = st.text_input(
             "Helix Dashboard URL",
@@ -1589,6 +1653,21 @@ def render(settings: Settings) -> None:
             ),
             key="cfg_helix_dashboard_url",
         )
+        helix_cookie_header = _as_str(st.session_state.get("cfg_helix_cookie_header", ""))
+        if not helix_cookie_header:
+            helix_cookie_header = _as_str(getattr(settings, "HELIX_COOKIE_HEADER", ""))
+            st.session_state["cfg_helix_cookie_header"] = helix_cookie_header
+        if helix_cookie_source != "browser":
+            helix_cookie_header = st.text_input(
+                "Cookie Helix manual (opcional, solo modo manual/auto)",
+                value=helix_cookie_header,
+                key="cfg_helix_cookie_header",
+                type="password",
+                help=(
+                    "Si eliges modo manual, pega aquí el header Cookie completo de Helix/SmartIT. "
+                    "No se exporta a Excel por seguridad."
+                ),
+            )
         st.caption("Modo de ingesta Helix: ARSQL (único modo soportado).")
 
         st.markdown("### Fuentes Helix por país")
@@ -1654,6 +1733,7 @@ def render(settings: Settings) -> None:
                     "HELIX_BROWSER": helix_default_browser,
                     "HELIX_SSL_VERIFY": helix_default_ssl_verify,
                     "HELIX_DASHBOARD_URL": helix_dashboard_url,
+                    "HELIX_COOKIE_SOURCE": helix_cookie_source,
                 },
             )
         with c_h_import:
@@ -1677,6 +1757,10 @@ def render(settings: Settings) -> None:
                 imported_dashboard_url = _as_str(
                     imported_helix_settings.get("HELIX_DASHBOARD_URL", helix_dashboard_url)
                 )
+                imported_cookie_source = _normalize_cookie_source(
+                    imported_helix_settings.get("HELIX_COOKIE_SOURCE", helix_cookie_source),
+                    default=helix_cookie_source,
+                )
                 if imported_browser not in {"chrome", "edge"}:
                     imported_browser = helix_default_browser
                 if imported_ssl_verify not in {"true", "false"}:
@@ -1686,10 +1770,12 @@ def render(settings: Settings) -> None:
                 st.session_state["cfg_helix_browser_default"] = imported_browser
                 st.session_state["cfg_helix_ssl_default"] = imported_ssl_verify
                 st.session_state["cfg_helix_dashboard_url"] = imported_dashboard_url
+                st.session_state["cfg_helix_cookie_source"] = imported_cookie_source
                 helix_default_proxy = imported_proxy
                 helix_default_browser = imported_browser
                 helix_default_ssl_verify = imported_ssl_verify
                 helix_dashboard_url = imported_dashboard_url
+                helix_cookie_source = imported_cookie_source
 
         helix_delete_ids, helix_delete_labels = _selected_sources_from_editor(
             helix_editor, source_type="helix"
@@ -1727,6 +1813,8 @@ def render(settings: Settings) -> None:
                     "HELIX_PROXY": str(helix_default_proxy).strip(),
                     "HELIX_SSL_VERIFY": str(helix_default_ssl_verify).strip().lower(),
                     "HELIX_DASHBOARD_URL": str(helix_dashboard_url).strip(),
+                    "HELIX_COOKIE_SOURCE": _normalize_cookie_source(helix_cookie_source),
+                    "HELIX_COOKIE_HEADER": str(helix_cookie_header).strip(),
                 },
             )
             _save_settings_with_migrations(new_settings)

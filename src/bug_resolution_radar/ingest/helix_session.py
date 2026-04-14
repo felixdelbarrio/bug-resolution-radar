@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
+from ..common.security import sanitize_cookie_header
 from .cookie_utils import (
     build_cookie_header_for_hosts,
     candidate_domains_from_host,
@@ -27,11 +29,31 @@ def _related_hosts(host: str) -> list[str]:
     return dedup
 
 
+def _cookie_source() -> str:
+    raw = str(os.getenv("HELIX_COOKIE_SOURCE", "browser") or "").strip().lower()
+    if raw in {"manual", "auto"}:
+        return raw
+    return "browser"
+
+
+def _manual_cookie() -> Optional[str]:
+    cookie = sanitize_cookie_header(str(os.getenv("HELIX_COOKIE_HEADER", "") or "").strip())
+    return cookie or None
+
+
 def get_helix_session_cookie(browser: str, host: str) -> Optional[str]:
     """
     Extrae cookies de Chrome/Edge (Chromium) usando browser-cookie3.
     No persiste cookies. Devuelve un string listo para header Cookie.
     """
+    source = _cookie_source()
+    manual_cookie = _manual_cookie()
+    if source == "manual":
+        if manual_cookie:
+            return manual_cookie
+        raise ValueError("HELIX_COOKIE_SOURCE=manual requiere HELIX_COOKIE_HEADER no vacío.")
+    if source == "auto" and manual_cookie:
+        return manual_cookie
     if not host:
         return None
 

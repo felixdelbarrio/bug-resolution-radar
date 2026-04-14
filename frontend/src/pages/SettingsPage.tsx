@@ -81,6 +81,16 @@ function normalizeBool(value: string | number | undefined, fallback = false) {
   return ["1", "true", "yes", "on"].includes(token);
 }
 
+function normalizeCookieSource(value: string | number | undefined, fallback = "browser") {
+  const token = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (["browser", "manual", "auto"].includes(token)) {
+    return token;
+  }
+  return fallback;
+}
+
 function withSourceDrafts(rows: WorkspaceSource[]) {
   return rows.map((row) => ({ ...row, markedForDeletion: false }));
 }
@@ -470,7 +480,9 @@ export function SettingsPage() {
       values: {
         ...savedPayload.values,
         JIRA_BASE_URL: asText(values.JIRA_BASE_URL),
-        JIRA_BROWSER: asText(values.JIRA_BROWSER || "chrome")
+        JIRA_BROWSER: asText(values.JIRA_BROWSER || "chrome"),
+        JIRA_COOKIE_SOURCE: normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser"),
+        JIRA_COOKIE_HEADER: asText(values.JIRA_COOKIE_HEADER)
       },
       jiraSources: jiraRows.filter((row) => !row.markedForDeletion),
     };
@@ -495,7 +507,9 @@ export function SettingsPage() {
         HELIX_PROXY: asText(values.HELIX_PROXY),
         HELIX_BROWSER: asText(values.HELIX_BROWSER || "chrome"),
         HELIX_SSL_VERIFY: normalizeBool(values.HELIX_SSL_VERIFY, true) ? "true" : "false",
-        HELIX_DASHBOARD_URL: asText(values.HELIX_DASHBOARD_URL)
+        HELIX_DASHBOARD_URL: asText(values.HELIX_DASHBOARD_URL),
+        HELIX_COOKIE_SOURCE: normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser"),
+        HELIX_COOKIE_HEADER: asText(values.HELIX_COOKIE_HEADER)
       },
       helixSources: helixRows.filter((row) => !row.markedForDeletion)
     };
@@ -817,6 +831,27 @@ export function SettingsPage() {
                     <option value="edge">Edge</option>
                   </select>
                 </label>
+                <label className="field">
+                  <span>Modo sesión Jira</span>
+                  <select
+                    value={normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser")}
+                    onChange={(event) => setValue("JIRA_COOKIE_SOURCE", event.target.value)}
+                  >
+                    <option value="browser">Browser (lectura local de sesión)</option>
+                    <option value="auto">Auto (manual si existe; si no browser)</option>
+                    <option value="manual">Manual (sin leer cookies del navegador)</option>
+                  </select>
+                </label>
+                {normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser") !== "browser" ? (
+                  <label className="field field-wide">
+                    <span>Cookie Jira manual (opcional)</span>
+                    <input
+                      type="password"
+                      value={asText(values.JIRA_COOKIE_HEADER)}
+                      onChange={(event) => setValue("JIRA_COOKIE_HEADER", event.target.value)}
+                    />
+                  </label>
+                ) : null}
               </div>
             </article>
           </section>
@@ -910,6 +945,17 @@ export function SettingsPage() {
                   <option value="false">false</option>
                 </select>
               </label>
+              <label className="field">
+                <span>Modo sesión Helix</span>
+                <select
+                  value={normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser")}
+                  onChange={(event) => setValue("HELIX_COOKIE_SOURCE", event.target.value)}
+                >
+                  <option value="browser">Browser (lectura local de sesión)</option>
+                  <option value="auto">Auto (manual si existe; si no browser)</option>
+                  <option value="manual">Manual (sin leer cookies del navegador)</option>
+                </select>
+              </label>
               <label className="field field-wide">
                 <span>Helix Dashboard URL</span>
                 <input
@@ -917,6 +963,16 @@ export function SettingsPage() {
                   onChange={(event) => setValue("HELIX_DASHBOARD_URL", event.target.value)}
                 />
               </label>
+              {normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser") !== "browser" ? (
+                <label className="field field-wide">
+                  <span>Cookie Helix manual (opcional)</span>
+                  <input
+                    type="password"
+                    value={asText(values.HELIX_COOKIE_HEADER)}
+                    onChange={(event) => setValue("HELIX_COOKIE_HEADER", event.target.value)}
+                  />
+                </label>
+              ) : null}
             </div>
           </section>
 
