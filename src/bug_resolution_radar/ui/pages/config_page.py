@@ -40,6 +40,10 @@ from bug_resolution_radar.services.source_maintenance import (
     purge_source_cache,
     reset_cache_store,
 )
+from bug_resolution_radar.services.sources_excel import (
+    build_sources_export_excel_bytes,
+    import_sources_from_excel_bytes,
+)
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_LIGHT,
     BBVA_SIGNAL_GREEN_1,
@@ -48,14 +52,13 @@ from bug_resolution_radar.theme.design_tokens import (
 )
 from bug_resolution_radar.ui.cache import clear_signature_cache
 from bug_resolution_radar.ui.common import load_issues_df
+from bug_resolution_radar.ui.dashboard.exports.downloads import (
+    build_download_filename,
+)
 from bug_resolution_radar.ui.dashboard.performance import (
     clear_perf_history,
     list_perf_snapshots,
     perf_history_rows,
-)
-from bug_resolution_radar.ui.dashboard.exports.downloads import (
-    build_download_filename,
-    df_to_excel_bytes,
 )
 from bug_resolution_radar.ui.style import apply_plotly_bbva
 
@@ -180,19 +183,21 @@ def _source_rows_export_df(df: pd.DataFrame, *, source_type: str) -> pd.DataFram
 
 
 def _render_sources_excel_download(
+    settings: Settings,
     df: pd.DataFrame,
     *,
     source_type: str,
     key: str,
     filename_prefix: str,
     sheet_name: str,
+    transversal_values: Dict[str, Any] | None = None,
 ) -> None:
     export_df = _source_rows_export_df(df, source_type=source_type)
-    disabled = export_df.empty
-    payload = (
-        b""
-        if disabled
-        else df_to_excel_bytes(export_df, include_index=False, sheet_name=sheet_name)
+    payload = build_sources_export_excel_bytes(
+        settings,
+        source_type=source_type,
+        source_rows=export_df.to_dict(orient="records"),
+        transversal_values=transversal_values,
     )
     st.download_button(
         label="Descargar Excel",
@@ -200,9 +205,84 @@ def _render_sources_excel_download(
         file_name=build_download_filename(filename_prefix, suffix="fuentes", ext="xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=key,
-        disabled=disabled,
+        disabled=False,
         width="stretch",
     )
+
+
+def _editor_rows_from_source_rows(
+    rows: List[Dict[str, str]], *, source_type: str
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for row in list(rows or []):
+        payload: Dict[str, Any] = {
+            "__delete__": False,
+            "__source_id__": _as_str(row.get("source_id")),
+            "country": _as_str(row.get("country")),
+            "alias": _as_str(row.get("alias")),
+        }
+        if source_type == "jira":
+            payload["jql"] = _as_str(row.get("jql"))
+        else:
+            payload["service_origin_buug"] = _as_str(row.get("service_origin_buug"))
+            payload["service_origin_n1"] = _as_str(row.get("service_origin_n1"))
+            payload["service_origin_n2"] = _as_str(row.get("service_origin_n2"))
+        out.append(payload)
+    return out
+
+
+def _render_sources_excel_import(
+    *,
+    source_type: str,
+    countries: List[str],
+    rows_state_key: str,
+    file_uploader_key: str,
+    apply_button_key: str,
+) -> Dict[str, str]:
+    uploader = st.file_uploader(
+        "Cargar Excel",
+        type=["xlsx"],
+        key=file_uploader_key,
+        width="stretch",
+        help="Carga un Excel con columnas equivalentes a la exportación.",
+    )
+    apply_upload = st.button(
+        "Aplicar Excel",
+        key=apply_button_key,
+        disabled=uploader is None,
+        width="stretch",
+    )
+    if not apply_upload:
+        return {}
+    if uploader is None:
+        st.error("Selecciona un archivo Excel antes de aplicar la carga.")
+        return {}
+    try:
+        payload = uploader.getvalue()
+        result = import_sources_from_excel_bytes(
+            payload,
+            source_type=source_type,
+            countries=countries,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return {}
+    except Exception as exc:
+        st.error(f"No se pudo cargar el Excel: {type(exc).__name__}: {exc}")
+        return {}
+
+    st.session_state[rows_state_key] = _editor_rows_from_source_rows(
+        result.rows,
+        source_type=source_type,
+    )
+    st.success(
+        "Excel cargado: "
+        f"{int(result.imported_rows)} fila(s) importada(s), "
+        f"{int(result.skipped_rows)} omitida(s)."
+    )
+    for warning in list(result.warnings or []):
+        st.warning(warning)
+    return {str(k): str(v) for k, v in dict(result.settings_values or {}).items()}
 
 
 def _merge_purge_stats(acc: Dict[str, int], nxt: Dict[str, int]) -> Dict[str, int]:
@@ -1353,13 +1433,40 @@ def render(settings: Settings) -> None:
             },
         )
         st.session_state[jira_rows_state_key] = jira_editor.to_dict(orient="records")
-        _render_sources_excel_download(
-            jira_editor,
-            source_type="jira",
-            key="cfg_export_jira_sources_xlsx",
-            filename_prefix="fuentes_jira",
-            sheet_name="Fuentes Jira",
-        )
+        st.caption("Descarga o carga fuentes Jira en formato Excel.")
+        c_j_export, c_j_import = st.columns(2)
+        with c_j_export:
+            _render_sources_excel_download(
+                settings,
+                jira_editor,
+                source_type="jira",
+                key="cfg_export_jira_sources_xlsx",
+                filename_prefix="fuentes_jira",
+                sheet_name="Fuentes Jira",
+                transversal_values={
+                    "JIRA_BASE_URL": jira_base,
+                    "JIRA_BROWSER": jira_browser,
+                },
+            )
+        with c_j_import:
+            imported_jira_settings = _render_sources_excel_import(
+                source_type="jira",
+                countries=countries,
+                rows_state_key=jira_rows_state_key,
+                file_uploader_key="cfg_import_jira_sources_xlsx",
+                apply_button_key="cfg_apply_jira_sources_xlsx",
+            )
+            if imported_jira_settings:
+                imported_base = _as_str(imported_jira_settings.get("JIRA_BASE_URL", jira_base))
+                imported_browser = _as_str(
+                    imported_jira_settings.get("JIRA_BROWSER", jira_browser)
+                ).lower()
+                if imported_browser not in {"chrome", "edge"}:
+                    imported_browser = jira_browser
+                st.session_state["cfg_jira_base"] = imported_base
+                st.session_state["cfg_jira_browser"] = imported_browser
+                jira_base = imported_base
+                jira_browser = imported_browser
 
         jira_delete_ids, jira_delete_labels = _selected_sources_from_editor(
             jira_editor, source_type="jira"
@@ -1532,13 +1639,57 @@ def render(settings: Settings) -> None:
             },
         )
         st.session_state[helix_rows_state_key] = helix_editor.to_dict(orient="records")
-        _render_sources_excel_download(
-            helix_editor,
-            source_type="helix",
-            key="cfg_export_helix_sources_xlsx",
-            filename_prefix="fuentes_helix",
-            sheet_name="Fuentes Helix",
-        )
+        st.caption("Descarga o carga fuentes Helix en formato Excel.")
+        c_h_export, c_h_import = st.columns(2)
+        with c_h_export:
+            _render_sources_excel_download(
+                settings,
+                helix_editor,
+                source_type="helix",
+                key="cfg_export_helix_sources_xlsx",
+                filename_prefix="fuentes_helix",
+                sheet_name="Fuentes Helix",
+                transversal_values={
+                    "HELIX_PROXY": helix_default_proxy,
+                    "HELIX_BROWSER": helix_default_browser,
+                    "HELIX_SSL_VERIFY": helix_default_ssl_verify,
+                    "HELIX_DASHBOARD_URL": helix_dashboard_url,
+                },
+            )
+        with c_h_import:
+            imported_helix_settings = _render_sources_excel_import(
+                source_type="helix",
+                countries=countries,
+                rows_state_key=helix_rows_state_key,
+                file_uploader_key="cfg_import_helix_sources_xlsx",
+                apply_button_key="cfg_apply_helix_sources_xlsx",
+            )
+            if imported_helix_settings:
+                imported_proxy = _as_str(
+                    imported_helix_settings.get("HELIX_PROXY", helix_default_proxy)
+                )
+                imported_browser = _as_str(
+                    imported_helix_settings.get("HELIX_BROWSER", helix_default_browser)
+                ).lower()
+                imported_ssl_verify = _as_str(
+                    imported_helix_settings.get("HELIX_SSL_VERIFY", helix_default_ssl_verify)
+                ).lower()
+                imported_dashboard_url = _as_str(
+                    imported_helix_settings.get("HELIX_DASHBOARD_URL", helix_dashboard_url)
+                )
+                if imported_browser not in {"chrome", "edge"}:
+                    imported_browser = helix_default_browser
+                if imported_ssl_verify not in {"true", "false"}:
+                    imported_ssl_verify = helix_default_ssl_verify
+
+                st.session_state["cfg_helix_proxy_default"] = imported_proxy
+                st.session_state["cfg_helix_browser_default"] = imported_browser
+                st.session_state["cfg_helix_ssl_default"] = imported_ssl_verify
+                st.session_state["cfg_helix_dashboard_url"] = imported_dashboard_url
+                helix_default_proxy = imported_proxy
+                helix_default_browser = imported_browser
+                helix_default_ssl_verify = imported_ssl_verify
+                helix_dashboard_url = imported_dashboard_url
 
         helix_delete_ids, helix_delete_labels = _selected_sources_from_editor(
             helix_editor, source_type="helix"

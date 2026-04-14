@@ -1624,6 +1624,23 @@ textarea::placeholder {
   cursor: not-allowed;
 }
 
+.file-upload-button {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.file-upload-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-upload-button.is-disabled {
+  pointer-events: none;
+}
+
 .settings-table,
 .selector-list {
   display: grid;
