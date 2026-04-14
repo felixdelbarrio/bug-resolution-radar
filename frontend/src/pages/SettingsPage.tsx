@@ -322,6 +322,8 @@ export function SettingsPage() {
   const [jiraRows, setJiraRows] = useState<SourceDraftRow[]>([]);
   const [helixRows, setHelixRows] = useState<SourceDraftRow[]>([]);
   const [flashMessage, setFlashMessage] = useState<string>("");
+  const [jiraExcelBusy, setJiraExcelBusy] = useState<boolean>(false);
+  const [jiraExcelInputKey, setJiraExcelInputKey] = useState<number>(0);
   const [helixExcelBusy, setHelixExcelBusy] = useState<boolean>(false);
   const [helixExcelInputKey, setHelixExcelInputKey] = useState<number>(0);
 
@@ -507,6 +509,46 @@ export function SettingsPage() {
     );
   }
 
+  async function downloadJiraSourcesExcel() {
+    await downloadSourcesExcel("jira", "fuentes_jira.xlsx");
+  }
+
+  async function importJiraSourcesExcel(file: File | null) {
+    if (!file) {
+      return;
+    }
+    setJiraExcelBusy(true);
+    try {
+      const imported: SettingsSourcesImportPayload = await importSourcesExcel("jira", file);
+      setJiraRows(withSourceDrafts(imported.rows));
+      if (imported.settingsValues) {
+        setDraft((current) =>
+          current
+            ? {
+                ...current,
+                values: {
+                  ...current.values,
+                  ...imported.settingsValues
+                }
+              }
+            : current
+        );
+      }
+      const warnings = imported.warnings.length;
+      setFlashMessage(
+        `Excel Jira cargado: ${imported.importedRows} filas importadas, ` +
+          `${imported.skippedRows} omitidas${warnings > 0 ? `, ${warnings} advertencias` : ""}. ` +
+          "Revisa y guarda la configuración."
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? "Error desconocido");
+      setFlashMessage(`No se pudo cargar el Excel Jira: ${detail}`);
+    } finally {
+      setJiraExcelBusy(false);
+      setJiraExcelInputKey((prev) => prev + 1);
+    }
+  }
+
   async function downloadHelixSourcesExcel() {
     await downloadSourcesExcel("helix", "fuentes_helix.xlsx");
   }
@@ -519,6 +561,19 @@ export function SettingsPage() {
     try {
       const imported: SettingsSourcesImportPayload = await importSourcesExcel("helix", file);
       setHelixRows(withSourceDrafts(imported.rows));
+      if (imported.settingsValues) {
+        setDraft((current) =>
+          current
+            ? {
+                ...current,
+                values: {
+                  ...current.values,
+                  ...imported.settingsValues
+                }
+              }
+            : current
+        );
+      }
       const warnings = imported.warnings.length;
       setFlashMessage(
         `Excel Helix cargado: ${imported.importedRows} filas importadas, ` +
@@ -775,6 +830,35 @@ export function SettingsPage() {
             onChange={setJiraRows}
             onAddRow={() => setJiraRows([...jiraRows, emptyJiraRow(countries[0] ?? "")])}
           />
+
+          <section className="surface-card page-stack">
+            <h3>Excel de Fuentes Jira</h3>
+            <p className="inline-caption">
+              Descarga la configuración actual o carga un Excel para reemplazar la tabla de fuentes.
+            </p>
+            <div className="settings-actions-row">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={jiraExcelBusy}
+                onClick={() => void downloadJiraSourcesExcel()}
+              >
+                Descargar Excel
+              </button>
+              <label className={cn("secondary-button", "file-upload-button", jiraExcelBusy && "is-disabled")}>
+                {jiraExcelBusy ? "Cargando..." : "Cargar Excel"}
+                <input
+                  key={jiraExcelInputKey}
+                  type="file"
+                  accept=".xlsx"
+                  disabled={jiraExcelBusy}
+                  onChange={(event) =>
+                    void importJiraSourcesExcel(event.target.files?.[0] ?? null)
+                  }
+                />
+              </label>
+            </div>
+          </section>
 
           <section className="surface-card page-stack">
             <div className="settings-actions-row">

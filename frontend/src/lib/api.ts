@@ -302,6 +302,7 @@ export type SettingsSourcesImportPayload = {
   importedRows: number;
   skippedRows: number;
   warnings: string[];
+  settingsValues?: Record<string, string>;
 };
 
 export function normalizeSettingsPayload(

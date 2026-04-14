@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Iterator, Sequence
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -154,7 +155,8 @@ def _json_list_from_settings(value: object) -> list[str]:
     return [str(item).strip() for item in payload if str(item).strip()]
 
 
-def _sync_settings_to_process_env(settings: Settings) -> None:
+@contextmanager
+def _sync_settings_to_process_env(settings: Settings) -> Iterator[None]:
     """
     Keep runtime environment aligned with persisted settings for ingest modules.
 
@@ -163,12 +165,24 @@ def _sync_settings_to_process_env(settings: Settings) -> None:
     `.env` through `load_settings()` but that does not export them to process env,
     so we mirror the active Settings model before running ingestion calls.
     """
+    previous: dict[str, tuple[bool, str]] = {}
     for key, value in settings.model_dump().items():
         env_key = str(key)
+        exists = env_key in os.environ
+        previous[env_key] = (exists, str(os.environ.get(env_key, "")))
         if value is None:
             os.environ.pop(env_key, None)
         else:
             os.environ[env_key] = str(value)
+    try:
+        yield
+    finally:
+        for env_key, snapshot in previous.items():
+            existed, old_value = snapshot
+            if existed:
+                os.environ[env_key] = old_value
+            else:
+                os.environ.pop(env_key, None)
 
 
 def _workspace_query(
@@ -895,6 +909,7 @@ def create_app() -> FastAPI:
             "importedRows": int(result.imported_rows),
             "skippedRows": int(result.skipped_rows),
             "warnings": list(result.warnings or []),
+            "settingsValues": dict(result.settings_values or {}),
         }
 
     @app.post("/api/settings/restore-from-example")
@@ -1001,7 +1016,6 @@ def create_app() -> FastAPI:
     @app.post("/api/ingest/jira/test")
     def test_jira_ingest(payload: SourceSelectionRequest) -> dict[str, Any]:
         settings = load_settings()
-        _sync_settings_to_process_env(settings)
         sources = _select_sources(
             list(jira_sources(settings)),
             requested_source_ids=payload.sourceIds,
@@ -1012,17 +1026,17 @@ def create_app() -> FastAPI:
         test_source = _pick_test_source(sources)
         if test_source is None:
             raise HTTPException(status_code=400, detail="No hay fuentes Jira seleccionadas.")
-        ok, message, _ = execute_jira_ingest(
-            settings=settings,
-            dry_run=True,
-            source=test_source,
-        )
+        with _sync_settings_to_process_env(settings):
+            ok, message, _ = execute_jira_ingest(
+                settings=settings,
+                dry_run=True,
+                source=test_source,
+            )
         return _single_source_result(connector="jira", ok=ok, message=message)
 
     @app.post("/api/ingest/helix/test")
     def test_helix_ingest(payload: SourceSelectionRequest) -> dict[str, Any]:
         settings = load_settings()
-        _sync_settings_to_process_env(settings)
         sources = _select_sources(
             list(helix_sources(settings)),
             requested_source_ids=payload.sourceIds,
@@ -1033,26 +1047,26 @@ def create_app() -> FastAPI:
         test_source = _pick_test_source(sources)
         if test_source is None:
             raise HTTPException(status_code=400, detail="No hay fuentes Helix seleccionadas.")
-        ok, message, _ = execute_helix_ingest(
-            browser=str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip()
-            or "chrome",
-            country=str(test_source.get("country", "")).strip(),
-            source_alias=str(test_source.get("alias", "")).strip(),
-            source_id=str(test_source.get("source_id", "")).strip(),
-            proxy=str(getattr(settings, "HELIX_PROXY", "") or "").strip(),
-            ssl_verify=str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip(),
-            service_origin_buug=test_source.get("service_origin_buug"),
-            service_origin_n1=test_source.get("service_origin_n1"),
-            service_origin_n2=test_source.get("service_origin_n2"),
-            dry_run=True,
-            existing_doc=HelixDocument.empty(),
-        )
+        with _sync_settings_to_process_env(settings):
+            ok, message, _ = execute_helix_ingest(
+                browser=str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip()
+                or "chrome",
+                country=str(test_source.get("country", "")).strip(),
+                source_alias=str(test_source.get("alias", "")).strip(),
+                source_id=str(test_source.get("source_id", "")).strip(),
+                proxy=str(getattr(settings, "HELIX_PROXY", "") or "").strip(),
+                ssl_verify=str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip(),
+                service_origin_buug=test_source.get("service_origin_buug"),
+                service_origin_n1=test_source.get("service_origin_n1"),
+                service_origin_n2=test_source.get("service_origin_n2"),
+                dry_run=True,
+                existing_doc=HelixDocument.empty(),
+            )
         return _single_source_result(connector="helix", ok=ok, message=message)
 
     @app.post("/api/ingest/jira")
     def post_ingest_jira(payload: SourceSelectionRequest) -> dict[str, Any]:
         settings = load_settings()
-        _sync_settings_to_process_env(settings)
         sources = _select_sources(
             list(jira_sources(settings)),
             requested_source_ids=payload.sourceIds,
@@ -1062,12 +1076,12 @@ def create_app() -> FastAPI:
         )
         if not sources:
             raise HTTPException(status_code=400, detail="No hay fuentes Jira seleccionadas.")
-        return run_jira_ingest(settings, selected_sources=sources)
+        with _sync_settings_to_process_env(settings):
+            return run_jira_ingest(settings, selected_sources=sources)
 
     @app.post("/api/ingest/helix")
     def post_ingest_helix(payload: SourceSelectionRequest) -> dict[str, Any]:
         settings = load_settings()
-        _sync_settings_to_process_env(settings)
         sources = _select_sources(
             list(helix_sources(settings)),
             requested_source_ids=payload.sourceIds,
@@ -1077,7 +1091,8 @@ def create_app() -> FastAPI:
         )
         if not sources:
             raise HTTPException(status_code=400, detail="No hay fuentes Helix seleccionadas.")
-        return run_helix_ingest(settings, selected_sources=sources)
+        with _sync_settings_to_process_env(settings):
+            return run_helix_ingest(settings, selected_sources=sources)
 
     @app.post("/api/reports/executive")
     def executive_report(payload: ReportRequest) -> Response:

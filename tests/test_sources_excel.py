@@ -7,7 +7,9 @@ import pytest
 
 from bug_resolution_radar.config import Settings, build_source_id
 from bug_resolution_radar.services.sources_excel import (
+    _TRANSVERSAL_SHEET_NAME,
     build_sources_export_dataframe,
+    build_sources_export_excel_bytes,
     import_sources_from_excel_bytes,
 )
 
@@ -68,6 +70,7 @@ def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_preserves_
     assert imported.imported_rows == 2
     assert imported.skipped_rows == 0
     assert imported.warnings == []
+    assert imported.settings_values == {}
     assert imported.rows[0]["country"] == "México"
     assert imported.rows[0]["alias"] == "MX SmartIT"
     assert imported.rows[0]["source_id"] == build_source_id("helix", "México", "MX SmartIT")
@@ -90,6 +93,7 @@ def test_import_sources_from_excel_bytes_skips_invalid_country_with_warning() ->
 
     assert imported.imported_rows == 1
     assert imported.skipped_rows == 1
+    assert imported.settings_values == {}
     assert imported.rows[0]["country"] == "México"
     assert any("país no soportado" in warning for warning in imported.warnings)
 
@@ -104,3 +108,70 @@ def test_import_sources_from_excel_bytes_fails_when_required_columns_missing() -
             countries=["México"],
         )
 
+
+def test_build_sources_export_excel_bytes_includes_transversal_sheet() -> None:
+    settings = Settings(
+        HELIX_PROXY="http://127.0.0.1:8999",
+        HELIX_BROWSER="chrome",
+        HELIX_SSL_VERIFY="false",
+        HELIX_DASHBOARD_URL="https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+        HELIX_SOURCES_JSON=(
+            '[{"country":"México","alias":"MX SmartIT","service_origin_buug":"BBVA México",'
+            '"service_origin_n1":"ENTERPRISE WEB"}]'
+        ),
+    )
+
+    payload = build_sources_export_excel_bytes(settings, source_type="helix")
+    xl = pd.ExcelFile(BytesIO(payload))
+
+    assert "Fuentes Helix" in xl.sheet_names
+    assert _TRANSVERSAL_SHEET_NAME in xl.sheet_names
+    trans = xl.parse(_TRANSVERSAL_SHEET_NAME)
+    assert set(trans.columns) == {"key", "value"}
+    values = {str(row["key"]): str(row["value"]) for row in trans.to_dict(orient="records")}
+    assert values["HELIX_PROXY"] == "http://127.0.0.1:8999"
+    assert values["HELIX_BROWSER"] == "chrome"
+    assert values["HELIX_SSL_VERIFY"] == "false"
+
+
+def test_import_sources_from_excel_bytes_reads_transversal_values_sheet() -> None:
+    source = pd.DataFrame(
+        [
+            {
+                "country": "México",
+                "alias": "MX SmartIT",
+                "service_origin_buug": "BBVA México",
+                "service_origin_n1": "ENTERPRISE WEB",
+            }
+        ]
+    )
+    trans = pd.DataFrame(
+        [
+            {"key": "HELIX_PROXY", "value": "http://127.0.0.1:8999"},
+            {"key": "HELIX_BROWSER", "value": "chrome"},
+            {"key": "HELIX_SSL_VERIFY", "value": "false"},
+            {
+                "key": "HELIX_DASHBOARD_URL",
+                "value": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        source.to_excel(writer, index=False, sheet_name="Fuentes Helix")
+        trans.to_excel(writer, index=False, sheet_name=_TRANSVERSAL_SHEET_NAME)
+
+    imported = import_sources_from_excel_bytes(
+        buffer.getvalue(),
+        source_type="helix",
+        countries=["México"],
+    )
+
+    assert imported.imported_rows == 1
+    assert imported.skipped_rows == 0
+    assert imported.settings_values == {
+        "HELIX_PROXY": "http://127.0.0.1:8999",
+        "HELIX_BROWSER": "chrome",
+        "HELIX_SSL_VERIFY": "false",
+        "HELIX_DASHBOARD_URL": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    }

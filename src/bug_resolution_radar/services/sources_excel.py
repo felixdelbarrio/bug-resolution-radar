@@ -6,7 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Dict, List
+from typing import Any
 
 import pandas as pd
 
@@ -17,7 +17,6 @@ from bug_resolution_radar.config import (
     jira_sources,
     supported_countries,
 )
-from bug_resolution_radar.services.tabular_export import dataframe_to_xlsx_bytes
 
 _SUPPORTED_SOURCE_TYPES = {"jira", "helix"}
 _EXPORT_COLUMNS: dict[str, list[str]] = {
@@ -35,9 +34,14 @@ _SHEET_NAMES: dict[str, str] = {
     "jira": "Fuentes Jira",
     "helix": "Fuentes Helix",
 }
+_TRANSVERSAL_SHEET_NAME = "Valores transversales"
 _REQUIRED_COLUMNS: dict[str, list[str]] = {
     "jira": ["country", "alias", "jql"],
     "helix": ["country", "alias"],
+}
+_TRANSVERSAL_KEYS_BY_SOURCE: dict[str, list[str]] = {
+    "jira": ["JIRA_BASE_URL", "JIRA_BROWSER"],
+    "helix": ["HELIX_PROXY", "HELIX_BROWSER", "HELIX_SSL_VERIFY", "HELIX_DASHBOARD_URL"],
 }
 _HEADER_ALIASES: dict[str, dict[str, str]] = {
     "jira": {
@@ -75,6 +79,18 @@ _HEADER_ALIASES: dict[str, dict[str, str]] = {
         "servicioorigenn2": "service_origin_n2",
     },
 }
+_TRANSVERSAL_HEADER_ALIASES: dict[str, str] = {
+    "key": "key",
+    "clave": "key",
+    "parameter": "key",
+    "parametro": "key",
+    "parametro_configuracion": "key",
+    "configuracion": "key",
+    "setting": "key",
+    "value": "value",
+    "valor": "value",
+    "valor_actual": "value",
+}
 
 
 def _normalize_source_type(source_type: str) -> str:
@@ -91,7 +107,7 @@ def _normalize_token(value: str) -> str:
     return token
 
 
-def _country_lookup(countries: List[str]) -> dict[str, str]:
+def _country_lookup(countries: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for country in list(countries or []):
         key = _normalize_token(country)
@@ -111,12 +127,12 @@ def _as_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _build_export_rows(settings: Settings, *, source_type: str) -> List[Dict[str, str]]:
+def _build_export_rows(settings: Settings, *, source_type: str) -> list[dict[str, str]]:
     normalized_type = _normalize_source_type(source_type)
     rows = jira_sources(settings) if normalized_type == "jira" else helix_sources(settings)
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for row in list(rows or []):
-        payload: Dict[str, str] = {
+        payload: dict[str, str] = {
             "source_id": _as_text(row.get("source_id")),
             "country": _as_text(row.get("country")),
             "alias": _as_text(row.get("alias")),
@@ -131,29 +147,89 @@ def _build_export_rows(settings: Settings, *, source_type: str) -> List[Dict[str
     return out
 
 
+def _rows_frame_from_source_rows(
+    source_rows: list[dict[str, Any]],
+    *,
+    source_type: str,
+) -> pd.DataFrame:
+    cols = _EXPORT_COLUMNS[source_type]
+    out_rows: list[dict[str, str]] = []
+    for row in list(source_rows or []):
+        payload = {column: _as_text(row.get(column)) for column in cols}
+        out_rows.append(payload)
+    return pd.DataFrame(out_rows, columns=cols)
+
+
+def _transversal_keys(source_type: str) -> list[str]:
+    return list(_TRANSVERSAL_KEYS_BY_SOURCE[source_type])
+
+
+def _build_transversal_rows(
+    settings: Settings,
+    *,
+    source_type: str,
+    overrides: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    override_map = dict(overrides or {})
+    for key in _transversal_keys(source_type):
+        if key in override_map:
+            raw_value = override_map.get(key)
+        else:
+            raw_value = getattr(settings, key, "")
+        out.append({"key": key, "value": _as_text(raw_value)})
+    return out
+
+
 def build_sources_export_dataframe(settings: Settings, *, source_type: str) -> pd.DataFrame:
     normalized_type = _normalize_source_type(source_type)
     rows = _build_export_rows(settings, source_type=normalized_type)
     return pd.DataFrame(rows, columns=_EXPORT_COLUMNS[normalized_type])
 
 
-def build_sources_export_excel_bytes(settings: Settings, *, source_type: str) -> bytes:
+def build_sources_export_excel_bytes(
+    settings: Settings,
+    *,
+    source_type: str,
+    source_rows: list[dict[str, Any]] | None = None,
+    transversal_values: dict[str, Any] | None = None,
+) -> bytes:
     normalized_type = _normalize_source_type(source_type)
-    frame = build_sources_export_dataframe(settings, source_type=normalized_type)
-    return dataframe_to_xlsx_bytes(
-        frame,
-        sheet_name=_SHEET_NAMES[normalized_type],
-        include_index=False,
+    if source_rows is None:
+        source_frame = build_sources_export_dataframe(settings, source_type=normalized_type)
+    else:
+        source_frame = _rows_frame_from_source_rows(source_rows, source_type=normalized_type)
+
+    transversal_rows = _build_transversal_rows(
+        settings,
+        source_type=normalized_type,
+        overrides=transversal_values,
     )
+    transversal_frame = pd.DataFrame(transversal_rows, columns=["key", "value"])
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        source_frame.to_excel(
+            writer,
+            index=False,
+            sheet_name=str(_SHEET_NAMES[normalized_type])[:31],
+        )
+        transversal_frame.to_excel(
+            writer,
+            index=False,
+            sheet_name=str(_TRANSVERSAL_SHEET_NAME)[:31],
+        )
+    return output.getvalue()
 
 
 @dataclass(frozen=True)
 class SourcesExcelImportResult:
     source_type: str
-    rows: List[Dict[str, str]]
+    rows: list[dict[str, str]]
     imported_rows: int
     skipped_rows: int
-    warnings: List[str]
+    warnings: list[str]
+    settings_values: dict[str, str]
 
 
 def _canonical_column_mapping(
@@ -173,21 +249,26 @@ def _canonical_column_mapping(
     return mapping
 
 
-def import_sources_from_excel_bytes(
-    payload: bytes,
+def _sheet_name_matches(sheet_name: str, candidates: set[str]) -> bool:
+    token = _normalize_token(sheet_name)
+    return token in candidates
+
+
+def _pick_source_sheet_name(sheet_names: list[str], *, source_type: str) -> str:
+    preferred = _SHEET_NAMES[source_type]
+    for name in sheet_names:
+        if str(name) == preferred:
+            return name
+    return sheet_names[0]
+
+
+def _parse_source_rows_from_frame(
+    frame: pd.DataFrame,
     *,
     source_type: str,
-    countries: List[str] | None = None,
-) -> SourcesExcelImportResult:
+    countries: list[str] | None = None,
+) -> tuple[list[dict[str, str]], int, list[str]]:
     normalized_type = _normalize_source_type(source_type)
-    if not payload:
-        raise ValueError("El Excel recibido está vacío.")
-
-    try:
-        frame = pd.read_excel(BytesIO(payload), sheet_name=0, engine="openpyxl")
-    except Exception as exc:
-        raise ValueError(f"No se pudo leer el Excel: {exc}") from exc
-
     if frame is None or frame.empty:
         raise ValueError("El Excel no contiene filas de fuentes.")
 
@@ -195,9 +276,7 @@ def import_sources_from_excel_bytes(
     missing = [name for name in _REQUIRED_COLUMNS[normalized_type] if name not in col_map]
     if missing:
         raise ValueError(
-            "El Excel no contiene las columnas obligatorias: "
-            + ", ".join(sorted(missing))
-            + "."
+            "El Excel no contiene las columnas obligatorias: " + ", ".join(sorted(missing)) + "."
         )
 
     source_columns = _EXPORT_COLUMNS[normalized_type]
@@ -206,13 +285,13 @@ def import_sources_from_excel_bytes(
         countries_list = supported_countries(Settings())
     country_by_key = _country_lookup(countries_list)
 
-    warnings: List[str] = []
-    rows: List[Dict[str, str]] = []
+    warnings: list[str] = []
+    rows: list[dict[str, str]] = []
     skipped_rows = 0
     seen: set[tuple[str, str]] = set()
 
     for idx, raw in enumerate(frame.to_dict(orient="records"), start=1):
-        row_data: Dict[str, str] = {}
+        row_data: dict[str, str] = {}
         for column in source_columns:
             excel_col = col_map.get(column)
             row_data[column] = _as_text(raw.get(excel_col, "")) if excel_col else ""
@@ -257,7 +336,7 @@ def import_sources_from_excel_bytes(
         source_id = _as_text(row_data.get("source_id", "")) or build_source_id(
             normalized_type, country, alias
         )
-        clean: Dict[str, str] = {
+        clean: dict[str, str] = {
             "source_id": source_id,
             "country": country,
             "alias": alias,
@@ -273,6 +352,103 @@ def import_sources_from_excel_bytes(
 
     if not rows:
         raise ValueError("No se encontraron filas válidas en el Excel para importar.")
+    return rows, int(skipped_rows), warnings
+
+
+def _parse_transversal_rows_from_frame(
+    frame: pd.DataFrame,
+    *,
+    allowed_keys: set[str],
+) -> dict[str, str]:
+    if frame is None or frame.empty:
+        return {}
+
+    mapping: dict[str, str] = {}
+    for column in list(frame.columns):
+        normalized = _normalize_token(column)
+        canonical = _TRANSVERSAL_HEADER_ALIASES.get(normalized)
+        if canonical and canonical not in mapping:
+            mapping[canonical] = str(column)
+
+    out: dict[str, str] = {}
+    if "key" in mapping and "value" in mapping:
+        key_col = mapping["key"]
+        value_col = mapping["value"]
+        for raw in frame.to_dict(orient="records"):
+            key = _as_text(raw.get(key_col, "")).upper()
+            if not key or key not in allowed_keys:
+                continue
+            out[key] = _as_text(raw.get(value_col, ""))
+        if out:
+            return out
+
+    first_row = {}
+    rows = frame.to_dict(orient="records")
+    if rows:
+        first_row = dict(rows[0])
+    for column in list(frame.columns):
+        key = _as_text(column).upper()
+        if key not in allowed_keys:
+            continue
+        out[key] = _as_text(first_row.get(column, ""))
+    return out
+
+
+def _pick_transversal_sheet_names(sheet_names: list[str], *, source_sheet_name: str) -> list[str]:
+    candidates = [name for name in sheet_names if str(name) != str(source_sheet_name)]
+    if not candidates:
+        return []
+
+    preferred_tokens = {
+        _normalize_token(_TRANSVERSAL_SHEET_NAME),
+        "valores_transversales",
+        "configuracion",
+        "configuracion_transversal",
+        "transversal",
+        "settings",
+        "parametros",
+    }
+    preferred = [name for name in candidates if _sheet_name_matches(name, preferred_tokens)]
+    return preferred + [name for name in candidates if name not in preferred]
+
+
+def import_sources_from_excel_bytes(
+    payload: bytes,
+    *,
+    source_type: str,
+    countries: list[str] | None = None,
+) -> SourcesExcelImportResult:
+    normalized_type = _normalize_source_type(source_type)
+    if not payload:
+        raise ValueError("El Excel recibido está vacío.")
+
+    try:
+        excel = pd.ExcelFile(BytesIO(payload), engine="openpyxl")
+    except Exception as exc:
+        raise ValueError(f"No se pudo leer el Excel: {exc}") from exc
+
+    if not excel.sheet_names:
+        raise ValueError("El Excel no contiene pestañas.")
+
+    source_sheet_name = _pick_source_sheet_name(excel.sheet_names, source_type=normalized_type)
+    source_frame = excel.parse(sheet_name=source_sheet_name)
+    rows, skipped_rows, warnings = _parse_source_rows_from_frame(
+        source_frame,
+        source_type=normalized_type,
+        countries=countries,
+    )
+
+    settings_values: dict[str, str] = {}
+    allowed_settings = {key.upper() for key in _transversal_keys(normalized_type)}
+    for sheet_name in _pick_transversal_sheet_names(
+        excel.sheet_names,
+        source_sheet_name=source_sheet_name,
+    ):
+        frame = excel.parse(sheet_name=sheet_name)
+        parsed = _parse_transversal_rows_from_frame(frame, allowed_keys=allowed_settings)
+        if parsed:
+            settings_values = parsed
+            break
 
     return SourcesExcelImportResult(
         source_type=normalized_type,
@@ -280,5 +456,5 @@ def import_sources_from_excel_bytes(
         imported_rows=len(rows),
         skipped_rows=int(skipped_rows),
         warnings=warnings,
+        settings_values=settings_values,
     )
-

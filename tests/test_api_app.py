@@ -493,6 +493,11 @@ def test_helix_ingest_test_endpoint_syncs_settings_into_process_env(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    monkeypatch.setenv("HELIX_DASHBOARD_URL", "__before__")
+    monkeypatch.setenv("HELIX_PROXY", "__before_proxy__")
+    monkeypatch.setenv("HELIX_SSL_VERIFY", "__before_ssl__")
+    monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "__before_arsql__")
+
     settings = _settings(tmp_path).model_copy(
         update={
             "HELIX_DASHBOARD_URL": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
@@ -528,6 +533,10 @@ def test_helix_ingest_test_endpoint_syncs_settings_into_process_env(
         "HELIX_SSL_VERIFY": settings.HELIX_SSL_VERIFY,
         "HELIX_ARSQL_BASE_URL": settings.HELIX_ARSQL_BASE_URL,
     }
+    assert os.getenv("HELIX_DASHBOARD_URL") == "__before__"
+    assert os.getenv("HELIX_PROXY") == "__before_proxy__"
+    assert os.getenv("HELIX_SSL_VERIFY") == "__before_ssl__"
+    assert os.getenv("HELIX_ARSQL_BASE_URL") == "__before_arsql__"
 
 
 def test_intelligence_functionality_chart_uses_dark_mode_palette_and_stack_order(
@@ -603,7 +612,12 @@ def test_settings_sources_export_endpoint_streams_helix_xlsx(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path).model_copy(
+        update={
+            "HELIX_PROXY": "http://127.0.0.1:8999",
+            "HELIX_SSL_VERIFY": "false",
+        }
+    )
     monkeypatch.setattr(api_app, "load_settings", lambda: settings)
 
     client = TestClient(api_app.create_app())
@@ -613,7 +627,10 @@ def test_settings_sources_export_endpoint_streams_helix_xlsx(
     assert response.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    frame = pd.read_excel(BytesIO(response.content), sheet_name=0)
+    xl = pd.ExcelFile(BytesIO(response.content))
+    assert "Fuentes Helix" in xl.sheet_names
+    assert "Valores transversales" in xl.sheet_names
+    frame = xl.parse("Fuentes Helix")
     assert list(frame.columns) == [
         "source_id",
         "country",
@@ -624,6 +641,11 @@ def test_settings_sources_export_endpoint_streams_helix_xlsx(
     ]
     assert frame.iloc[0]["country"] == "España"
     assert frame.iloc[0]["alias"] == "Helix Core"
+    trans = xl.parse("Valores transversales")
+    trans_values = {str(row["key"]): str(row["value"]) for row in trans.to_dict(orient="records")}
+    assert trans_values["HELIX_BROWSER"] == "chrome"
+    assert trans_values["HELIX_PROXY"] == "http://127.0.0.1:8999"
+    assert trans_values["HELIX_SSL_VERIFY"] == "false"
 
 
 def test_settings_sources_import_endpoint_parses_helix_excel_and_preserves_order(
@@ -649,8 +671,21 @@ def test_settings_sources_import_endpoint_parses_helix_excel_and_preserves_order
             },
         ]
     )
+    trans_frame = pd.DataFrame(
+        [
+            {"key": "HELIX_PROXY", "value": "http://127.0.0.1:8999"},
+            {"key": "HELIX_BROWSER", "value": "chrome"},
+            {"key": "HELIX_SSL_VERIFY", "value": "false"},
+            {
+                "key": "HELIX_DASHBOARD_URL",
+                "value": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+            },
+        ]
+    )
     buffer = BytesIO()
-    import_frame.to_excel(buffer, index=False, sheet_name="Fuentes Helix")
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        import_frame.to_excel(writer, index=False, sheet_name="Fuentes Helix")
+        trans_frame.to_excel(writer, index=False, sheet_name="Valores transversales")
 
     client = TestClient(api_app.create_app())
     response = client.post(
@@ -669,6 +704,12 @@ def test_settings_sources_import_endpoint_parses_helix_excel_and_preserves_order
     assert payload["rows"][0]["country"] == "México"
     assert payload["rows"][0]["alias"] == "MX SmartIT"
     assert payload["rows"][0]["source_type"] == "helix"
+    assert payload["settingsValues"] == {
+        "HELIX_PROXY": "http://127.0.0.1:8999",
+        "HELIX_BROWSER": "chrome",
+        "HELIX_SSL_VERIFY": "false",
+        "HELIX_DASHBOARD_URL": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    }
 
 
 def test_dashboard_charts_use_backend_semantic_tokens(monkeypatch, tmp_path: Path) -> None:
