@@ -489,6 +489,96 @@ def test_ingest_test_endpoints_run_only_under_explicit_click(
     ]
 
 
+def test_ingest_start_endpoint_uses_async_progress_contract(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = build_source_id("jira", "España", "Core")
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    captured = {}
+
+    def _fake_start(connector: str, *, settings: Settings, selected_sources: list[dict[str, str]]):
+        del settings
+        captured["connector"] = connector
+        captured["selected_sources"] = selected_sources
+        return {
+            "started": True,
+            "connector": connector,
+            "runId": 7,
+            "state": "running",
+            "active": True,
+            "startedAt": "2026-04-14T10:00:00+00:00",
+            "finishedAt": "",
+            "totalSources": len(selected_sources),
+            "completedSources": 0,
+            "successCount": 0,
+            "summary": "",
+            "messages": [],
+            "result": None,
+        }
+
+    monkeypatch.setattr(api_app, "start_ingest_job", _fake_start)
+
+    client = TestClient(api_app.create_app())
+    response = client.post("/api/ingest/jira/start", json={"sourceIds": [source_id]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["started"] is True
+    assert payload["connector"] == "jira"
+    assert payload["state"] == "running"
+    assert payload["runId"] == 7
+    assert captured["connector"] == "jira"
+    assert len(captured["selected_sources"]) == 1
+
+
+def test_ingest_progress_endpoint_returns_latest_snapshot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        api_app,
+        "get_ingest_progress",
+        lambda connector: {
+            "connector": connector,
+            "runId": 3,
+            "state": "partial",
+            "active": False,
+            "startedAt": "2026-04-14T10:00:00+00:00",
+            "finishedAt": "2026-04-14T10:05:00+00:00",
+            "totalSources": 2,
+            "completedSources": 2,
+            "successCount": 1,
+            "summary": "Reingesta finalizada.",
+            "messages": [
+                {"ok": True, "message": "Fuente 1 OK"},
+                {"ok": False, "message": "Fuente 2 KO"},
+            ],
+            "result": {
+                "state": "partial",
+                "summary": "Reingesta finalizada.",
+                "success_count": 1,
+                "total_sources": 2,
+                "messages": [{"ok": True, "message": "Fuente 1 OK"}],
+            },
+        },
+    )
+
+    client = TestClient(api_app.create_app())
+    response = client.get("/api/ingest/helix/progress")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["connector"] == "helix"
+    assert payload["runId"] == 3
+    assert payload["state"] == "partial"
+    assert payload["completedSources"] == 2
+
+
 def test_helix_ingest_test_endpoint_syncs_settings_into_process_env(
     monkeypatch,
     tmp_path: Path,
@@ -648,7 +738,7 @@ def test_settings_sources_export_endpoint_streams_helix_xlsx(
     assert trans_values["HELIX_SSL_VERIFY"] == "false"
 
 
-def test_settings_sources_import_endpoint_parses_helix_excel_and_preserves_order(
+def test_settings_sources_import_endpoint_parses_helix_excel_and_sorts_rows(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -701,8 +791,10 @@ def test_settings_sources_import_endpoint_parses_helix_excel_and_preserves_order
     assert payload["sourceType"] == "helix"
     assert payload["importedRows"] == 2
     assert payload["skippedRows"] == 0
-    assert payload["rows"][0]["country"] == "México"
-    assert payload["rows"][0]["alias"] == "MX SmartIT"
+    assert payload["rows"][0]["country"] == "España"
+    assert payload["rows"][0]["alias"] == "Incident Report"
+    assert payload["rows"][1]["country"] == "México"
+    assert payload["rows"][1]["alias"] == "MX SmartIT"
     assert payload["rows"][0]["source_type"] == "helix"
     assert payload["settingsValues"] == {
         "HELIX_PROXY": "http://127.0.0.1:8999",

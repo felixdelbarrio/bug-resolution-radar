@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from typing import Any, Dict, List
 
 from bug_resolution_radar.config import (
@@ -21,6 +22,15 @@ from bug_resolution_radar.services.workspace import (
     available_sources_by_country,
     merge_sources_by_country,
 )
+
+
+def _fold_sort_token(value: Any) -> str:
+    folded = unicodedata.normalize("NFKD", str(value or ""))
+    return folded.encode("ascii", "ignore").decode("ascii").casefold().strip()
+
+
+def _source_sort_key(row: Dict[str, Any]) -> tuple[str, str]:
+    return _fold_sort_token(row.get("country")), _fold_sort_token(row.get("alias"))
 
 
 def _normalize_source_rows(
@@ -46,7 +56,7 @@ def _normalize_source_rows(
                 if value:
                     clean[key] = value
         out.append(clean)
-    return out
+    return sorted(out, key=_source_sort_key)
 
 
 def _normalize_disabled_source_ids(values: List[Any]) -> str:
@@ -71,6 +81,8 @@ def _group_configured_sources_by_country(settings: Settings) -> Dict[str, List[D
         grouped.setdefault(country, []).append(
             {str(key): str(value).strip() for key, value in dict(row).items() if str(value).strip()}
         )
+    for country, rows in list(grouped.items()):
+        grouped[country] = sorted(rows, key=_source_sort_key)
     return grouped
 
 

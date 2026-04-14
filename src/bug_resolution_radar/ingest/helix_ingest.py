@@ -2008,14 +2008,10 @@ def ingest_helix(
     # -----------------------------
     items: List[HelixWorkItem] = []
     start = 0
-    arsql_limit = max(
-        1,
-        _coerce_int(
-            os.getenv("HELIX_ARSQL_LIMIT", str(chunk_size)),
-            max(1, int(chunk_size)),
-        ),
-    )
-    base_chunk_size = arsql_limit
+    requested_chunk_size = max(1, _coerce_int(chunk_size, 75))
+    env_chunk_limit = max(1, _coerce_int(os.getenv("HELIX_ARSQL_LIMIT", ""), requested_chunk_size))
+    # The explicit runtime chunk_size is the primary control; env value can only cap it.
+    base_chunk_size = min(requested_chunk_size, env_chunk_limit)
     current_chunk_size = base_chunk_size
     min_chunk_limit = max(
         1,

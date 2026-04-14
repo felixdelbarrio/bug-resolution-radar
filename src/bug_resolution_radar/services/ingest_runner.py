@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import Settings
@@ -13,6 +13,8 @@ from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.repositories.issues_store import load_issues_doc, save_issues_doc
+
+SourceProgressCallback = Callable[[bool, str, int, int], None]
 
 
 def _get_helix_path(settings: Settings) -> str:
@@ -90,11 +92,16 @@ def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
 
 
 def run_jira_ingest(
-    settings: Settings, *, selected_sources: List[Dict[str, str]]
+    settings: Settings,
+    *,
+    selected_sources: List[Dict[str, str]],
+    on_source_result: SourceProgressCallback | None = None,
 ) -> dict[str, Any]:
     work_doc = load_issues_doc(settings.DATA_PATH)
     messages: list[dict[str, Any]] = []
     success_count = 0
+    total_sources = len(list(selected_sources or []))
+    completed_sources = 0
     for src in list(selected_sources or []):
         ok, msg, new_doc = ingest_jira(
             settings=settings, dry_run=False, existing_doc=work_doc, source=src
@@ -102,12 +109,15 @@ def run_jira_ingest(
         if ok and new_doc is not None:
             work_doc = new_doc
             success_count += 1
-        messages.append({"ok": bool(ok), "message": str(msg or "").strip()})
+        source_message = str(msg or "").strip()
+        messages.append({"ok": bool(ok), "message": source_message})
+        completed_sources += 1
+        if on_source_result is not None:
+            on_source_result(bool(ok), source_message, int(completed_sources), int(total_sources))
 
     if success_count > 0:
         save_issues_doc(settings.DATA_PATH, work_doc)
 
-    total_sources = len(list(selected_sources or []))
     return {
         "state": "success"
         if success_count == total_sources and total_sources > 0
@@ -120,7 +130,10 @@ def run_jira_ingest(
 
 
 def run_helix_ingest(
-    settings: Settings, *, selected_sources: List[Dict[str, str]]
+    settings: Settings,
+    *,
+    selected_sources: List[Dict[str, str]],
+    on_source_result: SourceProgressCallback | None = None,
 ) -> dict[str, Any]:
     helix_path = _get_helix_path(settings)
     helix_repo = HelixRepo(Path(helix_path))
@@ -135,6 +148,8 @@ def run_helix_ingest(
     messages: list[dict[str, Any]] = []
     success_count = 0
     has_partial_updates = False
+    total_sources = len(list(selected_sources or []))
+    completed_sources = 0
     for src in list(selected_sources or []):
         ok, msg, new_helix_doc = ingest_helix(
             browser=helix_browser,
@@ -161,14 +176,17 @@ def run_helix_ingest(
             )
         if ok:
             success_count += 1
-        messages.append({"ok": bool(ok), "message": str(msg or "").strip()})
+        source_message = str(msg or "").strip()
+        messages.append({"ok": bool(ok), "message": source_message})
+        completed_sources += 1
+        if on_source_result is not None:
+            on_source_result(bool(ok), source_message, int(completed_sources), int(total_sources))
 
     if success_count > 0 or has_partial_updates:
         issues_doc.ingested_at = now_iso()
         helix_repo.save(merged_helix)
         save_issues_doc(settings.DATA_PATH, issues_doc)
 
-    total_sources = len(list(selected_sources or []))
     return {
         "state": "success"
         if success_count == total_sources and total_sources > 0

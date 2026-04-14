@@ -281,6 +281,12 @@ def _slug_token(value: str) -> str:
     return txt or "default"
 
 
+def _source_sort_key(row: Dict[str, Any]) -> tuple[str, str]:
+    country = _ascii_fold(_coerce_str(row.get("country"))).casefold()
+    alias = _ascii_fold(_coerce_str(row.get("alias"))).casefold()
+    return country, alias
+
+
 def _normalize_country(value: str, *, supported: List[str]) -> str:
     raw = _coerce_str(value)
     if not raw:
@@ -493,7 +499,7 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
             }
         )
 
-    return out
+    return sorted(out, key=_source_sort_key)
 
 
 def helix_sources(settings: Settings) -> List[Dict[str, str]]:
@@ -528,7 +534,7 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             payload["service_origin_n2"] = service_origin_n2
         out.append(payload)
 
-    return out
+    return sorted(out, key=_source_sort_key)
 
 
 def all_configured_sources(

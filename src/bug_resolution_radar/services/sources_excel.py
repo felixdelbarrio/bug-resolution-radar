@@ -107,6 +107,12 @@ def _normalize_token(value: str) -> str:
     return token
 
 
+def _row_sort_key(row: dict[str, Any]) -> tuple[str, str]:
+    country = _normalize_token(str(row.get("country") or ""))
+    alias = _normalize_token(str(row.get("alias") or ""))
+    return country, alias
+
+
 def _country_lookup(countries: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for country in list(countries or []):
@@ -144,7 +150,7 @@ def _build_export_rows(settings: Settings, *, source_type: str) -> list[dict[str
             payload["service_origin_n1"] = _as_text(row.get("service_origin_n1"))
             payload["service_origin_n2"] = _as_text(row.get("service_origin_n2"))
         out.append(payload)
-    return out
+    return sorted(out, key=_row_sort_key)
 
 
 def _rows_frame_from_source_rows(
@@ -449,6 +455,8 @@ def import_sources_from_excel_bytes(
         if parsed:
             settings_values = parsed
             break
+
+    rows = sorted(rows, key=_row_sort_key)
 
     return SourcesExcelImportResult(
         source_type=normalized_type,

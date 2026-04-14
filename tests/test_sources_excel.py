@@ -42,7 +42,9 @@ def test_build_sources_export_dataframe_for_helix_keeps_expected_columns_and_ord
     assert frame.iloc[0]["service_origin_n2"] == ""
 
 
-def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_preserves_first_row() -> None:
+def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_sorts_by_country_alias() -> (
+    None
+):
     frame = pd.DataFrame(
         [
             {
@@ -71,10 +73,11 @@ def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_preserves_
     assert imported.skipped_rows == 0
     assert imported.warnings == []
     assert imported.settings_values == {}
-    assert imported.rows[0]["country"] == "México"
-    assert imported.rows[0]["alias"] == "MX SmartIT"
-    assert imported.rows[0]["source_id"] == build_source_id("helix", "México", "MX SmartIT")
-    assert imported.rows[1]["country"] == "España"
+    assert imported.rows[0]["country"] == "España"
+    assert imported.rows[0]["alias"] == "Incident Report"
+    assert imported.rows[1]["country"] == "México"
+    assert imported.rows[1]["alias"] == "MX SmartIT"
+    assert imported.rows[1]["source_id"] == build_source_id("helix", "México", "MX SmartIT")
 
 
 def test_import_sources_from_excel_bytes_skips_invalid_country_with_warning() -> None:

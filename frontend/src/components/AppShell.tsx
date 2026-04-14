@@ -13,8 +13,6 @@ import {
 import { cn } from "../lib/cn";
 import { configureSemanticColors } from "../lib/semanticColors";
 
-const STORAGE_THEME_KEY = "bug-resolution-radar-theme";
-
 const dashboardTabs = [
   ["overview", "Resumen"],
   ["insights", "Insights"],
@@ -32,14 +30,6 @@ export type ShellContextValue = {
 };
 
 type ThemeContract = NonNullable<BootstrapPayload["designTokens"]>["theme"];
-
-function persistedTheme(): "light" | "dark" | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const value = window.localStorage.getItem(STORAGE_THEME_KEY);
-  return value === "dark" || value === "light" ? value : null;
-}
 
 function applyThemeContract(
   contract: ThemeContract | undefined,
@@ -68,9 +58,7 @@ export function AppShell() {
   const location = useLocation();
   const dashboardState = useDashboardParams("overview");
   const defaultsBootstrapped = useRef(false);
-  const [themeMode, setThemeMode] = useState<"light" | "dark">(
-    () => persistedTheme() ?? "light"
-  );
+  const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
 
   const bootstrap = useQuery({
     queryKey: [
@@ -125,21 +113,11 @@ export function AppShell() {
   });
 
   useEffect(() => {
-    const nextTheme = persistedTheme();
-    if (nextTheme) {
-      setThemeMode(nextTheme);
-      return;
-    }
-    if (bootstrap.data?.theme === "dark") {
-      setThemeMode("dark");
-      return;
-    }
-    setThemeMode("light");
+    setThemeMode(bootstrap.data?.theme === "dark" ? "dark" : "light");
   }, [bootstrap.data?.theme]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
-    window.localStorage.setItem(STORAGE_THEME_KEY, themeMode);
     applyThemeContract(bootstrap.data?.designTokens?.theme, themeMode);
   }, [bootstrap.data?.designTokens?.theme, themeMode]);
 
