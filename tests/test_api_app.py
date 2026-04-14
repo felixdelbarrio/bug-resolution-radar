@@ -701,8 +701,8 @@ def test_settings_sources_import_endpoint_parses_helix_excel_and_preserves_order
     assert payload["sourceType"] == "helix"
     assert payload["importedRows"] == 2
     assert payload["skippedRows"] == 0
-    assert payload["rows"][0]["country"] == "México"
-    assert payload["rows"][0]["alias"] == "MX SmartIT"
+    assert payload["rows"][0]["country"] == "España"
+    assert payload["rows"][0]["alias"] == "Incident Report"
     assert payload["rows"][0]["source_type"] == "helix"
     assert payload["settingsValues"] == {
         "HELIX_PROXY": "http://127.0.0.1:8999",

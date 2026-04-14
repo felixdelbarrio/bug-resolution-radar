@@ -42,7 +42,9 @@ def test_build_sources_export_dataframe_for_helix_keeps_expected_columns_and_ord
     assert frame.iloc[0]["service_origin_n2"] == ""
 
 
-def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_preserves_first_row() -> None:
+def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_sorts_by_country_alias() -> (
+    None
+):
     frame = pd.DataFrame(
         [
             {
@@ -71,10 +73,10 @@ def test_import_sources_from_excel_bytes_helix_normalizes_headers_and_preserves_
     assert imported.skipped_rows == 0
     assert imported.warnings == []
     assert imported.settings_values == {}
-    assert imported.rows[0]["country"] == "México"
-    assert imported.rows[0]["alias"] == "MX SmartIT"
-    assert imported.rows[0]["source_id"] == build_source_id("helix", "México", "MX SmartIT")
-    assert imported.rows[1]["country"] == "España"
+    assert imported.rows[0]["country"] == "España"
+    assert imported.rows[0]["alias"] == "Incident Report"
+    assert imported.rows[0]["source_id"] == build_source_id("helix", "España", "Incident Report")
+    assert imported.rows[1]["country"] == "México"
 
 
 def test_import_sources_from_excel_bytes_skips_invalid_country_with_warning() -> None:
@@ -132,6 +134,7 @@ def test_build_sources_export_excel_bytes_includes_transversal_sheet() -> None:
     assert values["HELIX_PROXY"] == "http://127.0.0.1:8999"
     assert values["HELIX_BROWSER"] == "chrome"
     assert values["HELIX_SSL_VERIFY"] == "false"
+    assert values["HELIX_COOKIE_SOURCE"] == "browser"
 
 
 def test_import_sources_from_excel_bytes_reads_transversal_values_sheet() -> None:
@@ -154,6 +157,7 @@ def test_import_sources_from_excel_bytes_reads_transversal_values_sheet() -> Non
                 "key": "HELIX_DASHBOARD_URL",
                 "value": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
             },
+            {"key": "HELIX_COOKIE_SOURCE", "value": "manual"},
         ]
     )
     buffer = BytesIO()
@@ -174,4 +178,28 @@ def test_import_sources_from_excel_bytes_reads_transversal_values_sheet() -> Non
         "HELIX_BROWSER": "chrome",
         "HELIX_SSL_VERIFY": "false",
         "HELIX_DASHBOARD_URL": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+        "HELIX_COOKIE_SOURCE": "manual",
     }
+
+
+def test_import_sources_from_excel_bytes_jira_sorts_by_country_alias() -> None:
+    frame = pd.DataFrame(
+        [
+            {"country": "México", "alias": "Zeta", "jql": "project = MX"},
+            {"country": "España", "alias": "Alpha", "jql": "project = ES"},
+            {"country": "España", "alias": "Zeta", "jql": "project = ES"},
+        ]
+    )
+
+    imported = import_sources_from_excel_bytes(
+        _build_excel_bytes(frame),
+        source_type="jira",
+        countries=["México", "España"],
+    )
+
+    assert imported.imported_rows == 3
+    assert imported.rows[0]["country"] == "España"
+    assert imported.rows[0]["alias"] == "Alpha"
+    assert imported.rows[1]["country"] == "España"
+    assert imported.rows[1]["alias"] == "Zeta"
+    assert imported.rows[2]["country"] == "México"

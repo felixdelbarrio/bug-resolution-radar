@@ -450,6 +450,8 @@ def ingest_jira(
     )
     wait_seconds = max(5, int(float(os.getenv("JIRA_BROWSER_LOGIN_WAIT_SECONDS", "90"))))
     poll_seconds = max(0.5, float(os.getenv("JIRA_BROWSER_LOGIN_POLL_SECONDS", "2")))
+    cookie_source_mode = str(os.getenv("JIRA_COOKIE_SOURCE", "browser") or "").strip().lower()
+    manual_cookie_mode = cookie_source_mode == "manual"
     try:
         host = urlparse(base).hostname or ""
         cookie = get_jira_session_cookie(browser=settings.JIRA_BROWSER, host=host)
@@ -459,7 +461,7 @@ def ingest_jira(
         cookie_error = str(e)
     cookie = sanitize_cookie_header(cookie)
     cookie_names = _cookie_names_from_header(cookie or "")
-    if not cookie or not _has_jira_auth_cookie(cookie_names):
+    if (not cookie or not _has_jira_auth_cookie(cookie_names)) and not manual_cookie_mode:
         bootstrapped_cookie = _bootstrap_jira_cookie_from_browser(
             browser=settings.JIRA_BROWSER,
             host=host,
@@ -473,9 +475,15 @@ def ingest_jira(
 
     if not cookie:
         details = f" Detalle: {cookie_error}" if cookie_error else ""
+        manual_hint = (
+            " Configura JIRA_COOKIE_HEADER (modo manual) o cambia JIRA_COOKIE_SOURCE."
+            if manual_cookie_mode
+            else ""
+        )
         return (
             False,
-            f"{source_label}: no se encontró cookie Jira válida en '{settings.JIRA_BROWSER}'.{details}",
+            f"{source_label}: no se encontró cookie Jira válida en "
+            f"'{settings.JIRA_BROWSER}'.{details}{manual_hint}",
             None,
         )
 
