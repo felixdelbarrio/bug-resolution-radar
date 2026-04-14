@@ -96,26 +96,44 @@ def run_jira_ingest(
     *,
     selected_sources: List[Dict[str, str]],
     on_source_result: SourceProgressCallback | None = None,
+    persist_each_source: bool = True,
 ) -> dict[str, Any]:
     work_doc = load_issues_doc(settings.DATA_PATH)
     messages: list[dict[str, Any]] = []
     success_count = 0
-    total_sources = len(list(selected_sources or []))
+    checkpoints_saved = 0
+    sources = list(selected_sources or [])
+    total_sources = len(sources)
     completed_sources = 0
-    for src in list(selected_sources or []):
+    for src in sources:
         ok, msg, new_doc = ingest_jira(
             settings=settings, dry_run=False, existing_doc=work_doc, source=src
         )
-        if ok and new_doc is not None:
-            work_doc = new_doc
-            success_count += 1
+        source_ok = bool(ok)
         source_message = str(msg or "").strip()
-        messages.append({"ok": bool(ok), "message": source_message})
+        if source_ok and new_doc is not None:
+            work_doc = new_doc
+            if persist_each_source:
+                save_issues_doc(settings.DATA_PATH, work_doc)
+                checkpoints_saved += 1
+            success_count += 1
+        elif source_ok and new_doc is None:
+            source_ok = False
+            if not source_message:
+                source_message = (
+                    "Ingesta Jira sin documento resultado; no se pudo confirmar persistencia."
+                )
+        messages.append({"ok": bool(source_ok), "message": source_message})
         completed_sources += 1
         if on_source_result is not None:
-            on_source_result(bool(ok), source_message, int(completed_sources), int(total_sources))
+            on_source_result(
+                bool(source_ok),
+                source_message,
+                int(completed_sources),
+                int(total_sources),
+            )
 
-    if success_count > 0:
+    if success_count > 0 and (not persist_each_source or checkpoints_saved <= 0):
         save_issues_doc(settings.DATA_PATH, work_doc)
 
     return {
@@ -134,6 +152,7 @@ def run_helix_ingest(
     *,
     selected_sources: List[Dict[str, str]],
     on_source_result: SourceProgressCallback | None = None,
+    persist_each_source: bool = True,
 ) -> dict[str, Any]:
     helix_path = _get_helix_path(settings)
     helix_repo = HelixRepo(Path(helix_path))
@@ -148,9 +167,11 @@ def run_helix_ingest(
     messages: list[dict[str, Any]] = []
     success_count = 0
     has_partial_updates = False
-    total_sources = len(list(selected_sources or []))
+    checkpoints_saved = 0
+    sources = list(selected_sources or [])
+    total_sources = len(sources)
     completed_sources = 0
-    for src in list(selected_sources or []):
+    for src in sources:
         ok, msg, new_helix_doc = ingest_helix(
             browser=helix_browser,
             country=str(src.get("country", "")).strip(),
@@ -165,24 +186,40 @@ def run_helix_ingest(
             existing_doc=HelixDocument.empty(),
             cache_doc=merged_helix,
         )
-        if new_helix_doc is not None and new_helix_doc.items:
-            has_partial_updates = True
-            merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
+        source_ok = bool(ok)
+        source_message = str(msg or "").strip()
+        checkpoint_required = False
+        if new_helix_doc is not None:
+            checkpoint_required = True
             merged_helix.ingested_at = new_helix_doc.ingested_at
             merged_helix.helix_base_url = new_helix_doc.helix_base_url
             merged_helix.query = "multi-source"
+        if new_helix_doc is not None and new_helix_doc.items:
+            has_partial_updates = True
+            merged_helix = _merge_helix_items(merged_helix, new_helix_doc.items)
             issues_doc = _merge_issues(
                 issues_doc, [_helix_item_to_issue(item) for item in new_helix_doc.items]
             )
-        if ok:
+        if persist_each_source and checkpoint_required:
+            issues_doc.ingested_at = now_iso()
+            helix_repo.save(merged_helix)
+            save_issues_doc(settings.DATA_PATH, issues_doc)
+            checkpoints_saved += 1
+        if source_ok:
             success_count += 1
-        source_message = str(msg or "").strip()
-        messages.append({"ok": bool(ok), "message": source_message})
+        messages.append({"ok": bool(source_ok), "message": source_message})
         completed_sources += 1
         if on_source_result is not None:
-            on_source_result(bool(ok), source_message, int(completed_sources), int(total_sources))
+            on_source_result(
+                bool(source_ok),
+                source_message,
+                int(completed_sources),
+                int(total_sources),
+            )
 
-    if success_count > 0 or has_partial_updates:
+    if (success_count > 0 or has_partial_updates) and (
+        not persist_each_source or checkpoints_saved <= 0
+    ):
         issues_doc.ingested_at = now_iso()
         helix_repo.save(merged_helix)
         save_issues_doc(settings.DATA_PATH, issues_doc)
