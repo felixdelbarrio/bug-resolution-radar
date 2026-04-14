@@ -1477,6 +1477,8 @@ def ingest_helix(
         0.5,
         _coerce_float(os.getenv("HELIX_BROWSER_LOGIN_POLL_SECONDS", "2"), 2.0),
     )
+    cookie_source_mode = str(os.getenv("HELIX_COOKIE_SOURCE", "browser") or "").strip().lower()
+    manual_cookie_mode = cookie_source_mode == "manual"
 
     def _auth_cookie_hosts() -> List[str]:
         seeds = [
@@ -1591,7 +1593,7 @@ def ingest_helix(
 
     cookie, cookie_source_host, cookie_error = _read_auth_cookie_from_browser()
     cookie_names_from_header = _cookie_names_from_header(cookie or "")
-    if not cookie or not _has_auth_cookie(cookie_names_from_header):
+    if (not cookie or not _has_auth_cookie(cookie_names_from_header)) and not manual_cookie_mode:
         bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
         if bootstrapped_cookie:
             cookie = bootstrapped_cookie
@@ -1608,6 +1610,8 @@ def ingest_helix(
                 " Revisa HELIX_DASHBOARD_URL/HELIX_ARSQL_DASHBOARD_URL: "
                 "la URL de bootstrap no es válida."
             )
+        if manual_cookie_mode:
+            hint = " Configura HELIX_COOKIE_HEADER (modo manual) o cambia HELIX_COOKIE_SOURCE."
         return (
             False,
             f"{source_label}: no se encontró cookie Helix válida en '{browser}'.{details}{hint}",
@@ -1626,7 +1630,7 @@ def ingest_helix(
 
     def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
         fresh_cookie, fresh_cookie_host, cookie_refresh_error = _read_auth_cookie_from_browser()
-        if not fresh_cookie:
+        if not fresh_cookie and not manual_cookie_mode:
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:
                 fresh_cookie = bootstrapped_cookie
@@ -1648,7 +1652,7 @@ def ingest_helix(
         refreshed_cookie_names = _cookies_to_jar(
             session, fresh_cookie, host=(fresh_cookie_host or host)
         )
-        if not _has_auth_cookie(refreshed_cookie_names):
+        if not _has_auth_cookie(refreshed_cookie_names) and not manual_cookie_mode:
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
                 force_interactive=True
             )
@@ -1662,12 +1666,12 @@ def ingest_helix(
                     bootstrapped_cookie,
                     host=(bootstrapped_host or fresh_cookie_host or host),
                 )
-            if not _has_auth_cookie(refreshed_cookie_names):
-                return (
-                    False,
-                    f"{source_label}: no se detectaron cookies de sesión Helix/SmartIT válidas tras "
-                    f"refresco ({trigger}). cookies_cargadas={refreshed_cookie_names}.",
-                )
+        if not _has_auth_cookie(refreshed_cookie_names):
+            return (
+                False,
+                f"{source_label}: no se detectaron cookies de sesión Helix/SmartIT válidas tras "
+                f"refresco ({trigger}). cookies_cargadas={refreshed_cookie_names}.",
+            )
 
         try:
             refresh_preflight = session.get(preflight_url, timeout=(5, 15))
@@ -1690,23 +1694,24 @@ def ingest_helix(
             )
 
         if _looks_like_sso_redirect(refresh_preflight):
-            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
-                force_interactive=True
-            )
-            if bootstrapped_cookie:
-                try:
-                    session.cookies.clear()
-                except Exception:
-                    pass
-                _cookies_to_jar(session, bootstrapped_cookie, host=(bootstrapped_host or host))
-                _apply_xsrf_headers(session)
-                retry_preflight: Optional[requests.Response]
-                try:
-                    retry_preflight = session.get(preflight_url, timeout=(5, 15))
-                except requests.exceptions.RequestException:
-                    retry_preflight = None
-                if retry_preflight is not None:
-                    refresh_preflight = retry_preflight
+            if not manual_cookie_mode:
+                bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
+                    force_interactive=True
+                )
+                if bootstrapped_cookie:
+                    try:
+                        session.cookies.clear()
+                    except Exception:
+                        pass
+                    _cookies_to_jar(session, bootstrapped_cookie, host=(bootstrapped_host or host))
+                    _apply_xsrf_headers(session)
+                    retry_preflight: Optional[requests.Response]
+                    try:
+                        retry_preflight = session.get(preflight_url, timeout=(5, 15))
+                    except requests.exceptions.RequestException:
+                        retry_preflight = None
+                    if retry_preflight is not None:
+                        refresh_preflight = retry_preflight
             if _looks_like_sso_redirect(refresh_preflight):
                 return (
                     False,
@@ -1906,23 +1911,24 @@ def ingest_helix(
             preflight_name = "/dashboards/"
             _sync_arsql_origin_headers()
         if not arsql_uid:
-            bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
-            if bootstrapped_cookie:
-                try:
-                    session.cookies.clear()
-                except Exception:
-                    pass
-                _cookies_to_jar(session, bootstrapped_cookie, host=(bootstrapped_host or host))
-                _apply_xsrf_headers(session)
-                arsql_uid, discovered_root = _discover_uid_across_candidates()
-                if arsql_uid:
-                    arsql_base_root = discovered_root or arsql_base_root
-                    discovered_parsed = urlparse(arsql_base_root)
-                    host = discovered_parsed.hostname or host
-                    scheme = discovered_parsed.scheme or scheme
-                    preflight_url = f"{arsql_base_root}/dashboards/"
-                    preflight_name = "/dashboards/"
-                    _sync_arsql_origin_headers()
+            if not manual_cookie_mode:
+                bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
+                if bootstrapped_cookie:
+                    try:
+                        session.cookies.clear()
+                    except Exception:
+                        pass
+                    _cookies_to_jar(session, bootstrapped_cookie, host=(bootstrapped_host or host))
+                    _apply_xsrf_headers(session)
+                    arsql_uid, discovered_root = _discover_uid_across_candidates()
+                    if arsql_uid:
+                        arsql_base_root = discovered_root or arsql_base_root
+                        discovered_parsed = urlparse(arsql_base_root)
+                        host = discovered_parsed.hostname or host
+                        scheme = discovered_parsed.scheme or scheme
+                        preflight_url = f"{arsql_base_root}/dashboards/"
+                        preflight_name = "/dashboards/"
+                        _sync_arsql_origin_headers()
         if not arsql_uid:
             return (
                 False,
@@ -2008,14 +2014,10 @@ def ingest_helix(
     # -----------------------------
     items: List[HelixWorkItem] = []
     start = 0
-    arsql_limit = max(
-        1,
-        _coerce_int(
-            os.getenv("HELIX_ARSQL_LIMIT", str(chunk_size)),
-            max(1, int(chunk_size)),
-        ),
-    )
-    base_chunk_size = arsql_limit
+    requested_chunk_size = max(1, _coerce_int(chunk_size, 75))
+    env_chunk_limit = max(1, _coerce_int(os.getenv("HELIX_ARSQL_LIMIT", ""), requested_chunk_size))
+    # The explicit runtime chunk_size is the primary control; env value can only cap it.
+    base_chunk_size = min(requested_chunk_size, env_chunk_limit)
     current_chunk_size = base_chunk_size
     min_chunk_limit = max(
         1,

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchJson,
+  type IngestProgressPayload,
   normalizeSettingsPayload,
   postJson,
   putJson,
@@ -132,6 +133,42 @@ function FeedbackPanel({ feedback }: { feedback?: ConnectorFeedback }) {
   );
 }
 
+function LiveProgressPanel({
+  connector,
+  progress
+}: {
+  connector: Connector;
+  progress?: IngestProgressPayload;
+}) {
+  if (!progress || progress.runId <= 0 || progress.state === "idle") {
+    return null;
+  }
+  const completed = Math.max(0, Number(progress.completedSources || 0));
+  const total = Math.max(0, Number(progress.totalSources || 0));
+
+  return (
+    <section className="inline-notice page-stack">
+      <strong>
+        {connector === "jira" ? "Jira" : "Helix"} · ejecución #{progress.runId}
+      </strong>
+      <p className="inline-caption">
+        Estado: {progress.state} · progreso {completed}/{total}
+      </p>
+      {progress.summary ? <p className="inline-caption">{progress.summary}</p> : null}
+      <ul className="signal-list">
+        {progress.messages.map((item, index) => (
+          <li
+            key={`${progress.runId}-${index}-${item.message}`}
+            className={item.ok ? "ingest-feedback-ok" : "ingest-feedback-error"}
+          >
+            {item.message}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function IngestSourceTable({
   connector,
   sources,
@@ -146,7 +183,10 @@ function IngestSourceTable({
   onToggle: (sourceId: string) => void;
 }) {
   const copy = CONNECTOR_COPY[connector];
-  const gridTemplateColumns = `96px repeat(${copy.columns.length}, minmax(0, 1fr))`;
+  const gridTemplateColumns =
+    connector === "jira"
+      ? "96px minmax(110px,0.85fr) minmax(180px,1fr) minmax(260px,1.8fr)"
+      : "96px minmax(110px,0.7fr) minmax(180px,1fr) minmax(170px,0.9fr) minmax(220px,1.3fr) minmax(240px,1.5fr)";
   if (sources.length === 0) {
     return <p className="issue-list-empty">Sin orígenes configurados.</p>;
   }
@@ -180,7 +220,11 @@ function IngestSourceTable({
               />
             </span>
             {copy.columns.map((column) => (
-              <span key={`${source.source_id}-${String(column.key)}`}>
+              <span
+                key={`${source.source_id}-${String(column.key)}`}
+                className={`ingest-source-cell ingest-source-cell-${String(column.key)}`}
+                title={String(source[column.key] ?? "").trim()}
+              >
                 {String(source[column.key] ?? "").trim() || "—"}
               </span>
             ))}
@@ -197,6 +241,9 @@ export function IngestPage() {
   const [jiraSelection, setJiraSelection] = useState<string[]>([]);
   const [helixSelection, setHelixSelection] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<Partial<Record<Connector, ConnectorFeedback>>>({});
+  const [lastHandledRunByConnector, setLastHandledRunByConnector] = useState<
+    Partial<Record<Connector, number>>
+  >({});
 
   const settings = useQuery({
     queryKey: ["settings-ingest"],
@@ -207,6 +254,17 @@ export function IngestPage() {
   const overview = useQuery({
     queryKey: ["ingest-overview"],
     queryFn: () => fetchJson<IngestOverviewPayload>("/api/ingest/overview")
+  });
+
+  const jiraProgress = useQuery({
+    queryKey: ["ingest-progress", "jira"],
+    queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/jira/progress"),
+    refetchInterval: 1500
+  });
+  const helixProgress = useQuery({
+    queryKey: ["ingest-progress", "helix"],
+    queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/helix/progress"),
+    refetchInterval: 1500
   });
 
   useEffect(() => {
@@ -228,7 +286,9 @@ export function IngestPage() {
       queryClient.invalidateQueries({ queryKey: ["dashboard-note-keys"] }),
       queryClient.invalidateQueries({ queryKey: ["settings"] }),
       queryClient.invalidateQueries({ queryKey: ["settings-ingest"] }),
-      queryClient.invalidateQueries({ queryKey: ["ingest-overview"] })
+      queryClient.invalidateQueries({ queryKey: ["ingest-overview"] }),
+      queryClient.invalidateQueries({ queryKey: ["ingest-progress", "jira"] }),
+      queryClient.invalidateQueries({ queryKey: ["ingest-progress", "helix"] })
     ]);
   }
 
@@ -316,53 +376,95 @@ export function IngestPage() {
     }
   });
 
-  const jiraIngestMutation = useMutation({
+  const jiraIngestStartMutation = useMutation({
     mutationFn: (sourceIds: string[]) =>
-      postJson<IngestResult>("/api/ingest/jira", { sourceIds }),
-    onSuccess: async (result) => {
-      setFeedback((current) => ({
-        ...current,
-        jira: {
-          title: "Resultado reingesta Jira",
-          result
-        }
-      }));
-      await invalidateRadarData();
+      postJson<IngestProgressPayload>("/api/ingest/jira/start", { sourceIds }),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(["ingest-progress", "jira"], payload);
+      if (!payload.started) {
+        setFeedback((current) => ({
+          ...current,
+          jira: {
+            title: "Reingesta Jira",
+            error: "Ya existe una ingesta Jira en curso."
+          }
+        }));
+      }
     },
     onError: (error) => {
       setFeedback((current) => ({
         ...current,
         jira: {
-          title: "Resultado reingesta Jira",
+          title: "Reingesta Jira",
           error: error instanceof Error ? error.message : "Error inesperado."
         }
       }));
     }
   });
 
-  const helixIngestMutation = useMutation({
+  const helixIngestStartMutation = useMutation({
     mutationFn: (sourceIds: string[]) =>
-      postJson<IngestResult>("/api/ingest/helix", { sourceIds }),
-    onSuccess: async (result) => {
-      setFeedback((current) => ({
-        ...current,
-        helix: {
-          title: "Resultado reingesta Helix",
-          result
-        }
-      }));
-      await invalidateRadarData();
+      postJson<IngestProgressPayload>("/api/ingest/helix/start", { sourceIds }),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(["ingest-progress", "helix"], payload);
+      if (!payload.started) {
+        setFeedback((current) => ({
+          ...current,
+          helix: {
+            title: "Reingesta Helix",
+            error: "Ya existe una ingesta Helix en curso."
+          }
+        }));
+      }
     },
     onError: (error) => {
       setFeedback((current) => ({
         ...current,
         helix: {
-          title: "Resultado reingesta Helix",
+          title: "Reingesta Helix",
           error: error instanceof Error ? error.message : "Error inesperado."
         }
       }));
     }
   });
+
+  useEffect(() => {
+    const progressByConnector: Partial<Record<Connector, IngestProgressPayload | undefined>> = {
+      jira: jiraProgress.data,
+      helix: helixProgress.data
+    };
+    (["jira", "helix"] as Connector[]).forEach((connector) => {
+      const progress = progressByConnector[connector];
+      if (!progress || progress.state === "idle" || progress.state === "running") {
+        return;
+      }
+      const runId = Number(progress.runId || 0);
+      if (!runId || lastHandledRunByConnector[connector] === runId) {
+        return;
+      }
+      if (progress.result) {
+        setFeedback((current) => ({
+          ...current,
+          [connector]: {
+            title:
+              connector === "jira"
+                ? "Resultado reingesta Jira"
+                : "Resultado reingesta Helix",
+            result: progress.result
+          }
+        }));
+      }
+      setLastHandledRunByConnector((current) => ({
+        ...current,
+        [connector]: runId
+      }));
+      void invalidateRadarData();
+    });
+  }, [
+    helixProgress.data,
+    jiraProgress.data,
+    lastHandledRunByConnector
+  ]);
 
   if (settings.isLoading || overview.isLoading) {
     return (
@@ -400,12 +502,18 @@ export function IngestPage() {
   const selectionMutation =
     connector === "jira" ? jiraSelectionMutation : helixSelectionMutation;
   const testMutation = connector === "jira" ? jiraTestMutation : helixTestMutation;
-  const ingestMutation = connector === "jira" ? jiraIngestMutation : helixIngestMutation;
+  const ingestStartMutation =
+    connector === "jira" ? jiraIngestStartMutation : helixIngestStartMutation;
+  const connectorProgress =
+    connector === "jira" ? jiraProgress.data : helixProgress.data;
   const connectorOverview = overview.data[connector];
   const selectionCount = selectedSourceIds.length;
   const isBusy =
-    selectionMutation.isPending || testMutation.isPending || ingestMutation.isPending;
-  const displayedLastIngest = ingestMutation.isPending
+    selectionMutation.isPending ||
+    testMutation.isPending ||
+    ingestStartMutation.isPending ||
+    Boolean(connectorProgress?.active);
+  const displayedLastIngest = connectorProgress?.active
     ? resetLastIngest(connector, connectorOverview.lastIngest)
     : connectorOverview.lastIngest;
 
@@ -477,26 +585,29 @@ export function IngestPage() {
             type="button"
             className="action-button"
             disabled={isBusy || selectionCount === 0}
-            onClick={() => ingestMutation.mutate(selectedSourceIds)}
+            onClick={() => ingestStartMutation.mutate(selectedSourceIds)}
           >
-            {ingestMutation.isPending ? `Reingestando ${activeTab}...` : copy.runLabel}
+            {connectorProgress?.active || ingestStartMutation.isPending
+              ? `Reingestando ${activeTab}...`
+              : copy.runLabel}
           </button>
         </div>
 
-        {ingestMutation.isPending ? (
+        {connectorProgress?.active ? (
           <p className="inline-caption">
             Ingesta en curso. Solo en esta acción puede solicitarse acceso a navegador o cookies
             si la fuente lo requiere.
           </p>
         ) : null}
 
+        <LiveProgressPanel connector={connector} progress={connectorProgress} />
         <FeedbackPanel feedback={feedback[connector]} />
       </section>
 
       <section className="surface-panel page-stack">
         <div>
           <h3>{copy.lastRunTitle}</h3>
-          {ingestMutation.isPending ? (
+          {connectorProgress?.active ? (
             <p className="inline-caption">
               Nueva ingesta en curso: se ocultan temporalmente los resultados de la ingesta
               previa.

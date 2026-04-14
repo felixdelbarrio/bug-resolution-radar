@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.so
 *.egg-info/
+.DS_Store
 
 # PyInstaller / binary build artifacts (local + CI packaging)
 dist/

@@ -294,6 +294,17 @@ export type SettingsPayload = {
   helixDisabledSourceIds: string[];
 };
 
+export type SourceType = "jira" | "helix";
+
+export type SettingsSourcesImportPayload = {
+  sourceType: SourceType;
+  rows: WorkspaceSource[];
+  importedRows: number;
+  skippedRows: number;
+  warnings: string[];
+  settingsValues?: Record<string, string>;
+};
+
 export function normalizeSettingsPayload(
   payload: Partial<SettingsPayload> | null | undefined
 ): SettingsPayload {
@@ -346,6 +357,22 @@ export type IngestResult = {
   success_count: number;
   total_sources: number;
   messages: Array<{ ok: boolean; message: string }>;
+};
+
+export type IngestProgressPayload = {
+  connector: "jira" | "helix";
+  runId: number;
+  state: "idle" | "running" | "success" | "partial" | "error";
+  active: boolean;
+  startedAt: string;
+  finishedAt: string;
+  totalSources: number;
+  completedSources: number;
+  successCount: number;
+  summary: string;
+  messages: Array<{ ok: boolean; message: string }>;
+  result?: IngestResult | null;
+  started?: boolean;
 };
 
 export type SavedReportPayload = {
@@ -438,6 +465,26 @@ export async function postJson<T>(path: string, payload: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function postBinary<T>(
+  path: string,
+  body: Blob | ArrayBuffer | Uint8Array,
+  contentType: string,
+  params?: Record<string, QueryValue>
+): Promise<T> {
+  const response = await fetch(`${path}${toQueryString(params ?? {})}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": contentType
+    },
+    credentials: "same-origin",
+    body
+  });
+  if (!response.ok) {
+    await parseError(response);
+  }
+  return (await response.json()) as T;
+}
+
 export async function downloadFromApi(
   path: string,
   payload: unknown,
@@ -487,4 +534,24 @@ export async function downloadGet(
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadSourcesExcel(sourceType: SourceType, suggestedName: string) {
+  await downloadGet(
+    "/api/settings/sources/export",
+    { sourceType },
+    suggestedName
+  );
+}
+
+export async function importSourcesExcel(
+  sourceType: SourceType,
+  file: File
+): Promise<SettingsSourcesImportPayload> {
+  return await postBinary<SettingsSourcesImportPayload>(
+    "/api/settings/sources/import",
+    file,
+    file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    { sourceType }
+  );
 }

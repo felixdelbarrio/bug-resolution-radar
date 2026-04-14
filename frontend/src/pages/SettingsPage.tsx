@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import type { ShellContextValue } from "../components/AppShell";
 import {
+  downloadSourcesExcel,
   fetchJson,
+  importSourcesExcel,
   normalizeSettingsPayload,
   postJson,
   putJson,
   type CacheInventoryRow,
+  type SettingsSourcesImportPayload,
   type SettingsPayload,
   type WorkspaceSource
 } from "../lib/api";
@@ -18,10 +21,10 @@ type SettingsTabId =
   | "jira"
   | "helix"
   | "rollups"
-  | "cache"
-  | "performance";
+  | "cache";
 
 type SourceDraftRow = WorkspaceSource & {
+  draftKey: string;
   markedForDeletion?: boolean;
 };
 
@@ -30,8 +33,7 @@ const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "jira", label: "Jira" },
   { id: "helix", label: "Helix" },
   { id: "rollups", label: "Agregados" },
-  { id: "cache", label: "Cache" },
-  { id: "performance", label: "Performance" }
+  { id: "cache", label: "Cache" }
 ];
 
 const trendChartCatalog = [
@@ -78,12 +80,48 @@ function normalizeBool(value: string | number | undefined, fallback = false) {
   return ["1", "true", "yes", "on"].includes(token);
 }
 
+let sourceDraftKeyCounter = 0;
+
+function nextSourceDraftKey() {
+  sourceDraftKeyCounter += 1;
+  return `source-draft-${sourceDraftKeyCounter}`;
+}
+
+function sortSourceRows<T extends { country: string; alias: string }>(rows: T[]) {
+  return [...rows].sort((left, right) => {
+    const byCountry = String(left.country || "").localeCompare(String(right.country || ""), "es", {
+      sensitivity: "base"
+    });
+    if (byCountry !== 0) {
+      return byCountry;
+    }
+    return String(left.alias || "").localeCompare(String(right.alias || ""), "es", {
+      sensitivity: "base"
+    });
+  });
+}
+
+function normalizeCookieSource(value: string | number | undefined, fallback = "browser") {
+  const token = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (["browser", "manual"].includes(token)) {
+    return token;
+  }
+  return fallback;
+}
+
 function withSourceDrafts(rows: WorkspaceSource[]) {
-  return rows.map((row) => ({ ...row, markedForDeletion: false }));
+  return sortSourceRows(rows).map((row) => ({
+    ...row,
+    draftKey: nextSourceDraftKey(),
+    markedForDeletion: false
+  }));
 }
 
 function emptyJiraRow(country: string): SourceDraftRow {
   return {
+    draftKey: nextSourceDraftKey(),
     source_id: buildSourceId("jira", country, ""),
     source_type: "jira",
     country,
@@ -95,6 +133,7 @@ function emptyJiraRow(country: string): SourceDraftRow {
 
 function emptyHelixRow(country: string): SourceDraftRow {
   return {
+    draftKey: nextSourceDraftKey(),
     source_id: buildSourceId("helix", country, ""),
     source_type: "helix",
     country,
@@ -161,7 +200,7 @@ function SourceTable({
           {!isJira ? <span>Servicio Origen N2</span> : null}
         </div>
         {rows.map((row, index) => (
-          <div className="source-table-row" key={`${row.source_id}-${index}`}>
+          <div className="source-table-row" key={row.draftKey}>
             <label className="table-checkbox">
               <input
                 type="checkbox"
@@ -319,6 +358,10 @@ export function SettingsPage() {
   const [jiraRows, setJiraRows] = useState<SourceDraftRow[]>([]);
   const [helixRows, setHelixRows] = useState<SourceDraftRow[]>([]);
   const [flashMessage, setFlashMessage] = useState<string>("");
+  const [jiraExcelBusy, setJiraExcelBusy] = useState<boolean>(false);
+  const [jiraExcelInputKey, setJiraExcelInputKey] = useState<number>(0);
+  const [helixExcelBusy, setHelixExcelBusy] = useState<boolean>(false);
+  const [helixExcelInputKey, setHelixExcelInputKey] = useState<number>(0);
 
   useEffect(() => {
     if (!settings.data) {
@@ -458,14 +501,21 @@ export function SettingsPage() {
     const deletedSourceIds = jiraRows
       .filter((row) => row.markedForDeletion)
       .map((row) => row.source_id);
+    const jiraRowsToSave = sortSourceRows(
+      jiraRows
+        .filter((row) => !row.markedForDeletion)
+        .map(({ draftKey: _draftKey, markedForDeletion: _markedForDeletion, ...row }) => row)
+    );
     const payload: SettingsPayload = {
       ...savedPayload,
       values: {
         ...savedPayload.values,
         JIRA_BASE_URL: asText(values.JIRA_BASE_URL),
-        JIRA_BROWSER: asText(values.JIRA_BROWSER || "chrome")
+        JIRA_BROWSER: asText(values.JIRA_BROWSER || "chrome"),
+        JIRA_COOKIE_SOURCE: normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser"),
+        JIRA_COOKIE_HEADER: asText(values.JIRA_COOKIE_HEADER)
       },
-      jiraSources: jiraRows.filter((row) => !row.markedForDeletion),
+      jiraSources: jiraRowsToSave,
     };
     const saved = await saveSettings.mutateAsync(payload);
     await purgeDeletedSources(deletedSourceIds);
@@ -481,6 +531,11 @@ export function SettingsPage() {
     const deletedSourceIds = helixRows
       .filter((row) => row.markedForDeletion)
       .map((row) => row.source_id);
+    const helixRowsToSave = sortSourceRows(
+      helixRows
+        .filter((row) => !row.markedForDeletion)
+        .map(({ draftKey: _draftKey, markedForDeletion: _markedForDeletion, ...row }) => row)
+    );
     const payload: SettingsPayload = {
       ...savedPayload,
       values: {
@@ -488,9 +543,11 @@ export function SettingsPage() {
         HELIX_PROXY: asText(values.HELIX_PROXY),
         HELIX_BROWSER: asText(values.HELIX_BROWSER || "chrome"),
         HELIX_SSL_VERIFY: normalizeBool(values.HELIX_SSL_VERIFY, true) ? "true" : "false",
-        HELIX_DASHBOARD_URL: asText(values.HELIX_DASHBOARD_URL)
+        HELIX_DASHBOARD_URL: asText(values.HELIX_DASHBOARD_URL),
+        HELIX_COOKIE_SOURCE: normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser"),
+        HELIX_COOKIE_HEADER: asText(values.HELIX_COOKIE_HEADER)
       },
-      helixSources: helixRows.filter((row) => !row.markedForDeletion)
+      helixSources: helixRowsToSave
     };
     const saved = await saveSettings.mutateAsync(payload);
     await purgeDeletedSources(deletedSourceIds);
@@ -500,6 +557,86 @@ export function SettingsPage() {
         ? "Configuración Helix y saneado de fuentes aplicados."
         : "Configuración Helix guardada."
     );
+  }
+
+  async function downloadJiraSourcesExcel() {
+    await downloadSourcesExcel("jira", "fuentes_jira.xlsx");
+  }
+
+  async function importJiraSourcesExcel(file: File | null) {
+    if (!file) {
+      return;
+    }
+    setJiraExcelBusy(true);
+    try {
+      const imported: SettingsSourcesImportPayload = await importSourcesExcel("jira", file);
+      setJiraRows(withSourceDrafts(imported.rows));
+      if (imported.settingsValues) {
+        setDraft((current) =>
+          current
+            ? {
+                ...current,
+                values: {
+                  ...current.values,
+                  ...imported.settingsValues
+                }
+              }
+            : current
+        );
+      }
+      const warnings = imported.warnings.length;
+      setFlashMessage(
+        `Excel Jira cargado: ${imported.importedRows} filas importadas, ` +
+          `${imported.skippedRows} omitidas${warnings > 0 ? `, ${warnings} advertencias` : ""}. ` +
+          "Revisa y guarda la configuración."
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? "Error desconocido");
+      setFlashMessage(`No se pudo cargar el Excel Jira: ${detail}`);
+    } finally {
+      setJiraExcelBusy(false);
+      setJiraExcelInputKey((prev) => prev + 1);
+    }
+  }
+
+  async function downloadHelixSourcesExcel() {
+    await downloadSourcesExcel("helix", "fuentes_helix.xlsx");
+  }
+
+  async function importHelixSourcesExcel(file: File | null) {
+    if (!file) {
+      return;
+    }
+    setHelixExcelBusy(true);
+    try {
+      const imported: SettingsSourcesImportPayload = await importSourcesExcel("helix", file);
+      setHelixRows(withSourceDrafts(imported.rows));
+      if (imported.settingsValues) {
+        setDraft((current) =>
+          current
+            ? {
+                ...current,
+                values: {
+                  ...current.values,
+                  ...imported.settingsValues
+                }
+              }
+            : current
+        );
+      }
+      const warnings = imported.warnings.length;
+      setFlashMessage(
+        `Excel Helix cargado: ${imported.importedRows} filas importadas, ` +
+          `${imported.skippedRows} omitidas${warnings > 0 ? `, ${warnings} advertencias` : ""}. ` +
+          "Revisa y guarda la configuración."
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? "Error desconocido");
+      setFlashMessage(`No se pudo cargar el Excel Helix: ${detail}`);
+    } finally {
+      setHelixExcelBusy(false);
+      setHelixExcelInputKey((prev) => prev + 1);
+    }
   }
 
   async function saveRollups() {
@@ -730,6 +867,26 @@ export function SettingsPage() {
                     <option value="edge">Edge</option>
                   </select>
                 </label>
+                <label className="field">
+                  <span>Modo sesión Jira</span>
+                  <select
+                    value={normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser")}
+                    onChange={(event) => setValue("JIRA_COOKIE_SOURCE", event.target.value)}
+                  >
+                    <option value="browser">Browser (lectura local de sesión)</option>
+                    <option value="manual">Manual (sin leer cookies del navegador)</option>
+                  </select>
+                </label>
+                {normalizeCookieSource(values.JIRA_COOKIE_SOURCE, "browser") !== "browser" ? (
+                  <label className="field field-wide">
+                    <span>Cookie Jira manual (opcional)</span>
+                    <input
+                      type="password"
+                      value={asText(values.JIRA_COOKIE_HEADER)}
+                      onChange={(event) => setValue("JIRA_COOKIE_HEADER", event.target.value)}
+                    />
+                  </label>
+                ) : null}
               </div>
             </article>
           </section>
@@ -743,6 +900,35 @@ export function SettingsPage() {
             onChange={setJiraRows}
             onAddRow={() => setJiraRows([...jiraRows, emptyJiraRow(countries[0] ?? "")])}
           />
+
+          <section className="surface-card page-stack">
+            <h3>Excel de Fuentes Jira</h3>
+            <p className="inline-caption">
+              Descarga la configuración actual o carga un Excel para reemplazar la tabla de fuentes.
+            </p>
+            <div className="settings-actions-row">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={jiraExcelBusy}
+                onClick={() => void downloadJiraSourcesExcel()}
+              >
+                Descargar Excel
+              </button>
+              <label className={cn("secondary-button", "file-upload-button", jiraExcelBusy && "is-disabled")}>
+                {jiraExcelBusy ? "Cargando..." : "Cargar Excel"}
+                <input
+                  key={jiraExcelInputKey}
+                  type="file"
+                  accept=".xlsx"
+                  disabled={jiraExcelBusy}
+                  onChange={(event) =>
+                    void importJiraSourcesExcel(event.target.files?.[0] ?? null)
+                  }
+                />
+              </label>
+            </div>
+          </section>
 
           <section className="surface-card page-stack">
             <div className="settings-actions-row">
@@ -794,11 +980,60 @@ export function SettingsPage() {
                   <option value="false">false</option>
                 </select>
               </label>
+              <label className="field">
+                <span>Modo sesión Helix</span>
+                <select
+                  value={normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser")}
+                  onChange={(event) => setValue("HELIX_COOKIE_SOURCE", event.target.value)}
+                >
+                  <option value="browser">Browser (lectura local de sesión)</option>
+                  <option value="manual">Manual (sin leer cookies del navegador)</option>
+                </select>
+              </label>
               <label className="field field-wide">
                 <span>Helix Dashboard URL</span>
                 <input
                   value={asText(values.HELIX_DASHBOARD_URL)}
                   onChange={(event) => setValue("HELIX_DASHBOARD_URL", event.target.value)}
+                />
+              </label>
+              {normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser") !== "browser" ? (
+                <label className="field field-wide">
+                  <span>Cookie Helix manual (opcional)</span>
+                  <input
+                    type="password"
+                    value={asText(values.HELIX_COOKIE_HEADER)}
+                    onChange={(event) => setValue("HELIX_COOKIE_HEADER", event.target.value)}
+                  />
+                </label>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="surface-card page-stack">
+            <h3>Excel de Fuentes Helix</h3>
+            <p className="inline-caption">
+              Descarga la configuración actual o carga un Excel para reemplazar la tabla de fuentes.
+            </p>
+            <div className="settings-actions-row">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={helixExcelBusy}
+                onClick={() => void downloadHelixSourcesExcel()}
+              >
+                Descargar Excel
+              </button>
+              <label className={cn("secondary-button", "file-upload-button", helixExcelBusy && "is-disabled")}>
+                {helixExcelBusy ? "Cargando..." : "Cargar Excel"}
+                <input
+                  key={helixExcelInputKey}
+                  type="file"
+                  accept=".xlsx"
+                  disabled={helixExcelBusy}
+                  onChange={(event) =>
+                    void importHelixSourcesExcel(event.target.files?.[0] ?? null)
+                  }
                 />
               </label>
             </div>
@@ -914,23 +1149,6 @@ export function SettingsPage() {
         </section>
       ) : null}
 
-      {activeTab === "performance" ? (
-        <section className="page-stack">
-          <section className="surface-card page-stack">
-            <h3>Performance</h3>
-            <p className="inline-caption">
-              Panel técnico reservado para snapshots de performance por vista.
-            </p>
-            <section className="surface-panel empty-panel">
-              <h3>Sin muestras en esta sesión</h3>
-              <p>
-                La pestaña mantiene la misma ubicación funcional que en Streamlit. Cuando existan
-                snapshots expuestos por la shell React aparecerán aquí.
-              </p>
-            </section>
-          </section>
-        </section>
-      ) : null}
     </section>
   );
 }

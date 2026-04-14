@@ -1624,6 +1624,23 @@ textarea::placeholder {
   cursor: not-allowed;
 }
 
+.file-upload-button {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.file-upload-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-upload-button.is-disabled {
+  pointer-events: none;
+}
+
 .settings-table,
 .selector-list {
   display: grid;
@@ -1655,6 +1672,9 @@ textarea::placeholder {
 .ingest-source-table {
   display: grid;
   gap: 0.55rem;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
 }
 
 .ingest-source-head,
@@ -1662,10 +1682,11 @@ textarea::placeholder {
   display: grid;
   grid-template-columns: 96px repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
-  align-items: center;
+  min-width: 0;
 }
 
 .ingest-source-head {
+  align-items: center;
   color: var(--bbva-text-muted);
   font-size: 0.78rem;
   font-weight: 700;
@@ -1673,6 +1694,7 @@ textarea::placeholder {
 }
 
 .ingest-source-row {
+  align-items: start;
   padding: 0.85rem 0.9rem;
   border: 1px solid var(--bbva-border);
   border-radius: var(--bbva-radius-md);
@@ -1687,13 +1709,33 @@ textarea::placeholder {
 .ingest-source-checkbox-head,
 .ingest-source-check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  min-width: 0;
 }
 
 .ingest-source-check input {
   width: 1rem;
   height: 1rem;
+  margin-top: 0.12rem;
   accent-color: var(--bbva-primary);
+}
+
+.ingest-source-head > span,
+.ingest-source-row > span,
+.ingest-source-cell {
+  min-width: 0;
+  line-height: 1.28;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ingest-source-cell-service_origin_n1,
+.ingest-source-cell-service_origin_n2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  overflow: hidden;
 }
 
 .ingest-action-row {

@@ -4,6 +4,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.period_functionality_followup import (
     build_period_functionality_followup_summary,
+    format_top_row_label,
 )
 from bug_resolution_radar.analytics.period_summary import (
     build_country_quincenal_result,
@@ -112,6 +113,7 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
     assert summary.top_rows[0].functionality == "Login y acceso"
     assert summary.top_rows[0].new_count == 2
     assert summary.top_rows[0].open_total == 2
+    assert float(summary.top_rows[0].avg_open_days) > 5.0
 
     assert summary.mitigation_ready_to_verify.count == 1
     assert summary.mitigation_new.count == 3
@@ -124,6 +126,19 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
     assert login_zoom.current_open_critical_count == 2
     assert login_zoom.issues
     assert login_zoom.issues[0].url.startswith("https://jira.example/")
+
+
+def test_format_top_row_label_includes_avg_open_days() -> None:
+    class _Row:
+        rank = 1
+        functionality = "Pagos"
+        new_count = 13
+        open_total = 30
+        avg_open_days = 29.6
+
+    assert format_top_row_label(_Row()) == (
+        "13 incidencias nuevas en Pagos (acumuladas 30 - 30 d. promedio)"
+    )
 
 
 def test_build_period_functionality_followup_summary_dedupes_zoom_issue_keys() -> None:

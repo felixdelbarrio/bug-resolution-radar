@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
+import os
 from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from bug_resolution_radar.config import Settings, build_source_id
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
-from bug_resolution_radar.repositories.issues_store import save_issues_doc
 from bug_resolution_radar.reports.executive_ppt import ExecutiveReportResult
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
+from bug_resolution_radar.repositories.issues_store import save_issues_doc
 
 api_app = importlib.import_module("bug_resolution_radar.api.app")
 dashboard_snapshot = importlib.import_module("bug_resolution_radar.services.dashboard_snapshot")
@@ -303,6 +306,12 @@ def test_intelligence_endpoint_returns_streamlit_aligned_payload(
     assert payload["functionality"]["combo"]["viewMode"] == "quincenal"
     assert "statusOptions" in payload["functionality"]["combo"]
     assert isinstance(payload["functionality"]["topics"], list)
+    assert "followup" in payload["functionality"]
+    assert isinstance(payload["functionality"]["followup"]["topThree"], list)
+    if payload["functionality"]["followup"]["topThree"]:
+        first = payload["functionality"]["followup"]["topThree"][0]
+        assert "avgOpenDays" in first
+        assert "d. promedio" in str(first.get("label", ""))
     assert "brief" in payload["duplicates"]
     assert "cards" in payload["people"]
     assert "kpis" in payload["opsHealth"]
@@ -480,6 +489,146 @@ def test_ingest_test_endpoints_run_only_under_explicit_click(
     ]
 
 
+def test_ingest_start_endpoint_uses_async_progress_contract(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = build_source_id("jira", "España", "Core")
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    captured = {}
+
+    def _fake_start(connector: str, *, settings: Settings, selected_sources: list[dict[str, str]]):
+        del settings
+        captured["connector"] = connector
+        captured["selected_sources"] = selected_sources
+        return {
+            "started": True,
+            "connector": connector,
+            "runId": 7,
+            "state": "running",
+            "active": True,
+            "startedAt": "2026-04-14T10:00:00+00:00",
+            "finishedAt": "",
+            "totalSources": len(selected_sources),
+            "completedSources": 0,
+            "successCount": 0,
+            "summary": "",
+            "messages": [],
+            "result": None,
+        }
+
+    monkeypatch.setattr(api_app, "start_ingest_job", _fake_start)
+
+    client = TestClient(api_app.create_app())
+    response = client.post("/api/ingest/jira/start", json={"sourceIds": [source_id]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["started"] is True
+    assert payload["connector"] == "jira"
+    assert payload["state"] == "running"
+    assert payload["runId"] == 7
+    assert captured["connector"] == "jira"
+    assert len(captured["selected_sources"]) == 1
+
+
+def test_ingest_progress_endpoint_returns_latest_snapshot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        api_app,
+        "get_ingest_progress",
+        lambda connector: {
+            "connector": connector,
+            "runId": 3,
+            "state": "partial",
+            "active": False,
+            "startedAt": "2026-04-14T10:00:00+00:00",
+            "finishedAt": "2026-04-14T10:05:00+00:00",
+            "totalSources": 2,
+            "completedSources": 2,
+            "successCount": 1,
+            "summary": "Reingesta finalizada.",
+            "messages": [
+                {"ok": True, "message": "Fuente 1 OK"},
+                {"ok": False, "message": "Fuente 2 KO"},
+            ],
+            "result": {
+                "state": "partial",
+                "summary": "Reingesta finalizada.",
+                "success_count": 1,
+                "total_sources": 2,
+                "messages": [{"ok": True, "message": "Fuente 1 OK"}],
+            },
+        },
+    )
+
+    client = TestClient(api_app.create_app())
+    response = client.get("/api/ingest/helix/progress")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["connector"] == "helix"
+    assert payload["runId"] == 3
+    assert payload["state"] == "partial"
+    assert payload["completedSources"] == 2
+
+
+def test_helix_ingest_test_endpoint_syncs_settings_into_process_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("HELIX_DASHBOARD_URL", "__before__")
+    monkeypatch.setenv("HELIX_PROXY", "__before_proxy__")
+    monkeypatch.setenv("HELIX_SSL_VERIFY", "__before_ssl__")
+    monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "__before_arsql__")
+
+    settings = _settings(tmp_path).model_copy(
+        update={
+            "HELIX_DASHBOARD_URL": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+            "HELIX_PROXY": "http://127.0.0.1:8999",
+            "HELIX_SSL_VERIFY": "false",
+            "HELIX_ARSQL_BASE_URL": "https://itsmhelixbbva-ir1.onbmc.com",
+        }
+    )
+    helix_source_id = build_source_id("helix", "España", "Helix Core")
+    captured: dict[str, str] = {}
+
+    def _fake_helix_ingest(**kwargs):
+        del kwargs
+        captured["HELIX_DASHBOARD_URL"] = str(os.getenv("HELIX_DASHBOARD_URL", ""))
+        captured["HELIX_PROXY"] = str(os.getenv("HELIX_PROXY", ""))
+        captured["HELIX_SSL_VERIFY"] = str(os.getenv("HELIX_SSL_VERIFY", ""))
+        captured["HELIX_ARSQL_BASE_URL"] = str(os.getenv("HELIX_ARSQL_BASE_URL", ""))
+        return True, "helix ok", None
+
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    monkeypatch.setattr(api_app, "execute_helix_ingest", _fake_helix_ingest)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/ingest/helix/test",
+        json={"sourceIds": [helix_source_id]},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "HELIX_DASHBOARD_URL": settings.HELIX_DASHBOARD_URL,
+        "HELIX_PROXY": settings.HELIX_PROXY,
+        "HELIX_SSL_VERIFY": settings.HELIX_SSL_VERIFY,
+        "HELIX_ARSQL_BASE_URL": settings.HELIX_ARSQL_BASE_URL,
+    }
+    assert os.getenv("HELIX_DASHBOARD_URL") == "__before__"
+    assert os.getenv("HELIX_PROXY") == "__before_proxy__"
+    assert os.getenv("HELIX_SSL_VERIFY") == "__before_ssl__"
+    assert os.getenv("HELIX_ARSQL_BASE_URL") == "__before_arsql__"
+
+
 def test_intelligence_functionality_chart_uses_dark_mode_palette_and_stack_order(
     monkeypatch,
     tmp_path: Path,
@@ -547,6 +696,112 @@ def test_issues_export_endpoint_streams_file(monkeypatch, tmp_path: Path) -> Non
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert "RAD-1" in response.text
+
+
+def test_settings_sources_export_endpoint_streams_helix_xlsx(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path).model_copy(
+        update={
+            "HELIX_PROXY": "http://127.0.0.1:8999",
+            "HELIX_SSL_VERIFY": "false",
+        }
+    )
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get("/api/settings/sources/export", params={"sourceType": "helix"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    xl = pd.ExcelFile(BytesIO(response.content))
+    assert "Fuentes Helix" in xl.sheet_names
+    assert "Valores transversales" in xl.sheet_names
+    frame = xl.parse("Fuentes Helix")
+    assert list(frame.columns) == [
+        "source_id",
+        "country",
+        "alias",
+        "service_origin_buug",
+        "service_origin_n1",
+        "service_origin_n2",
+    ]
+    assert frame.iloc[0]["country"] == "España"
+    assert frame.iloc[0]["alias"] == "Helix Core"
+    trans = xl.parse("Valores transversales")
+    trans_values = {str(row["key"]): str(row["value"]) for row in trans.to_dict(orient="records")}
+    assert trans_values["HELIX_BROWSER"] == "chrome"
+    assert trans_values["HELIX_PROXY"] == "http://127.0.0.1:8999"
+    assert trans_values["HELIX_SSL_VERIFY"] == "false"
+
+
+def test_settings_sources_import_endpoint_parses_helix_excel_and_sorts_rows(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    import_frame = pd.DataFrame(
+        [
+            {
+                "País": "México",
+                "Alias": "MX SmartIT",
+                "Servicio origen BU/UG": "BBVA México",
+                "Servicio origen N1": "ENTERPRISE WEB",
+            },
+            {
+                "País": "España",
+                "Alias": "Incident Report",
+                "Servicio origen BU/UG": "BBVA España",
+                "Servicio origen N1": "ENTERPRISES CHANNEL",
+            },
+        ]
+    )
+    trans_frame = pd.DataFrame(
+        [
+            {"key": "HELIX_PROXY", "value": "http://127.0.0.1:8999"},
+            {"key": "HELIX_BROWSER", "value": "chrome"},
+            {"key": "HELIX_SSL_VERIFY", "value": "false"},
+            {
+                "key": "HELIX_DASHBOARD_URL",
+                "value": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        import_frame.to_excel(writer, index=False, sheet_name="Fuentes Helix")
+        trans_frame.to_excel(writer, index=False, sheet_name="Valores transversales")
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/settings/sources/import?sourceType=helix",
+        content=buffer.getvalue(),
+        headers={
+            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sourceType"] == "helix"
+    assert payload["importedRows"] == 2
+    assert payload["skippedRows"] == 0
+    assert payload["rows"][0]["country"] == "España"
+    assert payload["rows"][0]["alias"] == "Incident Report"
+    assert payload["rows"][1]["country"] == "México"
+    assert payload["rows"][1]["alias"] == "MX SmartIT"
+    assert payload["rows"][0]["source_type"] == "helix"
+    assert payload["settingsValues"] == {
+        "HELIX_PROXY": "http://127.0.0.1:8999",
+        "HELIX_BROWSER": "chrome",
+        "HELIX_SSL_VERIFY": "false",
+        "HELIX_DASHBOARD_URL": "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    }
 
 
 def test_dashboard_charts_use_backend_semantic_tokens(monkeypatch, tmp_path: Path) -> None:
