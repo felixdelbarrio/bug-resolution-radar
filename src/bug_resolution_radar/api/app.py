@@ -570,15 +570,12 @@ def create_app() -> FastAPI:
                 "theme": frontend_theme_tokens(),
                 "semantic": semantic_color_contract(),
             },
-            "permissionsPolicy": {
-                "reports": "Solo se genera o descarga bajo acción explícita del usuario.",
-                "browser": (
-                    "Solo se abre navegador o se leen cookies durante acciones de "
-                    "ingesta o apertura explícita."
-                ),
-                "filesystem": "No se escribe en disco durante renderizado o carga inicial.",
-            },
-        }
+                "permissionsPolicy": {
+                    "reports": "Solo se genera o descarga bajo acción explícita del usuario.",
+                    "browser": "Operaciones externas solo se ejecutan bajo acción explícita.",
+                    "filesystem": "No se escribe en disco durante renderizado o carga inicial.",
+                },
+            }
 
     @app.get("/api/workspace")
     def workspace_options(

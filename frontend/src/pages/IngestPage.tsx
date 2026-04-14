@@ -595,8 +595,7 @@ export function IngestPage() {
 
         {connectorProgress?.active ? (
           <p className="inline-caption">
-            Ingesta en curso. Solo en esta acción puede solicitarse acceso a navegador o cookies
-            si la fuente lo requiere.
+            Ingesta en curso. Puedes seguir trabajando mientras se completa el proceso.
           </p>
         ) : null}
 

@@ -51,6 +51,15 @@
   --bbva-accent-bg: rgba(0, 81, 241, 0.08);
   --bbva-action-bg: rgba(255, 255, 255, 0.94);
   --bbva-action-border: rgba(7, 33, 70, 0.18);
+  --bbva-action-link: #004481;
+  --bbva-action-link-hover: #0051f1;
+  --bbva-input-inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  --bbva-table-inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --bbva-card-shadow-ambient: 0 8px 20px rgba(7, 33, 70, 0.08);
+  --bbva-insight-shadow-ambient: 0 8px 20px rgba(7, 33, 70, 0.06);
+  --bbva-button-disabled-bg: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2));
+  --bbva-button-disabled-border: color-mix(in srgb, var(--bbva-border-strong) 88%, transparent);
+  --bbva-button-disabled-text: var(--bbva-text-muted);
   --bbva-tab-soft-text: rgba(7, 33, 70, 0.72);
   --bbva-tab-active-bg: #004481;
   --bbva-tab-active-text: #ffffff;
@@ -77,6 +86,15 @@
   --bbva-accent-bg: rgba(91, 190, 255, 0.12);
   --bbva-action-bg: rgba(10, 46, 83, 0.92);
   --bbva-action-border: rgba(255, 255, 255, 0.18);
+  --bbva-action-link: #8bd8ff;
+  --bbva-action-link-hover: #5bbeff;
+  --bbva-input-inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --bbva-table-inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --bbva-card-shadow-ambient: 0 8px 20px rgba(0, 0, 0, 0.28);
+  --bbva-insight-shadow-ambient: 0 8px 20px rgba(0, 0, 0, 0.24);
+  --bbva-button-disabled-bg: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2));
+  --bbva-button-disabled-border: color-mix(in srgb, var(--bbva-border-strong) 92%, transparent);
+  --bbva-button-disabled-text: color-mix(in srgb, var(--bbva-text-muted) 92%, transparent);
   --bbva-tab-soft-text: rgba(246, 249, 252, 0.8);
   --bbva-tab-active-bg: #ffffff;
   --bbva-tab-active-text: #072146;
@@ -242,7 +260,7 @@ button {
   border-radius: var(--bbva-radius-md);
   background: var(--bbva-surface);
   color: var(--bbva-text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  box-shadow: var(--bbva-input-inset-shadow);
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
@@ -290,7 +308,7 @@ button {
   outline: none;
   border-color: color-mix(in srgb, var(--bbva-primary) 54%, var(--bbva-border-strong));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    var(--bbva-input-inset-shadow),
     0 0 0 3px color-mix(in srgb, var(--bbva-primary) 10%, transparent);
 }
 
@@ -635,7 +653,7 @@ textarea::placeholder {
   border-radius: var(--bbva-radius-md);
   background: color-mix(in srgb, var(--bbva-surface) 94%, var(--bbva-surface-2));
   box-shadow:
-    0 8px 20px rgba(7, 33, 70, 0.08),
+    var(--bbva-card-shadow-ambient),
     inset 0 0 0 1px color-mix(in srgb, var(--focus-accent, var(--bbva-primary)) 10%, transparent);
   color: var(--bbva-text);
   text-align: left;
@@ -1391,7 +1409,7 @@ textarea::placeholder {
   border-radius: 22px;
   border: 1px solid color-mix(in srgb, var(--bbva-border-strong) 92%, transparent);
   background: color-mix(in srgb, var(--bbva-surface) 98%, var(--bbva-surface-2));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  box-shadow: var(--bbva-table-inset-shadow);
 }
 
 .issues-table {
@@ -1583,6 +1601,11 @@ textarea::placeholder {
   border: 1px solid transparent;
   font-weight: 700;
   text-decoration: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .action-button {
@@ -1619,9 +1642,19 @@ textarea::placeholder {
 }
 
 .action-button:disabled,
-.secondary-button:disabled {
-  opacity: 0.52;
+.secondary-button:disabled,
+.ghost-button:disabled,
+.link-button:disabled {
+  border-color: var(--bbva-button-disabled-border);
+  background: var(--bbva-button-disabled-bg);
+  color: var(--bbva-button-disabled-text);
   cursor: not-allowed;
+  opacity: 1;
+}
+
+.link-button:disabled {
+  background: transparent;
+  border-color: transparent;
 }
 
 .file-upload-button {
@@ -1934,7 +1967,7 @@ textarea::placeholder {
   border-radius: var(--bbva-radius-md);
   background: color-mix(in srgb, var(--bbva-surface) 94%, var(--bbva-surface-2));
   box-shadow:
-    0 8px 20px rgba(7, 33, 70, 0.06),
+    var(--bbva-insight-shadow-ambient),
     inset 0 0 0 1px color-mix(in srgb, var(--insight-accent) 8%, transparent);
   overflow: hidden;
   transition:

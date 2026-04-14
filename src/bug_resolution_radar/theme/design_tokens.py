@@ -266,6 +266,21 @@ def frontend_theme_tokens() -> dict[str, dict[str, str]]:
             "--bbva-text": BBVA_LIGHT.ink,
             "--bbva-text-muted": hex_to_rgba(BBVA_LIGHT.ink, 0.72),
             "--bbva-on-primary": BBVA_LIGHT.white,
+            "--bbva-action-link": BBVA_LIGHT.core_blue,
+            "--bbva-action-link-hover": BBVA_LIGHT.electric_blue,
+            "--bbva-input-inset-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.45)",
+            "--bbva-table-inset-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.55)",
+            "--bbva-card-shadow-ambient": f"0 8px 20px {hex_to_rgba(BBVA_LIGHT.midnight, 0.08)}",
+            "--bbva-insight-shadow-ambient": (
+                f"0 8px 20px {hex_to_rgba(BBVA_LIGHT.midnight, 0.06)}"
+            ),
+            "--bbva-button-disabled-bg": (
+                "color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2))"
+            ),
+            "--bbva-button-disabled-border": (
+                "color-mix(in srgb, var(--bbva-border-strong) 88%, transparent)"
+            ),
+            "--bbva-button-disabled-text": "var(--bbva-text-muted)",
             "--bbva-success": BBVA_SIGNAL_GREEN_1,
             "--bbva-warning": BBVA_SIGNAL_ORANGE_1,
             "--bbva-danger": BBVA_SIGNAL_RED_1,
@@ -285,6 +300,21 @@ def frontend_theme_tokens() -> dict[str, dict[str, str]]:
             "--bbva-text": BBVA_DARK.ink,
             "--bbva-text-muted": hex_to_rgba(BBVA_DARK.ink, 0.76),
             "--bbva-on-primary": BBVA_DARK.white,
+            "--bbva-action-link": BBVA_DARK.serene_blue,
+            "--bbva-action-link-hover": BBVA_DARK.royal_blue,
+            "--bbva-input-inset-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.1)",
+            "--bbva-table-inset-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.14)",
+            "--bbva-card-shadow-ambient": "0 8px 20px rgba(0, 0, 0, 0.28)",
+            "--bbva-insight-shadow-ambient": "0 8px 20px rgba(0, 0, 0, 0.24)",
+            "--bbva-button-disabled-bg": (
+                "color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2))"
+            ),
+            "--bbva-button-disabled-border": (
+                "color-mix(in srgb, var(--bbva-border-strong) 92%, transparent)"
+            ),
+            "--bbva-button-disabled-text": (
+                "color-mix(in srgb, var(--bbva-text-muted) 92%, transparent)"
+            ),
             "--bbva-success": BBVA_SIGNAL_GREEN_1,
             "--bbva-warning": BBVA_SIGNAL_ORANGE_1,
             "--bbva-danger": BBVA_SIGNAL_RED_1,
