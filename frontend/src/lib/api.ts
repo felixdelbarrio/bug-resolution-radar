@@ -386,6 +386,9 @@ export type SavedReportPayload = {
 };
 
 type QueryValue = string | number | boolean | null | undefined | string[];
+type RequestOptions = {
+  signal?: AbortSignal;
+};
 
 function toQueryString(params: Record<string, QueryValue>) {
   const query = new URLSearchParams();
@@ -424,10 +427,12 @@ async function parseError(response: Response): Promise<never> {
 
 export async function fetchJson<T>(
   path: string,
-  params?: Record<string, QueryValue>
+  params?: Record<string, QueryValue>,
+  options?: RequestOptions
 ): Promise<T> {
   const response = await fetch(`${path}${toQueryString(params ?? {})}`, {
-    credentials: "same-origin"
+    credentials: "same-origin",
+    signal: options?.signal
   });
   if (!response.ok) {
     await parseError(response);

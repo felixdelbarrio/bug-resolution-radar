@@ -67,12 +67,16 @@ export function AppShell() {
       dashboardState.params.sourceId,
       dashboardState.params.scopeMode
     ],
-    queryFn: () =>
-      fetchJson<BootstrapPayload>("/api/bootstrap", {
-        country: dashboardState.params.country,
-        sourceId: dashboardState.params.sourceId,
-        scopeMode: dashboardState.params.scopeMode
-      }),
+    queryFn: ({ signal }) =>
+      fetchJson<BootstrapPayload>(
+        "/api/bootstrap",
+        {
+          country: dashboardState.params.country,
+          sourceId: dashboardState.params.sourceId,
+          scopeMode: dashboardState.params.scopeMode
+        },
+        { signal }
+      ),
     staleTime: 45_000,
     gcTime: 300_000,
     refetchOnWindowFocus: false,
@@ -139,6 +143,9 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    if (bootstrap.isFetching) {
+      return;
+    }
     if (!workspace || !bootstrap.data) {
       return;
     }
@@ -178,6 +185,7 @@ export function AppShell() {
       dashboardState.update(patch);
     }
   }, [
+    bootstrap.isFetching,
     bootstrap.data,
     dashboardState,
     dashboardState.params.assignee.length,

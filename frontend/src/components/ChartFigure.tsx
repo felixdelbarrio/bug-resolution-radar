@@ -14,11 +14,21 @@ export function ChartFigure({ figure, height = 320 }: ChartFigureProps) {
   }, []);
 
   if (!figure) {
-    return <div className="empty-card">No hay gráfico disponible para este bloque.</div>;
+    return (
+      <div className="empty-card" style={{ minHeight: `${height}px`, height: `${height}px` }}>
+        No hay gráfico disponible para este bloque.
+      </div>
+    );
   }
 
   return (
-    <Suspense fallback={<div className="empty-card">Cargando gráfico...</div>}>
+    <Suspense
+      fallback={
+        <div className="empty-card" style={{ minHeight: `${height}px`, height: `${height}px` }}>
+          Cargando gráfico...
+        </div>
+      }
+    >
       <LazyChartFigurePlot figure={figure} height={height} />
     </Suspense>
   );

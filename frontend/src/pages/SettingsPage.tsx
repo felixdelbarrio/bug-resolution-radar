@@ -345,12 +345,13 @@ export function SettingsPage() {
 
   const settings = useQuery({
     queryKey: ["settings"],
-    queryFn: async () =>
-      normalizeSettingsPayload(await fetchJson<SettingsPayload>("/api/settings"))
+    queryFn: async ({ signal }) =>
+      normalizeSettingsPayload(await fetchJson<SettingsPayload>("/api/settings", undefined, { signal }))
   });
   const cache = useQuery({
     queryKey: ["cache-inventory"],
-    queryFn: () => fetchJson<CacheInventoryRow[]>("/api/cache/inventory")
+    queryFn: ({ signal }) =>
+      fetchJson<CacheInventoryRow[]>("/api/cache/inventory", undefined, { signal })
   });
 
   const [draft, setDraft] = useState<SettingsPayload | null>(null);

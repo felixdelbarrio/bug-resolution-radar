@@ -247,23 +247,26 @@ export function IngestPage() {
 
   const settings = useQuery({
     queryKey: ["settings-ingest"],
-    queryFn: async () =>
-      normalizeSettingsPayload(await fetchJson<SettingsPayload>("/api/settings"))
+    queryFn: async ({ signal }) =>
+      normalizeSettingsPayload(await fetchJson<SettingsPayload>("/api/settings", undefined, { signal }))
   });
 
   const overview = useQuery({
     queryKey: ["ingest-overview"],
-    queryFn: () => fetchJson<IngestOverviewPayload>("/api/ingest/overview")
+    queryFn: ({ signal }) =>
+      fetchJson<IngestOverviewPayload>("/api/ingest/overview", undefined, { signal })
   });
 
   const jiraProgress = useQuery({
     queryKey: ["ingest-progress", "jira"],
-    queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/jira/progress"),
+    queryFn: ({ signal }) =>
+      fetchJson<IngestProgressPayload>("/api/ingest/jira/progress", undefined, { signal }),
     refetchInterval: 1500
   });
   const helixProgress = useQuery({
     queryKey: ["ingest-progress", "helix"],
-    queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/helix/progress"),
+    queryFn: ({ signal }) =>
+      fetchJson<IngestProgressPayload>("/api/ingest/helix/progress", undefined, { signal }),
     refetchInterval: 1500
   });
 

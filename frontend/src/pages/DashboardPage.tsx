@@ -29,6 +29,31 @@ import { cn } from "../lib/cn";
 
 type QueryParams = Record<string, string | number | boolean | string[]>;
 
+function normalizeFilterValues(values: string[]) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const token = String(value ?? "").trim();
+    if (!token) {
+      continue;
+    }
+    const key = token.toLocaleLowerCase("es-ES");
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(token);
+  }
+  normalized.sort((left, right) =>
+    left.localeCompare(right, "es-ES", { sensitivity: "base" })
+  );
+  return normalized;
+}
+
+function filterKey(values: string[]) {
+  return normalizeFilterValues(values).join("|");
+}
+
 function queryParams(
   params: ShellContextValue["dashboardState"]["params"],
   issueLikeQuery: string,
@@ -38,9 +63,9 @@ function queryParams(
     country: params.country,
     sourceId: params.sourceId,
     scopeMode: params.scopeMode,
-    status: params.status,
-    priority: params.priority,
-    assignee: params.assignee,
+    status: normalizeFilterValues(params.status),
+    priority: normalizeFilterValues(params.priority),
+    assignee: normalizeFilterValues(params.assignee),
     quincenalScope: params.quincenalScope,
     issueSortCol: params.issueSortCol,
     issueLikeQuery,
@@ -103,13 +128,18 @@ export function DashboardPage() {
   const currentPage = Math.max(1, Number.parseInt(dashboardState.params.issuePage, 10) || 1);
   const trendChartId =
     dashboardState.params.trendChart || bootstrap?.dashboardDefaults.defaultTrendChartId || "";
-  const paramsSignature = JSON.stringify(dashboardState.params);
+  const statusKey = filterKey(dashboardState.params.status);
+  const priorityKey = filterKey(dashboardState.params.priority);
+  const assigneeKey = filterKey(dashboardState.params.assignee);
+  const insightsStatusKey = filterKey(dashboardState.params.insightsStatus);
+  const insightsPriorityKey = filterKey(dashboardState.params.insightsPriority);
+  const insightsFunctionalityKey = filterKey(dashboardState.params.insightsFunctionality);
+  const summaryChartIdsKey = (bootstrap?.dashboardDefaults.summaryChartIds ?? []).join("|");
   const commonQueryOptions = {
     staleTime: 45_000,
     gcTime: 300_000,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    placeholderData: keepPreviousData
+    refetchOnReconnect: false
   } as const;
   const sharedScopeParams = useMemo(
     () =>
@@ -118,14 +148,25 @@ export function DashboardPage() {
         dashboardState.deferredIssueLikeQuery,
         darkMode
       ),
-    [paramsSignature, dashboardState.deferredIssueLikeQuery, darkMode]
+    [
+      dashboardState.params.country,
+      dashboardState.params.sourceId,
+      dashboardState.params.scopeMode,
+      statusKey,
+      priorityKey,
+      assigneeKey,
+      dashboardState.params.quincenalScope,
+      dashboardState.params.issueSortCol,
+      dashboardState.deferredIssueLikeQuery,
+      darkMode
+    ]
   );
   const overviewQueryParams = useMemo(
     () => ({
       ...sharedScopeParams,
       chartIds: bootstrap?.dashboardDefaults.summaryChartIds ?? []
     }),
-    [sharedScopeParams, bootstrap?.dashboardDefaults.summaryChartIds]
+    [sharedScopeParams, summaryChartIdsKey]
   );
   const trendDetailQueryParams = useMemo(
     () => ({
@@ -138,12 +179,19 @@ export function DashboardPage() {
     () => ({
       ...sharedScopeParams,
       insightsViewMode: dashboardState.params.insightsViewMode,
-      insightsStatus: dashboardState.params.insightsStatus,
-      insightsPriority: dashboardState.params.insightsPriority,
-      insightsFunctionality: dashboardState.params.insightsFunctionality,
+      insightsStatus: normalizeFilterValues(dashboardState.params.insightsStatus),
+      insightsPriority: normalizeFilterValues(dashboardState.params.insightsPriority),
+      insightsFunctionality: normalizeFilterValues(dashboardState.params.insightsFunctionality),
       insightsStatusManual: dashboardState.params.insightsStatusManual === "1"
     }),
-    [sharedScopeParams, paramsSignature]
+    [
+      sharedScopeParams,
+      dashboardState.params.insightsViewMode,
+      insightsStatusKey,
+      insightsPriorityKey,
+      insightsFunctionalityKey,
+      dashboardState.params.insightsStatusManual
+    ]
   );
   const issuesPanelQueryParams = useMemo(
     () =>
@@ -155,7 +203,16 @@ export function DashboardPage() {
         pageSize
       ),
     [
-      paramsSignature,
+      dashboardState.params.country,
+      dashboardState.params.sourceId,
+      dashboardState.params.scopeMode,
+      statusKey,
+      priorityKey,
+      assigneeKey,
+      dashboardState.params.quincenalScope,
+      dashboardState.params.issueSortCol,
+      dashboardState.params.issueSortDir,
+      dashboardState.params.issuesView,
       dashboardState.deferredIssueLikeQuery,
       darkMode,
       currentPage,
@@ -181,15 +238,18 @@ export function DashboardPage() {
 
   const overview = useQuery({
     queryKey: ["dashboard-overview", overviewQueryParams],
-    queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
+    queryFn: ({ signal }) =>
+      fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams, { signal }),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "overview",
     ...commonQueryOptions
   });
 
   const trendDetail = useQuery({
     queryKey: ["dashboard-trend-detail", trendDetailQueryParams],
-    queryFn: () =>
-      fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
+    queryFn: ({ signal }) =>
+      fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams, {
+        signal
+      }),
     enabled:
       Boolean(workspace?.selectedCountry) &&
       activePanel === "trends" &&
@@ -199,32 +259,37 @@ export function DashboardPage() {
 
   const intelligence = useQuery({
     queryKey: ["dashboard-intelligence", intelligenceQueryParams],
-    queryFn: () =>
-      fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams),
+    queryFn: ({ signal }) =>
+      fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams, {
+        signal
+      }),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "insights",
     ...commonQueryOptions
   });
 
   const issues = useQuery({
     queryKey: ["dashboard-issues", issuesPanelQueryParams],
-    queryFn: () =>
-      fetchJson<IssuesPayload>("/api/issues", issuesPanelQueryParams),
+    queryFn: ({ signal }) =>
+      fetchJson<IssuesPayload>("/api/issues", issuesPanelQueryParams, { signal }),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "issues",
+    placeholderData: keepPreviousData,
     ...commonQueryOptions
   });
 
   const kanban = useQuery({
     queryKey: ["dashboard-kanban", sharedScopeParams],
-    queryFn: () =>
-      fetchJson<KanbanPayload>("/api/kanban", sharedScopeParams),
+    queryFn: ({ signal }) =>
+      fetchJson<KanbanPayload>("/api/kanban", sharedScopeParams, { signal }),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "kanban",
     ...commonQueryOptions
   });
 
   const issueKeys = useQuery({
     queryKey: ["dashboard-note-keys", sharedScopeParams],
-    queryFn: () =>
-      fetchJson<IssueKeysPayload>("/api/issues/keys", sharedScopeParams),
+    queryFn: ({ signal }) =>
+      fetchJson<IssueKeysPayload>("/api/issues/keys", sharedScopeParams, {
+        signal
+      }),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "notes"
   });
 
@@ -254,34 +319,46 @@ export function DashboardPage() {
         if (trendChartId) {
           void queryClient.prefetchQuery({
             queryKey: ["dashboard-trend-detail", trendDetailQueryParams],
-            queryFn: () =>
-              fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
+            queryFn: ({ signal }) =>
+              fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams, {
+                signal
+              }),
             staleTime: commonQueryOptions.staleTime
           });
         }
         void queryClient.prefetchQuery({
           queryKey: ["dashboard-intelligence", intelligenceQueryParams],
-          queryFn: () =>
-            fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams),
+          queryFn: ({ signal }) =>
+            fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams, {
+              signal
+            }),
           staleTime: commonQueryOptions.staleTime
         });
       } else if (activePanel === "trends") {
         void queryClient.prefetchQuery({
           queryKey: ["dashboard-overview", overviewQueryParams],
-          queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
+          queryFn: ({ signal }) =>
+            fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams, {
+              signal
+            }),
           staleTime: commonQueryOptions.staleTime
         });
       } else if (activePanel === "insights") {
         void queryClient.prefetchQuery({
           queryKey: ["dashboard-overview", overviewQueryParams],
-          queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
+          queryFn: ({ signal }) =>
+            fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams, {
+              signal
+            }),
           staleTime: commonQueryOptions.staleTime
         });
         if (trendChartId) {
           void queryClient.prefetchQuery({
             queryKey: ["dashboard-trend-detail", trendDetailQueryParams],
-            queryFn: () =>
-              fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
+            queryFn: ({ signal }) =>
+              fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams, {
+                signal
+              }),
             staleTime: commonQueryOptions.staleTime
           });
         }
@@ -296,17 +373,17 @@ export function DashboardPage() {
     overviewQueryParams,
     trendDetailQueryParams,
     intelligenceQueryParams,
-    issuesPanelQueryParams,
-    sharedScopeParams,
     trendChartId,
     commonQueryOptions.staleTime
   ]);
 
   const note = useQuery({
     queryKey: ["dashboard-note", dashboardState.params.notesIssueKey],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<{ note: string }>(
-        `/api/notes/${encodeURIComponent(dashboardState.params.notesIssueKey)}`
+        `/api/notes/${encodeURIComponent(dashboardState.params.notesIssueKey)}`,
+        undefined,
+        { signal }
       ),
     enabled:
       Boolean(workspace?.selectedCountry) &&
