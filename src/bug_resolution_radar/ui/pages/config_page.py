@@ -134,7 +134,7 @@ def _as_str(value: Any) -> str:
 
 def _normalize_cookie_source(value: Any, *, default: str = "browser") -> str:
     token = str(value or "").strip().lower()
-    if token in {"browser", "manual", "auto"}:
+    if token in {"browser", "manual"}:
         return token
     return default
 
@@ -143,8 +143,6 @@ def _cookie_source_label(value: str) -> str:
     token = _normalize_cookie_source(value)
     if token == "manual":
         return "Manual (sin leer cookies del navegador)"
-    if token == "auto":
-        return "Auto (manual si existe; si no browser)"
     return "Browser (lectura local de sesión)"
 
 
@@ -1418,8 +1416,8 @@ def render(settings: Settings) -> None:
         with c3:
             jira_cookie_source = st.selectbox(
                 "Modo sesión Jira",
-                options=["browser", "auto", "manual"],
-                index=["browser", "auto", "manual"].index(jira_cookie_source_default),
+                options=["browser", "manual"],
+                index=["browser", "manual"].index(jira_cookie_source_default),
                 format_func=_cookie_source_label,
                 key="cfg_jira_cookie_source",
             )
@@ -1429,7 +1427,7 @@ def render(settings: Settings) -> None:
             st.session_state["cfg_jira_cookie_header"] = jira_cookie_header
         if jira_cookie_source != "browser":
             jira_cookie_header = st.text_input(
-                "Cookie Jira manual (opcional, solo modo manual/auto)",
+                "Cookie Jira manual (opcional, solo modo manual)",
                 value=jira_cookie_header,
                 key="cfg_jira_cookie_header",
                 type="password",
@@ -1636,8 +1634,8 @@ def render(settings: Settings) -> None:
         with h4:
             helix_cookie_source = st.selectbox(
                 "Modo sesión Helix",
-                options=["browser", "auto", "manual"],
-                index=["browser", "auto", "manual"].index(helix_cookie_source_default),
+                options=["browser", "manual"],
+                index=["browser", "manual"].index(helix_cookie_source_default),
                 format_func=_cookie_source_label,
                 key="cfg_helix_cookie_source",
             )
@@ -1659,7 +1657,7 @@ def render(settings: Settings) -> None:
             st.session_state["cfg_helix_cookie_header"] = helix_cookie_header
         if helix_cookie_source != "browser":
             helix_cookie_header = st.text_input(
-                "Cookie Helix manual (opcional, solo modo manual/auto)",
+                "Cookie Helix manual (opcional, solo modo manual)",
                 value=helix_cookie_header,
                 key="cfg_helix_cookie_header",
                 type="password",

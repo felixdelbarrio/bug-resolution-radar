@@ -15,7 +15,7 @@ from .cookie_utils import (
 
 def _cookie_source() -> str:
     raw = str(os.getenv("JIRA_COOKIE_SOURCE", "browser") or "").strip().lower()
-    if raw in {"manual", "auto"}:
+    if raw == "manual":
         return raw
     return "browser"
 
@@ -38,8 +38,6 @@ def get_jira_session_cookie(browser: str, host: str) -> Optional[str]:
         if manual_cookie:
             return manual_cookie
         raise ValueError("JIRA_COOKIE_SOURCE=manual requiere JIRA_COOKIE_HEADER no vacío.")
-    if source == "auto" and manual_cookie:
-        return manual_cookie
     if not host:
         return None
 

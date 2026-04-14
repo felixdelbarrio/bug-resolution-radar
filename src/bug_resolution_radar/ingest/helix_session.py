@@ -31,7 +31,7 @@ def _related_hosts(host: str) -> list[str]:
 
 def _cookie_source() -> str:
     raw = str(os.getenv("HELIX_COOKIE_SOURCE", "browser") or "").strip().lower()
-    if raw in {"manual", "auto"}:
+    if raw == "manual":
         return raw
     return "browser"
 
@@ -52,8 +52,6 @@ def get_helix_session_cookie(browser: str, host: str) -> Optional[str]:
         if manual_cookie:
             return manual_cookie
         raise ValueError("HELIX_COOKIE_SOURCE=manual requiere HELIX_COOKIE_HEADER no vacío.")
-    if source == "auto" and manual_cookie:
-        return manual_cookie
     if not host:
         return None
 

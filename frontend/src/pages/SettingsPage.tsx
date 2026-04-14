@@ -21,8 +21,7 @@ type SettingsTabId =
   | "jira"
   | "helix"
   | "rollups"
-  | "cache"
-  | "performance";
+  | "cache";
 
 type SourceDraftRow = WorkspaceSource & {
   markedForDeletion?: boolean;
@@ -33,8 +32,7 @@ const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "jira", label: "Jira" },
   { id: "helix", label: "Helix" },
   { id: "rollups", label: "Agregados" },
-  { id: "cache", label: "Cache" },
-  { id: "performance", label: "Performance" }
+  { id: "cache", label: "Cache" }
 ];
 
 const trendChartCatalog = [
@@ -85,7 +83,7 @@ function normalizeCookieSource(value: string | number | undefined, fallback = "b
   const token = String(value ?? "")
     .trim()
     .toLowerCase();
-  if (["browser", "manual", "auto"].includes(token)) {
+  if (["browser", "manual"].includes(token)) {
     return token;
   }
   return fallback;
@@ -838,7 +836,6 @@ export function SettingsPage() {
                     onChange={(event) => setValue("JIRA_COOKIE_SOURCE", event.target.value)}
                   >
                     <option value="browser">Browser (lectura local de sesión)</option>
-                    <option value="auto">Auto (manual si existe; si no browser)</option>
                     <option value="manual">Manual (sin leer cookies del navegador)</option>
                   </select>
                 </label>
@@ -952,7 +949,6 @@ export function SettingsPage() {
                   onChange={(event) => setValue("HELIX_COOKIE_SOURCE", event.target.value)}
                 >
                   <option value="browser">Browser (lectura local de sesión)</option>
-                  <option value="auto">Auto (manual si existe; si no browser)</option>
                   <option value="manual">Manual (sin leer cookies del navegador)</option>
                 </select>
               </label>
@@ -1115,23 +1111,6 @@ export function SettingsPage() {
         </section>
       ) : null}
 
-      {activeTab === "performance" ? (
-        <section className="page-stack">
-          <section className="surface-card page-stack">
-            <h3>Performance</h3>
-            <p className="inline-caption">
-              Panel técnico reservado para snapshots de performance por vista.
-            </p>
-            <section className="surface-panel empty-panel">
-              <h3>Sin muestras en esta sesión</h3>
-              <p>
-                La pestaña mantiene la misma ubicación funcional que en Streamlit. Cuando existan
-                snapshots expuestos por la shell React aparecerán aquí.
-              </p>
-            </section>
-          </section>
-        </section>
-      ) : null}
     </section>
   );
 }
