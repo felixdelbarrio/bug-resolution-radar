@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from functools import lru_cache
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterator, Sequence
+from typing import Any, Dict, Iterator, MutableMapping, Sequence
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -16,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.filtering import FilterState, normalize_filter_tokens
@@ -38,6 +40,7 @@ from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_b
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix as execute_helix_ingest
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira as execute_jira_ingest
 from bug_resolution_radar.models.schema_helix import HelixDocument
+from bug_resolution_radar.repositories.helix_store import load_helix_export_df
 from bug_resolution_radar.reports.service import (
     build_report_filters,
     default_report_export_dir,
@@ -45,7 +48,10 @@ from bug_resolution_radar.reports.service import (
     generate_period_followup_report_artifact,
     save_report_content,
 )
-from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.repositories.issues_store import (
+    load_issues_df,
+    load_issues_workspace_index,
+)
 from bug_resolution_radar.services.dashboard_snapshot import (
     DashboardQuery,
     build_dashboard_defaults,
@@ -82,6 +88,7 @@ from bug_resolution_radar.services.sources_excel import (
     import_sources_from_excel_bytes,
 )
 from bug_resolution_radar.services.tabular_export import (
+    dataframes_to_xlsx_bytes,
     dataframe_to_csv_bytes,
     dataframe_to_xlsx_bytes,
     download_filename,
@@ -90,9 +97,29 @@ from bug_resolution_radar.services.workspace import (
     WorkspaceSelection,
     apply_workspace_source_scope,
     available_sources_by_country,
+    merge_sources_by_country,
 )
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
 from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve bundled frontend assets with SPA fallback for client-side routes."""
+
+    async def get_response(self, path: str, scope: MutableMapping[str, Any]) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            clean_path = str(path or "").lstrip("/")
+            if exc.status_code != 404:
+                raise
+            if scope.get("method") not in {"GET", "HEAD"}:
+                raise
+            if clean_path.startswith("api/"):
+                raise
+            if Path(clean_path).suffix:
+                raise
+            return await super().get_response("index.html", scope)
 
 
 def _repo_root() -> Path:
@@ -292,7 +319,7 @@ def _scoped_dataframe_for_options(
 
 def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
     if df is None or df.empty:
-        return {"status": [], "priority": [], "assignee": [], "quincenal": [QUINCENAL_SCOPE_ALL]}
+        return _empty_filter_options()
 
     out: dict[str, list[str]] = {
         "status": [],
@@ -315,30 +342,99 @@ def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
     return out
 
 
+def _empty_filter_options() -> dict[str, list[str]]:
+    return {"status": [], "priority": [], "assignee": [], "quincenal": [QUINCENAL_SCOPE_ALL]}
+
+
+def _configured_sources_by_country(
+    settings: Settings,
+    *,
+    allowed_source_ids: set[str] | None = None,
+) -> dict[str, list[dict[str, str]]]:
+    grouped: dict[str, list[dict[str, str]]] = {}
+    for row in all_configured_sources(settings):
+        country_name = str(row.get("country") or "").strip()
+        source_id_value = str(row.get("source_id") or "").strip()
+        if not country_name or not source_id_value:
+            continue
+        if allowed_source_ids is not None and source_id_value not in allowed_source_ids:
+            continue
+        grouped.setdefault(country_name, []).append(dict(row))
+    for country_name, rows in list(grouped.items()):
+        grouped[country_name] = sorted(
+            rows,
+            key=lambda item: (
+                str(item.get("alias") or "").casefold(),
+                str(item.get("source_id") or "").casefold(),
+            ),
+        )
+    return grouped
+
+
+def _sources_by_country_from_index(
+    index_payload: dict[str, Any],
+) -> dict[str, list[dict[str, str]]]:
+    raw = dict(index_payload.get("sourcesByCountry") or {})
+    out: dict[str, list[dict[str, str]]] = {}
+    for country_name, rows in raw.items():
+        bucket: list[dict[str, str]] = []
+        for row in list(rows or []):
+            source_id_value = str(row.get("source_id") or "").strip()
+            source_country = str(row.get("country") or country_name or "").strip()
+            if not source_id_value or not source_country:
+                continue
+            bucket.append(
+                {
+                    "source_id": source_id_value,
+                    "country": source_country,
+                    "alias": str(row.get("alias") or source_id_value).strip() or source_id_value,
+                    "source_type": str(row.get("source_type") or "").strip().lower() or "jira",
+                }
+            )
+        if bucket:
+            out[str(country_name)] = bucket
+    return out
+
+
 def _workspace_payload(
     settings: Settings,
     *,
     country: str = "",
     source_id: str = "",
     scope_mode: str = "source",
+    include_filter_options: bool = True,
 ) -> dict[str, Any]:
+    df_all = pd.DataFrame()
+    has_data = False
     try:
-        df_all = load_issues_df(settings.DATA_PATH)
+        data_index = load_issues_workspace_index(settings.DATA_PATH)
     except Exception:
-        df_all = pd.DataFrame()
-
-    sources_by_country = (
-        available_sources_by_country(settings, df_all=df_all)
-        if isinstance(df_all, pd.DataFrame) and not df_all.empty
-        else {}
+        data_index = {}
+    index_sources_by_country = _sources_by_country_from_index(data_index)
+    indexed_source_ids = {
+        str(row.get("source_id") or "").strip()
+        for rows in index_sources_by_country.values()
+        for row in list(rows or [])
+        if str(row.get("source_id") or "").strip()
+    }
+    sources_by_country = merge_sources_by_country(
+        _configured_sources_by_country(
+            settings,
+            allowed_source_ids=indexed_source_ids or None,
+        ),
+        index_sources_by_country,
     )
+    has_data = bool(data_index.get("hasData"))
+    if include_filter_options:
+        try:
+            df_all = load_issues_df(settings.DATA_PATH)
+        except Exception:
+            df_all = pd.DataFrame()
+        if isinstance(df_all, pd.DataFrame) and not df_all.empty:
+            has_data = True
+            sources_by_country = available_sources_by_country(settings, df_all=df_all)
     if not sources_by_country:
-        configured = all_configured_sources(settings)
-        for source in configured:
-            src_country = str(source.get("country") or "").strip()
-            if not src_country:
-                continue
-            sources_by_country.setdefault(src_country, []).append(source)
+        sources_by_country = _configured_sources_by_country(settings)
 
     countries = list(sources_by_country.keys())
     selected_country = str(country or "").strip()
@@ -370,21 +466,28 @@ def _workspace_payload(
         source_id=selected_source_id,
         scope_mode=normalized_scope_mode,
     )
-    scoped_df = _scoped_dataframe_for_options(settings, workspace=workspace)
+    scoped_df = (
+        _scoped_dataframe_for_options(settings, workspace=workspace)
+        if include_filter_options
+        else pd.DataFrame()
+    )
     active_source_ids = (
         [selected_source_id]
         if workspace.scope_mode == "source" and selected_source_id
         else list(configured_rollup or source_ids)
     )
-    filter_options = _filter_options(scoped_df)
-    filter_options["quincenal"] = list(
-        quincenal_scope_options(
-            scoped_df,
-            settings=settings,
-            country=selected_country,
-            source_ids=active_source_ids,
-        ).keys()
+    filter_options = (
+        _filter_options(scoped_df) if include_filter_options else _empty_filter_options()
     )
+    if include_filter_options:
+        filter_options["quincenal"] = list(
+            quincenal_scope_options(
+                scoped_df,
+                settings=settings,
+                country=selected_country,
+                source_ids=active_source_ids,
+            ).keys()
+        )
 
     return {
         "countries": [
@@ -400,7 +503,7 @@ def _workspace_payload(
         "scopeMode": workspace.scope_mode,
         "hasCountryRollup": bool(configured_rollup),
         "countryRollupSourceIds": configured_rollup,
-        "hasData": bool(isinstance(df_all, pd.DataFrame) and not df_all.empty),
+        "hasData": bool(has_data),
         "filterOptions": filter_options,
     }
 
@@ -435,6 +538,84 @@ def _export_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFr
     )
     rows = list(result.get("rows") or [])
     return pd.DataFrame(rows)
+
+
+def _helix_data_path_and_mtime(settings: Settings) -> tuple[str, int]:
+    helix_path = (
+        str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip() or "data/helix_dump.json"
+    )
+    resolved = Path(helix_path).expanduser()
+    if not resolved.exists():
+        return "", -1
+    try:
+        return str(resolved.resolve()), int(resolved.stat().st_mtime_ns)
+    except Exception:
+        return str(resolved), -1
+
+
+def _helix_raw_export_bytes(settings: Settings, *, query: DashboardQuery) -> bytes:
+    export_df = _export_dataframe(settings, query=query)
+    if export_df.empty:
+        raise HTTPException(status_code=400, detail="No hay incidencias para exportar.")
+    if "source_type" not in export_df.columns:
+        raise HTTPException(
+            status_code=400, detail="El scope actual no contiene metadatos de origen."
+        )
+
+    helix_df = export_df.loc[
+        export_df["source_type"].fillna("").astype(str).str.strip().str.lower().eq("helix")
+    ].copy(deep=False)
+    if helix_df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay incidencias Helix en el alcance actual para exportar.",
+        )
+
+    helix_path, _ = _helix_data_path_and_mtime(settings)
+    if not helix_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No se ha encontrado el volcado Helix requerido para la exportación raw.",
+        )
+
+    raw_store_df = load_helix_export_df(helix_path)
+    if raw_store_df.empty or "merge_key" not in raw_store_df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail="No se ha podido cargar el dataset raw de Helix para la exportación.",
+        )
+
+    merge_keys = {
+        (
+            f"{str(source_id or '').strip().lower()}::{str(issue_key or '').strip().upper()}"
+            if str(source_id or "").strip()
+            else str(issue_key or "").strip().upper()
+        )
+        for source_id, issue_key in helix_df.loc[:, ["source_id", "key"]].itertuples(
+            index=False, name=None
+        )
+        if str(issue_key or "").strip()
+    }
+    raw_df = raw_store_df.loc[
+        raw_store_df["merge_key"].fillna("").astype(str).isin(merge_keys)
+    ].copy(deep=False)
+    if raw_df is None or raw_df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No se han encontrado filas raw de Helix para las incidencias filtradas.",
+        )
+    raw_df = raw_df.drop(
+        columns=[col for col in ("merge_key", "source_id") if col in raw_df.columns],
+        errors="ignore",
+    )
+
+    return dataframes_to_xlsx_bytes(
+        [("Helix Raw", raw_df)],
+        include_index=False,
+        hyperlink_columns_by_sheet={
+            "Helix Raw": [("ID de la Incidencia", "__item_url__")],
+        },
+    )
 
 
 class SourceSelectionRequest(BaseModel):
@@ -558,6 +739,7 @@ def create_app() -> FastAPI:
                 country=country,
                 source_id=sourceId,
                 scope_mode=scopeMode,
+                include_filter_options=False,
             ),
             "chartsCatalog": [
                 {"id": "timeseries", "label": "Evolución"},
@@ -630,6 +812,7 @@ def create_app() -> FastAPI:
             country=query.workspace.country,
             source_id=query.workspace.source_id,
             scope_mode=query.workspace.scope_mode,
+            include_filter_options=False,
         )
         return payload
 
@@ -811,6 +994,40 @@ def create_app() -> FastAPI:
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             filename = download_filename("issues", ext="xlsx")
         return Response(content=content, media_type=media_type, headers=_download_headers(filename))
+
+    @app.get("/api/issues/export/helix-raw")
+    def issues_export_helix_raw(
+        country: str = "",
+        sourceId: str = "",
+        scopeMode: str = "source",
+        status: str = "",
+        priority: str = "",
+        assignee: str = "",
+        quincenalScope: str = QUINCENAL_SCOPE_ALL,
+        issueKeys: str = "",
+        issueSortCol: str = "",
+        issueLikeQuery: str = "",
+    ) -> Response:
+        settings = load_settings()
+        query = _dashboard_query(
+            country=country,
+            source_id=sourceId,
+            scope_mode=scopeMode,
+            status=status,
+            priority=priority,
+            assignee=assignee,
+            quincenal_scope=quincenalScope,
+            issue_keys=issueKeys,
+            issue_sort_col=issueSortCol,
+            issue_like_query=issueLikeQuery,
+        )
+        content = _helix_raw_export_bytes(settings, query=query)
+        filename = download_filename("helix_raw_issues", ext="xlsx")
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=_download_headers(filename),
+        )
 
     @app.get("/api/kanban")
     def kanban(
@@ -1286,7 +1503,7 @@ def create_app() -> FastAPI:
 
     static_dir = _frontend_dist_dir()
     if static_dir is not None:
-        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+        app.mount("/", SPAStaticFiles(directory=str(static_dir), html=True), name="frontend")
     else:
         dev_url = _frontend_dev_url()
 

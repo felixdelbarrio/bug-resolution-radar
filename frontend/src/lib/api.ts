@@ -369,6 +369,10 @@ export type IngestProgressPayload = {
   totalSources: number;
   completedSources: number;
   successCount: number;
+  currentSourceLabel?: string;
+  currentSourceIndex?: number;
+  elapsedSeconds?: number;
+  maxRunSeconds?: number;
   summary: string;
   messages: Array<{ ok: boolean; message: string }>;
   result?: IngestResult | null;
@@ -502,6 +506,10 @@ export async function downloadFromApi(
     await parseError(response);
   }
   const blob = await response.blob();
+  saveBlobResponse(blob, response, suggestedName);
+}
+
+function saveBlobResponse(blob: Blob, response: Response, suggestedName: string) {
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const filenameMatch = disposition.match(/filename="([^"]+)"/);
   const filename = filenameMatch?.[1] ?? suggestedName;
@@ -509,8 +517,16 @@ export async function downloadFromApi(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    anchor.remove();
+  }, 0);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 60_000);
 }
 
 export async function downloadGet(
@@ -525,15 +541,7 @@ export async function downloadGet(
     await parseError(response);
   }
   const blob = await response.blob();
-  const disposition = response.headers.get("Content-Disposition") ?? "";
-  const filenameMatch = disposition.match(/filename="([^"]+)"/);
-  const filename = filenameMatch?.[1] ?? suggestedName;
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  saveBlobResponse(blob, response, suggestedName);
 }
 
 export async function downloadSourcesExcel(sourceType: SourceType, suggestedName: string) {

@@ -8,8 +8,7 @@ from typing import Any, Dict, List
 
 from bug_resolution_radar.config import Settings, helix_sources, jira_sources, save_settings
 from bug_resolution_radar.models.schema import IssuesDocument
-from bug_resolution_radar.models.schema_helix import HelixDocument
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
+from bug_resolution_radar.repositories.helix_store import load_helix_meta
 from bug_resolution_radar.repositories.issues_store import load_issues_doc
 
 
@@ -50,15 +49,14 @@ def _jira_last_ingest_payload(issues_doc: IssuesDocument) -> dict[str, Any]:
     }
 
 
-def _helix_last_ingest_payload(helix_doc: HelixDocument, *, helix_path: str) -> dict[str, Any]:
-    helix_source_ids = {str(item.source_id or "").strip() for item in helix_doc.items}
+def _helix_last_ingest_payload(helix_meta: dict[str, Any], *, helix_path: str) -> dict[str, Any]:
     return {
-        "schema_version": helix_doc.schema_version,
-        "ingested_at": helix_doc.ingested_at,
-        "helix_base_url": helix_doc.helix_base_url,
-        "query": helix_doc.query,
-        "helix_source_count": len([source_id for source_id in helix_source_ids if source_id]),
-        "items_count": len(helix_doc.items),
+        "schema_version": str(helix_meta.get("schema_version", "1.0") or "1.0"),
+        "ingested_at": str(helix_meta.get("ingested_at", "") or ""),
+        "helix_base_url": str(helix_meta.get("helix_base_url", "") or ""),
+        "query": str(helix_meta.get("query", "") or ""),
+        "helix_source_count": int(helix_meta.get("helix_source_count", 0) or 0),
+        "items_count": int(helix_meta.get("items_count", 0) or 0),
         "data_path": helix_path,
     }
 
@@ -82,8 +80,7 @@ def ingest_overview_payload(settings: Settings) -> dict[str, Any]:
     helix_cfg = list(helix_sources(settings))
     issues_doc = load_issues_doc(settings.DATA_PATH)
     helix_path = _helix_data_path(settings)
-    helix_repo = HelixRepo(Path(helix_path))
-    helix_doc = helix_repo.load() or HelixDocument.empty()
+    helix_meta = load_helix_meta(helix_path)
 
     jira_source_ids = [
         str(source.get("source_id", "")).strip()
@@ -125,7 +122,7 @@ def ingest_overview_payload(settings: Settings) -> dict[str, Any]:
                 configured_source_ids=helix_source_ids,
                 disabled_source_ids=helix_disabled,
             ),
-            "lastIngest": _helix_last_ingest_payload(helix_doc, helix_path=helix_path),
+            "lastIngest": _helix_last_ingest_payload(helix_meta, helix_path=helix_path),
         },
     }
 

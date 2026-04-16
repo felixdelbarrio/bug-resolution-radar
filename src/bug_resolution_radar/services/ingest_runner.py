@@ -15,6 +15,7 @@ from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.repositories.issues_store import load_issues_doc, save_issues_doc
 
 SourceProgressCallback = Callable[[bool, str, int, int], None]
+SourceStartCallback = Callable[[str, int, int], None]
 
 
 def _get_helix_path(settings: Settings) -> str:
@@ -26,6 +27,14 @@ def _issue_merge_key(issue: NormalizedIssue) -> str:
     sid = str(issue.source_id or "").strip().lower()
     key = str(issue.key or "").strip().upper()
     return f"{sid}::{key}" if sid else key
+
+
+def _source_progress_label(source: Dict[str, str]) -> str:
+    alias = str(source.get("alias", "")).strip()
+    country = str(source.get("country", "")).strip()
+    if alias and country:
+        return f"{alias} ({country})"
+    return alias or country or str(source.get("source_id", "")).strip() or "Fuente"
 
 
 def _merge_issues(doc: IssuesDocument, incoming: List[NormalizedIssue]) -> IssuesDocument:
@@ -96,6 +105,7 @@ def run_jira_ingest(
     *,
     selected_sources: List[Dict[str, str]],
     on_source_result: SourceProgressCallback | None = None,
+    on_source_start: SourceStartCallback | None = None,
     persist_each_source: bool = True,
 ) -> dict[str, Any]:
     work_doc = load_issues_doc(settings.DATA_PATH)
@@ -105,7 +115,9 @@ def run_jira_ingest(
     sources = list(selected_sources or [])
     total_sources = len(sources)
     completed_sources = 0
-    for src in sources:
+    for position, src in enumerate(sources, start=1):
+        if on_source_start is not None:
+            on_source_start(_source_progress_label(src), int(position), int(total_sources))
         ok, msg, new_doc = ingest_jira(
             settings=settings, dry_run=False, existing_doc=work_doc, source=src
         )
@@ -152,6 +164,7 @@ def run_helix_ingest(
     *,
     selected_sources: List[Dict[str, str]],
     on_source_result: SourceProgressCallback | None = None,
+    on_source_start: SourceStartCallback | None = None,
     persist_each_source: bool = True,
 ) -> dict[str, Any]:
     helix_path = _get_helix_path(settings)
@@ -171,7 +184,9 @@ def run_helix_ingest(
     sources = list(selected_sources or [])
     total_sources = len(sources)
     completed_sources = 0
-    for src in sources:
+    for position, src in enumerate(sources, start=1):
+        if on_source_start is not None:
+            on_source_start(_source_progress_label(src), int(position), int(total_sources))
         ok, msg, new_helix_doc = ingest_helix(
             browser=helix_browser,
             country=str(src.get("country", "")).strip(),
