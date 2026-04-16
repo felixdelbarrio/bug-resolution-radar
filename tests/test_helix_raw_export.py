@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
-from bug_resolution_radar.ui.dashboard.exports.helix_raw_export import (
+from bug_resolution_radar.services.helix_raw_export import (
     build_helix_raw_export_frame,
 )
 

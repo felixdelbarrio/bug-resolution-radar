@@ -13,7 +13,10 @@ from typing import Any, Dict, List, Set
 from dotenv import dotenv_values
 from pydantic import BaseModel
 
-from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.repositories.issues_store import (
+    load_issues_df,
+    load_issues_workspace_index,
+)
 
 
 def _default_user_config_home() -> Path:
@@ -583,20 +586,17 @@ def country_rollup_sources(settings: Settings) -> Dict[str, List[str]]:
 
     available_by_country: Dict[str, set[str]] = {}
     try:
-        df_all = load_issues_df(str(getattr(settings, "DATA_PATH", "") or ""))
+        index_payload = load_issues_workspace_index(str(getattr(settings, "DATA_PATH", "") or ""))
     except Exception:
-        df_all = None
-    if (
-        df_all is not None
-        and not df_all.empty
-        and {"country", "source_id"}.issubset(df_all.columns)
-    ):
-        for row in df_all[["country", "source_id"]].dropna().to_dict(orient="records"):
-            country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
+        index_payload = {}
+    for raw_country, source_rows in dict(index_payload.get("sourcesByCountry") or {}).items():
+        country = _normalize_country(_coerce_str(raw_country), supported=countries)
+        if not country:
+            continue
+        for row in list(source_rows or []):
             sid = _coerce_str(row.get("source_id"))
-            if not country or not sid:
-                continue
-            available_by_country.setdefault(country, set()).add(sid)
+            if sid:
+                available_by_country.setdefault(country, set()).add(sid)
 
     out: Dict[str, List[str]] = {}
     for row in rows:

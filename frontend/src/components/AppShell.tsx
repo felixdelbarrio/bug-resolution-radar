@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useDashboardParams } from "../hooks/useDashboardParams";
 import {
@@ -25,6 +30,8 @@ const dashboardTabs = [
 export type ShellContextValue = {
   bootstrap?: BootstrapPayload;
   workspace?: WorkspaceData;
+  workspaceLoading: boolean;
+  workspaceRefreshing: boolean;
   dashboardState: ReturnType<typeof useDashboardParams>;
   themeMode: "light" | "dark";
 };
@@ -76,10 +83,13 @@ export function AppShell() {
     staleTime: 45_000,
     gcTime: 300_000,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false
+    refetchOnReconnect: false,
+    placeholderData: keepPreviousData
   });
 
   const workspace = bootstrap.data?.workspace;
+  const workspaceLoading = bootstrap.isLoading && !bootstrap.data;
+  const workspaceRefreshing = bootstrap.isFetching;
   const isDashboard = location.pathname === "/dashboard";
   const isReports = location.pathname === "/reports";
   const isIngest = location.pathname === "/ingest";
@@ -225,6 +235,15 @@ export function AppShell() {
       .map((source) => `${source.alias} · ${String(source.source_type || "").toUpperCase()}`);
     return labels.join(" · ");
   }, [workspace]);
+
+  const countryOptions = workspace?.countries ?? [];
+  const sourceOptions = workspace?.sources ?? [];
+  const sourceSelectDisabled =
+    workspaceLoading ||
+    workspaceRefreshing ||
+    !workspace?.selectedCountry ||
+    sourceOptions.length === 0;
+
   return (
     <div className="app-shell">
       <header className="bbva-hero">
@@ -234,7 +253,10 @@ export function AppShell() {
         </div>
       </header>
 
-      <section className="workspace-scope-bar surface-panel">
+      <section
+        className={cn("workspace-scope-bar", "surface-panel", workspaceRefreshing && "is-loading")}
+        aria-busy={workspaceRefreshing}
+      >
         <div className="workspace-country-field">
           <label className="field-label" htmlFor="workspace-country">
             País
@@ -242,6 +264,7 @@ export function AppShell() {
           <select
             id="workspace-country"
             value={workspace?.selectedCountry ?? ""}
+            disabled={workspaceLoading || workspaceRefreshing || countryOptions.length === 0}
             onChange={(event) =>
               handleScopeChange({
                 country: event.target.value,
@@ -250,21 +273,26 @@ export function AppShell() {
               })
             }
           >
-            {(workspace?.countries ?? []).map((country) => (
-              <option key={country.country} value={country.country}>
-                {country.country}
-              </option>
-            ))}
+            {countryOptions.length > 0 ? (
+              countryOptions.map((country) => (
+                <option key={country.country} value={country.country}>
+                  {country.country}
+                </option>
+              ))
+            ) : (
+              <option value="">{workspaceLoading ? "Cargando países..." : "Sin países"}</option>
+            )}
           </select>
         </div>
 
         <div className="workspace-scope-detail">
-          {workspace?.hasCountryRollup ? (
-            <>
+          <div className="workspace-rollup-slot">
+            {workspace?.hasCountryRollup ? (
               <label className="checkbox-field">
                 <input
                   type="checkbox"
                   checked={(workspace?.scopeMode ?? "source") === "country"}
+                  disabled={workspaceRefreshing}
                   onChange={(event) =>
                     handleScopeChange({
                       scopeMode: event.target.checked ? "country" : "source"
@@ -273,56 +301,55 @@ export function AppShell() {
                 />
                 <span>Vista agregada</span>
               </label>
+            ) : (
+              <div className="workspace-rollup-placeholder">
+                <span className="field-label">Vista agregada</span>
+                <small>No disponible en este alcance</small>
+              </div>
+            )}
+          </div>
 
-              {(workspace?.scopeMode ?? "source") === "source" ? (
-                <div className="workspace-source-field">
-                  <label className="field-label" htmlFor="workspace-source">
-                    Origen
-                  </label>
-                  <select
-                    id="workspace-source"
-                    value={workspace?.selectedSourceId ?? ""}
-                    onChange={(event) =>
-                      handleScopeChange({
-                        sourceId: event.target.value
-                      })
-                    }
-                  >
-                    {(workspace?.sources ?? []).map((source) => (
+          <div className="workspace-source-slot">
+            {(workspace?.hasCountryRollup && (workspace?.scopeMode ?? "source") === "country") ? (
+              <p className="workspace-rollup-caption">
+                {rollupPreview ? `Agregado país activo: ${rollupPreview}` : "Agregado país activo"}
+              </p>
+            ) : (
+              <div className="workspace-source-field">
+                <label className="field-label" htmlFor="workspace-source">
+                  Origen
+                </label>
+                <select
+                  id="workspace-source"
+                  value={workspace?.selectedSourceId ?? ""}
+                  disabled={sourceSelectDisabled}
+                  onChange={(event) =>
+                    handleScopeChange({
+                      sourceId: event.target.value
+                    })
+                  }
+                >
+                  {sourceOptions.length > 0 ? (
+                    sourceOptions.map((source) => (
                       <option key={source.source_id} value={source.source_id}>
                         {source.alias} · {String(source.source_type || "").toUpperCase()}
                       </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <p className="workspace-rollup-caption">
-                  {rollupPreview ? `Agregado país activo: ${rollupPreview}` : "Agregado país activo"}
-                </p>
-              )}
-            </>
-          ) : (
-            <div className="workspace-source-field">
-              <label className="field-label" htmlFor="workspace-source">
-                Origen
-              </label>
-              <select
-                id="workspace-source"
-                value={workspace?.selectedSourceId ?? ""}
-                onChange={(event) =>
-                  handleScopeChange({
-                    sourceId: event.target.value
-                  })
-                }
-              >
-                {(workspace?.sources ?? []).map((source) => (
-                  <option key={source.source_id} value={source.source_id}>
-                    {source.alias} · {String(source.source_type || "").toUpperCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+                    ))
+                  ) : (
+                    <option value="">
+                      {workspaceLoading ? "Cargando orígenes..." : "Sin origen disponible"}
+                    </option>
+                  )}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="workspace-scope-status">
+            {workspaceRefreshing ? (
+              <span className="workspace-loading-pill">Actualizando alcance…</span>
+            ) : null}
+          </div>
         </div>
       </section>
 
@@ -408,6 +435,8 @@ export function AppShell() {
           context={{
             bootstrap: bootstrap.data,
             workspace,
+            workspaceLoading,
+            workspaceRefreshing,
             dashboardState,
             themeMode
           } satisfies ShellContextValue}

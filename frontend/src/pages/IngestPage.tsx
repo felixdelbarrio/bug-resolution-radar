@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import {
   fetchJson,
   type IngestProgressPayload,
@@ -69,30 +74,6 @@ const CONNECTOR_COPY: Record<
   }
 };
 
-function resetLastIngest(
-  connector: Connector,
-  payload: IngestLastRunPayload
-): IngestLastRunPayload {
-  if (connector === "jira") {
-    return {
-      ...payload,
-      ingested_at: "",
-      jira_base_url: "",
-      query: "",
-      jira_source_count: 0,
-      issues_count: 0
-    };
-  }
-  return {
-    ...payload,
-    ingested_at: "",
-    helix_base_url: "",
-    query: "",
-    helix_source_count: 0,
-    items_count: 0
-  };
-}
-
 function JsonBlock({ payload }: { payload: IngestLastRunPayload }) {
   return (
     <pre className="ingest-json-block">
@@ -145,18 +126,63 @@ function LiveProgressPanel({
   }
   const completed = Math.max(0, Number(progress.completedSources || 0));
   const total = Math.max(0, Number(progress.totalSources || 0));
+  const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  const elapsedSeconds = Math.max(0, Number(progress.elapsedSeconds || 0));
+  const maxRunSeconds = Math.max(0, Number(progress.maxRunSeconds || 0));
+  const currentSourceIndex = Math.max(0, Number(progress.currentSourceIndex || 0));
+  const currentSourceLabel = String(progress.currentSourceLabel || "").trim();
 
   return (
-    <section className="inline-notice page-stack">
-      <strong>
-        {connector === "jira" ? "Jira" : "Helix"} · ejecución #{progress.runId}
-      </strong>
-      <p className="inline-caption">
-        Estado: {progress.state} · progreso {completed}/{total}
-      </p>
+    <section
+      className={cn(
+        "inline-notice",
+        "page-stack",
+        "ingest-live-panel",
+        progress.active && "ingest-live-panel-active"
+      )}
+    >
+      <div className="ingest-live-head">
+        <strong>
+          {connector === "jira" ? "Jira" : "Helix"} · ejecución #{progress.runId}
+        </strong>
+        <span className={cn("ingest-state-pill", `ingest-state-${progress.state}`)}>
+          {progress.state}
+        </span>
+      </div>
+      <div className="ingest-progress-meta">
+        <span>
+          Progreso {completed}/{total} · {pct}%
+        </span>
+        <span>
+          {maxRunSeconds > 0
+            ? `Tiempo ${elapsedSeconds}s / ${maxRunSeconds}s`
+            : `Tiempo ${elapsedSeconds}s`}
+        </span>
+      </div>
+      <div
+        className="ingest-progress-track"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label={`Progreso ${connector}`}
+      >
+        <div className="ingest-progress-bar" style={{ width: `${Math.max(pct, progress.active ? 8 : 0)}%` }} />
+      </div>
+      {currentSourceLabel ? (
+        <div className="ingest-current-source">
+          <span className="ingest-pulse-dot" />
+          <strong>{currentSourceLabel}</strong>
+          {total > 0 ? (
+            <span className="inline-caption">
+              fuente {Math.max(1, currentSourceIndex)}/{total}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {progress.summary ? <p className="inline-caption">{progress.summary}</p> : null}
       <ul className="signal-list">
-        {progress.messages.map((item, index) => (
+        {progress.messages.slice(-6).map((item, index) => (
           <li
             key={`${progress.runId}-${index}-${item.message}`}
             className={item.ok ? "ingest-feedback-ok" : "ingest-feedback-error"}
@@ -237,6 +263,13 @@ function IngestSourceTable({
 
 export function IngestPage() {
   const queryClient = useQueryClient();
+  const commonQueryOptions = {
+    staleTime: 45_000,
+    gcTime: 300_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    placeholderData: keepPreviousData
+  } as const;
   const [activeTab, setActiveTab] = useState<Connector>("jira");
   const [jiraSelection, setJiraSelection] = useState<string[]>([]);
   const [helixSelection, setHelixSelection] = useState<string[]>([]);
@@ -248,12 +281,14 @@ export function IngestPage() {
   const settings = useQuery({
     queryKey: ["settings-ingest"],
     queryFn: async () =>
-      normalizeSettingsPayload(await fetchJson<SettingsPayload>("/api/settings"))
+      normalizeSettingsPayload(await fetchJson<SettingsPayload>("/api/settings")),
+    ...commonQueryOptions
   });
 
   const overview = useQuery({
     queryKey: ["ingest-overview"],
-    queryFn: () => fetchJson<IngestOverviewPayload>("/api/ingest/overview")
+    queryFn: () => fetchJson<IngestOverviewPayload>("/api/ingest/overview"),
+    ...commonQueryOptions
   });
 
   const jiraProgress = useQuery({
@@ -513,9 +548,7 @@ export function IngestPage() {
     testMutation.isPending ||
     ingestStartMutation.isPending ||
     Boolean(connectorProgress?.active);
-  const displayedLastIngest = connectorProgress?.active
-    ? resetLastIngest(connector, connectorOverview.lastIngest)
-    : connectorOverview.lastIngest;
+  const displayedLastIngest = connectorOverview.lastIngest;
 
   function handleToggle(sourceId: string) {
     const current = connector === "jira" ? jiraSelection : helixSelection;
@@ -609,8 +642,8 @@ export function IngestPage() {
           <h3>{copy.lastRunTitle}</h3>
           {connectorProgress?.active ? (
             <p className="inline-caption">
-              Nueva ingesta en curso: se ocultan temporalmente los resultados de la ingesta
-              previa.
+              Nueva ingesta en curso: se mantiene visible el último snapshot estable mientras
+              avanza el pipeline.
             </p>
           ) : null}
         </div>

@@ -26,6 +26,8 @@ class _IngestProgress:
     total_sources: int = 0
     completed_sources: int = 0
     success_count: int = 0
+    current_source_label: str = ""
+    current_source_index: int = 0
     messages: List[Dict[str, Any]] = field(default_factory=list)
     summary: str = ""
     result: Dict[str, Any] | None = None
@@ -82,6 +84,13 @@ def _entry(connector: str) -> _IngestProgress:
 
 
 def _snapshot(entry: _IngestProgress) -> Dict[str, Any]:
+    now_mono = time.monotonic()
+    elapsed = 0
+    if (
+        str(entry.state or "").strip().lower() == "running"
+        and float(entry.started_monotonic or 0.0) > 0
+    ):
+        elapsed = max(0, int(now_mono - float(entry.started_monotonic)))
     return {
         "connector": entry.connector,
         "runId": int(entry.run_id),
@@ -92,6 +101,9 @@ def _snapshot(entry: _IngestProgress) -> Dict[str, Any]:
         "totalSources": int(entry.total_sources),
         "completedSources": int(entry.completed_sources),
         "successCount": int(entry.success_count),
+        "currentSourceLabel": str(entry.current_source_label or ""),
+        "currentSourceIndex": int(entry.current_source_index or 0),
+        "elapsedSeconds": int(elapsed),
         "summary": str(entry.summary or ""),
         "maxRunSeconds": int(entry.max_run_seconds or 0),
         "messages": [dict(msg) for msg in list(entry.messages or [])],
@@ -141,6 +153,8 @@ def _start_progress(
         entry.total_sources = max(0, int(total_sources))
         entry.completed_sources = 0
         entry.success_count = 0
+        entry.current_source_label = ""
+        entry.current_source_index = 0
         entry.messages = []
         entry.summary = ""
         entry.result = None
@@ -192,6 +206,8 @@ def _recover_stuck_run_if_needed(connector: str) -> bool:
         entry.state = "error"
         entry.finished_at = now_iso()
         entry.summary = "La ingesta se detuvo por watchdog de ejecución."
+        entry.current_source_label = ""
+        entry.current_source_index = 0
         entry.result = {
             "state": "error",
             "summary": entry.summary,
@@ -226,6 +242,37 @@ def _append_progress(
         entry.messages.append({"ok": bool(ok), "message": str(message or "").strip()})
 
 
+def _mark_source_started(
+    connector: str,
+    *,
+    run_id: int,
+    source_label: str,
+    source_index: int,
+    total_sources: int,
+) -> None:
+    key = _normalize_connector(connector)
+    label = str(source_label or "").strip()
+    with _LOCK:
+        entry = _entry(key)
+        if int(entry.run_id) != int(run_id):
+            return
+        if entry.state != "running":
+            return
+        entry.total_sources = max(0, int(total_sources))
+        entry.current_source_label = label
+        entry.current_source_index = max(0, int(source_index))
+        if label:
+            entry.messages.append(
+                {
+                    "ok": True,
+                    "message": (
+                        f"Iniciando {label} "
+                        f"({max(1, int(source_index))}/{max(1, int(total_sources))})."
+                    ),
+                }
+            )
+
+
 def _finish_progress(connector: str, *, run_id: int, result: Dict[str, Any]) -> None:
     key = _normalize_connector(connector)
     normalized_result = dict(result or {})
@@ -239,6 +286,8 @@ def _finish_progress(connector: str, *, run_id: int, result: Dict[str, Any]) -> 
         entry.total_sources = int(
             normalized_result.get("total_sources") or entry.total_sources or 0
         )
+        entry.current_source_label = ""
+        entry.current_source_index = 0
         if int(entry.total_sources) > 0:
             entry.completed_sources = int(entry.total_sources)
         else:
@@ -265,6 +314,8 @@ def _fail_progress(connector: str, *, run_id: int, detail: str) -> None:
         entry.state = "error"
         entry.finished_at = now_iso()
         entry.summary = "La ingesta terminó con error."
+        entry.current_source_label = ""
+        entry.current_source_index = 0
         entry.result = {
             "state": "error",
             "summary": entry.summary,
@@ -315,6 +366,13 @@ def start_ingest_job(
                     result = run_jira_ingest(
                         settings_snapshot,
                         selected_sources=sources,
+                        on_source_start=lambda label, index, total: _mark_source_started(
+                            key,
+                            run_id=run_id,
+                            source_label=label,
+                            source_index=index,
+                            total_sources=total,
+                        ),
                         on_source_result=lambda ok, msg, completed, total: _append_progress(
                             key,
                             run_id=run_id,
@@ -328,6 +386,13 @@ def start_ingest_job(
                     result = run_helix_ingest(
                         settings_snapshot,
                         selected_sources=sources,
+                        on_source_start=lambda label, index, total: _mark_source_started(
+                            key,
+                            run_id=run_id,
+                            source_label=label,
+                            source_index=index,
+                            total_sources=total,
+                        ),
                         on_source_result=lambda ok, msg, completed, total: _append_progress(
                             key,
                             run_id=run_id,

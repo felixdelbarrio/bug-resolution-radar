@@ -15,7 +15,8 @@ import {
   type IssueKeysPayload,
   type IssuesPayload,
   type KanbanPayload,
-  type TrendDetailPayload
+  type TrendDetailPayload,
+  type WorkspaceData
 } from "../lib/api";
 import type { ShellContextValue } from "../components/AppShell";
 import { ChartFigure } from "../components/ChartFigure";
@@ -94,7 +95,14 @@ function QueryErrorState({ title, error }: { title: string; error: unknown }) {
 }
 
 export function DashboardPage() {
-  const { bootstrap, workspace, dashboardState, themeMode } =
+  const {
+    bootstrap,
+    workspace,
+    workspaceLoading,
+    workspaceRefreshing,
+    dashboardState,
+    themeMode
+  } =
     useOutletContext<ShellContextValue>();
   const queryClient = useQueryClient();
   const darkMode = themeMode === "dark";
@@ -162,6 +170,34 @@ export function DashboardPage() {
       pageSize
     ]
   );
+  const workspaceDetail = useQuery({
+    queryKey: [
+      "workspace-options",
+      dashboardState.params.country,
+      dashboardState.params.sourceId,
+      dashboardState.params.scopeMode
+    ],
+    queryFn: () =>
+      fetchJson<WorkspaceData>("/api/workspace", {
+        country: dashboardState.params.country,
+        sourceId: dashboardState.params.sourceId,
+        scopeMode: dashboardState.params.scopeMode
+      }),
+    enabled:
+      Boolean(workspace?.selectedCountry) &&
+      (activePanel === "issues" || activePanel === "kanban"),
+    ...commonQueryOptions
+  });
+  const issueWorkspace = workspaceDetail.data ?? workspace;
+  const selectedSourceType = useMemo(() => {
+    if (!issueWorkspace) {
+      return "";
+    }
+    return String(
+      issueWorkspace.sources.find((row) => row.source_id === issueWorkspace.selectedSourceId)
+        ?.source_type ?? ""
+    );
+  }, [issueWorkspace]);
 
   useEffect(() => {
     if (!bootstrap?.dashboardDefaults.defaultTrendChartId) {
@@ -381,6 +417,15 @@ export function DashboardPage() {
       assignee: insight.assigneeFilters,
       issuePage: "1"
     });
+  }
+
+  if (!workspace && workspaceLoading) {
+    return (
+      <EmptyState
+        title="Cargando alcance operativo"
+        description="Preparando país, origen y configuración de trabajo."
+      />
+    );
   }
 
   if (!workspace?.hasData) {
@@ -636,7 +681,7 @@ export function DashboardPage() {
     return (
       <section className="page-stack">
         <DashboardFilters
-          filterOptions={workspace.filterOptions}
+          filterOptions={issueWorkspace?.filterOptions}
           status={dashboardState.params.status}
           priority={dashboardState.params.priority}
           assignee={dashboardState.params.assignee}
@@ -653,6 +698,8 @@ export function DashboardPage() {
           sortDir={dashboardState.params.issueSortDir}
           issueLikeQuery={dashboardState.params.issueLikeQuery}
           queryParams={issueExportParams(dashboardState.params, darkMode)}
+          sourceType={selectedSourceType}
+          isRefreshing={issues.isFetching || workspaceDetail.isFetching || workspaceRefreshing}
           onOpenIssue={openIssue}
           onChange={dashboardState.update}
         />
@@ -676,7 +723,7 @@ export function DashboardPage() {
     return (
       <section className="page-stack">
         <DashboardFilters
-          filterOptions={workspace.filterOptions}
+          filterOptions={issueWorkspace?.filterOptions}
           status={dashboardState.params.status}
           priority={dashboardState.params.priority}
           assignee={dashboardState.params.assignee}
