@@ -40,7 +40,7 @@ PYINSTALLER_COLLECT_ARGS = \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test run ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
+.PHONY: help setup test run run-api ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
 
 help:
 	@echo ""
@@ -48,6 +48,7 @@ help:
 	@echo ""
 	@echo "  make setup        Instala backend + frontend"
 	@echo "  make run          Compila frontend y abre la app desktop autocontenida"
+	@echo "  make run-api      Compila frontend y sirve la SPA + API en http://127.0.0.1:8000"
 	@echo "  make CI           Replica local de checks GitHub (format/typecheck/coverage/quality)"
 	@echo "  make test         Ejecuta la suite Python seleccionada"
 	@echo "  make build        Compila frontend y empaqueta desktop"
@@ -92,6 +93,9 @@ test: _ensure-backend
 
 run: _ensure-frontend _ensure-icon-assets build-frontend
 	PYTHONPATH=src $(PYTHON) run_desktop.py
+
+run-api: _ensure-frontend build-frontend
+	PYTHONPATH=src $(PYTHON) run_api.py --host $(API_HOST) --port $(API_PORT)
 
 ci: ci-format ci-typecheck ci-coverage ci-quality
 

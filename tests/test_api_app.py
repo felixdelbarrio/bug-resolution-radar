@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from bug_resolution_radar.config import Settings, build_source_id
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
+from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.reports.executive_ppt import ExecutiveReportResult
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
 from bug_resolution_radar.repositories.issues_store import save_issues_doc
@@ -141,12 +143,81 @@ def _seed_functionality_issues(settings: Settings) -> str:
     return source_id
 
 
+def _seed_helix_issues(settings: Settings) -> str:
+    source_id = build_source_id("helix", "España", "Helix Core")
+    now = datetime.now(timezone.utc).isoformat()
+    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC0001",
+                    summary="Timeout al consultar Helix",
+                    status="Analysing",
+                    priority="High",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    url="https://helix.example.com/INC0001",
+                    raw_fields={
+                        "Status": "Analysing",
+                        "Submit Date": now,
+                        "Impacted Service": "Payments",
+                    },
+                )
+            ]
+        )
+    )
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="INC0001",
+                    summary="Timeout al consultar Helix",
+                    status="Analysing",
+                    type="Helix",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    assignee="Alice",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    source_type="helix",
+                    url="https://helix.example.com/INC0001",
+                )
+            ]
+        ),
+    )
+    return source_id
+
+
 def test_health_endpoint_reports_ok() -> None:
     client = TestClient(api_app.create_app())
     response = client.get("/api/health")
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_frontend_spa_routes_fallback_to_index(monkeypatch, tmp_path: Path) -> None:
+    frontend_dist = tmp_path / "frontend-dist"
+    frontend_dist.mkdir()
+    (frontend_dist / "index.html").write_text(
+        "<!doctype html><title>Radar Front</title>", encoding="utf-8"
+    )
+    monkeypatch.setattr(api_app, "_frontend_dist_dir", lambda: frontend_dist)
+
+    client = TestClient(api_app.create_app())
+
+    dashboard_response = client.get("/dashboard")
+    asset_response = client.get("/assets/missing.js")
+    unknown_api_response = client.get("/api/unknown")
+
+    assert dashboard_response.status_code == 200
+    assert "Radar Front" in dashboard_response.text
+    assert asset_response.status_code == 404
+    assert unknown_api_response.status_code == 404
 
 
 def test_dashboard_endpoint_returns_scoped_metrics(monkeypatch, tmp_path: Path) -> None:
@@ -696,6 +767,32 @@ def test_issues_export_endpoint_streams_file(monkeypatch, tmp_path: Path) -> Non
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert "RAD-1" in response.text
+
+
+def test_issues_export_helix_raw_endpoint_streams_xlsx(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_helix_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get(
+        "/api/issues/export/helix-raw",
+        params={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    xl = pd.ExcelFile(BytesIO(response.content))
+    assert "Helix Raw" in xl.sheet_names
+    frame = xl.parse("Helix Raw")
+    assert frame.loc[0, "ID de la Incidencia"] == "INC0001"
+    assert frame.loc[0, "Status"] == "Analysing"
 
 
 def test_settings_sources_export_endpoint_streams_helix_xlsx(

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { downloadGet } from "../lib/api";
 import { cn } from "../lib/cn";
 import { neutralChipStyle, semanticChipStyle } from "../lib/semanticColors";
@@ -12,6 +13,8 @@ type IssuesPanelProps = {
   sortDir: string;
   issueLikeQuery: string;
   queryParams: Record<string, string | string[] | boolean>;
+  sourceType: string;
+  isRefreshing: boolean;
   onOpenIssue: (row: Record<string, string | number | undefined>) => void;
   onChange: (patch: Record<string, string | string[]>) => void;
 };
@@ -112,13 +115,17 @@ export function IssuesPanel({
   sortDir,
   issueLikeQuery,
   queryParams,
+  sourceType,
+  isRefreshing,
   onOpenIssue,
   onChange
 }: IssuesPanelProps) {
+  const [downloadState, setDownloadState] = useState<"standard" | "helix-raw" | null>(null);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(total, page * pageSize);
   const tableView = view === "Tabla";
+  const helixExportAvailable = String(sourceType || "").trim().toLowerCase() === "helix";
   const summaryLabel =
     total === 0
       ? "0 issues filtradas"
@@ -126,10 +133,24 @@ export function IssuesPanel({
         ? `${total} issues filtradas`
         : `Mostrando ${start}-${end} de ${total} issues filtradas`;
 
+  async function handleDownload(path: string, kind: "standard" | "helix-raw", suggestedName: string) {
+    try {
+      setDownloadState(kind);
+      await downloadGet(path, queryParams, suggestedName);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo completar la descarga.";
+      window.alert(message);
+    } finally {
+      setDownloadState(null);
+    }
+  }
+
   return (
     <section className="page-stack">
       <section className="surface-panel issues-topbar">
         <p className="minor-copy issues-count-caption">{summaryLabel}</p>
+        {isRefreshing ? <span className="issues-refresh-pill">Actualizando backlog…</span> : null}
         <div className="issues-view-toggle">
           <button
             type="button"
@@ -196,10 +217,27 @@ export function IssuesPanel({
           <button
             type="button"
             className="action-button"
-            onClick={() => downloadGet("/api/issues/export", queryParams, "issues.xlsx")}
+            disabled={Boolean(downloadState) || isRefreshing}
+            onClick={() => void handleDownload("/api/issues/export", "standard", "issues.xlsx")}
           >
-            Excel
+            {downloadState === "standard" ? "Descargando..." : "Excel"}
           </button>
+          {helixExportAvailable ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={Boolean(downloadState) || isRefreshing}
+              onClick={() =>
+                void handleDownload(
+                  "/api/issues/export/helix-raw",
+                  "helix-raw",
+                  "helix_raw_issues.xlsx"
+                )
+              }
+            >
+              {downloadState === "helix-raw" ? "Preparando Helix Raw..." : "Helix Raw"}
+            </button>
+          ) : null}
         </div>
       </section>
 

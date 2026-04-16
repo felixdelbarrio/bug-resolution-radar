@@ -28,3 +28,9 @@ class HelixRepo:
             f.flush()
             os.fsync(f.fileno())
         tmp.replace(self._path)
+        try:
+            from bug_resolution_radar.repositories.helix_store import sync_helix_sidecars
+
+            sync_helix_sidecars(self._path, doc)
+        except Exception:
+            pass

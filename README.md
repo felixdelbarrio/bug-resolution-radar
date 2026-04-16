@@ -34,18 +34,27 @@ make CI
 make run
 ```
 
-La app queda disponible en `http://localhost:8501`.
+`make run` abre el contenedor desktop local.
+Para servir la SPA React + FastAPI sin shell desktop:
+
+```bash
+make run-api
+```
+
+La app queda disponible en `http://127.0.0.1:8000`.
 `make CI` valida formato, lint, tipado, guardias de documentación/código muerto y tests con cobertura.
 
 ## Architecture
 
 Resumen de capas:
 - `src/bug_resolution_radar/config.py`: contrato único de configuración y persistencia `.env`.
+- `frontend/src/`: SPA React/Vite, routing, estado URL-driven y consumo HTTP.
+- `src/bug_resolution_radar/api/app.py`: contratos FastAPI, descargas y serving de la SPA.
 - `src/bug_resolution_radar/ingest/`: conectores Jira/Helix y runtime de navegador.
 - `src/bug_resolution_radar/analytics/`: KPIs, semántica de estado y ventana de análisis.
-- `src/bug_resolution_radar/ui/`: shell Streamlit, páginas, dashboard, componentes e insights.
+- `src/bug_resolution_radar/ui/`: módulos legacy de Streamlit aún presentes como referencia de migración y utilidades de exportación históricas; el runtime activo ya no depende de esta shell.
 - `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
-- `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, perfilado de ingesta y circuit breaker.
+- `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, exportes e ingesta asíncrona.
 
 ## Documentation
 
@@ -116,7 +125,11 @@ Firma/notarización (opcional, macOS):
 ## Local Data
 
 - Issues: `data/issues.json`
+- Read model de issues: `data/issues.parquet`
+- Índice ligero de workspace: `data/issues.workspace.json`
 - Helix dump: `data/helix_dump.json`
+- Read model raw de Helix: `data/helix_dump.raw.parquet`
+- Metadatos ligeros de Helix: `data/helix_dump.meta.json`
 - Insights learning: `data/insights_learning.json`
 - Notas: `data/notes.json`
 - Observabilidad de ingesta:

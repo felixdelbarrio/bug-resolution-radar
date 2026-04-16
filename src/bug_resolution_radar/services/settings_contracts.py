@@ -17,9 +17,8 @@ from bug_resolution_radar.config import (
     supported_countries,
     to_env_json,
 )
-from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.repositories.issues_store import load_issues_workspace_index
 from bug_resolution_radar.services.workspace import (
-    available_sources_by_country,
     merge_sources_by_country,
 )
 
@@ -86,14 +85,38 @@ def _group_configured_sources_by_country(settings: Settings) -> Dict[str, List[D
     return grouped
 
 
+def _sources_by_country_from_index(
+    index_payload: Dict[str, Any],
+) -> Dict[str, List[Dict[str, str]]]:
+    raw = dict(index_payload.get("sourcesByCountry") or {})
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    for country, rows in raw.items():
+        bucket: List[Dict[str, str]] = []
+        for row in list(rows or []):
+            source_id = str(row.get("source_id") or "").strip()
+            country_name = str(row.get("country") or country or "").strip()
+            if not source_id or not country_name:
+                continue
+            bucket.append(
+                {
+                    "source_id": source_id,
+                    "country": country_name,
+                    "alias": str(row.get("alias") or source_id).strip() or source_id,
+                    "source_type": str(row.get("source_type") or "").strip().lower() or "jira",
+                }
+            )
+        if bucket:
+            grouped[str(country)] = bucket
+    return grouped
+
+
 def _rollup_eligible_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     configured = _group_configured_sources_by_country(settings)
     try:
-        df_all = load_issues_df(settings.DATA_PATH)
+        index_payload = load_issues_workspace_index(settings.DATA_PATH)
     except Exception:
-        df_all = None
-    inferred = available_sources_by_country(settings, df_all=df_all)
-    return merge_sources_by_country(configured, inferred)
+        index_payload = {}
+    return merge_sources_by_country(configured, _sources_by_country_from_index(index_payload))
 
 
 def load_settings_payload() -> Dict[str, Any]:
