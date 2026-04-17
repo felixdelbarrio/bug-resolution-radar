@@ -159,36 +159,29 @@ def apply_workspace_source_scope(
         return df.copy(deep=False)
 
     mask = pd.Series(True, index=df.index)
+    country_values: pd.Series | None = None
     if selected_country and "country" in df.columns:
-        mask &= df["country"].fillna("").astype(str).eq(selected_country)
+        country_values = df["country"].fillna("").astype(str)
+        mask &= country_values.eq(selected_country)
     if "source_id" in df.columns:
+        source_values = df["source_id"].fillna("").astype(str)
         if scope_mode == "source":
             if selected_source_id:
-                mask &= df["source_id"].fillna("").astype(str).eq(selected_source_id)
+                mask &= source_values.eq(selected_source_id)
         else:
-            available_source_ids = sorted(
-                {
-                    sid
-                    for sid in df["source_id"].fillna("").astype(str).tolist()
-                    if sid
-                    and (
-                        not selected_country
-                        or "country" not in df.columns
-                        or df.loc[df["source_id"].fillna("").astype(str).eq(sid), "country"]
-                        .fillna("")
-                        .astype(str)
-                        .eq(selected_country)
-                        .any()
-                    )
-                }
+            source_scope = (
+                source_values.loc[mask]
+                if selected_country and country_values is not None
+                else source_values
             )
+            available_source_ids = sorted({sid for sid in source_scope.tolist() if sid})
             selected_rollup = rollup_source_ids(
                 settings,
                 country=selected_country,
                 available_source_ids=available_source_ids,
             )
             if selected_rollup:
-                mask &= df["source_id"].fillna("").astype(str).isin(selected_rollup)
+                mask &= source_values.isin(selected_rollup)
     if bool(mask.all()):
         return df.copy(deep=False)
     return df.loc[mask].copy(deep=False)
