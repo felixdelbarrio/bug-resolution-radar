@@ -819,7 +819,11 @@ def _data_revision_key(settings: Settings) -> tuple[str, int, int]:
         return (str(resolved.resolve()), -1, -1)
 
 
-def _scope_context_cache_key(settings: Settings, *, query: DashboardQuery) -> tuple[Any, ...]:
+def _scope_context_cache_key(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+) -> tuple[Any, ...]:
     data_path, mtime_ns, size = _data_revision_key(settings)
     return (
         data_path,
@@ -838,7 +842,13 @@ def _scope_context_cache_key(settings: Settings, *, query: DashboardQuery) -> tu
     )
 
 
-def _build_scope_context(settings: Settings, *, query: DashboardQuery) -> DashboardScopeContext:
+def _build_scope_context(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+    include_kpis: bool,
+    include_timeseries_chart: bool,
+) -> DashboardScopeContext:
     scoped_df = load_workspace_dataframe(settings, query=query)
     dff = apply_filters(scoped_df, query.filters)
     source_ids = tuple(_active_source_ids(scoped_df, query=query))
@@ -853,12 +863,64 @@ def _build_scope_context(settings: Settings, *, query: DashboardQuery) -> Dashbo
         like_query=query.issue_like_query,
     )
     open_df = open_only(dff)
-    kpis = compute_kpis(dff, settings=settings, include_timeseries_chart=True)
+    kpis = (
+        compute_kpis(
+            dff,
+            settings=settings,
+            include_timeseries_chart=include_timeseries_chart,
+        )
+        if include_kpis
+        else {}
+    )
     return DashboardScopeContext(
         scoped_df=scoped_df,
         dff=dff,
         open_df=open_df,
         source_ids=source_ids,
+        kpis=dict(kpis or {}),
+    )
+
+
+def _context_satisfies_kpi_request(
+    context: DashboardScopeContext,
+    *,
+    include_kpis: bool,
+    include_timeseries_chart: bool,
+) -> bool:
+    if not include_kpis:
+        return True
+    if not context.kpis:
+        return False
+    if not include_timeseries_chart:
+        return True
+    return context.kpis.get("timeseries_chart") is not None
+
+
+def _context_with_requested_kpis(
+    context: DashboardScopeContext,
+    *,
+    settings: Settings,
+    include_kpis: bool,
+    include_timeseries_chart: bool,
+) -> DashboardScopeContext:
+    if _context_satisfies_kpi_request(
+        context,
+        include_kpis=include_kpis,
+        include_timeseries_chart=include_timeseries_chart,
+    ):
+        return context
+    if not include_kpis:
+        return context
+    kpis = compute_kpis(
+        context.dff,
+        settings=settings,
+        include_timeseries_chart=include_timeseries_chart,
+    )
+    return DashboardScopeContext(
+        scoped_df=context.scoped_df,
+        dff=context.dff,
+        open_df=context.open_df,
+        source_ids=context.source_ids,
         kpis=dict(kpis or {}),
     )
 
@@ -875,16 +937,35 @@ def _prune_scope_context_cache(now: float) -> None:
         _scope_context_cache.popitem(last=False)
 
 
-def load_scope_context(settings: Settings, *, query: DashboardQuery) -> DashboardScopeContext:
+def load_scope_context(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+    include_kpis: bool = False,
+    include_timeseries_chart: bool = False,
+) -> DashboardScopeContext:
     cache_key = _scope_context_cache_key(settings, query=query)
     now = monotonic()
     with _scope_context_cache_lock:
         cached = _scope_context_cache.get(cache_key)
         if cached is not None and (now - cached[0]) <= _SCOPE_CONTEXT_CACHE_TTL_SECONDS:
             _scope_context_cache.move_to_end(cache_key)
-            return cached[1]
+            context = _context_with_requested_kpis(
+                cached[1],
+                settings=settings,
+                include_kpis=include_kpis,
+                include_timeseries_chart=include_timeseries_chart,
+            )
+            if context is not cached[1]:
+                _scope_context_cache[cache_key] = (now, context)
+            return context
 
-    context = _build_scope_context(settings, query=query)
+    context = _build_scope_context(
+        settings,
+        query=query,
+        include_kpis=include_kpis,
+        include_timeseries_chart=include_timeseries_chart,
+    )
     with _scope_context_cache_lock:
         _scope_context_cache[cache_key] = (now, context)
         _scope_context_cache.move_to_end(cache_key)
@@ -897,10 +978,6 @@ def build_dashboard_snapshot(
     *,
     query: DashboardQuery,
 ) -> dict[str, Any]:
-    context = load_scope_context(settings, query=query)
-    dff = context.dff.copy(deep=False)
-    open_df = context.open_df.copy(deep=False)
-    kpis = dict(context.kpis or {})
     registry = build_trends_registry()
     requested_ids = (
         list(query.chart_ids)
@@ -913,6 +990,15 @@ def build_dashboard_snapshot(
             "resolution_hist",
         ]
     )
+    context = load_scope_context(
+        settings,
+        query=query,
+        include_kpis=True,
+        include_timeseries_chart="timeseries" in requested_ids,
+    )
+    dff = context.dff.copy(deep=False)
+    open_df = context.open_df.copy(deep=False)
+    kpis = dict(context.kpis or {})
     ctx = ChartContext(dff=dff, open_df=open_df, kpis=kpis, dark_mode=query.dark_mode)
     charts: list[dict[str, Any]] = []
     for chart_id in requested_ids:
@@ -1151,7 +1237,12 @@ def build_trend_detail(
     query: DashboardQuery,
     chart_id: str,
 ) -> dict[str, Any]:
-    context = load_scope_context(settings, query=query)
+    context = load_scope_context(
+        settings,
+        query=query,
+        include_kpis=str(chart_id or "").strip() == "timeseries",
+        include_timeseries_chart=str(chart_id or "").strip() == "timeseries",
+    )
     dff = context.dff.copy(deep=False)
     open_df = context.open_df.copy(deep=False)
     trend_open_df, adapted_for_terminal = _effective_trends_open_scope(

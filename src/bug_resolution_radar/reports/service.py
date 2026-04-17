@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Sequence
 
 import pandas as pd
@@ -28,6 +26,12 @@ from bug_resolution_radar.reports.period_followup_ppt import (
     PeriodFollowupReportResult,
     generate_country_period_followup_ppt,
 )
+from bug_resolution_radar.services.downloads import (
+    default_download_dir as default_report_export_dir,
+    ensure_download_dir as ensure_report_export_dir,
+    save_download_content as save_report_content,
+    unique_download_path as unique_report_export_path,
+)
 
 
 @dataclass(frozen=True)
@@ -43,73 +47,6 @@ class PreparedReportContext:
     scoped_df: pd.DataFrame
     dff: pd.DataFrame
     open_df: pd.DataFrame
-
-
-def _configured_export_path(settings: Settings) -> Path | None:
-    configured = str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
-    if not configured:
-        return None
-    return Path(configured).expanduser()
-
-
-def default_report_export_dir(settings: Settings) -> Path:
-    """Resolve preferred export directory without touching disk unless needed."""
-    configured = _configured_export_path(settings)
-    candidates: list[Path] = []
-    if configured is not None:
-        candidates.append(Path(configured).expanduser())
-    candidates.append((Path.home() / "Downloads").expanduser())
-
-    for candidate in candidates:
-        txt = str(candidate).strip()
-        if not txt:
-            continue
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-            if candidate.is_dir():
-                return candidate
-        except Exception:
-            continue
-    return Path.cwd()
-
-
-def ensure_report_export_dir(settings: Settings) -> Path:
-    """Create export dir only during an explicit save action."""
-    export_dir = default_report_export_dir(settings)
-    try:
-        export_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    if export_dir.is_dir():
-        return export_dir
-    return Path.cwd()
-
-
-def unique_report_export_path(export_dir: Path, *, file_name: str) -> Path:
-    name = str(file_name or "").strip() or "radar-export.pptx"
-    target = export_dir / name
-    if not target.exists():
-        return target
-    stem = target.stem or "radar-export"
-    suffix = target.suffix or ".pptx"
-    for idx in range(1, 1000):
-        candidate = export_dir / f"{stem}_{idx}{suffix}"
-        if not candidate.exists():
-            return candidate
-    return export_dir / f"{stem}_{os.getpid()}{suffix}"
-
-
-def save_report_content(
-    settings: Settings,
-    *,
-    file_name: str,
-    content: bytes,
-) -> Path:
-    """Persist generated report bytes to the configured export directory."""
-    export_dir = ensure_report_export_dir(settings)
-    export_path = unique_report_export_path(export_dir, file_name=file_name)
-    export_path.write_bytes(bytes(content or b""))
-    return export_path
 
 
 def _normalize_tokens(values: Sequence[str] | None) -> tuple[str, ...]:
