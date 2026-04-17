@@ -192,6 +192,85 @@ def _seed_helix_issues(settings: Settings) -> str:
     return source_id
 
 
+def _seed_helix_issues_with_multiple_statuses(settings: Settings) -> str:
+    source_id = build_source_id("helix", "España", "Helix Core")
+    now = datetime.now(timezone.utc).isoformat()
+    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC0001",
+                    summary="Timeout al consultar Helix",
+                    status="Analysing",
+                    priority="High",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    url="https://helix.example.com/INC0001",
+                    raw_fields={
+                        "Status": "Analysing",
+                        "Submit Date": now,
+                        "Impacted Service": "Payments",
+                    },
+                ),
+                HelixWorkItem(
+                    id="INC0002",
+                    summary="Error ya resuelto",
+                    status="Resolved",
+                    priority="Medium",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    url="https://helix.example.com/INC0002",
+                    raw_fields={
+                        "Status": "Resolved",
+                        "Submit Date": now,
+                        "Impacted Service": "Cards",
+                    },
+                ),
+            ]
+        )
+    )
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="INC0001",
+                    summary="Timeout al consultar Helix",
+                    status="Analysing",
+                    type="Helix",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    assignee="Alice",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    source_type="helix",
+                    url="https://helix.example.com/INC0001",
+                ),
+                NormalizedIssue(
+                    key="INC0002",
+                    summary="Error ya resuelto",
+                    status="Resolved",
+                    type="Helix",
+                    priority="Medium",
+                    created=now,
+                    updated=now,
+                    assignee="Bob",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    source_type="helix",
+                    url="https://helix.example.com/INC0002",
+                ),
+            ]
+        ),
+    )
+    return source_id
+
+
 def test_health_endpoint_reports_ok() -> None:
     client = TestClient(api_app.create_app())
     response = client.get("/api/health")
@@ -842,6 +921,33 @@ def test_issues_export_helix_raw_save_writes_raw_excel_to_configured_download_di
     assert frame.loc[0, "Status"] == "Analysing"
 
 
+def test_issues_export_helix_raw_save_respects_dashboard_filters(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_helix_issues_with_multiple_statuses(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/issues/export/helix-raw/save",
+        json={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "status": ["Analysing"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    saved_path = Path(payload["savedPath"])
+    xl = pd.ExcelFile(saved_path)
+    frame = xl.parse("Helix Raw")
+    assert frame["ID de la Incidencia"].tolist() == ["INC0001"]
+    assert frame["Status"].tolist() == ["Analysing"]
+
+
 def test_issues_export_helix_raw_endpoint_streams_xlsx(monkeypatch, tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     source_id = _seed_helix_issues(settings)
@@ -866,6 +972,81 @@ def test_issues_export_helix_raw_endpoint_streams_xlsx(monkeypatch, tmp_path: Pa
     frame = xl.parse("Helix Raw")
     assert frame.loc[0, "ID de la Incidencia"] == "INC0001"
     assert frame.loc[0, "Status"] == "Analysing"
+
+
+def test_issues_export_helix_raw_includes_all_imported_raw_fields(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = build_source_id("helix", "España", "Helix Core")
+    now = datetime.now(timezone.utc).isoformat()
+    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC0099",
+                    summary="Caso completo raw",
+                    status="Analysing",
+                    priority="High",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    url="https://helix.example.com/INC0099",
+                    raw_fields={
+                        "Status": "Analysing",
+                        "Submit Date": now,
+                        "Impacted Service": "Payments",
+                        "Custom Field A": "Valor A",
+                        "Custom Field B": 42,
+                        "Custom Nested": {"owner": "ops", "tier": 2},
+                    },
+                )
+            ]
+        )
+    )
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="INC0099",
+                    summary="Caso completo raw",
+                    status="Analysing",
+                    type="Helix",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    assignee="Alice",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_id,
+                    source_type="helix",
+                    url="https://helix.example.com/INC0099",
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get(
+        "/api/issues/export/helix-raw",
+        params={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+        },
+    )
+
+    assert response.status_code == 200
+    xl = pd.ExcelFile(BytesIO(response.content))
+    frame = xl.parse("Helix Raw")
+    assert frame.loc[0, "ID de la Incidencia"] == "INC0099"
+    assert frame.loc[0, "Status"] == "Analysing"
+    assert frame.loc[0, "Impacted Service"] == "Payments"
+    assert frame.loc[0, "Custom Field A"] == "Valor A"
+    assert frame.loc[0, "Custom Field B"] == 42
+    assert frame.loc[0, "Custom Nested"] == '{"owner": "ops", "tier": 2}'
 
 
 def test_settings_sources_export_save_writes_helix_excel_to_configured_download_dir(

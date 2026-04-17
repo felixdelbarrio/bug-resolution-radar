@@ -1993,9 +1993,7 @@ def render(settings: Settings) -> None:
                     label_visibility="collapsed",
                     placeholder=default_download_dir,
                 )
-                st.caption(
-                    "Se aplica a los Excel e informes generados desde la aplicación."
-                )
+                st.caption("Se aplica a los Excel e informes generados desde la aplicación.")
 
             with st.container(border=True, key="cfg_prefs_card_favs"):
                 st.markdown("#### Define los 3 gráficos favoritos")

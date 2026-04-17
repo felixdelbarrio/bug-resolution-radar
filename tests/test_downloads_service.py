@@ -49,9 +49,7 @@ def test_detect_system_downloads_dir_uses_linux_xdg_config(monkeypatch, tmp_path
 def test_resolve_download_target_prefers_configured_directory(tmp_path: Path) -> None:
     configured = tmp_path / "exports"
 
-    target = downloads.resolve_download_target(
-        Settings(REPORT_PPT_DOWNLOAD_DIR=str(configured))
-    )
+    target = downloads.resolve_download_target(Settings(REPORT_PPT_DOWNLOAD_DIR=str(configured)))
 
     assert target.directory == configured
     assert target.configured is True

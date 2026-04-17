@@ -47,6 +47,8 @@ class PreparedReportContext:
     scoped_df: pd.DataFrame
     dff: pd.DataFrame
     open_df: pd.DataFrame
+
+
 def _normalize_tokens(values: Sequence[str] | None) -> tuple[str, ...]:
     out: list[str] = []
     seen: set[str] = set()

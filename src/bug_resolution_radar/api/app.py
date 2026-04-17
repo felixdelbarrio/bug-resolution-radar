@@ -715,7 +715,9 @@ def _saved_file_payload(saved_path: Path, *, file_name: str | None = None) -> di
 
 
 def _csv_join(values: Sequence[str] | None) -> str:
-    return ",".join(str(value or "").strip() for value in list(values or []) if str(value or "").strip())
+    return ",".join(
+        str(value or "").strip() for value in list(values or []) if str(value or "").strip()
+    )
 
 
 def _reveal_in_file_manager(path: Path) -> bool:

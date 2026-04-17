@@ -48,6 +48,8 @@ _REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
 _REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
 _PERIOD_REPORT_STATUS_KEY = "workspace_period_report_status"
 _PERIOD_REPORT_SAVED_PATH_KEY_PREFIX = "workspace_period_report_saved_path"
+
+
 def _default_report_export_dir(settings: Settings) -> Path:
     """Pick the preferred export directory without creating it during render."""
     return default_download_dir(settings)

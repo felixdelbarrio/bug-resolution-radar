@@ -238,6 +238,8 @@ export function AppShell() {
 
   const countryOptions = workspace?.countries ?? [];
   const sourceOptions = workspace?.sources ?? [];
+  const isCountryRollupActive =
+    Boolean(workspace?.hasCountryRollup) && (workspace?.scopeMode ?? "source") === "country";
   const selectedCountryValue =
     countryOptions.some((country) => country.country === dashboardState.params.country)
       ? dashboardState.params.country
@@ -390,28 +392,18 @@ export function AppShell() {
             type="button"
             className={cn(
               "workspace-action",
-              isReports && reportMode === "executive" && "workspace-action-active"
+              isReports && "workspace-action-active"
             )}
-            title="Informe PPT ejecutivo"
-            aria-label="Informe PPT ejecutivo"
-            onClick={() => navigateWithParams("/reports", { reportMode: "executive" })}
+            title="Informes"
+            aria-label="Informes"
+            onClick={() =>
+              navigateWithParams("/reports", {
+                reportMode: isCountryRollupActive ? "period" : "executive"
+              })
+            }
           >
-            <img src="/brand/icons/digital-press.svg" alt="" />
+            <img src="/brand/icons/presentation.svg" alt="" />
           </button>
-          {workspace?.hasCountryRollup ? (
-            <button
-              type="button"
-              className={cn(
-                "workspace-action",
-                isReports && reportMode === "period" && "workspace-action-active"
-              )}
-              title="Informe seguimiento del periodo"
-              aria-label="Informe seguimiento del periodo"
-              onClick={() => navigateWithParams("/reports", { reportMode: "period" })}
-            >
-              <img src="/brand/icons/presentation.svg" alt="" />
-            </button>
-          ) : null}
           <button
             type="button"
             className={cn("workspace-action", isIngest && "workspace-action-active")}
