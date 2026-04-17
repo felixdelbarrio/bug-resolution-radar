@@ -389,6 +389,19 @@ export type SavedReportPayload = {
   closedIssues: number;
 };
 
+export type SavedFilePayload = {
+  fileName: string;
+  savedPath: string;
+  savedDir: string;
+  fileSize: number;
+};
+
+export type DownloadTargetPayload = {
+  directory: string;
+  configured: boolean;
+  source: "configured" | "system" | "fallback";
+};
+
 type QueryValue = string | number | boolean | null | undefined | string[];
 
 function toQueryString(params: Record<string, QueryValue>) {
@@ -489,67 +502,10 @@ export async function postBinary<T>(
   return (await response.json()) as T;
 }
 
-export async function downloadFromApi(
-  path: string,
-  payload: unknown,
-  suggestedName: string
-) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    credentials: "same-origin",
-    body: JSON.stringify(payload)
+export async function saveSourcesExcel(sourceType: SourceType): Promise<SavedFilePayload> {
+  return await postJson<SavedFilePayload>("/api/settings/sources/export/save", {
+    sourceType
   });
-  if (!response.ok) {
-    await parseError(response);
-  }
-  const blob = await response.blob();
-  saveBlobResponse(blob, response, suggestedName);
-}
-
-function saveBlobResponse(blob: Blob, response: Response, suggestedName: string) {
-  const disposition = response.headers.get("Content-Disposition") ?? "";
-  const filenameMatch = disposition.match(/filename="([^"]+)"/);
-  const filename = filenameMatch?.[1] ?? suggestedName;
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.rel = "noopener";
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  window.setTimeout(() => {
-    anchor.remove();
-  }, 0);
-  window.setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 60_000);
-}
-
-export async function downloadGet(
-  path: string,
-  params: Record<string, QueryValue>,
-  suggestedName: string
-) {
-  const response = await fetch(`${path}${toQueryString(params)}`, {
-    credentials: "same-origin"
-  });
-  if (!response.ok) {
-    await parseError(response);
-  }
-  const blob = await response.blob();
-  saveBlobResponse(blob, response, suggestedName);
-}
-
-export async function downloadSourcesExcel(sourceType: SourceType, suggestedName: string) {
-  await downloadGet(
-    "/api/settings/sources/export",
-    { sourceType },
-    suggestedName
-  );
 }
 
 export async function importSourcesExcel(

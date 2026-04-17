@@ -21,6 +21,12 @@ from bug_resolution_radar.reports import (
     generate_executive_report_artifact,
     generate_period_followup_report_artifact,
 )
+from bug_resolution_radar.services.downloads import (
+    default_download_dir,
+    ensure_download_dir,
+    resolve_download_target,
+    unique_download_path,
+)
 from bug_resolution_radar.ui.common import load_issues_df
 from bug_resolution_radar.ui.dashboard.quincenal_scope import normalize_quincenal_scope_label
 from bug_resolution_radar.ui.dashboard.state import (
@@ -42,63 +48,19 @@ _REPORT_REQUEST_SIG_KEY_PREFIX = "workspace_report_request_sig"
 _REPORT_ARTIFACT_KEY_PREFIX = "workspace_report_artifact"
 _PERIOD_REPORT_STATUS_KEY = "workspace_period_report_status"
 _PERIOD_REPORT_SAVED_PATH_KEY_PREFIX = "workspace_period_report_saved_path"
-
-
-def _configured_export_path(settings: Settings) -> Path | None:
-    configured = str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
-    if not configured:
-        return None
-    return Path(configured).expanduser()
-
-
 def _default_report_export_dir(settings: Settings) -> Path:
-    """
-    Pick a writable export directory.
-
-    Default: system Downloads folder.
-    Override: REPORT_PPT_DOWNLOAD_DIR (if configured by the user).
-    """
-    configured = _configured_export_path(settings)
-    candidates: list[Path] = []
-    if configured is not None:
-        candidates.append(Path(configured).expanduser())
-    candidates.append((Path.home() / "Downloads").expanduser())
-
-    for candidate in candidates:
-        txt = str(candidate).strip()
-        if not txt:
-            continue
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-            if candidate.is_dir():
-                return candidate
-        except Exception:
-            continue
-    return Path.cwd()
+    """Pick the preferred export directory without creating it during render."""
+    return default_download_dir(settings)
 
 
 def _ensure_report_export_dir(settings: Settings) -> Path:
-    """
-    Resolve and create export directory only when a save action is explicitly requested.
-    """
-    export_dir = _default_report_export_dir(settings)
-    try:
-        export_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    if export_dir.is_dir():
-        return export_dir
-    return Path.cwd()
+    """Resolve and create export directory only when a save action is explicitly requested."""
+    return ensure_download_dir(settings)
 
 
 def _report_export_target_label(settings: Settings) -> str:
-    """
-    Human-readable destination used in UI before touching filesystem.
-    """
-    configured = _configured_export_path(settings)
-    if configured is not None:
-        return str(configured)
-    return str((Path.home() / "Downloads").expanduser())
+    """Human-readable destination used in UI before touching filesystem."""
+    return str(resolve_download_target(settings).directory)
 
 
 def _report_export_help_text(settings: Settings) -> str:
@@ -112,17 +74,7 @@ def _report_export_help_text(settings: Settings) -> str:
 
 
 def _unique_export_path(export_dir: Path, *, file_name: str) -> Path:
-    name = str(file_name or "").strip() or "radar-export.pptx"
-    target = export_dir / name
-    if not target.exists():
-        return target
-    stem = target.stem or "radar-export"
-    suffix = target.suffix or ".pptx"
-    for i in range(1, 1000):
-        candidate = export_dir / f"{stem}_{i}{suffix}"
-        if not candidate.exists():
-            return candidate
-    return export_dir / f"{stem}_{os.getpid()}{suffix}"
+    return unique_download_path(export_dir, file_name=file_name)
 
 
 def _reveal_in_file_manager(path: Path) -> None:

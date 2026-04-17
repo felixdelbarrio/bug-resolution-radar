@@ -149,7 +149,7 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (!workspace || !bootstrap.data) {
+    if (!workspace || !bootstrap.data || bootstrap.isPlaceholderData) {
       return;
     }
     const patch: Record<string, string | string[]> = {};
@@ -238,6 +238,16 @@ export function AppShell() {
 
   const countryOptions = workspace?.countries ?? [];
   const sourceOptions = workspace?.sources ?? [];
+  const selectedCountryValue =
+    countryOptions.some((country) => country.country === dashboardState.params.country)
+      ? dashboardState.params.country
+      : (workspace?.selectedCountry ?? "");
+  const selectedSourceValue =
+    dashboardState.params.sourceId === ""
+      ? ""
+      : sourceOptions.some((source) => source.source_id === dashboardState.params.sourceId)
+        ? dashboardState.params.sourceId
+        : (workspace?.selectedSourceId ?? "");
   const sourceSelectDisabled =
     workspaceLoading ||
     workspaceRefreshing ||
@@ -263,7 +273,7 @@ export function AppShell() {
           </label>
           <select
             id="workspace-country"
-            value={workspace?.selectedCountry ?? ""}
+            value={selectedCountryValue}
             disabled={workspaceLoading || workspaceRefreshing || countryOptions.length === 0}
             onChange={(event) =>
               handleScopeChange({
@@ -321,7 +331,7 @@ export function AppShell() {
                 </label>
                 <select
                   id="workspace-source"
-                  value={workspace?.selectedSourceId ?? ""}
+                  value={selectedSourceValue}
                   disabled={sourceSelectDisabled}
                   onChange={(event) =>
                     handleScopeChange({
@@ -329,6 +339,11 @@ export function AppShell() {
                     })
                   }
                 >
+                  {selectedSourceValue === "" ? (
+                    <option value="">
+                      {workspaceRefreshing ? "Actualizando orígenes..." : "Selecciona un origen"}
+                    </option>
+                  ) : null}
                   {sourceOptions.length > 0 ? (
                     sourceOptions.map((source) => (
                       <option key={source.source_id} value={source.source_id}>

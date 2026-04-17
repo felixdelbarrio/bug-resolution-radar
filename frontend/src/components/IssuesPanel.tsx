@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { downloadGet } from "../lib/api";
+import { postJson, type SavedFilePayload } from "../lib/api";
 import { cn } from "../lib/cn";
 import { neutralChipStyle, semanticChipStyle } from "../lib/semanticColors";
 
@@ -13,7 +13,6 @@ type IssuesPanelProps = {
   sortDir: string;
   issueLikeQuery: string;
   queryParams: Record<string, string | string[] | boolean>;
-  sourceType: string;
   isRefreshing: boolean;
   onOpenIssue: (row: Record<string, string | number | undefined>) => void;
   onChange: (patch: Record<string, string | string[]>) => void;
@@ -115,17 +114,21 @@ export function IssuesPanel({
   sortDir,
   issueLikeQuery,
   queryParams,
-  sourceType,
   isRefreshing,
   onOpenIssue,
   onChange
 }: IssuesPanelProps) {
-  const [downloadState, setDownloadState] = useState<"standard" | "helix-raw" | null>(null);
+  const [downloadState, setDownloadState] = useState<"standard" | null>(null);
+  const [feedback, setFeedback] = useState<{
+    kind: "success" | "error";
+    message: string;
+    savedPath?: string;
+  } | null>(null);
+  const [revealPending, setRevealPending] = useState(false);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(total, page * pageSize);
   const tableView = view === "Tabla";
-  const helixExportAvailable = String(sourceType || "").trim().toLowerCase() === "helix";
   const summaryLabel =
     total === 0
       ? "0 issues filtradas"
@@ -133,16 +136,38 @@ export function IssuesPanel({
         ? `${total} issues filtradas`
         : `Mostrando ${start}-${end} de ${total} issues filtradas`;
 
-  async function handleDownload(path: string, kind: "standard" | "helix-raw", suggestedName: string) {
+  async function handleDownload() {
     try {
-      setDownloadState(kind);
-      await downloadGet(path, queryParams, suggestedName);
+      setFeedback(null);
+      setDownloadState("standard");
+      const saved = await postJson<SavedFilePayload>("/api/issues/export/save", {
+        ...queryParams,
+        format: "xlsx"
+      });
+      setFeedback({
+        kind: "success",
+        message: `Excel guardado en disco: ${saved.fileName}`,
+        savedPath: saved.savedPath
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "No se pudo completar la descarga.";
-      window.alert(message);
+      setFeedback({ kind: "error", message });
     } finally {
       setDownloadState(null);
+    }
+  }
+
+  async function handleReveal(savedPath: string) {
+    try {
+      setRevealPending(true);
+      await postJson("/api/system/reveal-path", { path: savedPath });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo abrir la carpeta de destino.";
+      setFeedback({ kind: "error", message, savedPath });
+    } finally {
+      setRevealPending(false);
     }
   }
 
@@ -218,28 +243,29 @@ export function IssuesPanel({
             type="button"
             className="action-button"
             disabled={Boolean(downloadState) || isRefreshing}
-            onClick={() => void handleDownload("/api/issues/export", "standard", "issues.xlsx")}
+            onClick={() => void handleDownload()}
           >
-            {downloadState === "standard" ? "Descargando..." : "Excel"}
+            {downloadState === "standard" ? "Guardando..." : "Excel"}
           </button>
-          {helixExportAvailable ? (
+        </div>
+      </section>
+
+      {feedback ? (
+        <section className={cn("inline-notice", feedback.kind === "error" && "inline-notice-error")}>
+          <strong>{feedback.message}</strong>
+          {feedback.savedPath ? <p className="inline-caption">{feedback.savedPath}</p> : null}
+          {feedback.savedPath ? (
             <button
               type="button"
               className="secondary-button"
-              disabled={Boolean(downloadState) || isRefreshing}
-              onClick={() =>
-                void handleDownload(
-                  "/api/issues/export/helix-raw",
-                  "helix-raw",
-                  "helix_raw_issues.xlsx"
-                )
-              }
+              disabled={revealPending}
+              onClick={() => void handleReveal(feedback.savedPath ?? "")}
             >
-              {downloadState === "helix-raw" ? "Preparando Helix Raw..." : "Helix Raw"}
+              {revealPending ? "Abriendo..." : "Abrir carpeta"}
             </button>
           ) : null}
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       {total === 0 ? (
         <section className="surface-panel empty-panel">

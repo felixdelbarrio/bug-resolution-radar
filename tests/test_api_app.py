@@ -769,6 +769,50 @@ def test_issues_export_endpoint_streams_file(monkeypatch, tmp_path: Path) -> Non
     assert "RAD-1" in response.text
 
 
+def test_download_target_endpoint_uses_configured_directory(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get("/api/downloads/target")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "directory": str(Path(settings.REPORT_PPT_DOWNLOAD_DIR)),
+        "configured": True,
+        "source": "configured",
+    }
+
+
+def test_issues_export_save_writes_helix_excel_to_configured_download_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_helix_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/issues/export/save",
+        json={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "format": "xlsx",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    saved_path = Path(payload["savedPath"])
+    assert saved_path.exists()
+    assert saved_path.parent == Path(settings.REPORT_PPT_DOWNLOAD_DIR)
+    xl = pd.ExcelFile(saved_path)
+    frame = xl.parse("Issues")
+    assert frame.loc[0, "key"] == "INC0001"
+    assert frame.loc[0, "source_type"] == "helix"
+
+
 def test_issues_export_helix_raw_endpoint_streams_xlsx(monkeypatch, tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     source_id = _seed_helix_issues(settings)
@@ -793,6 +837,26 @@ def test_issues_export_helix_raw_endpoint_streams_xlsx(monkeypatch, tmp_path: Pa
     frame = xl.parse("Helix Raw")
     assert frame.loc[0, "ID de la Incidencia"] == "INC0001"
     assert frame.loc[0, "Status"] == "Analysing"
+
+
+def test_settings_sources_export_save_writes_helix_excel_to_configured_download_dir(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post("/api/settings/sources/export/save", json={"sourceType": "helix"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    saved_path = Path(payload["savedPath"])
+    assert saved_path.exists()
+    assert saved_path.parent == Path(settings.REPORT_PPT_DOWNLOAD_DIR)
+    xl = pd.ExcelFile(saved_path)
+    assert "Fuentes Helix" in xl.sheet_names
+    assert "Valores transversales" in xl.sheet_names
 
 
 def test_settings_sources_export_endpoint_streams_helix_xlsx(

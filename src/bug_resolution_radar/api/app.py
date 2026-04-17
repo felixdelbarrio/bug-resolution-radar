@@ -43,7 +43,6 @@ from bug_resolution_radar.models.schema_helix import HelixDocument
 from bug_resolution_radar.repositories.helix_store import load_helix_export_df
 from bug_resolution_radar.reports.service import (
     build_report_filters,
-    default_report_export_dir,
     generate_executive_report_artifact,
     generate_period_followup_report_artifact,
     save_report_content,
@@ -62,6 +61,10 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_kanban_columns,
     build_trend_detail,
+)
+from bug_resolution_radar.services.downloads import (
+    resolve_download_target,
+    save_download_content,
 )
 from bug_resolution_radar.services.ingest_contracts import (
     ingest_overview_payload,
@@ -659,6 +662,24 @@ class PathRevealRequest(BaseModel):
     path: str = ""
 
 
+class DashboardExportSaveRequest(BaseModel):
+    format: str = "xlsx"
+    country: str = ""
+    sourceId: str = ""
+    scopeMode: str = "source"
+    status: list[str] = Field(default_factory=list)
+    priority: list[str] = Field(default_factory=list)
+    assignee: list[str] = Field(default_factory=list)
+    quincenalScope: str = QUINCENAL_SCOPE_ALL
+    issueKeys: list[str] = Field(default_factory=list)
+    issueSortCol: str = ""
+    issueLikeQuery: str = ""
+
+
+class SourceExportSaveRequest(BaseModel):
+    sourceType: str = "helix"
+
+
 def _report_saved_payload(
     *,
     saved_path: Path,
@@ -677,6 +698,24 @@ def _report_saved_payload(
         "openIssues": int(open_issues or 0),
         "closedIssues": int(closed_issues or 0),
     }
+
+
+def _saved_file_payload(saved_path: Path, *, file_name: str | None = None) -> dict[str, Any]:
+    size = 0
+    try:
+        size = int(saved_path.stat().st_size)
+    except Exception:
+        size = 0
+    return {
+        "fileName": str(file_name or saved_path.name).strip() or saved_path.name,
+        "savedPath": str(saved_path),
+        "savedDir": str(saved_path.parent),
+        "fileSize": size,
+    }
+
+
+def _csv_join(values: Sequence[str] | None) -> str:
+    return ",".join(str(value or "").strip() for value in list(values or []) if str(value or "").strip())
 
 
 def _reveal_in_file_manager(path: Path) -> bool:
@@ -995,6 +1034,34 @@ def create_app() -> FastAPI:
             filename = download_filename("issues", ext="xlsx")
         return Response(content=content, media_type=media_type, headers=_download_headers(filename))
 
+    @app.post("/api/issues/export/save")
+    def issues_export_save(payload: DashboardExportSaveRequest) -> dict[str, Any]:
+        export_format = str(payload.format or "xlsx").strip().lower() or "xlsx"
+        if export_format not in {"xlsx", "csv"}:
+            raise HTTPException(status_code=400, detail="Formato de exportación no soportado.")
+        settings = load_settings()
+        query = _dashboard_query(
+            country=payload.country,
+            source_id=payload.sourceId,
+            scope_mode=payload.scopeMode,
+            status=_csv_join(payload.status),
+            priority=_csv_join(payload.priority),
+            assignee=_csv_join(payload.assignee),
+            quincenal_scope=payload.quincenalScope,
+            issue_keys=_csv_join(payload.issueKeys),
+            issue_sort_col=payload.issueSortCol,
+            issue_like_query=payload.issueLikeQuery,
+        )
+        df = _export_dataframe(settings, query=query)
+        if export_format == "csv":
+            content = dataframe_to_csv_bytes(df, include_index=False)
+            filename = download_filename("issues", ext="csv")
+        else:
+            content = dataframe_to_xlsx_bytes(df, sheet_name="Issues", include_index=False)
+            filename = download_filename("issues", ext="xlsx")
+        export_path = save_download_content(settings, file_name=filename, content=content)
+        return _saved_file_payload(export_path, file_name=filename)
+
     @app.get("/api/issues/export/helix-raw")
     def issues_export_helix_raw(
         country: str = "",
@@ -1098,6 +1165,20 @@ def create_app() -> FastAPI:
             headers=_download_headers(filename),
         )
 
+    @app.post("/api/settings/sources/export/save")
+    def post_settings_sources_export_save(payload: SourceExportSaveRequest) -> dict[str, Any]:
+        settings = load_settings()
+        source_type = str(payload.sourceType or "helix").strip().lower()
+        if source_type not in {"jira", "helix"}:
+            raise HTTPException(status_code=400, detail="Tipo de fuente no soportado.")
+        try:
+            content = build_sources_export_excel_bytes(settings, source_type=source_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        filename = download_filename(f"fuentes_{source_type}", ext="xlsx")
+        export_path = save_download_content(settings, file_name=filename, content=content)
+        return _saved_file_payload(export_path, file_name=filename)
+
     @app.post("/api/settings/sources/import")
     async def post_settings_sources_import(
         request: Request,
@@ -1186,14 +1267,19 @@ def create_app() -> FastAPI:
         )
         return {"opened": bool(opened), "browser": browser, "url": target_url}
 
+    @app.get("/api/downloads/target")
+    def download_target() -> dict[str, Any]:
+        settings = load_settings()
+        target = resolve_download_target(settings)
+        return {
+            "directory": str(target.directory),
+            "configured": bool(target.configured),
+            "source": str(target.source),
+        }
+
     @app.get("/api/reports/export-target")
     def report_export_target() -> dict[str, Any]:
-        settings = load_settings()
-        export_dir = default_report_export_dir(settings)
-        return {
-            "directory": str(export_dir),
-            "configured": bool(str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()),
-        }
+        return download_target()
 
     @app.post("/api/system/reveal-path")
     def reveal_path(payload: PathRevealRequest) -> dict[str, Any]:

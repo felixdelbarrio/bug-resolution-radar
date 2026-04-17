@@ -31,7 +31,6 @@ from bug_resolution_radar.config import (
     restore_env_from_example,
     rollup_source_ids,
     save_settings,
-    suggested_period_ppt_template_path,
     supported_countries,
     to_env_json,
 )
@@ -1980,7 +1979,7 @@ def render(settings: Settings) -> None:
                 )
 
             with st.container(border=True, key="cfg_prefs_card_ppt"):
-                st.markdown("#### Descargas del informe PPT")
+                st.markdown("#### Descargas de informes")
                 st.markdown("**Carpeta de guardado**")
                 default_download_dir = str((Path.home() / "Downloads").expanduser())
                 report_ppt_download_dir_default = (
@@ -1994,26 +1993,9 @@ def render(settings: Settings) -> None:
                     label_visibility="collapsed",
                     placeholder=default_download_dir,
                 )
-                st.markdown("**Plantilla informe seguimiento**")
-                period_template_default = str(
-                    getattr(settings, "PERIOD_PPT_TEMPLATE_PATH", "") or ""
-                ).strip() or str(suggested_period_ppt_template_path(settings))
-                period_ppt_template_path = st.text_input(
-                    "Ruta de plantilla PPT seguimiento",
-                    value=period_template_default,
-                    key="cfg_period_ppt_template_path",
-                    label_visibility="collapsed",
+                st.caption(
+                    "Se aplica a los Excel e informes generados desde la aplicación."
                 )
-                template_exists = (
-                    Path(str(period_ppt_template_path or "").strip()).expanduser().exists()
-                )
-                if template_exists:
-                    st.caption("Plantilla detectada y lista para el informe de seguimiento.")
-                else:
-                    st.caption(
-                        "La ruta no existe. Si no defines una propia, la app usará la "
-                        "plantilla corporativa integrada durante la generación."
-                    )
 
             with st.container(border=True, key="cfg_prefs_card_favs"):
                 st.markdown("#### Define los 3 gráficos favoritos")
@@ -2103,7 +2085,7 @@ def render(settings: Settings) -> None:
                         "DASHBOARD_SUMMARY_CHARTS": summary_csv,
                         "TREND_SELECTED_CHARTS": summary_csv,
                         "REPORT_PPT_DOWNLOAD_DIR": str(report_ppt_download_dir).strip(),
-                        "PERIOD_PPT_TEMPLATE_PATH": str(period_ppt_template_path).strip(),
+                        "PERIOD_PPT_TEMPLATE_PATH": "",
                         "ANALYSIS_LOOKBACK_MONTHS": normalize_analysis_lookback_months(
                             analysis_selected_months,
                             default=12,
