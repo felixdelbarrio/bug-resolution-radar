@@ -22,7 +22,7 @@ def test_default_report_export_dir_uses_configured_downloads_path_on_macos(
     out = report_page._default_report_export_dir(settings)
 
     assert out == downloads
-    assert out.exists()
+    assert not out.exists()
 
 
 def test_default_report_export_dir_uses_non_protected_configured_path_on_macos(
@@ -37,7 +37,7 @@ def test_default_report_export_dir_uses_non_protected_configured_path_on_macos(
     out = report_page._default_report_export_dir(settings)
 
     assert out == safe_dir
-    assert out.exists()
+    assert not out.exists()
 
 
 def test_default_report_export_dir_uses_system_downloads_by_default(
@@ -50,4 +50,4 @@ def test_default_report_export_dir_uses_system_downloads_by_default(
     out = report_page._default_report_export_dir(settings)
 
     assert out == home / "Downloads"
-    assert out.exists()
+    assert not out.exists()

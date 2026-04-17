@@ -3,13 +3,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import type { ShellContextValue } from "../components/AppShell";
 import {
-  downloadSourcesExcel,
   fetchJson,
   importSourcesExcel,
   normalizeSettingsPayload,
   postJson,
   putJson,
+  saveSourcesExcel,
   type CacheInventoryRow,
+  type DownloadTargetPayload,
+  type SavedFilePayload,
   type SettingsSourcesImportPayload,
   type SettingsPayload,
   type WorkspaceSource
@@ -352,6 +354,10 @@ export function SettingsPage() {
     queryKey: ["cache-inventory"],
     queryFn: () => fetchJson<CacheInventoryRow[]>("/api/cache/inventory")
   });
+  const downloadTarget = useQuery({
+    queryKey: ["download-target"],
+    queryFn: () => fetchJson<DownloadTargetPayload>("/api/downloads/target")
+  });
 
   const [draft, setDraft] = useState<SettingsPayload | null>(null);
   const [savedPayload, setSavedPayload] = useState<SettingsPayload | null>(null);
@@ -362,6 +368,7 @@ export function SettingsPage() {
   const [jiraExcelInputKey, setJiraExcelInputKey] = useState<number>(0);
   const [helixExcelBusy, setHelixExcelBusy] = useState<boolean>(false);
   const [helixExcelInputKey, setHelixExcelInputKey] = useState<number>(0);
+  const [downloadsPromptDismissed, setDownloadsPromptDismissed] = useState<boolean>(false);
 
   useEffect(() => {
     if (!settings.data) {
@@ -372,6 +379,7 @@ export function SettingsPage() {
     setSavedPayload(normalized);
     setJiraRows(withSourceDrafts(normalized.jiraSources));
     setHelixRows(withSourceDrafts(normalized.helixSources));
+    setDownloadsPromptDismissed(false);
   }, [settings.data]);
 
   const saveSettings = useMutation({
@@ -415,6 +423,9 @@ export function SettingsPage() {
   }
 
   const values = draft.values;
+  const configuredDownloadDir = asText(values.REPORT_PPT_DOWNLOAD_DIR);
+  const suggestedDownloadDir = asText(downloadTarget.data?.directory);
+  const effectiveDownloadDir = configuredDownloadDir || suggestedDownloadDir;
   const savedFavorites = parseCsv(
     asText(values.DASHBOARD_SUMMARY_CHARTS || values.TREND_SELECTED_CHARTS)
   );
@@ -487,8 +498,8 @@ export function SettingsPage() {
           ? "true"
           : "false",
         OPEN_ISSUES_FOCUS_MODE: asText(values.OPEN_ISSUES_FOCUS_MODE || "criticidad_alta"),
-        REPORT_PPT_DOWNLOAD_DIR: asText(values.REPORT_PPT_DOWNLOAD_DIR),
-        PERIOD_PPT_TEMPLATE_PATH: asText(values.PERIOD_PPT_TEMPLATE_PATH),
+        REPORT_PPT_DOWNLOAD_DIR: configuredDownloadDir,
+        PERIOD_PPT_TEMPLATE_PATH: "",
         DASHBOARD_SUMMARY_CHARTS: summaryCsv,
         TREND_SELECTED_CHARTS: summaryCsv
       }
@@ -559,8 +570,17 @@ export function SettingsPage() {
     );
   }
 
-  async function downloadJiraSourcesExcel() {
-    await downloadSourcesExcel("jira", "fuentes_jira.xlsx");
+  async function saveJiraSourcesExcel() {
+    setJiraExcelBusy(true);
+    try {
+      const saved: SavedFilePayload = await saveSourcesExcel("jira");
+      setFlashMessage(`Excel Jira guardado en ${saved.savedPath}`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? "Error desconocido");
+      setFlashMessage(`No se pudo guardar el Excel Jira: ${detail}`);
+    } finally {
+      setJiraExcelBusy(false);
+    }
   }
 
   async function importJiraSourcesExcel(file: File | null) {
@@ -599,8 +619,17 @@ export function SettingsPage() {
     }
   }
 
-  async function downloadHelixSourcesExcel() {
-    await downloadSourcesExcel("helix", "fuentes_helix.xlsx");
+  async function saveHelixSourcesExcel() {
+    setHelixExcelBusy(true);
+    try {
+      const saved: SavedFilePayload = await saveSourcesExcel("helix");
+      setFlashMessage(`Excel Helix guardado en ${saved.savedPath}`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? "Error desconocido");
+      setFlashMessage(`No se pudo guardar el Excel Helix: ${detail}`);
+    } finally {
+      setHelixExcelBusy(false);
+    }
   }
 
   async function importHelixSourcesExcel(file: File | null) {
@@ -781,23 +810,47 @@ export function SettingsPage() {
           </section>
 
           <section className="surface-card page-stack">
-            <h3>Descargas del informe PPT</h3>
+            <h3>Descargas de informes</h3>
+            {!configuredDownloadDir &&
+            downloadTarget.data?.source === "system" &&
+            !downloadsPromptDismissed ? (
+              <section className="inline-notice">
+                <strong>Se ha detectado la carpeta Descargas del sistema.</strong>
+                <p className="inline-caption">
+                  {suggestedDownloadDir || "Usaremos esa ruta cuando generes Excel e informes."}
+                </p>
+                <div className="settings-actions-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setValue("REPORT_PPT_DOWNLOAD_DIR", suggestedDownloadDir)}
+                  >
+                    Usar Descargas
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setDownloadsPromptDismissed(true)}
+                  >
+                    Ahora no
+                  </button>
+                </div>
+              </section>
+            ) : null}
             <div className="settings-form-grid">
               <label className="field">
                 <span>Carpeta de guardado</span>
                 <input
-                  value={asText(values.REPORT_PPT_DOWNLOAD_DIR)}
+                  value={effectiveDownloadDir}
                   onChange={(event) => setValue("REPORT_PPT_DOWNLOAD_DIR", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>Plantilla informe seguimiento</span>
-                <input
-                  value={asText(values.PERIOD_PPT_TEMPLATE_PATH)}
-                  onChange={(event) => setValue("PERIOD_PPT_TEMPLATE_PATH", event.target.value)}
+                  placeholder={suggestedDownloadDir}
                 />
               </label>
             </div>
+            <p className="inline-caption">
+              Se aplica a los Excel e informes generados por la aplicación. Solo se accederá a la
+              carpeta cuando lances una descarga explícita.
+            </p>
           </section>
 
           <section className="surface-card page-stack">
@@ -911,7 +964,7 @@ export function SettingsPage() {
                 type="button"
                 className="secondary-button"
                 disabled={jiraExcelBusy}
-                onClick={() => void downloadJiraSourcesExcel()}
+                onClick={() => void saveJiraSourcesExcel()}
               >
                 Descargar Excel
               </button>
@@ -1020,7 +1073,7 @@ export function SettingsPage() {
                 type="button"
                 className="secondary-button"
                 disabled={helixExcelBusy}
-                onClick={() => void downloadHelixSourcesExcel()}
+                onClick={() => void saveHelixSourcesExcel()}
               >
                 Descargar Excel
               </button>

@@ -14,6 +14,9 @@ export function ReportsPage() {
     savedPath?: string;
   } | null>(null);
   const reportMode = new URLSearchParams(location.search).get("reportMode") ?? "executive";
+  const isCountryRollupActive =
+    Boolean(workspace?.hasCountryRollup) && dashboardState.params.scopeMode === "country";
+  const activeReportMode = isCountryRollupActive && reportMode === "period" ? "period" : "executive";
   const periodSourceIds = workspace?.countryRollupSourceIds ?? [];
 
   const executive = useMutation({
@@ -118,7 +121,7 @@ export function ReportsPage() {
         <article
           className={cn(
             "surface-panel",
-            reportMode === "executive" && "surface-panel-emphasis"
+            activeReportMode === "executive" && "surface-panel-emphasis"
           )}
         >
           <div className="panel-head">
@@ -144,11 +147,11 @@ export function ReportsPage() {
           </button>
         </article>
 
-        {workspace?.hasCountryRollup ? (
+        {isCountryRollupActive ? (
           <article
             className={cn(
               "surface-panel",
-              reportMode === "period" && "surface-panel-emphasis"
+              activeReportMode === "period" && "surface-panel-emphasis"
             )}
           >
             <div className="panel-head">

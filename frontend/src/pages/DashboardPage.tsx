@@ -198,7 +198,6 @@ export function DashboardPage() {
         ?.source_type ?? ""
     );
   }, [issueWorkspace]);
-
   useEffect(() => {
     if (!bootstrap?.dashboardDefaults.defaultTrendChartId) {
       return;
