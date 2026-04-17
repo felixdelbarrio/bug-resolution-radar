@@ -68,8 +68,9 @@ def test_build_issue_rows_skips_kpi_computation(monkeypatch: Any, tmp_path) -> N
     monkeypatch.setattr(dashboard_snapshot, "compute_kpis", _fail_compute_kpis)
     dashboard_snapshot._scope_context_cache.clear()
 
-    out = build_issue_rows(settings, query=query, offset=0, limit=1, sort_by="updated", sort_dir="desc")
+    out = build_issue_rows(
+        settings, query=query, offset=0, limit=1, sort_by="updated", sort_dir="desc"
+    )
 
     assert out["total"] == 2
     assert [row["key"] for row in out["rows"]] == ["MEX-2"]
-

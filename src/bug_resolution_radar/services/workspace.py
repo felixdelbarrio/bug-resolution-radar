@@ -169,7 +169,11 @@ def apply_workspace_source_scope(
             if selected_source_id:
                 mask &= source_values.eq(selected_source_id)
         else:
-            source_scope = source_values.loc[mask] if selected_country and country_values is not None else source_values
+            source_scope = (
+                source_values.loc[mask]
+                if selected_country and country_values is not None
+                else source_values
+            )
             available_source_ids = sorted({sid for sid in source_scope.tolist() if sid})
             selected_rollup = rollup_source_ids(
                 settings,
