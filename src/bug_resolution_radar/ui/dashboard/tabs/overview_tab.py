@@ -324,7 +324,7 @@ def render_overview_kpis(
     if not open_df.empty and "created" in open_df.columns:
         created = pd.to_datetime(open_df["created"], errors="coerce", utc=True)
         created_naive = created.dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         ages = ((now - created_naive).dt.total_seconds() / 86400.0).clip(lower=0.0)
         aged_30_count = int((ages > 30).sum())
 
@@ -355,7 +355,7 @@ def render_overview_kpis(
 
     if not dff.empty and "created" in dff.columns:
         created_dt = pd.to_datetime(dff["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         w14 = now - pd.Timedelta(days=14)
         created_14 = int((created_dt >= w14).sum())
         if "resolved" in dff.columns:

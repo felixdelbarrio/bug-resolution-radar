@@ -163,7 +163,7 @@ def render_ops_health_tab(
         st.caption("No hay `created` válidas para calcular antigüedad.")
         return
 
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     created_naive = as_naive_utc(tmp["created"])
     tmp["age_days"] = (now - created_naive).dt.total_seconds() / 86400.0
     tmp["age_days"] = tmp["age_days"].clip(lower=0.0)

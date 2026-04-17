@@ -239,7 +239,7 @@ def build_open_age_priority_payload(
 
     now_ref = reference_now
     if now_ref is None:
-        now_ref = pd.Timestamp.utcnow().tz_localize(None)
+        now_ref = pd.Timestamp.now("UTC").tz_localize(None)
     else:
         now_ref = pd.Timestamp(now_ref)
         if now_ref.tzinfo is not None:

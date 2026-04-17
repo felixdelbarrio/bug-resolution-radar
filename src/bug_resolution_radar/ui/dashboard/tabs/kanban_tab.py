@@ -221,7 +221,7 @@ def render_kanban_tab(*, open_df: pd.DataFrame) -> None:
         _inject_kanban_item_css()
 
         cols = st.columns(len(selected_statuses))
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         if "created" in kan.columns:
             created_naive = pd.to_datetime(
                 kan["created"], errors="coerce", utc=True

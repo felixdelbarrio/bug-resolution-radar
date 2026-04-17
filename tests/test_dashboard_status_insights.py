@@ -6,7 +6,7 @@ from bug_resolution_radar.ui.dashboard.insights import build_chart_insights
 
 
 def test_open_status_insights_avoids_final_state_focus() -> None:
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     open_df = pd.DataFrame(
         {
             "status": [

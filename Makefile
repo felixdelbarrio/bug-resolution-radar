@@ -32,7 +32,6 @@ PYINSTALLER_COLLECT_ARGS = \
 	--collect-all fastapi \
 	--collect-all starlette \
 	--collect-all uvicorn \
-	--collect-all plotly \
 	--collect-all browser_cookie3 \
 	--collect-all openpyxl \
 	--collect-all xlsxwriter \
