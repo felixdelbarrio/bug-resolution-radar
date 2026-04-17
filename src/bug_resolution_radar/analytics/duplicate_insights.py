@@ -92,7 +92,7 @@ def prepare_duplicates_payload(df2: pd.DataFrame) -> dict[str, Any]:
         age_series = pd.Series([pd.NA] * len(extra_df), index=extra_df.index)
         if "created" in extra_df.columns:
             created_naive = _as_naive_utc(extra_df["created"])
-            now = pd.Timestamp.utcnow().tz_localize(None)
+            now = pd.Timestamp.now("UTC").tz_localize(None)
             age_series = ((now - created_naive).dt.total_seconds() / 86400.0).clip(lower=0.0)
 
         assignee_series = (

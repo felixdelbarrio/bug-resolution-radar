@@ -247,7 +247,7 @@ def _insights_age_buckets(ctx: ChartContext) -> List[str]:
             "Si no hay fechas de creación fiables, normaliza el campo ‘created’ en la ingesta para poder medir envejecimiento y deuda.",
         ]
 
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     age_days = (now - created).dt.total_seconds() / 86400.0
     if age_days.empty:
         return [

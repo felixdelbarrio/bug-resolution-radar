@@ -186,7 +186,7 @@ def _age_days(open_df: pd.DataFrame) -> pd.Series:
     valid = created.notna()
     if not valid.any():
         return pd.Series([], dtype=float)
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     ages = (now - created[valid]).dt.total_seconds() / 86400.0
     return ages.clip(lower=0.0)
 
@@ -199,7 +199,7 @@ def _age_days_aligned(df: pd.DataFrame) -> pd.Series:
     valid = created.notna()
     if not valid.any():
         return out
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     out.loc[valid] = ((now - created.loc[valid]).dt.total_seconds() / 86400.0).clip(lower=0.0)
     return out
 
@@ -212,7 +212,7 @@ def _stale_days_from_updated(df: pd.DataFrame) -> pd.Series:
     valid = updated.notna()
     if not valid.any():
         return out
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     out.loc[valid] = ((now - updated.loc[valid]).dt.total_seconds() / 86400.0).clip(lower=0.0)
     return out
 
@@ -1260,7 +1260,7 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
             if "resolved" in safe_dff.columns
             else pd.Series(pd.NaT, index=safe_dff.index)
         )
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         from_14 = now - pd.Timedelta(days=14)
         created_14 = int((created >= from_14).sum())
         resolved_14 = int((resolved >= from_14).sum())

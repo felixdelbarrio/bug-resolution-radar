@@ -1042,6 +1042,9 @@ def test_issues_export_helix_raw_includes_all_imported_raw_fields(
     xl = pd.ExcelFile(BytesIO(response.content))
     frame = xl.parse("Helix Raw")
     assert frame.loc[0, "ID de la Incidencia"] == "INC0099"
+    assert frame.loc[0, "id"] == "INC0099"
+    assert frame.loc[0, "priority"] == "High"
+    assert frame.loc[0, "summary"] == "Caso completo raw"
     assert frame.loc[0, "Status"] == "Analysing"
     assert frame.loc[0, "Impacted Service"] == "Payments"
     assert frame.loc[0, "Custom Field A"] == "Valor A"

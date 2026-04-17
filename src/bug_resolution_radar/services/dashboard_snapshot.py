@@ -191,7 +191,7 @@ def _build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> 
         if "updated" in safe_open.columns
         else pd.Series([], dtype="datetime64[ns]")
     )
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     age_days = (
         ((now - created_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
         if not created_open.empty
@@ -380,7 +380,7 @@ def build_overview_focus_cards(
     aged_30_count = 0
     if not open_df.empty and "created" in open_df.columns:
         created = pd.to_datetime(open_df["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         ages = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         aged_30_count = int((ages > 30).sum())
 
@@ -409,7 +409,7 @@ def build_overview_focus_cards(
     resolved_14 = 0
     if not dff.empty and "created" in dff.columns:
         created_dt = pd.to_datetime(dff["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         w14 = now - pd.Timedelta(days=14)
         created_14 = int((created_dt >= w14).sum())
         if "resolved" in dff.columns:
@@ -621,7 +621,7 @@ def build_overview_kpis_payload(
     aged_30_count = 0
     if not open_df.empty and "created" in open_df.columns:
         created = pd.to_datetime(open_df["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         ages = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         aged_30_count = int((ages > 30).sum())
     aged_30_pct = (aged_30_count / open_issues * 100.0) if open_issues else 0.0
@@ -1124,7 +1124,7 @@ def build_kanban_columns(
     kan["status"] = normalize_text_col(kan["status"], "(sin estado)")
     if "created" in kan.columns:
         created = pd.to_datetime(kan["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         kan["ageDays"] = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0).fillna(0.0)
     else:
         kan["ageDays"] = 0.0
@@ -1470,7 +1470,7 @@ def _issue_records_from_df(
         page["ageDays"] = pd.to_numeric(page[age_days_col], errors="coerce").fillna(0.0)
     elif "created" in page.columns:
         created = pd.to_datetime(page["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         page["ageDays"] = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0).fillna(0.0)
     else:
         page["ageDays"] = 0.0
@@ -2018,7 +2018,7 @@ def _build_functionality_payload(
             created = pd.to_datetime(tmp_open["created"], errors="coerce", utc=True).dt.tz_localize(
                 None
             )
-            now = pd.Timestamp.utcnow().tz_localize(None)
+            now = pd.Timestamp.now("UTC").tz_localize(None)
             tmp_open["__age_days"] = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         else:
             tmp_open["__age_days"] = pd.NA
@@ -2242,7 +2242,7 @@ def _build_people_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
     has_created = "created" in df2.columns
     if has_created:
         created = pd.to_datetime(df2["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         df2["age_days"] = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
     else:
         df2["age_days"] = pd.NA
@@ -2334,7 +2334,7 @@ def _build_ops_health_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
     if not open_df.empty and "created" in open_df.columns:
         tmp = open_df.copy(deep=False)
         created = pd.to_datetime(tmp["created"], errors="coerce", utc=True).dt.tz_localize(None)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         tmp["age_days"] = ((now - created).dt.total_seconds() / 86400.0).clip(lower=0.0)
         oldest = tmp.dropna(subset=["age_days"]).sort_values(
             "age_days",

@@ -386,7 +386,7 @@ def build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> D
         if "created" in safe_open.columns
         else pd.Series([], dtype="datetime64[ns]")
     )
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     age_days = (
         ((now - created_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
         if not created_open.empty

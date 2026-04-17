@@ -179,7 +179,7 @@ def _rank_topic_candidates(sub: pd.DataFrame) -> pd.DataFrame:
     if col_exists(work, "updated"):
         updated_dt = pd.to_datetime(work["updated"], errors="coerce", utc=True)
         updated_naive = as_naive_utc(updated_dt)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         stale = ((now - updated_naive).dt.total_seconds() / 86400.0).fillna(0.0).clip(lower=0.0)
 
     no_owner_bonus = (
@@ -241,7 +241,7 @@ def _prepare_top_topics_payload(open_df: pd.DataFrame) -> dict[str, Any]:
     if col_exists(tmp_open, "created"):
         created_dt = pd.to_datetime(tmp_open["created"], errors="coerce", utc=True)
         created_naive = as_naive_utc(created_dt)
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         tmp_open["__age_days"] = ((now - created_naive).dt.total_seconds() / 86400.0).clip(
             lower=0.0
         )
@@ -546,7 +546,7 @@ def render_top_topics_tab(
         st.info("No hay incidencias abiertas para analizar temas.")
         return
 
-    today = pd.Timestamp.utcnow().tz_localize(None).strftime("%Y-%m-%d")
+    today = pd.Timestamp.now("UTC").tz_localize(None).strftime("%Y-%m-%d")
     sig = dataframe_signature(
         open_df,
         columns=("key", "summary", "status", "priority", "assignee", "created", "updated"),
