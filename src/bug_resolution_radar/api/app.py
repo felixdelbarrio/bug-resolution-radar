@@ -40,7 +40,7 @@ from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_b
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix as execute_helix_ingest
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira as execute_jira_ingest
 from bug_resolution_radar.models.schema_helix import HelixDocument
-from bug_resolution_radar.repositories.helix_store import load_helix_export_df
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.reports.service import (
     build_report_filters,
     generate_executive_report_artifact,
@@ -61,11 +61,13 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_kanban_columns,
     build_trend_detail,
+    load_scope_context,
 )
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
     save_download_content,
 )
+from bug_resolution_radar.services.helix_raw_export import build_helix_raw_export_frame
 from bug_resolution_radar.services.ingest_contracts import (
     ingest_overview_payload,
     persist_ingest_selection,
@@ -543,6 +545,22 @@ def _export_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+def _helix_export_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
+    context = load_scope_context(settings, query=query)
+    dff = context.dff.copy(deep=False)
+    if dff.empty:
+        return dff
+
+    sort_column = (
+        query.issue_sort_col
+        if str(query.issue_sort_col or "").strip() in dff.columns
+        else ("updated" if "updated" in dff.columns else ("key" if "key" in dff.columns else ""))
+    )
+    if sort_column:
+        dff = dff.sort_values(sort_column, ascending=False, kind="mergesort")
+    return dff
+
+
 def _helix_data_path_and_mtime(settings: Settings) -> tuple[str, int]:
     helix_path = (
         str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip() or "data/helix_dump.json"
@@ -557,7 +575,7 @@ def _helix_data_path_and_mtime(settings: Settings) -> tuple[str, int]:
 
 
 def _helix_raw_export_bytes(settings: Settings, *, query: DashboardQuery) -> bytes:
-    export_df = _export_dataframe(settings, query=query)
+    export_df = _helix_export_dataframe(settings, query=query)
     if export_df.empty:
         raise HTTPException(status_code=400, detail="No hay incidencias para exportar.")
     if "source_type" not in export_df.columns:
@@ -581,36 +599,33 @@ def _helix_raw_export_bytes(settings: Settings, *, query: DashboardQuery) -> byt
             detail="No se ha encontrado el volcado Helix requerido para la exportación raw.",
         )
 
-    raw_store_df = load_helix_export_df(helix_path)
-    if raw_store_df.empty or "merge_key" not in raw_store_df.columns:
+    try:
+        helix_doc = HelixRepo(Path(helix_path)).load() or HelixDocument.empty()
+    except Exception:
+        helix_doc = HelixDocument.empty()
+    helix_items_by_merge_key = {}
+    for item in helix_doc.items:
+        source_id = str(item.source_id or "").strip().lower()
+        issue_key = str(item.id or "").strip().upper()
+        if not issue_key:
+            continue
+        merge_key = f"{source_id}::{issue_key}" if source_id else issue_key
+        helix_items_by_merge_key[merge_key] = item
+
+    if not helix_items_by_merge_key:
         raise HTTPException(
             status_code=400,
             detail="No se ha podido cargar el dataset raw de Helix para la exportación.",
         )
-
-    merge_keys = {
-        (
-            f"{str(source_id or '').strip().lower()}::{str(issue_key or '').strip().upper()}"
-            if str(source_id or "").strip()
-            else str(issue_key or "").strip().upper()
-        )
-        for source_id, issue_key in helix_df.loc[:, ["source_id", "key"]].itertuples(
-            index=False, name=None
-        )
-        if str(issue_key or "").strip()
-    }
-    raw_df = raw_store_df.loc[
-        raw_store_df["merge_key"].fillna("").astype(str).isin(merge_keys)
-    ].copy(deep=False)
+    raw_df = build_helix_raw_export_frame(
+        helix_df,
+        helix_items_by_merge_key=helix_items_by_merge_key,
+    )
     if raw_df is None or raw_df.empty:
         raise HTTPException(
             status_code=400,
             detail="No se han encontrado filas raw de Helix para las incidencias filtradas.",
         )
-    raw_df = raw_df.drop(
-        columns=[col for col in ("merge_key", "source_id") if col in raw_df.columns],
-        errors="ignore",
-    )
 
     return dataframes_to_xlsx_bytes(
         [("Helix Raw", raw_df)],
