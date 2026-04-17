@@ -75,7 +75,7 @@ def test_duplicates_brief_reports_high_duplicate_pressure() -> None:
 
 
 def test_priority_pack_flags_unassigned_critical_items() -> None:
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     open_df = pd.DataFrame(
         {
             "priority": ["Highest", "High", "Medium", "Low"],
@@ -95,7 +95,7 @@ def test_priority_pack_flags_unassigned_critical_items() -> None:
 
 
 def test_status_pack_flags_stalled_dominant_state() -> None:
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     open_df = pd.DataFrame(
         {
             "status": ["In Progress", "In Progress", "In Progress", "Test", "Test"],
@@ -118,7 +118,7 @@ def test_status_pack_flags_stalled_dominant_state() -> None:
 
 
 def test_status_pack_does_not_mark_accepted_as_bottleneck() -> None:
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     open_df = pd.DataFrame(
         {
             "status": [

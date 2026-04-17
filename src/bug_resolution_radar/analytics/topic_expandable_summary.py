@@ -547,7 +547,7 @@ def build_topic_expandable_summaries(
         reference_day = (
             max(reference_candidates).normalize()
             if reference_candidates
-            else pd.Timestamp.utcnow().tz_localize(None).normalize()
+            else pd.Timestamp.now("UTC").tz_localize(None).normalize()
         )
         window_start = reference_day - pd.Timedelta(days=window_days)
         created_recent = created_dt.notna() & (created_dt >= window_start)

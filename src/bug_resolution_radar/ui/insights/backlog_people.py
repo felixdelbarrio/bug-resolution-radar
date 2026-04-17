@@ -158,7 +158,7 @@ def render_backlog_people_tab(
         df2["created"]
     )
     if has_created:
-        now = pd.Timestamp.utcnow().tz_localize(None)
+        now = pd.Timestamp.now("UTC").tz_localize(None)
         created_naive = as_naive_utc(df2["created"])
         df2["age_days"] = (now - created_naive).dt.total_seconds() / 86400.0
         df2["age_days"] = df2["age_days"].clip(lower=0.0)

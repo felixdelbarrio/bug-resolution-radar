@@ -109,7 +109,7 @@ def render_duplicates_tab(
     if col_exists(df2, "summary"):
         df2["summary"] = df2["summary"].fillna("").astype(str)
 
-    today = pd.Timestamp.utcnow().tz_localize(None).strftime("%Y-%m-%d")
+    today = pd.Timestamp.now("UTC").tz_localize(None).strftime("%Y-%m-%d")
     sig = dataframe_signature(
         df2,
         columns=("key", "summary", "status", "priority", "assignee", "created", "updated"),

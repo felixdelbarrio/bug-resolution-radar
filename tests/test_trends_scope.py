@@ -231,7 +231,7 @@ def test_render_open_priority_pie_excludes_deployed_rows() -> None:
 
 
 def test_render_age_buckets_renders_issue_level_distribution() -> None:
-    now = pd.Timestamp.utcnow()
+    now = pd.Timestamp.now("UTC")
     open_df = pd.DataFrame(
         {
             "status": ["New", "Analysing", "Blocked", "En progreso", "To Rework", "Ready"],
@@ -266,7 +266,7 @@ def test_render_age_buckets_renders_issue_level_distribution() -> None:
 
 
 def test_age_bucket_priority_distribution_groups_open_counts() -> None:
-    now = pd.Timestamp.utcnow()
+    now = pd.Timestamp.now("UTC")
     open_df = pd.DataFrame(
         {
             "priority": ["Highest", "Highest", "Medium", "Low", None],

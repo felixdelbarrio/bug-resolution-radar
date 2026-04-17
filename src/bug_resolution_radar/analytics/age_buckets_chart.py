@@ -65,7 +65,7 @@ def build_age_bucket_points(issues_df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
 
-    now = pd.Timestamp.utcnow().tz_localize(None)
+    now = pd.Timestamp.now("UTC").tz_localize(None)
     df["__age_days"] = (now - df["__created_dt"]).dt.total_seconds() / 86400.0
     df["__age_days"] = df["__age_days"].clip(lower=0.0)
     if "status" not in df.columns:
