@@ -1096,6 +1096,26 @@ def create_app() -> FastAPI:
             headers=_download_headers(filename),
         )
 
+    @app.post("/api/issues/export/helix-raw/save")
+    def issues_export_helix_raw_save(payload: DashboardExportSaveRequest) -> dict[str, Any]:
+        settings = load_settings()
+        query = _dashboard_query(
+            country=payload.country,
+            source_id=payload.sourceId,
+            scope_mode=payload.scopeMode,
+            status=_csv_join(payload.status),
+            priority=_csv_join(payload.priority),
+            assignee=_csv_join(payload.assignee),
+            quincenal_scope=payload.quincenalScope,
+            issue_keys=_csv_join(payload.issueKeys),
+            issue_sort_col=payload.issueSortCol,
+            issue_like_query=payload.issueLikeQuery,
+        )
+        content = _helix_raw_export_bytes(settings, query=query)
+        filename = download_filename("helix_raw_issues", ext="xlsx")
+        export_path = save_download_content(settings, file_name=filename, content=content)
+        return _saved_file_payload(export_path, file_name=filename)
+
     @app.get("/api/kanban")
     def kanban(
         country: str = "",

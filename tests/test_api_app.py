@@ -784,11 +784,11 @@ def test_download_target_endpoint_uses_configured_directory(monkeypatch, tmp_pat
     }
 
 
-def test_issues_export_save_writes_helix_excel_to_configured_download_dir(
+def test_issues_export_save_writes_standard_excel_to_configured_download_dir(
     monkeypatch, tmp_path: Path
 ) -> None:
     settings = _settings(tmp_path)
-    source_id = _seed_helix_issues(settings)
+    source_id = _seed_issues(settings)
     monkeypatch.setattr(api_app, "load_settings", lambda: settings)
 
     client = TestClient(api_app.create_app())
@@ -809,8 +809,37 @@ def test_issues_export_save_writes_helix_excel_to_configured_download_dir(
     assert saved_path.parent == Path(settings.REPORT_PPT_DOWNLOAD_DIR)
     xl = pd.ExcelFile(saved_path)
     frame = xl.parse("Issues")
-    assert frame.loc[0, "key"] == "INC0001"
-    assert frame.loc[0, "source_type"] == "helix"
+    assert frame.loc[0, "key"] == "RAD-1"
+    assert frame.loc[0, "source_type"] == "jira"
+
+
+def test_issues_export_helix_raw_save_writes_raw_excel_to_configured_download_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_helix_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/issues/export/helix-raw/save",
+        json={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "format": "xlsx",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    saved_path = Path(payload["savedPath"])
+    assert saved_path.exists()
+    assert saved_path.parent == Path(settings.REPORT_PPT_DOWNLOAD_DIR)
+    xl = pd.ExcelFile(saved_path)
+    frame = xl.parse("Helix Raw")
+    assert frame.loc[0, "ID de la Incidencia"] == "INC0001"
+    assert frame.loc[0, "Status"] == "Analysing"
 
 
 def test_issues_export_helix_raw_endpoint_streams_xlsx(monkeypatch, tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ type IssuesPanelProps = {
   sortDir: string;
   issueLikeQuery: string;
   queryParams: Record<string, string | string[] | boolean>;
+  sourceType: string;
   isRefreshing: boolean;
   onOpenIssue: (row: Record<string, string | number | undefined>) => void;
   onChange: (patch: Record<string, string | string[]>) => void;
@@ -114,6 +115,7 @@ export function IssuesPanel({
   sortDir,
   issueLikeQuery,
   queryParams,
+  sourceType,
   isRefreshing,
   onOpenIssue,
   onChange
@@ -129,6 +131,16 @@ export function IssuesPanel({
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(total, page * pageSize);
   const tableView = view === "Tabla";
+  const rowSourceTypes = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row.source_type ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+  const isHelixScope =
+    String(sourceType || "").trim().toLowerCase() === "helix" ||
+    (rowSourceTypes.length === 1 && rowSourceTypes[0] === "helix");
   const summaryLabel =
     total === 0
       ? "0 issues filtradas"
@@ -140,13 +152,16 @@ export function IssuesPanel({
     try {
       setFeedback(null);
       setDownloadState("standard");
-      const saved = await postJson<SavedFilePayload>("/api/issues/export/save", {
+      const saved = await postJson<SavedFilePayload>(
+        isHelixScope ? "/api/issues/export/helix-raw/save" : "/api/issues/export/save",
+        {
         ...queryParams,
         format: "xlsx"
-      });
+        }
+      );
       setFeedback({
         kind: "success",
-        message: `Excel guardado en disco: ${saved.fileName}`,
+        message: `${isHelixScope ? "Helix Raw" : "Excel"} guardado en disco: ${saved.fileName}`,
         savedPath: saved.savedPath
       });
     } catch (error) {
