@@ -12,9 +12,9 @@ from fastapi.testclient import TestClient
 from bug_resolution_radar.config import Settings, build_source_id
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.reports.executive_ppt import ExecutiveReportResult
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
+from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.repositories.issues_store import save_issues_doc
 
 api_app = importlib.import_module("bug_resolution_radar.api.app")
@@ -892,6 +892,35 @@ def test_issues_export_save_writes_standard_excel_to_configured_download_dir(
     assert frame.loc[0, "source_type"] == "jira"
 
 
+def test_issues_export_jira_only_includes_all_persisted_columns(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_issues(settings)
+    parquet_path = Path(settings.DATA_PATH).with_suffix(".parquet")
+    df = pd.read_parquet(parquet_path)
+    df["jira_custom_field"] = "valor ingest ado"
+    df.to_parquet(parquet_path, index=False)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/issues/export/save",
+        json={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "format": "xlsx",
+            "priority": ["High"],
+        },
+    )
+
+    assert response.status_code == 200
+    frame = pd.ExcelFile(Path(response.json()["savedPath"])).parse("Issues")
+    assert frame["key"].tolist() == ["RAD-1"]
+    assert frame.loc[0, "jira_custom_field"] == "valor ingest ado"
+
+
 def test_issues_export_helix_raw_save_writes_raw_excel_to_configured_download_dir(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -1050,6 +1079,184 @@ def test_issues_export_helix_raw_includes_all_imported_raw_fields(
     assert frame.loc[0, "Custom Field A"] == "Valor A"
     assert frame.loc[0, "Custom Field B"] == 42
     assert frame.loc[0, "Custom Nested"] == '{"owner": "ops", "tier": 2}'
+
+
+def test_issues_export_aggregate_helix_jira_creates_sheet_per_source(
+    monkeypatch, tmp_path: Path
+) -> None:
+    jira_source_id = build_source_id("jira", "España", "Core")
+    helix_source_id = build_source_id("helix", "España", "Helix Core")
+    settings = _settings(tmp_path).model_copy(
+        update={
+            "COUNTRY_ROLLUP_SOURCES_JSON": (
+                f'[{{"country":"España","source_ids":["{jira_source_id}","{helix_source_id}"]}}]'
+            )
+        }
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC0001",
+                    summary="Timeout al consultar Helix",
+                    status="Analysing",
+                    priority="High",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=helix_source_id,
+                    url="https://helix.example.com/INC0001",
+                    raw_fields={"Status": "Analysing"},
+                )
+            ]
+        )
+    )
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="RAD-1",
+                    summary="Error en login",
+                    status="Open",
+                    type="Bug",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    assignee="Alice",
+                    country="España",
+                    source_alias="Core",
+                    source_id=jira_source_id,
+                    source_type="jira",
+                    url="https://jira.example.com/browse/RAD-1",
+                ),
+                NormalizedIssue(
+                    key="INC0001",
+                    summary="Timeout al consultar Helix",
+                    status="Analysing",
+                    type="Helix",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    assignee="Bob",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=helix_source_id,
+                    source_type="helix",
+                    url="https://helix.example.com/INC0001",
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/issues/export/save",
+        json={"country": "España", "sourceId": jira_source_id, "scopeMode": "country"},
+    )
+
+    assert response.status_code == 200
+    xl = pd.ExcelFile(Path(response.json()["savedPath"]))
+    assert xl.sheet_names == ["JIRA", "Helix Raw"]
+    assert xl.parse("JIRA")["key"].tolist() == ["RAD-1"]
+    assert xl.parse("Helix Raw")["ID de la Incidencia"].tolist() == ["INC0001"]
+
+
+def test_issues_export_aggregate_multi_helix_creates_raw_sheet_per_source(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source_a = build_source_id("helix", "España", "Helix Core")
+    source_b = build_source_id("helix", "España", "Helix Ops")
+    settings = Settings(
+        APP_TITLE="Radar",
+        DATA_PATH=str((tmp_path / "issues.json").resolve()),
+        NOTES_PATH=str((tmp_path / "notes.json").resolve()),
+        INSIGHTS_LEARNING_PATH=str((tmp_path / "learning.json").resolve()),
+        HELIX_DATA_PATH=str((tmp_path / "helix.json").resolve()),
+        JIRA_SOURCES_JSON="[]",
+        HELIX_SOURCES_JSON=(
+            '[{"country":"España","alias":"Helix Core","service_origin_buug":"Canales"},'
+            '{"country":"España","alias":"Helix Ops","service_origin_buug":"Canales"}]'
+        ),
+        COUNTRY_ROLLUP_SOURCES_JSON=(
+            f'[{{"country":"España","source_ids":["{source_a}","{source_b}"]}}]'
+        ),
+        REPORT_PPT_DOWNLOAD_DIR=str((tmp_path / "exports").resolve()),
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC0001",
+                    summary="Caso A",
+                    status="Analysing",
+                    priority="High",
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_a,
+                    raw_fields={"Status": "Analysing"},
+                ),
+                HelixWorkItem(
+                    id="INC0002",
+                    summary="Caso B",
+                    status="New",
+                    priority="Highest",
+                    country="España",
+                    source_alias="Helix Ops",
+                    source_id=source_b,
+                    raw_fields={"Status": "New"},
+                ),
+            ]
+        )
+    )
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="INC0001",
+                    summary="Caso A",
+                    status="Analysing",
+                    type="Helix",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    country="España",
+                    source_alias="Helix Core",
+                    source_id=source_a,
+                    source_type="helix",
+                ),
+                NormalizedIssue(
+                    key="INC0002",
+                    summary="Caso B",
+                    status="New",
+                    type="Helix",
+                    priority="Highest",
+                    created=now,
+                    updated=now,
+                    country="España",
+                    source_alias="Helix Ops",
+                    source_id=source_b,
+                    source_type="helix",
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.post(
+        "/api/issues/export/save",
+        json={"country": "España", "scopeMode": "country"},
+    )
+
+    assert response.status_code == 200
+    xl = pd.ExcelFile(Path(response.json()["savedPath"]))
+    assert xl.sheet_names == ["Helix Raw - Helix Core", "Helix Raw - Helix Ops"]
+    assert xl.parse("Helix Raw - Helix Core")["ID de la Incidencia"].tolist() == ["INC0001"]
+    assert xl.parse("Helix Raw - Helix Ops")["ID de la Incidencia"].tolist() == ["INC0002"]
 
 
 def test_settings_sources_export_save_writes_helix_excel_to_configured_download_dir(

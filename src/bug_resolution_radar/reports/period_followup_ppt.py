@@ -39,6 +39,10 @@ from bug_resolution_radar.analytics.period_functionality_followup import (
     build_period_functionality_followup_summary,
     format_top_row_label,
 )
+from bug_resolution_radar.analytics.period_risk_issue_lists import (
+    PeriodRiskIssueRow,
+    build_period_risk_issue_lists,
+)
 from bug_resolution_radar.analytics.period_summary import (
     OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
     QuincenalScopeResult,
@@ -85,6 +89,14 @@ _REPORT_FONT_BOOK_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Book.ttf"
 _REPORT_FONT_BOLD_PATH = _REPORT_FONT_DIR / "BentonSansBBVA-Bold.ttf"
 _ZOOM_TABLE_ROWS_PER_SLIDE = 5
 _ZOOM_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (2.2, 4.6, 2.25, 1.85, 1.5, 1.5)
+_RISK_TABLE_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Descripción",
+    "Funcionalidad/\nCausa raíz",
+    "Estado",
+    "Criticidad",
+    "Días abierta",
+)
 _FUNCTIONALITY_DASHBOARD_TABLE_HEADERS: tuple[str, ...] = (
     "#",
     "Resto incidencias abiertas",
@@ -243,6 +255,17 @@ def _slug(value: str) -> str:
     txt = str(value or "").strip().lower()
     txt = re.sub(r"[^a-z0-9]+", "-", txt).strip("-")
     return txt or "scope"
+
+
+def _parse_bool_flag(value: object, *, default: bool = False) -> bool:
+    token = str(value or "").strip().lower()
+    if not token:
+        return bool(default)
+    if token in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if token in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
 
 
 def _fmt_days(value: float | None) -> int:
@@ -3129,7 +3152,7 @@ def _populate_functionality_dashboard_slide(
 ) -> None:
     critical_wording = bool(getattr(summary, "is_critical_focus", False))
     table_rows: list[list[str]] = []
-    for row in list(summary.tail_rows or []):
+    for row in list(summary.tail_rows or [])[:6]:
         table_rows.append(
             [
                 str(int(row.rank)),
@@ -3305,6 +3328,128 @@ def _populate_functionality_zoom_slide(
         data_rows=len(rows),
         description_col_index=1,
     )
+
+
+def _chunk_risk_issues(
+    issues: Sequence[PeriodRiskIssueRow],
+    *,
+    rows_per_slide: int,
+) -> list[tuple[PeriodRiskIssueRow, ...]]:
+    size = max(int(rows_per_slide or 0), 1)
+    items = list(issues or [])
+    if not items:
+        return [tuple()]
+    return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
+
+
+def _risk_issue_rows_for_table(
+    issues: Sequence[PeriodRiskIssueRow],
+    *,
+    empty_message: str,
+) -> tuple[list[list[str]], dict[int, str]]:
+    rows: list[list[str]] = []
+    row_links: dict[int, str] = {}
+    for idx, issue in enumerate(list(issues or [])):
+        issue_key = str(issue.key or "").strip().upper()
+        rows.append(
+            [
+                issue_key,
+                _trim_text(_premium_sentence_case(str(issue.summary or "")), max_chars=260),
+                _trim_text(
+                    _premium_sentence_case(str(issue.functionality or "")),
+                    max_chars=120,
+                ),
+                _trim_text(str(issue.status or ""), max_chars=48),
+                _trim_text(str(issue.priority or ""), max_chars=32),
+                f"{int(issue.open_days or 0)} días",
+            ]
+        )
+        if str(issue.url or "").strip():
+            row_links[idx] = str(issue.url or "").strip()
+    if not rows:
+        rows.append(
+            ["", str(empty_message or "Sin incidencias para este criterio."), "", "", "", ""]
+        )
+    return rows, row_links
+
+
+def _populate_risk_issue_list_slide(
+    slide: Any,
+    *,
+    title: str,
+    issues_page: Sequence[PeriodRiskIssueRow],
+    empty_message: str,
+    page_number: int,
+    total_pages: int,
+) -> None:
+    page_suffix = ""
+    if int(total_pages or 0) > 1:
+        roman = _to_roman(int(page_number or 1))
+        page_suffix = f" ({roman})" if roman else f" ({int(page_number or 1)})"
+    _set_shape_text(slide, 1, f"{str(title or '').strip()}{page_suffix}")
+    _set_shape_font_name(slide, shape_index=1, font_name=_PPT_FONT_BODY_MEDIUM)
+    _set_shape_text(
+        slide,
+        3,
+        "Listado ejecutivo de incidencias abiertas ordenado por exposición operativa.",
+    )
+    _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(*_TABLE_BODY_FG_RGB))
+    _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_BODY)
+    _set_shape_text(slide, 4, "Detalle de incidencias abiertas:")
+    _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
+
+    _configure_zoom_table_layout(slide, table_shape_index=2, caption_shape_index=3)
+    rows, row_links = _risk_issue_rows_for_table(issues_page, empty_message=empty_message)
+    _replace_table_with_picture(
+        slide,
+        table_shape_index=2,
+        rows=rows,
+        headers=_RISK_TABLE_HEADERS,
+        column_weights=_ZOOM_TABLE_COLUMN_WEIGHTS,
+        description_col_index=1,
+        left_align_cols=(0, 1, 2),
+        hyperlink_by_row=row_links,
+        font_boost_pt=0.45,
+        header_font_size_pt=_ZOOM_TABLE_HEADER_FONT_SIZE_PT,
+    )
+
+
+def _append_period_risk_issue_slides(
+    prs: Any,
+    *,
+    high_priority_issues: Sequence[PeriodRiskIssueRow],
+    aged_issues: Sequence[PeriodRiskIssueRow],
+) -> None:
+    template_path = _resolve_functionality_template_path()
+    template_prs = Presentation(str(template_path))
+    if len(template_prs.slides) < 3:
+        raise ValueError("La plantilla de funcionalidad debe contener la slide de zoom.")
+    zoom_template_slide = template_prs.slides[2]
+    specs = (
+        (
+            "Incidencias abiertas de criticidad alta",
+            tuple(high_priority_issues or ()),
+            "Sin incidencias abiertas de criticidad alta en el scope actual.",
+        ),
+        (
+            "Incidencias abiertas con más de 30 días",
+            tuple(aged_issues or ()),
+            "Sin incidencias abiertas con más de 30 días en el scope actual.",
+        ),
+    )
+    for title, issues, empty_message in specs:
+        pages = _chunk_risk_issues(issues, rows_per_slide=_ZOOM_TABLE_ROWS_PER_SLIDE)
+        total_pages = len(pages)
+        for page_idx, page_rows in enumerate(pages, start=1):
+            slide = _append_slide_clone_from_source(prs, source_slide=zoom_template_slide)
+            _populate_risk_issue_list_slide(
+                slide,
+                title=title,
+                issues_page=page_rows,
+                empty_message=empty_message,
+                page_number=page_idx,
+                total_pages=total_pages,
+            )
 
 
 def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
@@ -3558,6 +3703,7 @@ def _append_functionality_followup_slides(
     open_df: pd.DataFrame,
     slide_width: int,
     slide_height: int,
+    include_zoom_slides: bool = True,
 ) -> None:
     critical_wording = bool(getattr(summary, "is_critical_focus", False))
     template_path = _resolve_functionality_template_path()
@@ -3603,6 +3749,9 @@ def _append_functionality_followup_slides(
         ),
     )
     _populate_functionality_dashboard_slide(dashboard_slide, summary=summary)
+
+    if not include_zoom_slides:
+        return
 
     # Zoom de top 3 funcionalidades con paginado por overflow.
     zooms = list(summary.zoom_slides or [])
@@ -3779,6 +3928,16 @@ def generate_country_period_followup_ppt(
         slide_height=slide_height_emu,
     )
 
+    risk_lists = build_period_risk_issue_lists(
+        aggregate.dff,
+        fallback_analysis_day=aggregate.summary.window.current_end,
+    )
+    _append_period_risk_issue_slides(
+        prs,
+        high_priority_issues=risk_lists.high_priority,
+        aged_issues=risk_lists.aged,
+    )
+
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
         jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
@@ -3796,6 +3955,10 @@ def generate_country_period_followup_ppt(
         open_df=aggregate.open_df,
         slide_width=slide_width_emu,
         slide_height=slide_height_emu,
+        include_zoom_slides=_parse_bool_flag(
+            getattr(settings, "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED", "false"),
+            default=False,
+        ),
     )
 
     buff = BytesIO()

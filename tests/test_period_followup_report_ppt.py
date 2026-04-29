@@ -49,6 +49,21 @@ def _build_compact_template(path: Path) -> None:
     prs.save(str(path))
 
 
+def _slide_text(slide: Any) -> str:
+    return " ".join(
+        str(getattr(shape, "text", "") or "")
+        for shape in slide.shapes
+        if getattr(shape, "has_text_frame", False)
+    )
+
+
+def _find_slide_index(prs: Presentation, needle: str) -> int:
+    for idx, slide in enumerate(prs.slides):
+        if needle in _slide_text(slide):
+            return idx
+    raise AssertionError(f"No slide contains {needle!r}")
+
+
 def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Path) -> None:
     template = tmp_path / "template.pptx"
     _build_minimal_template(template)
@@ -91,27 +106,21 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 14
+    assert out.slide_count == 13
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 14
-    s9_text = " ".join(
-        str(getattr(shape, "text", "") or "")
-        for shape in prs.slides[8].shapes
-        if getattr(shape, "has_text_frame", False)
+    assert len(prs.slides) == 13
+    deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
+    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas con más de 30 días" in deck_text
+    dashboard_idx = _find_slide_index(
+        prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad"
     )
-    s10_text = " ".join(
-        str(getattr(shape, "text", "") or "")
-        for shape in prs.slides[9].shapes
-        if getattr(shape, "has_text_frame", False)
-    )
-    assert "quincena" in s9_text.lower()
-    assert "funcionalidad" in s10_text.lower()
     # Functional follow-up slides must preserve light background from source template.
-    bg_fill = prs.slides[9].background.fill
+    bg_fill = prs.slides[dashboard_idx].background.fill
     assert int(bg_fill.type or 0) == 1
     assert bg_fill.fore_color.rgb == RGBColor(247, 248, 248)
 
@@ -158,7 +167,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 14
+    assert out.slide_count == 13
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
@@ -431,6 +440,7 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     settings = Settings(
         PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
         JIRA_BASE_URL="https://jira.example",
+        PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED="true",
     )
 
     called_chart_ids: list[str] = []
@@ -502,6 +512,7 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     settings = Settings(
         PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
         JIRA_BASE_URL="https://jira.example",
+        PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED="true",
     )
     out = generate_country_period_followup_ppt(
         settings,
@@ -510,7 +521,9 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    dashboard_slide = prs.slides[10]
+    dashboard_slide = prs.slides[
+        _find_slide_index(prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad")
+    ]
     assert not any(getattr(shape, "has_table", False) for shape in dashboard_slide.shapes)
     dashboard_table_picture = [
         shape
@@ -522,15 +535,15 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     ]
     assert dashboard_table_picture
 
-    # Slides 12-14 (0-based 11-13): zooms de funcionalidad.
-    for slide_idx in (11, 12, 13):
+    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Login y acceso, abiertas")
+    for slide_idx in (first_zoom_idx, first_zoom_idx + 1, first_zoom_idx + 2):
         slide = prs.slides[slide_idx]
         zoom_tables = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
         assert len(zoom_tables) == 1
 
-    zoom_table = [shape for shape in prs.slides[11].shapes if getattr(shape, "has_table", False)][
-        0
-    ].table
+    zoom_table = [
+        shape for shape in prs.slides[first_zoom_idx].shapes if getattr(shape, "has_table", False)
+    ][0].table
     first_data_key_cell = zoom_table.cell(1, 0)
     runs = list(first_data_key_cell.text_frame.paragraphs[0].runs)
     assert runs
@@ -587,7 +600,10 @@ def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> N
             },
         ]
     )
-    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED="true",
+    )
     out = generate_country_period_followup_ppt(
         settings,
         country="México",
@@ -595,7 +611,9 @@ def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> N
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    dashboard_slide = prs.slides[10]
+    dashboard_slide = prs.slides[
+        _find_slide_index(prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad")
+    ]
     top_three_blob = " | ".join(
         str(getattr(shape, "text", "") or "")
         for idx in (5, 7, 9)
@@ -633,7 +651,10 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
             },
         ]
     )
-    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED="true",
+    )
 
     out = generate_country_period_followup_ppt(
         settings,
@@ -643,9 +664,12 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     )
     prs = Presentation(BytesIO(out.content))
 
+    dashboard_idx = _find_slide_index(
+        prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad"
+    )
     dashboard_blob_shape = next(
         shape
-        for shape in prs.slides[10].shapes
+        for shape in prs.slides[dashboard_idx].shapes
         if getattr(shape, "has_text_frame", False)
         and "INCIDENCIAS" in str(getattr(shape, "text", "") or "")
         and "ABIERTAS" in str(getattr(shape, "text", "") or "")
@@ -659,7 +683,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     dashboard_table_picture = max(
         (
             shape
-            for shape in prs.slides[10].shapes
+            for shape in prs.slides[dashboard_idx].shapes
             if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
             and int(getattr(shape, "left", 0)) < 3_600_000
         ),
@@ -671,7 +695,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     mitigation_panel = next(
         (
             shape
-            for shape in prs.slides[10].shapes
+            for shape in prs.slides[dashboard_idx].shapes
             if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.AUTO_SHAPE
             and int(getattr(shape, "left", 0)) > 5_400_000
             and int(getattr(shape, "width", 0)) >= 3_000_000
@@ -687,9 +711,10 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         mitigation_panel.top + mitigation_panel.height
     )
 
+    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas")
     root_cause_shape = next(
         shape
-        for shape in prs.slides[11].shapes
+        for shape in prs.slides[first_zoom_idx].shapes
         if getattr(shape, "has_text_frame", False)
         and any(
             token in str(getattr(shape, "text", "") or "").lower()
@@ -746,7 +771,10 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         ]
     )
     dff = pd.DataFrame(rows)
-    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED="true",
+    )
     out = generate_country_period_followup_ppt(
         settings,
         country="México",
@@ -754,16 +782,66 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 15
+    assert len(prs.slides) == 17
+    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas en la quincena (I)")
     zoom_titles = [
         str(getattr(shape, "text", "") or "").strip()
-        for slide_idx in (11, 12)
+        for slide_idx in (first_zoom_idx, first_zoom_idx + 1)
         for shape in prs.slides[slide_idx].shapes
         if getattr(shape, "has_text_frame", False)
     ]
     joined_titles = " | ".join(zoom_titles)
+    deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
+    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
     assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
+
+
+def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Pagos no refleja saldo",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "B-1",
+                "summary": "Login falla en acceso",
+                "status": "Analysing",
+                "priority": "Medium",
+                "created": "2026-03-01T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+    deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
+
+    assert len(prs.slides) == 13
+    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas con más de 30 días" in deck_text
+    assert "Seguimiento de KPIs - Incidencias abiertas por funcionalidad" in deck_text
+    assert "Incidencias, en Pagos, abiertas en la quincena" not in deck_text
 
 
 def test_functionality_dashboard_table_headers_include_business_wording() -> None:
@@ -1050,7 +1128,7 @@ def test_period_followup_functionality_trend_title_matches_template_style() -> N
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    trend_slide = prs.slides[9]  # slide 10 (1-based)
+    trend_slide = prs.slides[_find_slide_index(prs, "Tendencia por funcionalidad")]
 
     title_shape = next(
         (

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from functools import lru_cache
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, MutableMapping, Sequence
 
@@ -40,7 +39,6 @@ from bug_resolution_radar.ingest.browser_runtime import open_url_in_configured_b
 from bug_resolution_radar.ingest.helix_ingest import ingest_helix as execute_helix_ingest
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira as execute_jira_ingest
 from bug_resolution_radar.models.schema_helix import HelixDocument
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.reports.service import (
     build_report_filters,
     generate_executive_report_artifact,
@@ -61,22 +59,24 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_kanban_columns,
     build_trend_detail,
-    load_scope_context,
 )
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
     save_download_content,
 )
-from bug_resolution_radar.services.helix_raw_export import build_helix_raw_export_frame
-from bug_resolution_radar.services.ingest_contracts import (
-    ingest_overview_payload,
-    persist_ingest_selection,
-)
 from bug_resolution_radar.services.ingest_async import (
     get_ingest_progress,
     start_ingest_job,
 )
+from bug_resolution_radar.services.ingest_contracts import (
+    ingest_overview_payload,
+    persist_ingest_selection,
+)
 from bug_resolution_radar.services.ingest_runner import run_helix_ingest, run_jira_ingest
+from bug_resolution_radar.services.issue_workbook_export import (
+    build_issue_export_frame,
+    build_issue_workbook_export,
+)
 from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.services.settings_contracts import (
     load_settings_payload,
@@ -93,9 +93,7 @@ from bug_resolution_radar.services.sources_excel import (
     import_sources_from_excel_bytes,
 )
 from bug_resolution_radar.services.tabular_export import (
-    dataframes_to_xlsx_bytes,
     dataframe_to_csv_bytes,
-    dataframe_to_xlsx_bytes,
     download_filename,
 )
 from bug_resolution_radar.services.workspace import (
@@ -533,107 +531,23 @@ def _download_headers(filename: str) -> dict[str, str]:
 
 
 def _export_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
-    result = build_issue_rows(
-        settings,
-        query=query,
-        offset=0,
-        limit=50000,
-        sort_by=query.issue_sort_col or "updated",
-        sort_dir="desc",
-    )
-    rows = list(result.get("rows") or [])
-    return pd.DataFrame(rows)
+    return build_issue_export_frame(settings, query=query)
 
 
-def _helix_export_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
-    context = load_scope_context(settings, query=query)
-    dff = context.dff.copy(deep=False)
-    if dff.empty:
-        return dff
-
-    sort_column = (
-        query.issue_sort_col
-        if str(query.issue_sort_col or "").strip() in dff.columns
-        else ("updated" if "updated" in dff.columns else ("key" if "key" in dff.columns else ""))
-    )
-    if sort_column:
-        dff = dff.sort_values(sort_column, ascending=False, kind="mergesort")
-    return dff
-
-
-def _helix_data_path_and_mtime(settings: Settings) -> tuple[str, int]:
-    helix_path = (
-        str(getattr(settings, "HELIX_DATA_PATH", "") or "").strip() or "data/helix_dump.json"
-    )
-    resolved = Path(helix_path).expanduser()
-    if not resolved.exists():
-        return "", -1
+def _issue_workbook_export_bytes(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+    helix_only: bool = False,
+) -> bytes:
     try:
-        return str(resolved.resolve()), int(resolved.stat().st_mtime_ns)
-    except Exception:
-        return str(resolved), -1
-
-
-def _helix_raw_export_bytes(settings: Settings, *, query: DashboardQuery) -> bytes:
-    export_df = _helix_export_dataframe(settings, query=query)
-    if export_df.empty:
-        raise HTTPException(status_code=400, detail="No hay incidencias para exportar.")
-    if "source_type" not in export_df.columns:
-        raise HTTPException(
-            status_code=400, detail="El scope actual no contiene metadatos de origen."
-        )
-
-    helix_df = export_df.loc[
-        export_df["source_type"].fillna("").astype(str).str.strip().str.lower().eq("helix")
-    ].copy(deep=False)
-    if helix_df.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay incidencias Helix en el alcance actual para exportar.",
-        )
-
-    helix_path, _ = _helix_data_path_and_mtime(settings)
-    if not helix_path:
-        raise HTTPException(
-            status_code=400,
-            detail="No se ha encontrado el volcado Helix requerido para la exportación raw.",
-        )
-
-    try:
-        helix_doc = HelixRepo(Path(helix_path)).load() or HelixDocument.empty()
-    except Exception:
-        helix_doc = HelixDocument.empty()
-    helix_items_by_merge_key = {}
-    for item in helix_doc.items:
-        source_id = str(item.source_id or "").strip().lower()
-        issue_key = str(item.id or "").strip().upper()
-        if not issue_key:
-            continue
-        merge_key = f"{source_id}::{issue_key}" if source_id else issue_key
-        helix_items_by_merge_key[merge_key] = item
-
-    if not helix_items_by_merge_key:
-        raise HTTPException(
-            status_code=400,
-            detail="No se ha podido cargar el dataset raw de Helix para la exportación.",
-        )
-    raw_df = build_helix_raw_export_frame(
-        helix_df,
-        helix_items_by_merge_key=helix_items_by_merge_key,
-    )
-    if raw_df is None or raw_df.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="No se han encontrado filas raw de Helix para las incidencias filtradas.",
-        )
-
-    return dataframes_to_xlsx_bytes(
-        [("Helix Raw", raw_df)],
-        include_index=False,
-        hyperlink_columns_by_sheet={
-            "Helix Raw": [("ID de la Incidencia", "__item_url__")],
-        },
-    )
+        return build_issue_workbook_export(
+            settings,
+            query=query,
+            helix_only=helix_only,
+        ).content
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class SourceSelectionRequest(BaseModel):
@@ -1040,13 +954,13 @@ def create_app() -> FastAPI:
             issue_sort_col=issueSortCol,
             issue_like_query=issueLikeQuery,
         )
-        df = _export_dataframe(settings, query=query)
         if str(format).lower() == "csv":
+            df = _export_dataframe(settings, query=query)
             content = dataframe_to_csv_bytes(df, include_index=False)
             media_type = "text/csv; charset=utf-8"
             filename = download_filename("issues", ext="csv")
         else:
-            content = dataframe_to_xlsx_bytes(df, sheet_name="Issues", include_index=False)
+            content = _issue_workbook_export_bytes(settings, query=query)
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             filename = download_filename("issues", ext="xlsx")
         return Response(content=content, media_type=media_type, headers=_download_headers(filename))
@@ -1069,12 +983,12 @@ def create_app() -> FastAPI:
             issue_sort_col=payload.issueSortCol,
             issue_like_query=payload.issueLikeQuery,
         )
-        df = _export_dataframe(settings, query=query)
         if export_format == "csv":
+            df = _export_dataframe(settings, query=query)
             content = dataframe_to_csv_bytes(df, include_index=False)
             filename = download_filename("issues", ext="csv")
         else:
-            content = dataframe_to_xlsx_bytes(df, sheet_name="Issues", include_index=False)
+            content = _issue_workbook_export_bytes(settings, query=query)
             filename = download_filename("issues", ext="xlsx")
         export_path = save_download_content(settings, file_name=filename, content=content)
         return _saved_file_payload(export_path, file_name=filename)
@@ -1105,7 +1019,7 @@ def create_app() -> FastAPI:
             issue_sort_col=issueSortCol,
             issue_like_query=issueLikeQuery,
         )
-        content = _helix_raw_export_bytes(settings, query=query)
+        content = _issue_workbook_export_bytes(settings, query=query, helix_only=True)
         filename = download_filename("helix_raw_issues", ext="xlsx")
         return Response(
             content=content,
@@ -1128,7 +1042,7 @@ def create_app() -> FastAPI:
             issue_sort_col=payload.issueSortCol,
             issue_like_query=payload.issueLikeQuery,
         )
-        content = _helix_raw_export_bytes(settings, query=query)
+        content = _issue_workbook_export_bytes(settings, query=query, helix_only=True)
         filename = download_filename("helix_raw_issues", ext="xlsx")
         export_path = save_download_content(settings, file_name=filename, content=content)
         return _saved_file_payload(export_path, file_name=filename)

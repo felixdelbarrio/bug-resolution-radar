@@ -31,9 +31,13 @@ def priority_rank(priority: Optional[str]) -> int:
     """Rank priority strings in a stable Jira-friendly order."""
     token = str(priority or "").strip().lower()
     compact = "".join(ch for ch in token if ch.isalnum())
-    if token == "p0" or "highest" in token or compact in {"suponeunimpedimento", "impedimento"}:
+    if (
+        token == "p0"
+        or "highest" in token
+        or compact in {"suponeunimpedimento", "impedimento", "veryhigh", "muyalto"}
+    ):
         return 0
-    if token == "p1" or "high" in token:
+    if token == "p1" or "high" in token or compact == "alto":
         return 1
     if token == "p2" or "medium" in token:
         return 2

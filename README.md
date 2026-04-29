@@ -35,13 +35,6 @@ make run
 ```
 
 `make run` abre el contenedor desktop local.
-Para servir la SPA React + FastAPI sin shell desktop:
-
-```bash
-make run-api
-```
-
-La app queda disponible en `http://127.0.0.1:8000`.
 `make CI` valida formato, lint, tipado, guardias de documentación/código muerto y tests con cobertura.
 
 ## Architecture

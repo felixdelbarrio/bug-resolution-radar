@@ -248,6 +248,24 @@ def test_config_roundtrip_open_issues_focus_mode(monkeypatch: Any, tmp_path: Pat
     assert "OPEN_ISSUES_FOCUS_MODE=criticidad_alta" in saved
 
 
+def test_config_roundtrip_period_functionality_detail_toggle(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED=true\n", encoding="utf-8")
+
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    settings = cfg.load_settings()
+    assert str(settings.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED).strip().lower() == "true"
+
+    settings.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED = "false"
+    cfg.save_settings(settings)
+    saved = env_path.read_text(encoding="utf-8")
+    assert "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED=false" in saved
+
+
 def test_semantic_status_and_priority_colors() -> None:
     assert status_color("New") == "#E85D63"
     assert status_color("Ready") == "#E85D63"

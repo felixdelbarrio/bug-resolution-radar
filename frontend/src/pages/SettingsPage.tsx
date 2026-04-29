@@ -497,6 +497,12 @@ export function SettingsPage() {
         QUINCENA_LAST_FINISHED_ONLY: normalizeBool(values.QUINCENA_LAST_FINISHED_ONLY)
           ? "true"
           : "false",
+        PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED: normalizeBool(
+          values.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED,
+          false
+        )
+          ? "true"
+          : "false",
         OPEN_ISSUES_FOCUS_MODE: asText(values.OPEN_ISSUES_FOCUS_MODE || "criticidad_alta"),
         REPORT_PPT_DOWNLOAD_DIR: configuredDownloadDir,
         PERIOD_PPT_TEMPLATE_PATH: "",
@@ -786,27 +792,6 @@ export function SettingsPage() {
               </label>
             </article>
 
-            <article className="surface-card page-stack">
-              <h3>Criterio de foco en abiertas</h3>
-              <div className="radio-stack">
-                <label className="radio-card">
-                  <input
-                    type="radio"
-                    checked={asText(values.OPEN_ISSUES_FOCUS_MODE || "criticidad_alta") === "criticidad_alta"}
-                    onChange={() => setValue("OPEN_ISSUES_FOCUS_MODE", "criticidad_alta")}
-                  />
-                  <span>Criticidad alta (Impedimento / High / Highest)</span>
-                </label>
-                <label className="radio-card">
-                  <input
-                    type="radio"
-                    checked={asText(values.OPEN_ISSUES_FOCUS_MODE || "criticidad_alta") === "maestras"}
-                    onChange={() => setValue("OPEN_ISSUES_FOCUS_MODE", "maestras")}
-                  />
-                  <span>Incidencias maestras</span>
-                </label>
-              </div>
-            </article>
           </section>
 
           <section className="surface-card page-stack">
@@ -851,6 +836,44 @@ export function SettingsPage() {
               Se aplica a los Excel e informes generados por la aplicación. Solo se accederá a la
               carpeta cuando lances una descarga explícita.
             </p>
+          </section>
+
+          <section className="surface-card page-stack">
+            <h3>Configuración informe Seguimiento del periodo</h3>
+            <label className="checkbox-field checkbox-field-panel">
+              <input
+                type="checkbox"
+                checked={normalizeBool(values.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED, false)}
+                onChange={(event) =>
+                  setValue(
+                    "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED",
+                    event.target.checked ? "true" : "false"
+                  )
+                }
+              />
+              <span>Detalle Incidencias abiertas por funcionalidad</span>
+            </label>
+            <div className="page-stack">
+              <h4>Criterio de foco en abiertas</h4>
+              <div className="radio-stack">
+                <label className="radio-card">
+                  <input
+                    type="radio"
+                    checked={asText(values.OPEN_ISSUES_FOCUS_MODE || "criticidad_alta") === "criticidad_alta"}
+                    onChange={() => setValue("OPEN_ISSUES_FOCUS_MODE", "criticidad_alta")}
+                  />
+                  <span>Criticidad alta (Impedimento / High / Highest)</span>
+                </label>
+                <label className="radio-card">
+                  <input
+                    type="radio"
+                    checked={asText(values.OPEN_ISSUES_FOCUS_MODE || "criticidad_alta") === "maestras"}
+                    onChange={() => setValue("OPEN_ISSUES_FOCUS_MODE", "maestras")}
+                  />
+                  <span>Incidencias maestras</span>
+                </label>
+              </div>
+            </div>
           </section>
 
           <section className="surface-card page-stack">
