@@ -165,7 +165,7 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == 15
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
-    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     dashboard_idx = _find_slide_index(
         prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad"
@@ -830,7 +830,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     ]
     joined_titles = " | ".join(zoom_titles)
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
-    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
     assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
@@ -894,8 +894,8 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         prs,
         "Seguimiento de KPIs - Incidencias abiertas por funcionalidad",
     )
-    high_cover_idx = _find_slide_index(prs, "Incidencias abiertas de criticidad alta")
-    high_detail_idx = _find_slide_index(prs, "Incidencias abiertas de criticidad alta (I)")
+    high_cover_idx = _find_slide_index(prs, "Incidencias abiertas por criticidad alta")
+    high_detail_idx = _find_slide_index(prs, "Incidencias abiertas por criticidad alta (I)")
     aged_cover_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días")
     aged_detail_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días (I)")
 
@@ -903,6 +903,8 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     assert aged_cover_idx < aged_detail_idx
     assert not _native_tables(prs.slides[high_cover_idx])
     assert not _native_tables(prs.slides[aged_cover_idx])
+    assert "Quincena" in _slide_text(prs.slides[high_cover_idx])
+    assert "Quincena" in _slide_text(prs.slides[aged_cover_idx])
 
     expected_headers = {
         "ID",
@@ -971,7 +973,7 @@ def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> 
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
 
     assert len(prs.slides) == 15
-    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Seguimiento de KPIs - Incidencias abiertas por funcionalidad" in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena" not in deck_text
