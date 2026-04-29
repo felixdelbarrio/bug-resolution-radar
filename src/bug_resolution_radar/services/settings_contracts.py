@@ -70,6 +70,17 @@ def _normalize_disabled_source_ids(values: List[Any]) -> str:
     return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
 
 
+def _normalize_bool_setting(value: Any, *, default: bool = False) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return "true" if default else "false"
+    if token in {"1", "true", "t", "yes", "y", "on"}:
+        return "true"
+    if token in {"0", "false", "f", "no", "n", "off"}:
+        return "false"
+    return "true" if default else "false"
+
+
 def _group_configured_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     grouped: Dict[str, List[Dict[str, str]]] = {}
     for row in all_configured_sources(settings):
@@ -175,6 +186,10 @@ def save_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     merged_values["HELIX_INGEST_DISABLED_SOURCES_JSON"] = _normalize_disabled_source_ids(
         list(payload.get("helixDisabledSourceIds") or [])
+    )
+    merged_values["PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"] = _normalize_bool_setting(
+        merged_values.get("PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"),
+        default=False,
     )
 
     new_settings = Settings.model_validate(merged_values)

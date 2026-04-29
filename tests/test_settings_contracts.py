@@ -6,7 +6,10 @@ from pathlib import Path
 from bug_resolution_radar.config import Settings, build_source_id
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.repositories.issues_store import save_issues_doc
-from bug_resolution_radar.services.settings_contracts import _rollup_eligible_sources_by_country
+from bug_resolution_radar.services.settings_contracts import (
+    _rollup_eligible_sources_by_country,
+    save_settings_payload,
+)
 
 
 def _seed_issue(path: Path, *, country: str, alias: str, source_type: str) -> str:
@@ -78,3 +81,43 @@ def test_rollup_eligible_sources_fall_back_to_inferred_dataset_sources(tmp_path:
             "source_type": "jira",
         }
     ]
+
+
+def test_period_functionality_detail_setting_defaults_off() -> None:
+    settings = Settings()
+
+    assert str(settings.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED).strip().lower() == "false"
+
+
+def test_save_settings_payload_persists_period_report_preferences(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import bug_resolution_radar.config as cfg
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    payload = {
+        "values": {
+            **Settings().model_dump(),
+            "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED": "true",
+            "OPEN_ISSUES_FOCUS_MODE": "maestras",
+        },
+        "supportedCountries": ["México"],
+        "jiraSources": [],
+        "helixSources": [],
+        "countryRollupSources": {},
+        "jiraDisabledSourceIds": [],
+        "helixDisabledSourceIds": [],
+    }
+
+    saved = save_settings_payload(payload)
+
+    values = saved["values"]
+    assert values["PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"] == "true"
+    assert values["OPEN_ISSUES_FOCUS_MODE"] == "maestras"
+    persisted = env_path.read_text(encoding="utf-8")
+    assert "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED=true" in persisted
+    assert "OPEN_ISSUES_FOCUS_MODE=maestras" in persisted
