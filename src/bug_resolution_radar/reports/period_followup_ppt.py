@@ -2759,28 +2759,9 @@ def _populate_risk_issue_list_slide(
     )
 
 
-def _append_period_risk_issue_cover(prs: Any, *, title: str) -> None:
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    try:
-        fill = slide.background.fill
-        fill.solid()
-        fill.fore_color.rgb = RGBColor(*_EXEC_BG_RGB)
-    except Exception:
-        pass
-    slide_width = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
-    slide_height = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
-    _add_exec_textbox(
-        slide,
-        left=int(slide_width * 0.078),
-        top=int(slide_height * 0.39),
-        width=int(slide_width * 0.82),
-        height=int(slide_height * 0.18),
-        text=str(title or "").strip(),
-        font_size_pt=30.0,
-        color_rgb=RGBColor(255, 255, 255),
-        font_name=_PPT_FONT_HEAD,
-        bold=True,
-    )
+def _append_period_risk_issue_cover(prs: Any, *, title: str, cover_template_slide: Any) -> None:
+    slide = _append_slide_clone_from_source(prs, source_slide=cover_template_slide)
+    _set_shape_text(slide, 2, str(title or "").strip())
 
 
 def _append_period_risk_issue_section(
@@ -2790,8 +2771,13 @@ def _append_period_risk_issue_section(
     issues: Sequence[PeriodRiskIssueRow],
     empty_message: str,
     zoom_template_slide: Any,
+    cover_template_slide: Any,
 ) -> None:
-    _append_period_risk_issue_cover(prs, title=title)
+    _append_period_risk_issue_cover(
+        prs,
+        title=title,
+        cover_template_slide=cover_template_slide,
+    )
     pages = _chunk_risk_issues(
         tuple(issues or ()),
         rows_per_slide=_ISSUE_TABLE_ROWS_PER_SLIDE,
@@ -2820,6 +2806,9 @@ def _append_period_risk_issue_sections(
     if len(template_prs.slides) < 3:
         raise ValueError("La plantilla de funcionalidad debe contener la slide de zoom.")
     zoom_template_slide = template_prs.slides[2]
+    if len(prs.slides) < 2:
+        raise ValueError("La plantilla de periodo debe contener la slide de portada de sección.")
+    cover_template_slide = prs.slides[1]
     specs = (
         (
             "Incidencias abiertas de criticidad alta",
@@ -2839,6 +2828,7 @@ def _append_period_risk_issue_sections(
             issues=issues,
             empty_message=empty_message,
             zoom_template_slide=zoom_template_slide,
+            cover_template_slide=cover_template_slide,
         )
 
 
