@@ -547,6 +547,12 @@ def _set_shape_text_strict(slide: Any, index_1_based: int, text: str) -> None:
     shape = _shape_or_none(slide, index_1_based)
     if shape is None or not getattr(shape, "has_text_frame", False):
         return
+    _set_shape_text_strict_by_shape(shape, text)
+
+
+def _set_shape_text_strict_by_shape(shape: Any, text: str) -> None:
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
     tf = shape.text_frame
     sample_run = None
     try:
@@ -2225,6 +2231,41 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
         pass
 
 
+def _cover_title_shape_or_none(slide: Any) -> Any | None:
+    candidates: list[tuple[int, Any]] = []
+    for shape in slide.shapes:
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        text = str(getattr(shape, "text", "") or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        score = 0
+        if "quincena" in lower or "periodo" in lower or "dd/mm" in lower:
+            score -= 1_000
+        if any(
+            token in lower
+            for token in ("incidencia", "abiertas", "critic", "funcionalidad", "días", "dias")
+        ):
+            score += 80
+        score += int(_shape_area_in2(shape) * 10.0)
+        try:
+            score -= int(int(shape.top) / 200000)
+        except Exception:
+            pass
+        candidates.append((score, shape))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def _update_risk_issue_cover(slide: Any, *, title: str, period_label: str) -> None:
+    title_shape = _cover_title_shape_or_none(slide)
+    if title_shape is not None:
+        _set_shape_text_strict_by_shape(title_shape, str(title or "").strip())
+    _update_cover_period(slide, period_label=period_label)
+
+
 def _fmt_avg_days(value: float) -> str:
     if pd.isna(value):
         return "0"
@@ -2759,28 +2800,15 @@ def _populate_risk_issue_list_slide(
     )
 
 
-def _append_period_risk_issue_cover(prs: Any, *, title: str) -> None:
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    try:
-        fill = slide.background.fill
-        fill.solid()
-        fill.fore_color.rgb = RGBColor(*_EXEC_BG_RGB)
-    except Exception:
-        pass
-    slide_width = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
-    slide_height = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
-    _add_exec_textbox(
-        slide,
-        left=int(slide_width * 0.078),
-        top=int(slide_height * 0.39),
-        width=int(slide_width * 0.82),
-        height=int(slide_height * 0.18),
-        text=str(title or "").strip(),
-        font_size_pt=30.0,
-        color_rgb=RGBColor(255, 255, 255),
-        font_name=_PPT_FONT_HEAD,
-        bold=True,
-    )
+def _append_period_risk_issue_cover(
+    prs: Any,
+    *,
+    cover_template_slide: Any,
+    title: str,
+    period_label: str,
+) -> None:
+    slide = _append_slide_clone_from_source(prs, source_slide=cover_template_slide)
+    _update_risk_issue_cover(slide, title=title, period_label=period_label)
 
 
 def _append_period_risk_issue_section(
@@ -2789,9 +2817,16 @@ def _append_period_risk_issue_section(
     title: str,
     issues: Sequence[PeriodRiskIssueRow],
     empty_message: str,
+    period_label: str,
+    cover_template_slide: Any,
     zoom_template_slide: Any,
 ) -> None:
-    _append_period_risk_issue_cover(prs, title=title)
+    _append_period_risk_issue_cover(
+        prs,
+        cover_template_slide=cover_template_slide,
+        title=title,
+        period_label=period_label,
+    )
     pages = _chunk_risk_issues(
         tuple(issues or ()),
         rows_per_slide=_ISSUE_TABLE_ROWS_PER_SLIDE,
@@ -2812,17 +2847,21 @@ def _append_period_risk_issue_section(
 def _append_period_risk_issue_sections(
     prs: Any,
     *,
+    period_label: str,
     high_priority_issues: Sequence[PeriodRiskIssueRow],
     aged_issues: Sequence[PeriodRiskIssueRow],
 ) -> None:
     template_path = _resolve_functionality_template_path()
     template_prs = Presentation(str(template_path))
     if len(template_prs.slides) < 3:
-        raise ValueError("La plantilla de funcionalidad debe contener la slide de zoom.")
+        raise ValueError(
+            "La plantilla de funcionalidad debe contener la portada y la slide de zoom."
+        )
+    cover_template_slide = template_prs.slides[0]
     zoom_template_slide = template_prs.slides[2]
     specs = (
         (
-            "Incidencias abiertas de criticidad alta",
+            "Incidencias abiertas por criticidad alta",
             tuple(high_priority_issues or ()),
             "Sin incidencias abiertas de criticidad alta en el scope actual.",
         ),
@@ -2838,6 +2877,8 @@ def _append_period_risk_issue_sections(
             title=title,
             issues=issues,
             empty_message=empty_message,
+            period_label=period_label,
+            cover_template_slide=cover_template_slide,
             zoom_template_slide=zoom_template_slide,
         )
 
@@ -3349,6 +3390,7 @@ def generate_country_period_followup_ppt(
     )
     _append_period_risk_issue_sections(
         prs,
+        period_label=functionality_followup.period_label,
         high_priority_issues=risk_lists.high_priority,
         aged_issues=risk_lists.aged,
     )
