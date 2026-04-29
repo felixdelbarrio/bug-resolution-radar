@@ -14,7 +14,6 @@ from dotenv import dotenv_values
 from pydantic import BaseModel
 
 from bug_resolution_radar.repositories.issues_store import (
-    load_issues_df,
     load_issues_workspace_index,
 )
 
@@ -396,6 +395,7 @@ class Settings(BaseModel):
     PERIOD_PPT_TEMPLATE_PATH: str = ""
     ANALYSIS_LOOKBACK_MONTHS: int = 12
     QUINCENA_LAST_FINISHED_ONLY: str = "false"
+    PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED: str = "false"
     OPEN_ISSUES_FOCUS_MODE: str = "criticidad_alta"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
 

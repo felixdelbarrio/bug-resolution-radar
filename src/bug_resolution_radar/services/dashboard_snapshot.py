@@ -1664,7 +1664,10 @@ def _build_theme_trend_figure(
 
 
 def _active_source_ids(scoped_df: pd.DataFrame, *, query: DashboardQuery) -> list[str]:
-    if query.workspace.source_id:
+    if (
+        str(query.workspace.scope_mode or "").strip().lower() == "source"
+        and query.workspace.source_id
+    ):
         return [str(query.workspace.source_id)]
     if (
         not isinstance(scoped_df, pd.DataFrame)

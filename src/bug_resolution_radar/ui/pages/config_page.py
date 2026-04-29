@@ -1946,8 +1946,43 @@ def render(settings: Settings) -> None:
                     "reportes de seguimiento."
                 )
 
-            with st.container(border=True, key="cfg_prefs_card_open_focus"):
-                st.markdown("#### Criterio de foco en abiertas")
+            with st.container(border=True, key="cfg_prefs_card_ppt"):
+                st.markdown("#### Descargas de informes")
+                st.markdown("**Carpeta de guardado**")
+                default_download_dir = str((Path.home() / "Downloads").expanduser())
+                report_ppt_download_dir_default = (
+                    str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
+                    or default_download_dir
+                )
+                report_ppt_download_dir = st.text_input(
+                    "Carpeta de guardado del informe PPT",
+                    value=report_ppt_download_dir_default,
+                    key="cfg_report_ppt_download_dir",
+                    label_visibility="collapsed",
+                    placeholder=default_download_dir,
+                )
+                st.caption("Se aplica a los Excel e informes generados desde la aplicación.")
+
+            with st.container(border=True, key="cfg_prefs_card_period_followup"):
+                st.markdown("#### Configuración informe Seguimiento del periodo")
+                functionality_detail_default = _boolish(
+                    getattr(settings, "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED", "false"),
+                    default=False,
+                )
+                st.session_state.setdefault(
+                    "cfg_period_report_functionality_detail_enabled",
+                    functionality_detail_default,
+                )
+                functionality_detail_enabled = st.checkbox(
+                    "Detalle Incidencias abiertas por funcionalidad",
+                    key="cfg_period_report_functionality_detail_enabled",
+                    help=(
+                        "Activa el paginado de slides de detalle por funcionalidad después "
+                        "del dashboard funcional."
+                    ),
+                )
+
+                st.markdown("##### Criterio de foco en abiertas")
                 open_focus_mode_default = normalize_open_issues_focus_mode(
                     getattr(
                         settings, "OPEN_ISSUES_FOCUS_MODE", OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
@@ -1977,23 +2012,6 @@ def render(settings: Settings) -> None:
                     "Aplica de forma centralizada en Insights, scopes quincenales "
                     "y el informe Seguimiento del periodo."
                 )
-
-            with st.container(border=True, key="cfg_prefs_card_ppt"):
-                st.markdown("#### Descargas de informes")
-                st.markdown("**Carpeta de guardado**")
-                default_download_dir = str((Path.home() / "Downloads").expanduser())
-                report_ppt_download_dir_default = (
-                    str(getattr(settings, "REPORT_PPT_DOWNLOAD_DIR", "") or "").strip()
-                    or default_download_dir
-                )
-                report_ppt_download_dir = st.text_input(
-                    "Carpeta de guardado del informe PPT",
-                    value=report_ppt_download_dir_default,
-                    key="cfg_report_ppt_download_dir",
-                    label_visibility="collapsed",
-                    placeholder=default_download_dir,
-                )
-                st.caption("Se aplica a los Excel e informes generados desde la aplicación.")
 
             with st.container(border=True, key="cfg_prefs_card_favs"):
                 st.markdown("#### Define los 3 gráficos favoritos")
@@ -2090,6 +2108,9 @@ def render(settings: Settings) -> None:
                         ),
                         "QUINCENA_LAST_FINISHED_ONLY": (
                             "true" if bool(quincena_last_finished_only) else "false"
+                        ),
+                        "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED": (
+                            "true" if bool(functionality_detail_enabled) else "false"
                         ),
                         "OPEN_ISSUES_FOCUS_MODE": normalize_open_issues_focus_mode(
                             open_issues_focus_mode

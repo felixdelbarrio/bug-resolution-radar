@@ -170,15 +170,6 @@ export function DashboardPage() {
     ]
   );
   const issueWorkspace = workspace;
-  const selectedSourceType = useMemo(() => {
-    if (!issueWorkspace) {
-      return "";
-    }
-    return String(
-      issueWorkspace.sources.find((row) => row.source_id === issueWorkspace.selectedSourceId)
-        ?.source_type ?? ""
-    );
-  }, [issueWorkspace]);
   useEffect(() => {
     if (!bootstrap?.dashboardDefaults.defaultTrendChartId) {
       return;
@@ -678,7 +669,6 @@ export function DashboardPage() {
           sortDir={dashboardState.params.issueSortDir}
           issueLikeQuery={dashboardState.params.issueLikeQuery}
           queryParams={issueExportParams(dashboardState.params, darkMode)}
-          sourceType={selectedSourceType}
           isRefreshing={issues.isFetching || workspaceRefreshing}
           onOpenIssue={openIssue}
           onChange={dashboardState.update}
