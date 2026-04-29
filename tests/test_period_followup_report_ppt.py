@@ -57,11 +57,62 @@ def _slide_text(slide: Any) -> str:
     )
 
 
+def _slide_table_text(slide: Any) -> str:
+    chunks: list[str] = []
+    for shape in slide.shapes:
+        if not getattr(shape, "has_table", False):
+            continue
+        table = shape.table
+        for row in table.rows:
+            for cell in row.cells:
+                chunks.append(str(cell.text or ""))
+    return " ".join(chunks)
+
+
+def _slide_all_text(slide: Any) -> str:
+    return f"{_slide_text(slide)} {_slide_table_text(slide)}".strip()
+
+
 def _find_slide_index(prs: Presentation, needle: str) -> int:
     for idx, slide in enumerate(prs.slides):
-        if needle in _slide_text(slide):
+        if needle in _slide_all_text(slide):
             return idx
     raise AssertionError(f"No slide contains {needle!r}")
+
+
+def _native_tables(slide: Any) -> list[Any]:
+    return [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
+
+
+def _table_intersects_picture(slide: Any, table_shape: Any) -> bool:
+    table_left = int(getattr(table_shape, "left", 0) or 0)
+    table_top = int(getattr(table_shape, "top", 0) or 0)
+    table_right = table_left + int(getattr(table_shape, "width", 0) or 0)
+    table_bottom = table_top + int(getattr(table_shape, "height", 0) or 0)
+    for shape in slide.shapes:
+        if getattr(shape, "shape_type", None) != MSO_SHAPE_TYPE.PICTURE:
+            continue
+        left = int(getattr(shape, "left", 0) or 0)
+        top = int(getattr(shape, "top", 0) or 0)
+        right = left + int(getattr(shape, "width", 0) or 0)
+        bottom = top + int(getattr(shape, "height", 0) or 0)
+        if left < table_right and right > table_left and top < table_bottom and bottom > table_top:
+            return True
+    return False
+
+
+def _assert_native_table_font_floor(table_shape: Any) -> None:
+    table = table_shape.table
+    for ridx, row in enumerate(table.rows):
+        min_size = 8.0 if ridx == 0 else 9.0
+        for cell in row.cells:
+            for paragraph in cell.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    if not str(getattr(run, "text", "") or "").strip():
+                        continue
+                    assert run.font.name in {"Arial", "Aptos"}
+                    assert run.font.size is not None
+                    assert float(run.font.size.pt) >= min_size
 
 
 def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Path) -> None:
@@ -106,13 +157,13 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 13
+    assert out.slide_count == 15
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 13
+    assert len(prs.slides) == 15
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
     assert "Incidencias abiertas de criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
@@ -167,7 +218,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         dff_override=dff,
     )
 
-    assert out.slide_count == 13
+    assert out.slide_count == 15
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
@@ -524,16 +575,11 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     dashboard_slide = prs.slides[
         _find_slide_index(prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad")
     ]
-    assert not any(getattr(shape, "has_table", False) for shape in dashboard_slide.shapes)
-    dashboard_table_picture = [
-        shape
-        for shape in dashboard_slide.shapes
-        if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
-        and int(getattr(shape, "left", 0)) < 3_600_000
-        and int(getattr(shape, "width", 0)) >= 3_000_000
-        and int(getattr(shape, "height", 0)) >= 2_200_000
-    ]
-    assert dashboard_table_picture
+    dashboard_tables = _native_tables(dashboard_slide)
+    assert len(dashboard_tables) == 1
+    assert "Resto incidencias abiertas" in _slide_table_text(dashboard_slide)
+    assert not _table_intersects_picture(dashboard_slide, dashboard_tables[0])
+    _assert_native_table_font_floor(dashboard_tables[0])
 
     first_zoom_idx = _find_slide_index(prs, "Incidencias, en Login y acceso, abiertas")
     for slide_idx in (first_zoom_idx, first_zoom_idx + 1, first_zoom_idx + 2):
@@ -553,7 +599,7 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     header_criticity_cell = zoom_table.cell(0, 4)
     header_runs = list(header_criticity_cell.text_frame.paragraphs[0].runs)
     assert header_runs
-    assert float(header_runs[0].font.size.pt) <= 9.0
+    assert float(header_runs[0].font.size.pt) >= 8.0
     tc_pr = first_data_key_cell._tc.tcPr
     assert tc_pr.find(qn("a:lnL")) is not None
     assert tc_pr.find(qn("a:lnR")) is not None
@@ -680,18 +726,12 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     dashboard_run = dashboard_blob_shape.text_frame.paragraphs[0].runs[0]
     assert dashboard_run.font.color.rgb == RGBColor(255, 255, 255)
 
-    dashboard_table_picture = max(
-        (
-            shape
-            for shape in prs.slides[dashboard_idx].shapes
-            if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
-            and int(getattr(shape, "left", 0)) < 3_600_000
-        ),
-        key=lambda shape: int(getattr(shape, "width", 0)) * int(getattr(shape, "height", 0)),
-    )
-    assert int(dashboard_table_picture.top) > int(
-        dashboard_blob_shape.top + dashboard_blob_shape.height
-    )
+    dashboard_tables = _native_tables(prs.slides[dashboard_idx])
+    assert len(dashboard_tables) == 1
+    dashboard_table = dashboard_tables[0]
+    assert not _table_intersects_picture(prs.slides[dashboard_idx], dashboard_table)
+    _assert_native_table_font_floor(dashboard_table)
+    assert int(dashboard_table.top) > int(dashboard_blob_shape.top + dashboard_blob_shape.height)
     mitigation_panel = next(
         (
             shape
@@ -704,10 +744,8 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         None,
     )
     assert mitigation_panel is not None
-    assert int(dashboard_table_picture.left + dashboard_table_picture.width) < int(
-        mitigation_panel.left
-    )
-    assert int(dashboard_table_picture.top + dashboard_table_picture.height) <= int(
+    assert int(dashboard_table.left + dashboard_table.width) < int(mitigation_panel.left)
+    assert int(dashboard_table.top + dashboard_table.height) <= int(
         mitigation_panel.top + mitigation_panel.height
     )
 
@@ -782,7 +820,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         dff_override=dff,
     )
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 17
+    assert len(prs.slides) == 19
     first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas en la quincena (I)")
     zoom_titles = [
         str(getattr(shape, "text", "") or "").strip()
@@ -796,6 +834,101 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
     assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
+
+
+def test_period_followup_risk_sections_use_native_tables_after_functionality() -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "MEXBMI1-101",
+                "summary": "Alta criticidad con bloqueo de operativa",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-20T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "url": "https://jira.example/browse/MEXBMI1-101",
+            },
+            {
+                "key": "EAM-77",
+                "summary": "Impedimento en autenticación para clientes",
+                "status": "Ready To Verify",
+                "priority": "Supone un impedimento",
+                "created": "2026-04-05T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+            {
+                "key": "SKSEMEX-9",
+                "summary": "Incidencia abierta antigua de prioridad media",
+                "status": "Analysing",
+                "priority": "Medium",
+                "created": "2026-02-01T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        JIRA_BASE_URL="https://jira.example",
+    )
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+    prs = Presentation(BytesIO(out.content))
+
+    trend_idx = _find_slide_index(prs, "Tendencia por funcionalidad : vista agregada")
+    dashboard_idx = _find_slide_index(
+        prs,
+        "Seguimiento de KPIs - Incidencias abiertas por funcionalidad",
+    )
+    high_cover_idx = _find_slide_index(prs, "Incidencias abiertas de criticidad alta")
+    high_detail_idx = _find_slide_index(prs, "Incidencias abiertas de criticidad alta (I)")
+    aged_cover_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días")
+    aged_detail_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días (I)")
+
+    assert trend_idx < dashboard_idx < high_cover_idx < high_detail_idx < aged_cover_idx
+    assert aged_cover_idx < aged_detail_idx
+    assert not _native_tables(prs.slides[high_cover_idx])
+    assert not _native_tables(prs.slides[aged_cover_idx])
+
+    expected_headers = {
+        "ID",
+        "Descripción",
+        "Funcionalidad/\nCausa raíz",
+        "Estado",
+        "Criticidad",
+        "Días abierta",
+    }
+    for slide_idx, expected_id in (
+        (high_detail_idx, "MEXBMI1-101"),
+        (aged_detail_idx, "SKSEMEX-9"),
+    ):
+        slide = prs.slides[slide_idx]
+        tables = _native_tables(slide)
+        assert len(tables) == 1
+        table_shape = tables[0]
+        assert not _table_intersects_picture(slide, table_shape)
+        _assert_native_table_font_floor(table_shape)
+        headers = {table_shape.table.cell(0, cidx).text for cidx in range(6)}
+        assert headers == expected_headers
+        table_text = _slide_table_text(slide)
+        assert expected_id in table_text
+        assert "Descripción" in table_text
+        assert "Criticidad" in table_text
+        assert "días" in table_text
 
 
 def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> None:
@@ -837,7 +970,7 @@ def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> 
     prs = Presentation(BytesIO(out.content))
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
 
-    assert len(prs.slides) == 13
+    assert len(prs.slides) == 15
     assert "Incidencias abiertas de criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Seguimiento de KPIs - Incidencias abiertas por funcionalidad" in deck_text
