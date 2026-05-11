@@ -17,6 +17,8 @@ from bug_resolution_radar.config import Settings, bundled_period_ppt_template_pa
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
 from bug_resolution_radar.reports import period_followup_ppt as period_ppt_mod
 from bug_resolution_radar.theme.design_tokens import (
+    BBVA_REPORT_AMBER_BG,
+    BBVA_REPORT_RED_BG,
     EXEC_CHART_AXIS_FONT_PT,
     EXEC_CHART_EXPORT_HEIGHT,
     EXEC_CHART_EXPORT_WIDTH,
@@ -24,6 +26,7 @@ from bug_resolution_radar.theme.design_tokens import (
     EXEC_CHART_LEGEND_FONT_PT,
     EXEC_CHART_TOTAL_FONT_PT,
     EXEC_CHART_TREND_EXPORT_HEIGHT,
+    hex_to_rgb,
 )
 
 
@@ -369,6 +372,14 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         if getattr(shape, "has_text_frame", False)
     ).lower()
     assert "seguimiento de incidencias - méxico (vista agregada)" in s3_blob
+    for slide_idx in (2, 3, 4):
+        summary_slide = prs.slides[slide_idx]
+        assert summary_slide.shapes[4].fill.fore_color.rgb == RGBColor(
+            *hex_to_rgb(BBVA_REPORT_RED_BG)
+        )
+        assert summary_slide.shapes[5].fill.fore_color.rgb == RGBColor(
+            *hex_to_rgb(BBVA_REPORT_AMBER_BG)
+        )
 
     # Regression guard: redesigned slides 7/8 keep a single hero chart panel.
     for slide_idx in (6, 7):  # slides 7 and 8 (0-based indexes)
@@ -463,7 +474,11 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         if period_run_size is not None:
             break
     assert period_run_size is not None
-    assert float(period_run_size.pt) >= 11.0
+    assert float(period_run_size.pt) >= 10.5
+    assert period_shape.text_frame.auto_size == MSO_AUTO_SIZE.NONE
+    assert period_shape.text_frame.word_wrap is False
+    assert int(period_shape.text_frame.margin_left) > 0
+    assert int(period_shape.text_frame.margin_right) > 0
 
 
 def test_resolution_chart_uses_executive_fonts_and_column_totals(monkeypatch: Any) -> None:
@@ -683,6 +698,71 @@ def test_filter_last_six_months_trend_keeps_month_window() -> None:
     assert filtered["quincena_start"].tolist() == sorted(filtered["quincena_start"].tolist())
 
 
+def test_summary_timeseries_chart_uses_executive_export_tokens(monkeypatch: Any) -> None:
+    now = pd.Timestamp("2026-04-10T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Issue A",
+                "status": "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=20)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+            },
+            {
+                "key": "A-2",
+                "summary": "Issue B",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": (now - pd.Timedelta(days=18)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": (now - pd.Timedelta(days=2)).isoformat(),
+            },
+            {
+                "key": "A-3",
+                "summary": "Issue C",
+                "status": "New",
+                "priority": "Low",
+                "created": (now - pd.Timedelta(days=5)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+            },
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def _capture_fig(fig: Any, *, width: int, height: int, scale: float = 1.0) -> bytes:
+        captured["fig"] = fig
+        captured["width"] = width
+        captured["height"] = height
+        captured["scale"] = scale
+        return b"png"
+
+    monkeypatch.setattr(period_ppt_mod, "_fig_to_png_exact", _capture_fig)
+
+    payload = period_ppt_mod._chart_png(
+        Settings(),
+        dff=dff,
+        open_df=dff[dff["resolved"].isna()],
+        chart_id="timeseries",
+    )
+
+    assert payload == b"png"
+    assert captured["width"] == EXEC_CHART_EXPORT_WIDTH
+    assert captured["height"] == EXEC_CHART_TREND_EXPORT_HEIGHT
+    fig = captured["fig"]
+    assert int(fig.layout.xaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.yaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.legend.font.size) >= EXEC_CHART_LEGEND_FONT_PT
+    assert int(fig.layout.margin.b) >= 190
+    for trace in fig.data:
+        if str(getattr(trace, "type", "") or "").lower() in {"scatter", "scattergl"}:
+            assert float(trace.marker.size) >= 8.0
+            assert float(trace.line.width) >= 4.2
+
+
 def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     monkeypatch: Any,
 ) -> None:
@@ -887,13 +967,11 @@ def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> N
     dashboard_slide = prs.slides[
         _find_slide_index(prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad")
     ]
-    top_three_blob = " | ".join(
-        str(getattr(shape, "text", "") or "")
-        for idx in (5, 7, 9)
-        for shape in [dashboard_slide.shapes[idx - 1]]
-        if getattr(shape, "has_text_frame", False)
-    ).lower()
-    assert "d. p." in top_three_blob
+    top_three_blob = _slide_text(dashboard_slide).lower()
+    assert "en total" in top_three_blob
+    assert "días promedio" in top_three_blob
+    assert "acum." not in top_three_blob
+    assert "d. p." not in top_three_blob
 
 
 def test_generate_country_period_followup_ppt_functionality_color_contrast_is_readable() -> None:
@@ -971,6 +1049,14 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         None,
     )
     assert mitigation_panel is not None
+    dashboard_text = _slide_all_text(prs.slides[dashboard_idx])
+    assert "Estado Ready to Verify" in dashboard_text
+    assert "Estado New" in dashboard_text
+    assert "Estado bloqueadas" in dashboard_text
+    assert "Resto:" in dashboard_text
+    assert "d. prom." not in dashboard_text
+    assert "Incidencias en New:" not in dashboard_text
+    assert "Resto de incidencias:" not in dashboard_text
     assert int(dashboard_table.left + dashboard_table.width) < int(mitigation_panel.left)
     assert int(dashboard_table.top + dashboard_table.height) <= int(
         mitigation_panel.top + mitigation_panel.height
@@ -1101,6 +1187,50 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "country": "México",
                 "source_id": "jira:mexico:gema",
             },
+            {
+                "key": "MEXBMI1-102",
+                "summary": "Alta criticidad adicional 1",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-21T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "MEXBMI1-103",
+                "summary": "Alta criticidad adicional 2",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-22T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "MEXBMI1-104",
+                "summary": "Alta criticidad adicional 3",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-23T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "MEXBMI1-105",
+                "summary": "Alta criticidad adicional 4",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-24T09:00:00+00:00",
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
         ]
     )
     settings = Settings(
@@ -1126,9 +1256,21 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     high_detail_idx = _find_slide_index(prs, "Incidencias abiertas por criticidad alta (I)")
     aged_cover_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días")
     aged_detail_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días (I)")
+    high_detail_slides = [
+        idx
+        for idx, slide in enumerate(prs.slides)
+        if "Incidencias abiertas por criticidad alta (" in _slide_text(slide)
+    ]
+    aged_detail_slides = [
+        idx
+        for idx, slide in enumerate(prs.slides)
+        if "Incidencias abiertas con más de 30 días (" in _slide_text(slide)
+    ]
 
     assert trend_idx < dashboard_idx < high_cover_idx < high_detail_idx < aged_cover_idx
     assert aged_cover_idx < aged_detail_idx
+    assert len(high_detail_slides) >= 2
+    assert len(aged_detail_slides) >= 2
     trend_title_shapes = [
         shape
         for shape in prs.slides[trend_idx].shapes
@@ -1170,17 +1312,28 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         "Criticidad",
         "Días abierta",
     }
+    old_high_note = "Detalle ordenado por 1º : Criticidad, 2º: Días abierta y 3º: Estado"
+    old_aged_note = "Detalle ordenado por 1º : Días abierta, 2º: Criticidad y 3º: Estado"
+    for slide_idx in high_detail_slides:
+        slide_text = _slide_all_text(prs.slides[slide_idx])
+        assert period_ppt_mod._RISK_HIGH_PRIORITY_ORDER_NOTE in slide_text
+        assert old_high_note not in slide_text
+    for slide_idx in aged_detail_slides:
+        slide_text = _slide_all_text(prs.slides[slide_idx])
+        assert period_ppt_mod._RISK_AGED_ORDER_NOTE in slide_text
+        assert old_aged_note not in slide_text
+        assert "2ºCrriticidad" not in slide_text
     for slide_idx, expected_ids, order_note, forbidden in (
         (
             high_detail_idx,
             ["EAM-77", "MEXBMI1-101"],
-            "Detalle ordenado por 1º : Criticidad, 2º: Días abierta y 3º: Estado",
+            period_ppt_mod._RISK_HIGH_PRIORITY_ORDER_NOTE,
             "SKSEMEX-9",
         ),
         (
             aged_detail_idx,
             ["SKSEMEX-9", "MEXBMI1-101"],
-            "Detalle ordenado por 1º : Días abierta, 2º: Criticidad y 3º: Estado",
+            period_ppt_mod._RISK_AGED_ORDER_NOTE,
             "",
         ),
     ):
@@ -1261,6 +1414,9 @@ def test_functionality_dashboard_table_headers_include_business_wording() -> Non
         "Agregadas",
         "Días promedio abiertas",
     )
+    weights = period_ppt_mod._FUNCTIONALITY_DASHBOARD_TABLE_COLUMN_WEIGHTS
+    assert weights[1] < 3.05
+    assert weights[3] > 1.12
 
 
 def test_generate_country_period_followup_ppt_functionality_wording_depends_on_priority_filter() -> (
@@ -1302,9 +1458,14 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         dff_override=dff,
     )
     prs_default = Presentation(BytesIO(out_default.content))
+    default_dashboard_idx = _find_slide_index(
+        prs_default,
+        "Seguimiento de KPIs - Incidencias abiertas por funcionalidad",
+    )
+    default_risk_idx = _find_slide_index(prs_default, "Incidencias abiertas por criticidad alta")
     blob_default = " ".join(
         str(getattr(shape, "text", "") or "")
-        for idx in (8, 9, 10, 11, 12)
+        for idx in range(default_dashboard_idx, default_risk_idx)
         for shape in prs_default.slides[idx].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
@@ -1319,9 +1480,14 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         functionality_priority_filters=["High", "Highest", "Supone un impedimento"],
     )
     prs_critical = Presentation(BytesIO(out_critical.content))
+    critical_dashboard_idx = _find_slide_index(
+        prs_critical,
+        "Seguimiento de KPIs - Incidencias críticas abiertas por funcionalidad",
+    )
+    critical_risk_idx = _find_slide_index(prs_critical, "Incidencias abiertas por criticidad alta")
     blob_critical = " ".join(
         str(getattr(shape, "text", "") or "")
-        for idx in (8, 9, 10, 11, 12)
+        for idx in range(critical_dashboard_idx, critical_risk_idx)
         for shape in prs_critical.slides[idx].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()

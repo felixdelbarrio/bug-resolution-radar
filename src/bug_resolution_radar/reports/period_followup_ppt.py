@@ -39,7 +39,6 @@ from bug_resolution_radar.analytics.period_functionality_followup import (
     FunctionalityZoomSlide,
     PeriodFunctionalityFollowupSummary,
     build_period_functionality_followup_summary,
-    format_top_row_label,
 )
 from bug_resolution_radar.analytics.period_risk_issue_lists import (
     PeriodRiskIssueRow,
@@ -70,6 +69,12 @@ from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_SANS_BOOK_PPT,
     BBVA_FONT_SANS_MEDIUM_PPT,
     BBVA_LIGHT,
+    BBVA_REPORT_AMBER_BG,
+    BBVA_REPORT_AMBER_BORDER,
+    BBVA_REPORT_AMBER_TEXT,
+    BBVA_REPORT_RED_BG,
+    BBVA_REPORT_RED_BORDER,
+    BBVA_REPORT_RED_TEXT,
     EXEC_CHART_AXIS_FONT_PT,
     EXEC_CHART_AXIS_TITLE_FONT_PT,
     EXEC_CHART_EXPORT_HEIGHT,
@@ -112,7 +117,7 @@ _FUNCTIONALITY_DASHBOARD_TABLE_HEADERS: tuple[str, ...] = (
     "Agregadas",
     "Días promedio abiertas",
 )
-_FUNCTIONALITY_DASHBOARD_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (0.68, 3.05, 1.02, 1.12, 2.55)
+_FUNCTIONALITY_DASHBOARD_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (0.68, 2.88, 1.02, 1.32, 2.50)
 _FUNCTIONALITY_DASHBOARD_TABLE_ROWS = 4
 _FUNCTIONALITY_TABLE_GAP_TOP_EMU = 120_000
 _FUNCTIONALITY_TABLE_GAP_RIGHT_EMU = 185_000
@@ -139,9 +144,12 @@ _FUNCTIONALITY_TREND_AGGREGATE_TITLE = (
     "Tendencia por funcionalidad : vista agregada ultimo semestre"
 )
 _RISK_HIGH_PRIORITY_ORDER_NOTE = (
-    "Detalle ordenado por 1º : Criticidad, 2º: Días abierta y 3º: Estado"
+    "Detalle - incidencias CRÍTICAS - ordenado por 1º : Criticidad, 2º: Días abierta y 3º: Estado"
 )
-_RISK_AGED_ORDER_NOTE = "Detalle ordenado por 1º : Días abierta, 2º: Criticidad y 3º: Estado"
+_RISK_AGED_ORDER_NOTE = (
+    "Detalle - TODAS las incidencias abiertas - ordenado por 1º : Días abierta, "
+    "2º: Criticidad y 3º: Estado"
+)
 
 
 @dataclass(frozen=True)
@@ -899,6 +907,37 @@ def _first_run_color_rgb(shape: Any) -> RGBColor | None:
     return None
 
 
+def _set_shape_fill_and_line(slide: Any, *, shape_index: int, fill_hex: str, line_hex: str) -> None:
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None:
+        return
+    try:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = RGBColor(*hex_to_rgb(fill_hex))
+    except Exception:
+        pass
+    try:
+        shape.line.color.rgb = RGBColor(*hex_to_rgb(line_hex))
+        shape.line.width = Pt(1.0)
+    except Exception:
+        pass
+
+
+def _style_summary_open_criticity_cards(slide: Any) -> None:
+    _set_shape_fill_and_line(
+        slide,
+        shape_index=5,
+        fill_hex=BBVA_REPORT_RED_BG,
+        line_hex=BBVA_REPORT_RED_BORDER,
+    )
+    _set_shape_fill_and_line(
+        slide,
+        shape_index=6,
+        fill_hex=BBVA_REPORT_AMBER_BG,
+        line_hex=BBVA_REPORT_AMBER_BORDER,
+    )
+
+
 def _write_open_criticity_card(
     slide: Any,
     *,
@@ -1180,11 +1219,6 @@ def _chart_png(
     if fig is None:
         return b""
     if chart_id == "timeseries":
-        margin = getattr(getattr(fig, "layout", None), "margin", None)
-        left = int(getattr(margin, "l", 34) or 34)
-        right = max(int(getattr(margin, "r", 34) or 34), 42)
-        top = int(getattr(margin, "t", 36) or 36)
-        bottom = max(int(getattr(margin, "b", 64) or 64), 128)
         for trace in list(getattr(fig, "data", ())):
             trace_type = str(getattr(trace, "type", "") or "").lower()
             if trace_type in {"scatter", "scattergl"}:
@@ -1193,10 +1227,10 @@ def _chart_png(
                 except Exception:
                     pass
                 try:
-                    base_width = 2.7
+                    base_width = 4.2
                     token = str(getattr(trace, "name", "") or "").strip().lower()
                     if "backlog" in token or "abierto" in token:
-                        base_width = 3.2
+                        base_width = 4.8
                     trace.line.width = base_width
                 except Exception:
                     pass
@@ -1205,7 +1239,7 @@ def _chart_png(
                 except Exception:
                     pass
                 try:
-                    trace.marker.size = 5.4
+                    trace.marker.size = 8.0
                 except Exception:
                     pass
                 try:
@@ -1220,43 +1254,13 @@ def _chart_png(
                     trace.opacity = 0.98
                 except Exception:
                     pass
-        fig.update_layout(
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-0.22,
-                xanchor="center",
-                x=0.5,
-                font=dict(size=14, color="#0F2D86"),
-                bgcolor="rgba(255,255,255,0.92)",
-                bordercolor="#C9D4EA",
-                borderwidth=1,
-            ),
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
-            font=dict(size=14, color="#132A7B"),
-            margin=dict(l=left, r=right, t=top, b=bottom),
+        _apply_executive_timeseries_chart_layout(fig)
+        payload = _fig_to_png_exact(
+            fig,
+            width=EXEC_CHART_EXPORT_WIDTH,
+            height=EXEC_CHART_TREND_EXPORT_HEIGHT,
+            scale=1.2,
         )
-        fig.update_xaxes(
-            showgrid=False,
-            showline=True,
-            linecolor="#C7D1E6",
-            linewidth=1.2,
-            tickfont=dict(size=11, color="#213A8F"),
-            nticks=8,
-        )
-        fig.update_yaxes(
-            showgrid=True,
-            gridcolor="#E7EDF8",
-            gridwidth=1.0,
-            showline=True,
-            linecolor="#C7D1E6",
-            linewidth=1.2,
-            tickfont=dict(size=11, color="#213A8F"),
-            nticks=6,
-            dtick=1,
-        )
-        payload = _fig_to_png_exact(fig, width=1900, height=1325, scale=1.2)
         return payload or b""
     payload = _fig_to_png_exact(fig, width=3400, height=760)
     return payload or b""
@@ -1278,6 +1282,11 @@ def _boardroom_snippet(text: str, *, max_chars: int) -> str:
     if first and len(first) <= max_chars:
         return first if first.endswith(".") else f"{first}."
     return _trim_text(clean, max_chars=max_chars)
+
+
+def _single_line_ellipsis(text: object, *, max_chars: int) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "").strip())
+    return ellipsize_text(clean, max_chars=max_chars)
 
 
 def _priority_order_key(value: object) -> tuple[int, str]:
@@ -1387,7 +1396,7 @@ def _apply_executive_chart_layout(
 ) -> None:
     kind_token = str(kind or "").strip().lower()
     export_height = int(height or EXEC_CHART_EXPORT_HEIGHT)
-    legend_y = -0.33 if kind_token == "trend" else -0.25
+    legend_y = -0.33 if kind_token in {"trend", "timeseries"} else -0.25
     fig.update_layout(
         width=EXEC_CHART_EXPORT_WIDTH,
         height=export_height,
@@ -1431,6 +1440,51 @@ def _apply_executive_chart_layout(
                 traceorder="normal",
             )
         )
+
+
+def _axis_title_text(fig: go.Figure, axis_name: str) -> str:
+    axis = getattr(getattr(fig, "layout", None), axis_name, None)
+    title = getattr(axis, "title", None)
+    return str(getattr(title, "text", "") or "")
+
+
+def _apply_executive_timeseries_chart_layout(fig: go.Figure) -> None:
+    _apply_executive_chart_layout(
+        fig,
+        kind="timeseries",
+        show_legend=True,
+        x_title=_axis_title_text(fig, "xaxis"),
+        y_title=_axis_title_text(fig, "yaxis"),
+        height=EXEC_CHART_TREND_EXPORT_HEIGHT,
+        margin=_exec_chart_margin(l=82, r=56, t=56, b=190),
+    )
+    fig.update_layout(
+        plot_bgcolor="#FFFFFF",
+        paper_bgcolor="#FFFFFF",
+        font=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#132A7B"),
+    )
+    fig.update_xaxes(
+        showgrid=False,
+        showline=True,
+        linecolor="#C7D1E6",
+        linewidth=1.2,
+        tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#213A8F"),
+        title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
+        automargin=True,
+        nticks=8,
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor="#E7EDF8",
+        gridwidth=1.0,
+        showline=True,
+        linecolor="#C7D1E6",
+        linewidth=1.2,
+        tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#213A8F"),
+        title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
+        automargin=True,
+        nticks=6,
+    )
 
 
 def _overlay_picture_contain(
@@ -2210,6 +2264,7 @@ def _populate_open_priority_executive_slide(
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     summary_metric_color = _first_run_color_rgb(_shape_or_none(slide, 16)) or RGBColor(4, 19, 139)
+    _style_summary_open_criticity_cards(slide)
     _set_shape_text(slide, 3, title)
     _set_paragraph_value_after_colon(
         slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
@@ -2245,12 +2300,14 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         shape_index=5,
         value=int(summary.open_focus_total),
         label=str(summary.open_focus_report_label),
+        color_rgb=RGBColor(*hex_to_rgb(BBVA_REPORT_RED_TEXT)),
     )
     _write_open_criticity_card(
         slide,
         shape_index=6,
         value=int(summary.open_other_total),
         label=str(summary.open_other_report_label),
+        color_rgb=RGBColor(*hex_to_rgb(BBVA_REPORT_AMBER_TEXT)),
     )
 
     _write_metric_card(
@@ -2364,7 +2421,7 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
     paragraph = tf.paragraphs[0]
     paragraph.alignment = PP_ALIGN.CENTER
     run = paragraph.add_run()
-    run.text = str(period_label or "").strip()
+    run.text = _single_line_ellipsis(period_label, max_chars=42)
 
     if sample_run is not None:
         try:
@@ -2387,7 +2444,24 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
             pass
 
     # Keep the period text readable and centered inside the yellow ribbon.
-    run.font.size = Pt(15.0)
+    try:
+        run.font.name = _PPT_FONT_BODY_MEDIUM
+    except Exception:
+        pass
+    run.font.size = Pt(13.5)
+    run.font.bold = True
+    try:
+        if getattr(getattr(run.font, "color", None), "rgb", None) is None:
+            run.font.color.rgb = RGBColor(*hex_to_rgb(BBVA_LIGHT.midnight))
+    except Exception:
+        pass
+    try:
+        tf.margin_left = 20_000
+        tf.margin_right = 20_000
+        tf.margin_top = 4_000
+        tf.margin_bottom = 4_000
+    except Exception:
+        pass
     try:
         tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
     except Exception:
@@ -2397,7 +2471,7 @@ def _update_cover_period(slide: Any, *, period_label: str) -> None:
     except Exception:
         pass
     try:
-        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        tf.auto_size = MSO_AUTO_SIZE.NONE
     except Exception:
         pass
 
@@ -2460,10 +2534,6 @@ def _fmt_avg_days(value: float) -> str:
         return "0"
     safe = max(float(value or 0.0), 0.0)
     return str(int(round(safe)))
-
-
-def _fmt_avg_days_short(value: float) -> str:
-    return f"{_fmt_avg_days(value)} d. prom."
 
 
 def _write_functionality_total_open_badge(
@@ -2547,8 +2617,68 @@ def _write_functionality_total_open_badge(
 
 
 def _top_row_line(row: FunctionalityTopRow) -> str:
-    line = format_top_row_label(row).replace("acumuladas", "acum.").replace("d. promedio", "d. p.")
-    return _trim_text(line, max_chars=108)
+    count = int(getattr(row, "new_count", 0) or 0)
+    count_txt = "incidencia nueva" if count == 1 else "incidencias nuevas"
+    functionality = str(getattr(row, "functionality", "") or "").strip()
+    open_total = int(getattr(row, "open_total", 0) or 0)
+    avg_days = _fmt_avg_days(float(getattr(row, "avg_open_days", 0.0) or 0.0))
+    line = (
+        f"{count} {count_txt} en {functionality} ({open_total} en total - {avg_days} días promedio)"
+    )
+    return _single_line_ellipsis(line, max_chars=118)
+
+
+def _mitigation_status_line(
+    *,
+    label: str,
+    count: int,
+    avg_open_days: float,
+    in_fortnight: bool = False,
+    rest_open: bool = False,
+    max_chars: int = 104,
+) -> str:
+    days = _fmt_avg_days(avg_open_days)
+    if rest_open:
+        text = f"{label}: {int(count)} incidencias con {days} días de promedio abiertas"
+    elif in_fortnight:
+        text = (
+            f"{label}: {int(count)} incidencias, en la quincena, "
+            f"con {days} días de promedio en el estado"
+        )
+    else:
+        text = f"{label}: {int(count)} incidencias con {days} días de promedio en el estado"
+    return _single_line_ellipsis(text, max_chars=max_chars)
+
+
+def _write_mitigation_status_line(slide: Any, shape_index: int, text: str) -> None:
+    _set_shape_text_strict(slide, shape_index, text)
+    _set_shape_font_size(
+        slide,
+        shape_index=shape_index,
+        font_size_pt=8.2,
+        bold=True,
+        disable_autofit=True,
+    )
+    _set_shape_font_name(slide, shape_index=shape_index, font_name=_PPT_FONT_BODY_MEDIUM)
+    shape = _shape_or_none(slide, shape_index)
+    if shape is None or not getattr(shape, "has_text_frame", False):
+        return
+    tf = shape.text_frame
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    try:
+        tf.margin_left = 12_000
+        tf.margin_right = 12_000
+        tf.margin_top = 4_000
+        tf.margin_bottom = 4_000
+    except Exception:
+        pass
 
 
 def _root_cause_caption(zoom: FunctionalityZoomSlide, *, critical_wording: bool) -> str:
@@ -2793,44 +2923,42 @@ def _populate_functionality_dashboard_slide(
         )
         _set_shape_font_name(slide, shape_index=shape_idx, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    _set_shape_text_strict(
+    _write_mitigation_status_line(
         slide,
         13,
-        (
-            "Incidencias en la quincena en ready to verify: "
-            f"{int(summary.mitigation_ready_to_verify.count)} / "
-            f"{_fmt_avg_days_short(summary.mitigation_ready_to_verify.avg_open_days)}"
+        _mitigation_status_line(
+            label="Estado Ready to Verify",
+            count=int(summary.mitigation_ready_to_verify.count),
+            avg_open_days=summary.mitigation_ready_to_verify.avg_open_days,
+            in_fortnight=True,
         ),
     )
-    _set_shape_text_strict(
+    _write_mitigation_status_line(
         slide,
         19,
-        (
-            "Incidencias en New: "
-            f"{int(summary.mitigation_new.count)} / "
-            f"{_fmt_avg_days_short(summary.mitigation_new.avg_open_days)}"
+        _mitigation_status_line(
+            label="Estado New",
+            count=int(summary.mitigation_new.count),
+            avg_open_days=summary.mitigation_new.avg_open_days,
         ),
     )
-    _set_shape_text_strict(
+    _write_mitigation_status_line(
         slide,
         20,
-        (
-            (
-                "Incidencias críticas bloqueadas: "
-                if critical_wording
-                else "Incidencias bloqueadas: "
-            )
-            + f"{int(summary.mitigation_blocked.count)} / "
-            f"{_fmt_avg_days_short(summary.mitigation_blocked.avg_open_days)}"
+        _mitigation_status_line(
+            label="Estado bloqueadas",
+            count=int(summary.mitigation_blocked.count),
+            avg_open_days=summary.mitigation_blocked.avg_open_days,
         ),
     )
-    _set_shape_text_strict(
+    _write_mitigation_status_line(
         slide,
         21,
-        (
-            "Resto de incidencias: "
-            f"{int(summary.mitigation_non_critical.count)} / "
-            f"{_fmt_avg_days_short(summary.mitigation_non_critical.avg_open_days)}"
+        _mitigation_status_line(
+            label="Resto",
+            count=int(summary.mitigation_non_critical.count),
+            avg_open_days=summary.mitigation_non_critical.avg_open_days,
+            rest_open=True,
         ),
     )
     for idx in (5, 13, 19, 20, 21):
