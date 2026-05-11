@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
   actions: read
+  security-events: read
+
+env:
+  CODEQL_ACTION_FILE_COVERAGE_ON_PRS: "true"
 
 jobs:
   analyze:
@@ -29,6 +33,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
+          tools: linked
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4
