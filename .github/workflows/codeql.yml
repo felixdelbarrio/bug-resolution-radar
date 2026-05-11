@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
   actions: read
-  security-events: read
+  security-events: write
 
 env:
   CODEQL_ACTION_FILE_COVERAGE_ON_PRS: "true"
