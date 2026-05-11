@@ -65,14 +65,22 @@ jobs:
         if: runner.os != 'Windows'
         run: make setup PY=python3
 
-      - name: Install toolchain (Windows)
+      - name: Install backend dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          npm --prefix frontend install
-          npm --prefix frontend run build
+
+      - name: Install frontend dependencies (Windows)
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend (Windows)
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        run: npm run build
 
       - name: Build release asset (POSIX)
         if: runner.os != 'Windows'
@@ -88,17 +96,25 @@ jobs:
           pytest -q tests/test_period_followup_report_ppt.py
           python scripts/update_app_icon.py --input assets/app_icon/bug-resolution-radar.png
 
+          $iconPath = (Resolve-Path "assets/app_icon/bug-resolution-radar.ico").Path
+          $frontendDist = (Resolve-Path "frontend/dist").Path
           $args = @(
             "--noconfirm",
             "--clean",
             "--onefile",
             "--windowed",
             "--name", "bug-resolution-radar",
-            "--icon", "assets/app_icon/bug-resolution-radar.ico",
+            "--icon", $iconPath,
             "--workpath", "build",
             "--specpath", "build",
             "--distpath", "dist",
-            "--add-data", "frontend/dist;frontend_dist",
+            "--add-data", "${frontendDist};frontend_dist"
+          )
+          if (Test-Path ".env.example" -PathType Leaf) {
+            $envExample = (Resolve-Path ".env.example").Path
+            $args += @("--add-data", "${envExample};.")
+          }
+          $args += @(
             "--paths", "src",
             "--collect-all", "bug_resolution_radar.analytics",
             "--collect-all", "bug_resolution_radar.api",
@@ -123,9 +139,6 @@ jobs:
             "--collect-all", "browser_cookie3",
             "run_desktop.py"
           )
-          if (Test-Path ".env.example" -PathType Leaf) {
-            $args += @("--add-data", ".env.example;.")
-          }
           pyinstaller @args
 
           $bundleDir = "release_bundle/bug-resolution-radar-windows"
