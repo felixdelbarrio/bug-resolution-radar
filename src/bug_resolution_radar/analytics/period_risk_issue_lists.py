@@ -9,7 +9,7 @@ from typing import Sequence
 import pandas as pd
 
 from bug_resolution_radar.analytics.insights import classify_theme
-from bug_resolution_radar.analytics.issues import priority_rank
+from bug_resolution_radar.analytics.issues import priority_rank, status_progress_rank
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.analytics.topic_expandable_summary import infer_root_cause_label
 
@@ -163,6 +163,10 @@ def _prepare_open_issue_frame(
         work["__issue_key"] = work["key"].fillna("").astype(str).str.strip()
     else:
         work["__issue_key"] = ""
+    if "status" in work.columns:
+        work["__status_rank"] = work["status"].map(status_progress_rank)
+    else:
+        work["__status_rank"] = 99
     return work.loc[work["__issue_key"].ne("")].copy(deep=False)
 
 
@@ -194,8 +198,8 @@ def _build_high_priority_from_prepared(df: pd.DataFrame) -> tuple[PeriodRiskIssu
     if high.empty:
         return ()
     high = high.sort_values(
-        by=["__open_days", "__priority_rank", "__issue_key"],
-        ascending=[False, True, True],
+        by=["__priority_rank", "__open_days", "__status_rank", "__issue_key"],
+        ascending=[True, False, True, True],
         kind="mergesort",
     )
     return _rows_from_prepared(high)
@@ -216,8 +220,8 @@ def _build_aged_from_prepared(
     if aged.empty:
         return ()
     aged = aged.sort_values(
-        by=["__priority_rank", "__open_days", "__issue_key"],
-        ascending=[True, False, True],
+        by=["__open_days", "__priority_rank", "__status_rank", "__issue_key"],
+        ascending=[False, True, True, True],
         kind="mergesort",
     )
     return _rows_from_prepared(aged)

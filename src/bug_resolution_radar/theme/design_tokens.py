@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Final
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,18 @@ BBVA_RADIUS_INNER_PX = 8
 BBVA_GRID_BASE_PX = 8
 BBVA_GRID_MARGIN_PX = 24
 BBVA_GRID_GUTTER_PX = 24
+
+# Executive PPT chart export tokens. Plotly interprets font sizes as pixels in
+# exported raster output; keep the names stable for the report layer.
+EXEC_CHART_AXIS_FONT_PT: Final[int] = 30
+EXEC_CHART_AXIS_TITLE_FONT_PT: Final[int] = 31
+EXEC_CHART_INSIDE_VALUE_FONT_PT: Final[int] = 30
+EXEC_CHART_TOTAL_FONT_PT: Final[int] = 40
+EXEC_CHART_LEGEND_FONT_PT: Final[int] = 28
+EXEC_CHART_MARGIN: Final[dict[str, int]] = {"l": 72, "r": 48, "t": 78, "b": 142}
+EXEC_CHART_EXPORT_WIDTH: Final[int] = 1700
+EXEC_CHART_EXPORT_HEIGHT: Final[int] = 420
+EXEC_CHART_TREND_EXPORT_HEIGHT: Final[int] = 773
 
 
 def _safe_hex(hex_color: str, *, fallback: str) -> str:
