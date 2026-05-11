@@ -60,11 +60,11 @@ def status_progress_rank(status: Optional[str]) -> int:
     if not token:
         return 99
     ranked_patterns: tuple[tuple[str, ...], ...] = (
-        ("accepted",),
-        ("ready to deploy",),
-        ("deployed",),
         ("ready to verify",),
         ("test",),
+        ("ready to deploy",),
+        ("deployed",),
+        ("accepted",),
         ("to rework", "rework"),
         ("en progreso", "in progress"),
         ("blocked", "bloque"),
