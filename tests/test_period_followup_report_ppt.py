@@ -16,6 +16,15 @@ from pptx.oxml.ns import qn
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
 from bug_resolution_radar.reports import period_followup_ppt as period_ppt_mod
+from bug_resolution_radar.theme.design_tokens import (
+    EXEC_CHART_AXIS_FONT_PT,
+    EXEC_CHART_EXPORT_HEIGHT,
+    EXEC_CHART_EXPORT_WIDTH,
+    EXEC_CHART_INSIDE_VALUE_FONT_PT,
+    EXEC_CHART_LEGEND_FONT_PT,
+    EXEC_CHART_TOTAL_FONT_PT,
+    EXEC_CHART_TREND_EXPORT_HEIGHT,
+)
 
 
 def _build_minimal_template(path: Path) -> None:
@@ -165,7 +174,7 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == 15
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
-    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     dashboard_idx = _find_slide_index(
         prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad"
@@ -429,7 +438,8 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         cover_blob_lower,
     )
     assert len(period_matches) == 1
-    assert "kpis, evolución y análisis del periodo" in cover_blob_lower
+    assert "seguimiento incidencias" in cover_blob_lower
+    assert "kpis, evolución y análisis del periodo" not in cover_blob_lower
 
     period_shape = next(
         (
@@ -454,6 +464,223 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
             break
     assert period_run_size is not None
     assert float(period_run_size.pt) >= 11.0
+
+
+def test_resolution_chart_uses_executive_fonts_and_column_totals(monkeypatch: Any) -> None:
+    now = pd.Timestamp("2026-04-30T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Issue A",
+                "status": "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=1)).isoformat(),
+            },
+            {
+                "key": "A-2",
+                "summary": "Issue B",
+                "status": "New",
+                "priority": "Medium",
+                "created": (now - pd.Timedelta(days=1)).isoformat(),
+            },
+            {
+                "key": "A-3",
+                "summary": "Issue C",
+                "status": "New",
+                "priority": "Highest",
+                "created": (now - pd.Timedelta(days=45)).isoformat(),
+            },
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def _capture_fig(fig: Any, *, width: int, height: int, scale: float = 1.0) -> bytes:
+        captured["fig"] = fig
+        captured["width"] = width
+        captured["height"] = height
+        captured["scale"] = scale
+        return b"png"
+
+    monkeypatch.setattr(period_ppt_mod, "_fig_to_png_exact", _capture_fig)
+
+    payload = period_ppt_mod._resolution_chart_png_executive(
+        Settings(),
+        dff=dff,
+        open_df=dff,
+        reference_now=now,
+    )
+
+    assert payload == b"png"
+    assert captured["width"] == EXEC_CHART_EXPORT_WIDTH
+    assert captured["height"] == EXEC_CHART_EXPORT_HEIGHT
+    fig = captured["fig"]
+    assert int(fig.layout.xaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.yaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.legend.font.size) >= EXEC_CHART_LEGEND_FONT_PT
+    bars = [trace for trace in fig.data if str(trace.type) == "bar"]
+    assert bars
+    assert all(int(trace.textfont.size) >= EXEC_CHART_INSIDE_VALUE_FONT_PT for trace in bars)
+    totals_by_x: dict[str, int] = {}
+    for trace in bars:
+        for x_val, y_val in zip(list(trace.x), list(trace.y)):
+            totals_by_x[str(x_val)] = totals_by_x.get(str(x_val), 0) + int(y_val)
+    total_trace = [
+        trace
+        for trace in fig.data
+        if str(trace.type) == "scatter" and list(getattr(trace, "text", []) or [])
+    ][-1]
+    assert int(total_trace.textfont.size) >= EXEC_CHART_TOTAL_FONT_PT
+    assert {
+        str(x_val): int(text)
+        for x_val, text in zip(list(total_trace.x), list(total_trace.text))
+        if str(text).strip()
+    } == {label: total for label, total in totals_by_x.items() if total > 0}
+
+
+def test_priority_chart_uses_executive_fonts_and_safe_y_range(monkeypatch: Any) -> None:
+    dff = pd.DataFrame(
+        [
+            {"key": "A-1", "status": "New", "priority": "High"},
+            {"key": "A-2", "status": "New", "priority": "High"},
+            {"key": "A-3", "status": "New", "priority": "Medium"},
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def _capture_fig(fig: Any, *, width: int, height: int, scale: float = 1.0) -> bytes:
+        captured["fig"] = fig
+        captured["width"] = width
+        captured["height"] = height
+        return b"png"
+
+    monkeypatch.setattr(period_ppt_mod, "_fig_to_png_exact", _capture_fig)
+
+    payload = period_ppt_mod._priority_chart_png_executive(Settings(), dff=dff, open_df=dff)
+
+    assert payload == b"png"
+    assert captured["width"] == EXEC_CHART_EXPORT_WIDTH
+    assert captured["height"] == EXEC_CHART_EXPORT_HEIGHT
+    fig = captured["fig"]
+    bars = [trace for trace in fig.data if str(trace.type) == "bar"]
+    assert bars
+    assert int(fig.layout.xaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.yaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert all(int(trace.textfont.size) >= EXEC_CHART_INSIDE_VALUE_FONT_PT for trace in bars)
+    pct_trace = [trace for trace in fig.data if str(trace.type) == "scatter"][-1]
+    assert int(pct_trace.textfont.size) >= EXEC_CHART_TOTAL_FONT_PT
+    max_bar = max(int(trace.y[0]) for trace in bars)
+    assert float(fig.layout.yaxis.range[1]) > float(max_bar)
+
+
+def test_functionality_trend_filters_last_six_months_and_adds_totals(
+    monkeypatch: Any,
+) -> None:
+    rows: list[dict[str, object]] = []
+    for idx, created in enumerate(
+        [
+            "2026-01-05T00:00:00+00:00",
+            "2026-02-05T00:00:00+00:00",
+            "2026-03-05T00:00:00+00:00",
+            "2026-04-05T00:00:00+00:00",
+            "2026-05-05T00:00:00+00:00",
+            "2026-06-05T00:00:00+00:00",
+            "2026-07-05T00:00:00+00:00",
+            "2026-08-05T00:00:00+00:00",
+        ],
+        start=1,
+    ):
+        rows.append(
+            {
+                "key": f"A-{idx}",
+                "summary": "Pagos no refleja saldo" if idx % 2 else "Login falla",
+                "status": "New",
+                "priority": "High",
+                "created": created,
+            }
+        )
+    captured: dict[str, Any] = {}
+
+    def _capture_fig(fig: Any, *, width: int, height: int, scale: float = 1.0) -> bytes:
+        captured["fig"] = fig
+        captured["width"] = width
+        captured["height"] = height
+        return b"png"
+
+    monkeypatch.setattr(period_ppt_mod, "_fig_to_png_exact", _capture_fig)
+
+    payload = period_ppt_mod._functionality_fortnight_trend_png(open_df=pd.DataFrame(rows))
+
+    assert payload == b"png"
+    assert captured["width"] == EXEC_CHART_EXPORT_WIDTH
+    assert captured["height"] == EXEC_CHART_TREND_EXPORT_HEIGHT
+    fig = captured["fig"]
+    bars = [trace for trace in fig.data if str(trace.type) == "bar"]
+    assert bars
+    axis_labels = [str(label) for label in list(bars[0].x)]
+    assert all(not label.startswith(("01 |", "02 |")) for label in axis_labels)
+    assert any(label.startswith("03 |") for label in axis_labels)
+    assert int(fig.layout.xaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.yaxis.tickfont.size) >= EXEC_CHART_AXIS_FONT_PT
+    assert int(fig.layout.legend.font.size) >= EXEC_CHART_LEGEND_FONT_PT
+    assert all(int(trace.textfont.size) >= EXEC_CHART_INSIDE_VALUE_FONT_PT for trace in bars)
+    totals_by_x: dict[str, int] = {}
+    for trace in bars:
+        for x_val, y_val in zip(list(trace.x), list(trace.y)):
+            totals_by_x[str(x_val)] = totals_by_x.get(str(x_val), 0) + int(y_val)
+    total_trace = [
+        trace
+        for trace in fig.data
+        if str(trace.type) == "scatter" and list(getattr(trace, "text", []) or [])
+    ][-1]
+    assert int(total_trace.textfont.size) >= EXEC_CHART_TOTAL_FONT_PT
+    assert {
+        str(x_val): int(text)
+        for x_val, text in zip(list(total_trace.x), list(total_trace.text))
+        if str(text).strip()
+    } == {label: total for label, total in totals_by_x.items() if total > 0}
+
+
+def test_filter_last_six_months_trend_keeps_month_window() -> None:
+    trend = pd.DataFrame(
+        {
+            "quincena_start": pd.to_datetime(
+                [
+                    "2026-01-01",
+                    "2026-02-01",
+                    "2026-03-01",
+                    "2026-04-01",
+                    "2026-05-01",
+                    "2026-06-01",
+                    "2026-07-01",
+                    "2026-08-01",
+                ]
+            ),
+            "quincena_end": pd.to_datetime(
+                [
+                    "2026-01-15",
+                    "2026-02-15",
+                    "2026-03-15",
+                    "2026-04-15",
+                    "2026-05-15",
+                    "2026-06-15",
+                    "2026-07-15",
+                    "2026-08-15",
+                ]
+            ),
+            "quincena_label": [f"2026-{month:02d} · 1-15" for month in range(1, 9)],
+            "tema": ["Pagos"] * 8,
+            "issues": [1] * 8,
+            "issues_cumulative": list(range(1, 9)),
+            "issues_value": list(range(1, 9)),
+        }
+    )
+
+    filtered = period_ppt_mod._filter_last_six_months_trend(trend)
+
+    assert filtered["quincena_start"].min() == pd.Timestamp("2026-03-01")
+    assert filtered["quincena_start"].max() == pd.Timestamp("2026-08-01")
+    assert filtered["quincena_start"].tolist() == sorted(filtered["quincena_start"].tolist())
 
 
 def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
@@ -830,7 +1057,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     ]
     joined_titles = " | ".join(zoom_titles)
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
-    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
     assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
@@ -889,18 +1116,26 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     )
     prs = Presentation(BytesIO(out.content))
 
-    trend_idx = _find_slide_index(prs, "Tendencia por funcionalidad : vista agregada")
+    trend_title = "Tendencia por funcionalidad : vista agregada ultimo semestre"
+    trend_idx = _find_slide_index(prs, trend_title)
     dashboard_idx = _find_slide_index(
         prs,
         "Seguimiento de KPIs - Incidencias abiertas por funcionalidad",
     )
-    high_cover_idx = _find_slide_index(prs, "Incidencias abiertas de criticidad alta")
-    high_detail_idx = _find_slide_index(prs, "Incidencias abiertas de criticidad alta (I)")
+    high_cover_idx = _find_slide_index(prs, "Incidencias abiertas por criticidad alta")
+    high_detail_idx = _find_slide_index(prs, "Incidencias abiertas por criticidad alta (I)")
     aged_cover_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días")
     aged_detail_idx = _find_slide_index(prs, "Incidencias abiertas con más de 30 días (I)")
 
     assert trend_idx < dashboard_idx < high_cover_idx < high_detail_idx < aged_cover_idx
     assert aged_cover_idx < aged_detail_idx
+    trend_title_shapes = [
+        shape
+        for shape in prs.slides[trend_idx].shapes
+        if getattr(shape, "has_text_frame", False) and trend_title in str(shape.text or "")
+    ]
+    assert trend_title_shapes
+    assert all("\n" not in str(shape.text or "") for shape in trend_title_shapes)
     assert not _native_tables(prs.slides[high_cover_idx])
     assert not _native_tables(prs.slides[aged_cover_idx])
 
@@ -908,7 +1143,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     section_cover_template = template_prs.slides[1]
     section_cover_title = section_cover_template.shapes[1]
     for cover_idx, expected_title in (
-        (high_cover_idx, "Incidencias abiertas de criticidad alta"),
+        (high_cover_idx, "Incidencias abiertas por criticidad alta"),
         (aged_cover_idx, "Incidencias abiertas con más de 30 días"),
     ):
         cover = prs.slides[cover_idx]
@@ -935,11 +1170,24 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         "Criticidad",
         "Días abierta",
     }
-    for slide_idx, expected_id in (
-        (high_detail_idx, "MEXBMI1-101"),
-        (aged_detail_idx, "SKSEMEX-9"),
+    for slide_idx, expected_ids, order_note, forbidden in (
+        (
+            high_detail_idx,
+            ["EAM-77", "MEXBMI1-101"],
+            "Detalle ordenado por 1º : Criticidad, 2º: Días abierta y 3º: Estado",
+            "SKSEMEX-9",
+        ),
+        (
+            aged_detail_idx,
+            ["SKSEMEX-9", "MEXBMI1-101"],
+            "Detalle ordenado por 1º : Días abierta, 2º: Criticidad y 3º: Estado",
+            "",
+        ),
     ):
         slide = prs.slides[slide_idx]
+        slide_text = _slide_all_text(slide)
+        assert "Detalle de incidencias abiertas:" not in slide_text
+        assert order_note in slide_text
         tables = _native_tables(slide)
         assert len(tables) == 1
         table_shape = tables[0]
@@ -948,7 +1196,12 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         headers = {table_shape.table.cell(0, cidx).text for cidx in range(6)}
         assert headers == expected_headers
         table_text = _slide_table_text(slide)
-        assert expected_id in table_text
+        row_ids = [
+            table_shape.table.cell(row_idx, 0).text for row_idx in range(1, len(expected_ids) + 1)
+        ]
+        assert row_ids == expected_ids
+        if forbidden:
+            assert forbidden not in table_text
         assert "Descripción" in table_text
         assert "Criticidad" in table_text
         assert "días" in table_text
@@ -994,7 +1247,7 @@ def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> 
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
 
     assert len(prs.slides) == 15
-    assert "Incidencias abiertas de criticidad alta" in deck_text
+    assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Seguimiento de KPIs - Incidencias abiertas por funcionalidad" in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena" not in deck_text
