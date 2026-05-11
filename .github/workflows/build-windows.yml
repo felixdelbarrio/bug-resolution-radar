@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-windows:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
 
     steps:
@@ -37,10 +37,12 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Install frontend dependencies
-        run: npm --prefix frontend install
+        working-directory: frontend
+        run: npm ci
 
       - name: Build frontend
-        run: npm --prefix frontend run build
+        working-directory: frontend
+        run: npm run build
 
       - name: Verify desktop runtime dependencies
         shell: pwsh
@@ -64,20 +66,23 @@ jobs:
       - name: Build executable with PyInstaller
         shell: pwsh
         run: |
+          $iconPath = (Resolve-Path "assets/app_icon/bug-resolution-radar.ico").Path
+          $frontendDist = (Resolve-Path "frontend/dist").Path
           $args = @(
             "--noconfirm",
             "--clean",
             "--onefile",
             "--windowed",
             "--name", "bug-resolution-radar",
-            "--icon", "assets/app_icon/bug-resolution-radar.ico",
+            "--icon", $iconPath,
             "--workpath", "build",
             "--specpath", "build",
             "--distpath", "dist",
-            "--add-data", "frontend/dist;frontend_dist"
+            "--add-data", "${frontendDist};frontend_dist"
           )
           if (Test-Path ".env.example" -PathType Leaf) {
-            $args += @("--add-data", ".env.example;.")
+            $envExample = (Resolve-Path ".env.example").Path
+            $args += @("--add-data", "${envExample};.")
           }
           $args += @(
             "--paths", "src",
