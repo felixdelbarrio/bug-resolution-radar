@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
   actions: read
+  security-events: read
+
+env:
+  CODEQL_ACTION_FILE_COVERAGE_ON_PRS: "true"
 
 jobs:
   analyze:
@@ -22,19 +26,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
+          tools: linked
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           # Keep CI green when repository-level Code Scanning is disabled.
           # Results are still generated and published as workflow artifacts.
@@ -43,7 +48,7 @@ jobs:
           output: sarif-results
 
       - name: Upload CodeQL SARIF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: codeql-sarif-${{ matrix.language }}
           path: sarif-results
