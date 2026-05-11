@@ -1138,8 +1138,29 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     assert all("\n" not in str(shape.text or "") for shape in trend_title_shapes)
     assert not _native_tables(prs.slides[high_cover_idx])
     assert not _native_tables(prs.slides[aged_cover_idx])
-    assert "Quincena" in _slide_text(prs.slides[high_cover_idx])
-    assert "Quincena" in _slide_text(prs.slides[aged_cover_idx])
+
+    template_prs = Presentation(str(bundled_period_ppt_template_path()))
+    section_cover_template = template_prs.slides[1]
+    section_cover_title = section_cover_template.shapes[1]
+    for cover_idx, expected_title in (
+        (high_cover_idx, "Incidencias abiertas por criticidad alta"),
+        (aged_cover_idx, "Incidencias abiertas con más de 30 días"),
+    ):
+        cover = prs.slides[cover_idx]
+        cover_text = _slide_text(cover)
+        assert "Haga clic para agregar" not in cover_text
+        assert (
+            cover.shapes[0].fill.fore_color.rgb
+            == section_cover_template.shapes[0].fill.fore_color.rgb
+        )
+        assert cover.shapes[1].left == section_cover_title.left
+        assert cover.shapes[1].top == section_cover_title.top
+        assert cover.shapes[1].width == section_cover_title.width
+        assert cover.shapes[1].height == section_cover_title.height
+        assert cover.shapes[1].text == expected_title
+        assert cover.shapes[1].text_frame.paragraphs[0].runs[0].font.name == (
+            section_cover_title.text_frame.paragraphs[0].runs[0].font.name
+        )
 
     expected_headers = {
         "ID",

@@ -3046,11 +3046,11 @@ def _append_period_risk_issue_sections(
     template_path = _resolve_functionality_template_path()
     template_prs = Presentation(str(template_path))
     if len(template_prs.slides) < 3:
-        raise ValueError(
-            "La plantilla de funcionalidad debe contener la portada y la slide de zoom."
-        )
-    cover_template_slide = template_prs.slides[0]
+        raise ValueError("La plantilla de funcionalidad debe contener la slide de zoom.")
     zoom_template_slide = template_prs.slides[2]
+    if len(prs.slides) < 2:
+        raise ValueError("La plantilla de periodo debe contener la slide de portada de sección.")
+    cover_template_slide = prs.slides[1]
     specs = (
         (
             "Incidencias abiertas por criticidad alta",
