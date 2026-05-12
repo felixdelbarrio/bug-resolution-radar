@@ -12,10 +12,13 @@ from typing import Dict, Iterable, List, Mapping, Sequence
 import pandas as pd
 
 from bug_resolution_radar.analytics.issues import sort_issues_for_display
-from bug_resolution_radar.analytics.status_semantics import (
-    effective_closed_mask,
-    effective_finalized_at,
+from bug_resolution_radar.analytics.quincenal_calculators import (
+    ClosedIncidentsCalculator,
+    CreatedIncidentsCalculator,
+    NormalizedIssueFrame,
+    ResolutionMetricsCalculator,
 )
+from bug_resolution_radar.analytics.time_windows import QuincenalWindow, TimeWindowService
 from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 
@@ -47,15 +50,6 @@ class OpenIssueGrouping:
     other_card_detail: str
     focus_report_label: str
     other_report_label: str
-
-
-@dataclass(frozen=True)
-class QuincenalWindow:
-    current_start: pd.Timestamp
-    current_end: pd.Timestamp
-    previous_start: pd.Timestamp
-    previous_end: pd.Timestamp
-    month_start: pd.Timestamp
 
 
 @dataclass(frozen=True)
@@ -369,11 +363,6 @@ def _infer_reference_day_from_df(df: pd.DataFrame | None) -> pd.Timestamp | None
         candidates.append(pd.Timestamp(parsed.max()))
 
     if not candidates:
-        finalized = _to_dt_naive(effective_finalized_at(safe)).dropna()
-        if not finalized.empty:
-            candidates.append(pd.Timestamp(finalized.max()))
-
-    if not candidates:
         return None
     return max(candidates).normalize()
 
@@ -383,21 +372,14 @@ def _analysis_reference_day(
     reference_day: pd.Timestamp | None = None,
     df: pd.DataFrame | None = None,
 ) -> pd.Timestamp:
+    service = TimeWindowService()
     if reference_day is not None:
-        ts = pd.Timestamp(reference_day)
-        try:
-            ts = ts.tz_convert(None)
-        except Exception:
-            try:
-                ts = ts.tz_localize(None)
-            except Exception:
-                pass
-        return ts.normalize()
+        return service.normalize_reference_day(reference_day)
 
     inferred = _infer_reference_day_from_df(df)
     if inferred is not None:
-        return inferred
-    return pd.Timestamp.now().normalize()
+        return service.normalize_reference_day(inferred)
+    return service.today()
 
 
 def _window_from_reference(
@@ -405,40 +387,9 @@ def _window_from_reference(
     *,
     last_finished_only: bool,
 ) -> QuincenalWindow:
-    anchor = pd.Timestamp(reference_day).normalize()
-    month_start = anchor.replace(day=1)
-    month_end = (month_start + pd.offsets.MonthBegin(1) - pd.Timedelta(days=1)).normalize()
-
-    if last_finished_only:
-        if int(anchor.day) <= 15:
-            previous_month_end = month_start - pd.Timedelta(days=1)
-            current_start = previous_month_end.replace(day=16)
-            current_end = previous_month_end
-        else:
-            current_start = month_start
-            current_end = month_start + pd.Timedelta(days=14)
-    else:
-        if int(anchor.day) <= 15:
-            current_start = month_start
-            current_end = month_start + pd.Timedelta(days=14)
-        else:
-            current_start = month_start + pd.Timedelta(days=15)
-            current_end = month_end
-
-    if int(current_start.day) == 1:
-        previous_end = current_start - pd.Timedelta(days=1)
-        previous_start = previous_end.replace(day=16)
-    else:
-        previous_start = current_start.replace(day=1)
-        previous_end = current_start - pd.Timedelta(days=1)
-    accumulated_month_start = current_start.replace(day=1)
-
-    return QuincenalWindow(
-        current_start=current_start,
-        current_end=current_end,
-        previous_start=previous_start,
-        previous_end=previous_end,
-        month_start=accumulated_month_start,
+    return TimeWindowService().current_window(
+        reference_day,
+        last_finished_only=last_finished_only,
     )
 
 
@@ -450,18 +401,6 @@ def _delta_pct(now_value: float | int, before_value: float | int) -> float | Non
             return 0.0
         return None
     return (now_val - before_val) / before_val
-
-
-def _resolution_days_stats(
-    df: pd.DataFrame, *, column: str = "resolution_days"
-) -> tuple[float | None, float | None, float | None]:
-    safe = _safe_df(df)
-    if safe.empty or column not in safe.columns:
-        return None, None, None
-    values = pd.to_numeric(safe[column], errors="coerce").dropna()
-    if values.empty:
-        return None, None, None
-    return float(values.mean()), float(values.min()), float(values.max())
 
 
 def _focus_group_mask(
@@ -594,75 +533,55 @@ def _scope_result(
         last_finished_only=_quincena_last_finished_only(settings),
     )
     grouping = open_issue_grouping(settings)
+    normalized = NormalizedIssueFrame.from_df(safe)
 
-    closed_mask = effective_closed_mask(safe)
+    closed_mask = normalized.closed_mask
     open_df = safe.loc[~closed_mask].copy(deep=False) if not safe.empty else pd.DataFrame()
     open_focus_mask = _focus_group_mask(open_df, grouping=grouping, settings=settings)
     open_focus = open_df.loc[open_focus_mask].copy(deep=False)
     open_other = open_df.loc[~open_focus_mask].copy(deep=False)
 
-    created = _to_dt_naive(safe["created"]) if "created" in safe.columns else pd.Series(pd.NaT)
-    created_day = created.dt.normalize()
-    new_now_mask = created_day.between(window.current_start, window.current_end, inclusive="both")
-    new_before_mask = created_day.between(
-        window.previous_start, window.previous_end, inclusive="both"
+    created_metrics = CreatedIncidentsCalculator().calculate(
+        normalized,
+        window=window,
     )
-    new_accumulated_mask = created_day.between(
-        window.month_start, window.current_end, inclusive="both"
+    closed_metrics = ClosedIncidentsCalculator().calculate(
+        normalized,
+        window=window,
     )
-
-    finalized = _to_dt_naive(effective_finalized_at(safe))
-    finalized_day = finalized.dt.normalize()
-    closed_now_mask = finalized_day.between(
-        window.current_start, window.current_end, inclusive="both"
-    )
-    closed_before_mask = finalized_day.between(
-        window.previous_start, window.previous_end, inclusive="both"
+    resolution_metrics = ResolutionMetricsCalculator().calculate(
+        normalized,
+        window=window,
     )
 
-    closed_now = safe.loc[closed_now_mask].copy(deep=False)
-    closed_before = safe.loc[closed_before_mask].copy(deep=False)
+    closed_now = safe.loc[closed_metrics.current_mask].copy(deep=False)
+    closed_before = safe.loc[closed_metrics.previous_mask].copy(deep=False)
     closed_focus_now, closed_other_now = _focus_other_counts(
         closed_now,
         grouping=grouping,
         settings=settings,
     )
 
-    resolution_source = safe.copy(deep=False)
-    resolution_source["__created"] = created
-    resolution_source["__finalized"] = finalized
-    resolution_source = resolution_source[
-        resolution_source["__created"].notna() & resolution_source["__finalized"].notna()
-    ].copy(deep=False)
-    if resolution_source.empty:
-        resolved_now = pd.DataFrame()
-        resolved_before = pd.DataFrame()
-    else:
-        resolution_source["resolution_days"] = (
-            (resolution_source["__finalized"] - resolution_source["__created"]).dt.total_seconds()
-            / 86400.0
-        ).clip(lower=0.0)
-        finalized_norm = resolution_source["__finalized"].dt.normalize()
-        resolved_now = resolution_source.loc[
-            finalized_norm.between(window.current_start, window.current_end, inclusive="both")
-        ].copy(deep=False)
-        resolved_before = resolution_source.loc[
-            finalized_norm.between(window.previous_start, window.previous_end, inclusive="both")
-        ].copy(deep=False)
+    resolved_now = safe.loc[resolution_metrics.current_mask].copy(deep=False)
+    if not resolved_now.empty:
+        resolved_now["resolution_days"] = resolution_metrics.current_days.reindex(
+            resolved_now.index
+        )
+    resolved_before = safe.loc[resolution_metrics.previous_mask].copy(deep=False)
+    if not resolved_before.empty:
+        resolved_before["resolution_days"] = resolution_metrics.previous_days.reindex(
+            resolved_before.index
+        )
 
-    resolution_now_days, resolution_now_min_days, resolution_now_max_days = _resolution_days_stats(
-        resolved_now,
-        column="resolution_days",
-    )
+    resolution_now_days = resolution_metrics.current_mean
+    resolution_now_min_days = resolution_metrics.current_min
+    resolution_now_max_days = resolution_metrics.current_max
     resolved_focus_now, resolved_other_now = _focus_other_counts(
         resolved_now,
         grouping=grouping,
         settings=settings,
     )
-    resolution_before_days, _, _ = _resolution_days_stats(
-        resolved_before,
-        column="resolution_days",
-    )
+    resolution_before_days = resolution_metrics.previous_mean
     resolution_delta_pct = (
         _delta_pct(resolution_now_days, resolution_before_days)
         if resolution_now_days is not None and resolution_before_days is not None
@@ -673,15 +592,15 @@ def _scope_result(
         open_focus=_issue_listing(open_focus, source_label_by_id=source_label_by_id),
         open_other=_issue_listing(open_other, source_label_by_id=source_label_by_id),
         new_now=_issue_listing(
-            safe.loc[new_now_mask].copy(deep=False),
+            safe.loc[created_metrics.current_mask].copy(deep=False),
             source_label_by_id=source_label_by_id,
         ),
         new_before=_issue_listing(
-            safe.loc[new_before_mask].copy(deep=False),
+            safe.loc[created_metrics.previous_mask].copy(deep=False),
             source_label_by_id=source_label_by_id,
         ),
         new_accumulated=_issue_listing(
-            safe.loc[new_accumulated_mask].copy(deep=False),
+            safe.loc[created_metrics.total_mask].copy(deep=False),
             source_label_by_id=source_label_by_id,
         ),
         closed_now=_issue_listing(closed_now, source_label_by_id=source_label_by_id),
@@ -715,15 +634,15 @@ def _scope_result(
         open_other_report_label=str(grouping.other_report_label),
         open_focus_total=int(len(open_focus)),
         open_other_total=int(len(open_other)),
-        new_now=int(new_now_mask.sum()),
-        new_before=int(new_before_mask.sum()),
-        new_accumulated=int(new_accumulated_mask.sum()),
-        new_delta_pct=_delta_pct(int(new_now_mask.sum()), int(new_before_mask.sum())),
-        closed_now=int(closed_now_mask.sum()),
+        new_now=int(created_metrics.current),
+        new_before=int(created_metrics.previous),
+        new_accumulated=int(created_metrics.total),
+        new_delta_pct=_delta_pct(int(created_metrics.current), int(created_metrics.previous)),
+        closed_now=int(closed_metrics.current),
         closed_focus_now=int(closed_focus_now),
         closed_other_now=int(closed_other_now),
-        closed_before=int(closed_before_mask.sum()),
-        closed_delta_pct=_delta_pct(int(closed_now_mask.sum()), int(closed_before_mask.sum())),
+        closed_before=int(closed_metrics.previous),
+        closed_delta_pct=_delta_pct(int(closed_metrics.current), int(closed_metrics.previous)),
         resolution_days_now=resolution_now_days,
         resolution_days_min_now=resolution_now_min_days,
         resolution_days_max_now=resolution_now_max_days,
@@ -831,9 +750,7 @@ def build_country_quincenal_result(
 
 
 def format_window_label(window: QuincenalWindow) -> str:
-    start = window.current_start.strftime("%d/%m")
-    end = window.current_end.strftime("%d/%m/%Y")
-    return f"Periodo {start} - {end}"
+    return TimeWindowService().format_window_label(window)
 
 
 def ordered_country_sources(

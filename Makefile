@@ -39,7 +39,7 @@ PYINSTALLER_COLLECT_ARGS = \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test run ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
+.PHONY: help setup test run format lint ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
 
 help:
 	@echo ""
@@ -49,6 +49,8 @@ help:
 	@echo "  make run          Compila frontend y abre la app desktop autocontenida"
 	@echo "  make CI           Replica local de checks GitHub (format/typecheck/coverage/quality)"
 	@echo "  make test         Ejecuta la suite Python seleccionada"
+	@echo "  make format       Formatea Python con ruff"
+	@echo "  make lint         Ejecuta ruff check + mypy"
 	@echo "  make build        Compila frontend y empaqueta desktop"
 	@echo "  make kill         Detiene puertos 8000 y 5173"
 	@echo "  make clean        Limpia venv, cachés y build frontend"
@@ -88,6 +90,13 @@ test: _ensure-backend
 		tests/test_workspace_scope_sources.py \
 		tests/test_browser_runtime_permissions.py \
 		tests/test_security.py
+
+format: _ensure-backend
+	PYTHONPATH=src $(PYTHON) -m ruff format .
+
+lint: _ensure-backend
+	PYTHONPATH=src $(PYTHON) -m ruff check .
+	PYTHONPATH=src $(PYTHON) -m mypy src
 
 run: _ensure-frontend _ensure-icon-assets build-frontend
 	PYTHONPATH=src $(PYTHON) run_desktop.py

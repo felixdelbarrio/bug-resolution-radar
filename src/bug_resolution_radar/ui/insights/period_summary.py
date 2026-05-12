@@ -487,12 +487,12 @@ def render_period_summary_tab(*, settings: Settings, dff_filtered: pd.DataFrame)
             zoom_label=QUINCENAL_SCOPE_CREATED_CURRENT,
         )
         _render_issue_group(
-            "Creadas en el mes actual",
+            QUINCENAL_SCOPE_CREATED_MONTH,
             summary.new_accumulated,
             groups.new_accumulated,
             key_to_url=key_to_url,
             key_to_meta=key_to_meta,
-            help_text="mes actual",
+            help_text="quincena actual + anterior",
             zoom_label=QUINCENAL_SCOPE_CREATED_MONTH,
         )
         _render_issue_group(

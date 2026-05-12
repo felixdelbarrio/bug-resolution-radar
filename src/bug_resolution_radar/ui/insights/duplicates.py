@@ -7,13 +7,15 @@ from typing import Any, Callable, List
 import pandas as pd
 import streamlit as st
 
+from bug_resolution_radar.analytics.duplicate_insights import (
+    _dedupe_heuristic_clusters as _dedupe_heuristic_clusters_backend,
+)
+from bug_resolution_radar.analytics.duplicate_insights import (
+    prepare_duplicates_payload as _prepare_duplicates_payload_backend,
+)
 from bug_resolution_radar.analytics.duplicates import (
     ExactTitleDuplicateStats,
     exact_title_duplicate_stats,
-)
-from bug_resolution_radar.analytics.duplicate_insights import (
-    _dedupe_heuristic_clusters as _dedupe_heuristic_clusters_backend,
-    prepare_duplicates_payload as _prepare_duplicates_payload_backend,
 )
 from bug_resolution_radar.analytics.insights import SimilarityCluster
 from bug_resolution_radar.config import Settings

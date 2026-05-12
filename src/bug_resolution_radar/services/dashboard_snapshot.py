@@ -1889,10 +1889,10 @@ def _build_period_summary_payload(
                 "items": _issue_records_from_df(groups.new_now, limit=20),
             },
             {
-                "label": "Creadas en el mes actual",
+                "label": QUINCENAL_SCOPE_CREATED_MONTH,
                 "count": int(summary.new_accumulated),
-                "helpText": "mes actual",
-                "tone": _period_tone("Creadas en el mes actual"),
+                "helpText": "quincena actual + anterior",
+                "tone": _period_tone(QUINCENAL_SCOPE_CREATED_MONTH),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_MONTH,
                 "issueKeys": _issue_keys(groups.new_accumulated),
                 "items": _issue_records_from_df(groups.new_accumulated, limit=20),
