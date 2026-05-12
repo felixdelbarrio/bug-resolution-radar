@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import calendar
 from dataclasses import dataclass
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
@@ -28,20 +28,28 @@ _SPANISH_MONTH_ABBR: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
-class QuincenalWindow:
-    current_start: pd.Timestamp
-    current_end: pd.Timestamp
-    previous_start: pd.Timestamp
-    previous_end: pd.Timestamp
-    month_start: pd.Timestamp
+class ReportingWindow:
+    reference_date: date
+    current_start: date
+    current_end: date
+    previous_start: date
+    previous_end: date
+    use_last_completed_fortnight: bool
 
     @property
-    def total_start(self) -> pd.Timestamp:
+    def month_start(self) -> date:
+        return self.current_start.replace(day=1)
+
+    @property
+    def total_start(self) -> date:
         return self.previous_start
 
     @property
-    def total_end(self) -> pd.Timestamp:
+    def total_end(self) -> date:
         return self.current_end
+
+
+QuincenalWindow = ReportingWindow
 
 
 class TimeWindowService:
@@ -79,76 +87,73 @@ class TimeWindowService:
         reference_day: pd.Timestamp | str,
         *,
         last_finished_only: bool = False,
-    ) -> QuincenalWindow:
-        anchor = self.normalize_reference_day(reference_day)
+    ) -> ReportingWindow:
+        reference = self.normalize_reference_day(reference_day).date()
         if last_finished_only:
-            anchor = self._last_finished_anchor(anchor)
-        return self._window_for_anchor(anchor)
-
-    def format_current_created_label(self, window: QuincenalWindow, *, singular: bool) -> str:
-        verb = "CREADA" if singular else "CREADAS"
-        return f"{verb} DEL {self._same_month_range(window.current_start, window.current_end)}"
-
-    def format_current_closed_label(self, window: QuincenalWindow, *, singular: bool) -> str:
-        verb = "CERRADA" if singular else "CERRADAS"
-        return f"{verb} DEL {self._same_month_range(window.current_start, window.current_end)}"
-
-    def format_previous_range_label(self, window: QuincenalWindow) -> str:
-        return self._full_range(window.previous_start, window.previous_end)
-
-    def format_window_label(self, window: QuincenalWindow) -> str:
-        start = window.current_start.strftime("%d/%m")
-        end = window.current_end.strftime("%d/%m/%Y")
-        return f"Periodo {start} - {end}"
-
-    def _last_finished_anchor(self, anchor: pd.Timestamp) -> pd.Timestamp:
-        month_start = anchor.replace(day=1)
-        if int(anchor.day) <= 15:
-            return month_start - pd.Timedelta(days=1)
-        return month_start + pd.Timedelta(days=14)
-
-    def _window_for_anchor(self, anchor: pd.Timestamp) -> QuincenalWindow:
-        month_start = anchor.replace(day=1)
-        month_end_day = calendar.monthrange(int(anchor.year), int(anchor.month))[1]
-        month_end = anchor.replace(day=month_end_day)
-
-        if int(anchor.day) <= 15:
-            current_start = month_start
-            current_end = month_start + pd.Timedelta(days=14)
+            current_start, current_end = self._completed_window_before(reference)
         else:
-            current_start = month_start + pd.Timedelta(days=15)
-            current_end = month_end
-
-        if int(current_start.day) == 1:
-            previous_end = current_start - pd.Timedelta(days=1)
-            previous_start = previous_end.replace(day=15)
-        else:
-            previous_start = current_start.replace(day=1)
-            previous_end = current_start - pd.Timedelta(days=1)
-
-        return QuincenalWindow(
-            current_start=current_start.normalize(),
-            current_end=current_end.normalize(),
-            previous_start=previous_start.normalize(),
-            previous_end=previous_end.normalize(),
-            month_start=current_start.replace(day=1).normalize(),
+            current_start, current_end = self._active_window(reference)
+        previous_start, previous_end = self._completed_window_before(current_start)
+        return ReportingWindow(
+            reference_date=reference,
+            current_start=current_start,
+            current_end=current_end,
+            previous_start=previous_start,
+            previous_end=previous_end,
+            use_last_completed_fortnight=bool(last_finished_only),
         )
 
-    def _month_abbr(self, value: pd.Timestamp) -> str:
+    def format_current_created_label(self, window: ReportingWindow, *, singular: bool) -> str:
+        verb = "CREADA" if singular else "CREADAS"
+        return (
+            f"{verb} DEL {self._same_month_range_words(window.current_start, window.current_end)}"
+        )
+
+    def format_current_closed_label(self, window: ReportingWindow, *, singular: bool) -> str:
+        verb = "CERRADA" if singular else "CERRADAS"
+        return f"{verb} DEL {self.format_compact_range(window.current_start, window.current_end)}"
+
+    def format_previous_range_label(self, window: ReportingWindow) -> str:
+        return self.format_compact_range(window.previous_start, window.previous_end)
+
+    def format_window_label(self, window: ReportingWindow) -> str:
+        start = pd.Timestamp(window.current_start).strftime("%d/%m")
+        end = pd.Timestamp(window.current_end).strftime("%d/%m/%Y")
+        return f"Periodo {start} - {end}"
+
+    def _active_window(self, reference: date) -> tuple[date, date]:
+        if int(reference.day) <= 14:
+            return reference.replace(day=1), reference
+        return reference.replace(day=15), reference
+
+    def _completed_window_before(self, reference: date) -> tuple[date, date]:
+        day = int(reference.day)
+        if day <= 14:
+            end = reference.replace(day=1) - timedelta(days=1)
+            return end.replace(day=15), end
+
+        start = reference.replace(day=1)
+        return start, start.replace(day=14)
+
+    def _month_abbr(self, value: date | pd.Timestamp) -> str:
         month = int(pd.Timestamp(value).month)
         return _SPANISH_MONTH_ABBR[month - 1]
 
-    def _same_month_range(self, start: pd.Timestamp, end: pd.Timestamp) -> str:
-        start_ts = pd.Timestamp(start)
-        end_ts = pd.Timestamp(end)
-        if int(start_ts.month) == int(end_ts.month) and int(start_ts.year) == int(end_ts.year):
-            return f"{start_ts.day:02d} AL {end_ts.day:02d} {self._month_abbr(end_ts)}"
-        return f"{self._full_date(start_ts)} AL {self._full_date(end_ts)}"
+    def _same_month_range_words(self, start: date, end: date) -> str:
+        if int(start.month) == int(end.month) and int(start.year) == int(end.year):
+            return f"{start.day:02d} AL {end.day:02d} {self._month_abbr(end)}"
+        return f"{self._full_date(start)} AL {self._full_date(end)}"
 
-    def _full_range(self, start: pd.Timestamp, end: pd.Timestamp) -> str:
-        return f"{self._full_date(start)} - {self._full_date(end)}"
+    def format_compact_range(self, start: date | pd.Timestamp, end: date | pd.Timestamp) -> str:
+        start_date = pd.Timestamp(start).date()
+        end_date = pd.Timestamp(end).date()
+        if int(start_date.month) == int(end_date.month) and int(start_date.year) == int(
+            end_date.year
+        ):
+            return f"{start_date.day:02d}-{end_date.day:02d} {self._month_abbr(end_date)}"
+        return f"{self._full_date(start_date)}-{self._full_date(end_date)}"
 
-    def _full_date(self, value: pd.Timestamp) -> str:
+    def _full_date(self, value: date | pd.Timestamp) -> str:
         ts = pd.Timestamp(value)
         return f"{ts.day:02d} {self._month_abbr(ts)}"
 

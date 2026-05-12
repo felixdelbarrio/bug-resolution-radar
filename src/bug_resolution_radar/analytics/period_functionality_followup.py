@@ -183,7 +183,11 @@ def _created_current_window_mask(
         return pd.Series(False, index=df.index, dtype=bool)
     created = _to_dt_naive(df[created_col])
     created_day = created.dt.normalize()
-    return created_day.notna() & created_day.between(window_start, window_end, inclusive="both")
+    return created_day.notna() & created_day.between(
+        pd.Timestamp(window_start),
+        pd.Timestamp(window_end),
+        inclusive="both",
+    )
 
 
 def _analysis_day(df: pd.DataFrame, *, fallback: pd.Timestamp) -> pd.Timestamp:
@@ -348,7 +352,7 @@ def build_period_functionality_followup_summary(
 
     del selected_statuses, selected_functionalities  # used to drive filtering in shared pipeline
 
-    reference_day = _analysis_day(scope.dff, fallback=window.current_end)
+    reference_day = _analysis_day(scope.dff, fallback=pd.Timestamp(window.current_end))
     if open_base.empty:
         zero = MitigationBucket(count=0, avg_open_days=0.0)
         return PeriodFunctionalityFollowupSummary(
@@ -411,7 +415,7 @@ def build_period_functionality_followup_summary(
     theme_new = (
         open_current["__theme"].value_counts().rename_axis("functionality").rename("new_count")
         if not open_current.empty
-        else pd.Series(dtype="int64", name="new_count")
+        else pd.Series(dtype="int64", name="new_count").rename_axis("functionality")
     )
     theme_avg_open_days = (
         open_filtered.groupby("__theme", dropna=False)["__open_days"]
