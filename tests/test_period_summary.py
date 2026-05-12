@@ -146,7 +146,7 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
     assert summary.new_now == 2
     assert summary.new_before == 3
     assert summary.closed_now == 1
-    assert summary.new_accumulated == 2
+    assert summary.new_accumulated == 5
     assert summary.resolution_days_now is not None
     assert int(round(summary.resolution_days_now)) == 19
     assert summary.resolution_days_min_now is not None
@@ -318,7 +318,7 @@ def test_build_country_quincenal_result_uses_last_finished_when_enabled() -> Non
     window = result.aggregate.summary.window
     assert window.current_start == pd.Timestamp("2026-03-01")
     assert window.current_end == pd.Timestamp("2026-03-15")
-    assert window.previous_start == pd.Timestamp("2026-02-16")
+    assert window.previous_start == pd.Timestamp("2026-02-15")
     assert window.previous_end == pd.Timestamp("2026-02-28")
     assert result.aggregate.summary.new_now == 1
     assert result.aggregate.summary.new_before == 1

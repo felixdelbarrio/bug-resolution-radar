@@ -16,7 +16,7 @@ from bug_resolution_radar.config import Settings
 QUINCENAL_SCOPE_ALL = "Todas"
 QUINCENAL_SCOPE_CREATED_CURRENT = "Creadas en la quincena actual"
 QUINCENAL_SCOPE_CREATED_PREVIOUS = "Creadas en la quincena previa"
-QUINCENAL_SCOPE_CREATED_MONTH = "Creadas en el mes actual"
+QUINCENAL_SCOPE_CREATED_MONTH = "Creadas en quincena actual y anterior"
 QUINCENAL_SCOPE_CLOSED_CURRENT = "Cerradas en la quincena"
 QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT = (
     "Días de resolución incidencias cerradas en la quincena actual"
@@ -30,6 +30,7 @@ _LEGACY_LABEL_TO_CANONICAL: Dict[str, str] = {
     "Nuevas (quincena actual)": QUINCENAL_SCOPE_CREATED_CURRENT,
     "Nuevas (quincena previa)": QUINCENAL_SCOPE_CREATED_PREVIOUS,
     "Nuevas (acumulado)": QUINCENAL_SCOPE_CREATED_MONTH,
+    "Creadas en el mes actual": QUINCENAL_SCOPE_CREATED_MONTH,
     "Cerradas (quincena actual)": QUINCENAL_SCOPE_CLOSED_CURRENT,
     "Resolución (cerradas ahora)": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
     "Otras abiertas": QUINCENAL_SCOPE_OTHERS_OPEN,
