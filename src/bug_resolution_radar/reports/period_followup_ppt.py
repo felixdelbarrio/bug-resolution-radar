@@ -60,7 +60,10 @@ from bug_resolution_radar.config import Settings, resolve_period_ppt_template_pa
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
+    KpiRow,
+    KpiSideMetric,
     apply_text_frame_margins,
+    iter_out_of_viewport_shapes,
     metric_card_typography,
 )
 from bug_resolution_radar.reports.pptx_native_tables import (
@@ -815,6 +818,30 @@ def _remove_slide_number_artifacts(prs: Any) -> None:
         _remove_slide_number_nodes(getattr(part, "_element", None))
 
 
+def validate_shapes_inside_slide(prs: Any) -> None:
+    slide_width = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
+    slide_height = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
+    offenders = list(
+        iter_out_of_viewport_shapes(
+            getattr(prs, "slides", []),
+            slide_width=slide_width,
+            slide_height=slide_height,
+        )
+    )
+    if not offenders:
+        return
+    details: list[str] = []
+    for shape in offenders[:8]:
+        details.append(
+            "shape"
+            f"(left={int(getattr(shape, 'left', 0) or 0)}, "
+            f"top={int(getattr(shape, 'top', 0) or 0)}, "
+            f"width={int(getattr(shape, 'width', 0) or 0)}, "
+            f"height={int(getattr(shape, 'height', 0) or 0)})"
+        )
+    raise ValueError("El informe contiene shapes fuera del canvas: " + "; ".join(details))
+
+
 def _to_roman(value: int) -> str:
     num = max(int(value or 0), 0)
     if num <= 0:
@@ -934,10 +961,44 @@ def _set_paragraph_value_label(
         label_run.font.name = str(label_font_name or _PPT_FONT_BODY_MEDIUM)
     except Exception:
         pass
-    label_run.font.bold = True
+    label_run.font.bold = False
     if color_rgb is not None:
         label_run.font.color.rgb = color_rgb
     paragraph.space_before = Pt(0)
+    paragraph.space_after = Pt(0)
+
+
+def _set_paragraph_kpi_side_metric(
+    paragraph: Any,
+    *,
+    metric: KpiSideMetric,
+    size_pt: float,
+    color_rgb: RGBColor | None = None,
+    space_before_pt: float = 0.0,
+) -> None:
+    paragraph.clear()
+    value_run = paragraph.add_run()
+    value_run.text = f"{str(metric.value_text or '').strip()} "
+    value_run.font.size = Pt(float(size_pt))
+    try:
+        value_run.font.name = _PPT_FONT_BODY_MEDIUM
+    except Exception:
+        pass
+    value_run.font.bold = True
+    if color_rgb is not None:
+        value_run.font.color.rgb = color_rgb
+
+    label_run = paragraph.add_run()
+    label_run.text = str(metric.label_text or "").strip()
+    label_run.font.size = Pt(float(size_pt))
+    try:
+        label_run.font.name = _PPT_FONT_BODY_MEDIUM
+    except Exception:
+        pass
+    label_run.font.bold = False
+    if color_rgb is not None:
+        label_run.font.color.rgb = color_rgb
+    paragraph.space_before = Pt(float(space_before_pt))
     paragraph.space_after = Pt(0)
 
 
@@ -1032,7 +1093,8 @@ def _write_metric_card(
     tf = _shape_text_frame(slide, shape_index=shape_index)
     if tf is None:
         return
-    typography = metric_card_typography(value_text, label_text)
+    row = KpiRow(value_text=str(value_text or ""), label_text=str(label_text or ""))
+    typography = metric_card_typography(row.value_text, row.label_text)
     resolved_value_size = (
         float(value_size_pt) if value_size_pt is not None else typography.value_size_pt
     )
@@ -1040,12 +1102,16 @@ def _write_metric_card(
         float(label_size_pt) if label_size_pt is not None else typography.label_size_pt
     )
     apply_text_frame_margins(tf, margin_pt=0.0)
+    try:
+        tf.word_wrap = False
+    except Exception:
+        pass
     tf.clear()
     p0 = tf.paragraphs[0]
     _set_paragraph_value_label(
         p0,
-        value_text=str(value_text or ""),
-        label_text=str(label_text or ""),
+        value_text=row.value_text,
+        label_text=row.label_text,
         value_size_pt=resolved_value_size,
         label_size_pt=resolved_label_size,
         color_rgb=base_color,
@@ -1072,7 +1138,7 @@ def _add_metric_split_column(
     top_value: int,
     bottom_label: str,
     bottom_value: int,
-    value_suffix: str = "",
+    value_unit: str = "",
     text_color_rgb: RGBColor | None = None,
     detail_size_pt: float | None = None,
 ) -> None:
@@ -1093,11 +1159,11 @@ def _add_metric_split_column(
     if width <= 0 or height <= 0:
         return
 
-    # Mirror the visual geometry of the summary KPI right column.
-    divider_left = left + int(width * 0.636)
-    divider_top = top + int(height * 0.094)
-    divider_height = int(height * 0.811)
-    divider_width = max(int(width * 0.0018), 1)
+    theme = PERIOD_FOLLOWUP_LAYOUT
+    divider_left = left + int(width * theme.split_column_ratio)
+    divider_top = top + int(height * theme.split_divider_top_ratio)
+    divider_height = int(height * theme.split_divider_height_ratio)
+    divider_width = max(int(width * theme.split_divider_width_ratio), 1)
 
     divider = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
@@ -1110,10 +1176,12 @@ def _add_metric_split_column(
     divider.fill.fore_color.rgb = base_color
     divider.line.fill.background()
 
-    text_left = divider_left + int(width * 0.012)
-    text_top = top + int(height * 0.078)
-    text_width = max((left + width) - text_left - int(width * 0.040), 1)
-    text_height = int(height * 0.845)
+    text_left = divider_left + int(width * theme.split_column_padding_ratio)
+    text_top = top + int(height * theme.split_text_top_ratio)
+    text_width = max(
+        (left + width) - text_left - int(width * theme.split_column_right_padding_ratio), 1
+    )
+    text_height = int(height * theme.split_text_height_ratio)
     split_box = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
     tf = split_box.text_frame
     try:
@@ -1136,23 +1204,30 @@ def _add_metric_split_column(
     resolved_detail_size = (
         float(detail_size_pt) if detail_size_pt is not None else typography.detail_size_pt
     )
+    unit = str(value_unit or "").strip()
+    top_metric = KpiSideMetric(
+        value_text=str(int(top_value)),
+        label_text=f"{unit} {str(top_label).strip()}".strip(),
+    )
+    bottom_metric = KpiSideMetric(
+        value_text=str(int(bottom_value)),
+        label_text=f"{unit} {str(bottom_label).strip()}".strip(),
+    )
 
     p0 = tf.paragraphs[0]
-    _set_paragraph_single_run(
+    _set_paragraph_kpi_side_metric(
         p0,
-        text=f"{str(top_label).strip()}: {int(top_value)}{str(value_suffix or '')}",
+        metric=top_metric,
         size_pt=resolved_detail_size,
-        bold=True,
         color_rgb=base_color,
     )
     p1 = tf.add_paragraph()
-    _set_paragraph_single_run(
+    _set_paragraph_kpi_side_metric(
         p1,
-        text=f"{str(bottom_label).strip()}: {int(bottom_value)}{str(value_suffix or '')}",
+        metric=bottom_metric,
         size_pt=resolved_detail_size,
-        bold=True,
         color_rgb=base_color,
-        space_before_pt=0.3,
+        space_before_pt=theme.split_metric_gap_pt,
     )
 
 
@@ -1201,11 +1276,11 @@ def _write_created_total_column(
 
     text_left = divider_left + int(width * theme.split_column_padding_ratio)
     detail.left = text_left
-    detail.top = top + int(height * 0.078)
+    detail.top = top + int(height * theme.split_text_top_ratio)
     detail.width = max(
         (left + width) - text_left - int(width * theme.split_column_right_padding_ratio), 1
     )
-    detail.height = int(height * 0.845)
+    detail.height = int(height * theme.split_text_height_ratio)
     tf = detail.text_frame
     try:
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
@@ -1225,27 +1300,28 @@ def _write_created_total_column(
     detail_size = typography.detail_size_pt
 
     p0 = tf.paragraphs[0]
-    _set_paragraph_single_run(
+    _set_paragraph_kpi_side_metric(
         p0,
-        text=f"{str(previous_range_label).strip()}: {int(previous_value)}",
+        metric=KpiSideMetric(
+            value_text=str(int(previous_value)),
+            label_text=f"del {str(previous_range_label).strip()}",
+        ),
         size_pt=detail_size,
-        bold=True,
         color_rgb=base_color,
     )
     p1 = tf.add_paragraph()
-    _set_paragraph_single_run(
+    _set_paragraph_kpi_side_metric(
         p1,
-        text=f"TOTAL: {int(total_value)}",
+        metric=KpiSideMetric(value_text=str(int(total_value)), label_text="en TOTAL"),
         size_pt=detail_size,
-        bold=True,
         color_rgb=base_color,
-        space_before_pt=0.3,
+        space_before_pt=theme.split_metric_gap_pt,
     )
 
 
 def _remove_summary_legacy_artifacts(slide: Any) -> None:
-    # Legacy template markers, detail links, and created-flow delta no longer render.
-    _remove_shape_indices(slide, 19, 18, 14, 11, 8, 7)
+    # Legacy template markers, detail links, and stray arrows no longer render.
+    _remove_shape_indices(slide, 18, 14, 11, 8, 7)
 
 
 def _configure_summary_delta_badge(
@@ -1263,15 +1339,16 @@ def _configure_summary_delta_badge(
         card = _shape_or_none(slide, int(card_shape_index))
         if card is not None:
             try:
-                divider_left = int(card.left) + int(card.width * 0.636)
-                badge_width = max(int(card.width * 0.106), 1)
-                badge_height = max(int(card.height * 0.152), 1)
-                badge_right = divider_left - int(card.width * 0.014)
+                theme = PERIOD_FOLLOWUP_LAYOUT
+                divider_left = int(card.left) + int(card.width * theme.split_column_ratio)
+                badge_width = max(int(card.width * theme.delta_badge_width_ratio), 1)
+                badge_height = max(int(card.height * theme.delta_badge_height_ratio), 1)
+                badge_right = divider_left - int(card.width * theme.delta_badge_right_gap_ratio)
                 shape.width = badge_width
                 shape.height = badge_height
-                min_left = int(card.left) + int(card.width * 0.418)
+                min_left = int(card.left) + int(card.width * theme.delta_badge_min_left_ratio)
                 shape.left = max(badge_right - badge_width, min_left)
-                shape.top = int(card.top) + int(card.height * 0.088)
+                shape.top = int(card.top) + int(card.height * theme.delta_badge_top_ratio)
             except Exception:
                 pass
 
@@ -2049,7 +2126,7 @@ def _populate_open_aging_executive_slide(
         settings,
         dff=scope_result.dff,
         open_df=scope_result.open_df,
-        reference_now=scope_result.summary.window.current_end,
+        reference_now=pd.Timestamp(scope_result.summary.window.current_end),
     )
     if chart_png:
         _overlay_picture_contain(
@@ -2424,14 +2501,15 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     delta_badges = {
         10: _summary_delta_badge(summary.closed_delta_pct),
         13: _summary_delta_badge(summary.resolution_delta_pct),
+        19: _summary_delta_badge(summary.new_delta_pct),
     }
     for shape_idx, (badge_text, badge_color) in delta_badges.items():
         _set_shape_text(slide, shape_idx, badge_text)
         _set_shape_font_color(slide, shape_index=shape_idx, color_rgb=badge_color)
-    focus_split_label = (
+    focus_side_label = (
         "MAESTRAS"
         if str(summary.open_group_mode or "").strip() == OPEN_ISSUES_FOCUS_MODE_MAESTRAS
-        else "ALTAS"
+        else "CRITICIDADES ALTAS"
     )
     _write_open_criticity_card(
         slide,
@@ -2482,7 +2560,7 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _add_metric_split_column(
         slide,
         card_shape_index=9,
-        top_label=str(focus_split_label),
+        top_label=str(focus_side_label),
         top_value=int(summary.closed_focus_now),
         bottom_label="RESTO",
         bottom_value=int(summary.closed_other_now),
@@ -2491,10 +2569,10 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         slide,
         shape_index=12,
         value_text=str(_fmt_days(summary.resolution_days_now)),
-        label_text="DÍAS DE RESOLUCIÓN",
-        extra_lines=[
-            ("(EN PROM.)", 8.1, True, True, 0.0),
-        ],
+        label_text="DÍAS DE RESOLUCIÓN (EN PROMEDIO)",
+        extra_lines=(
+            [("SIN DATOS", 8.1, True, False, 0.25)] if summary.resolution_days_now is None else None
+        ),
         text_color_rgb=summary_metric_color,
     )
     _add_metric_split_column(
@@ -2504,16 +2582,22 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         top_value=int(_fmt_days(summary.resolution_days_max_now)),
         bottom_label="MIN",
         bottom_value=int(_fmt_days(summary.resolution_days_min_now)),
-        value_suffix=" días",
+        value_unit="días",
     )
 
-    _set_shape_font_size(slide, shape_index=10, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
-    _set_shape_font_size(slide, shape_index=13, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    for delta_shape_idx in (10, 13, 19):
+        _set_shape_font_size(
+            slide,
+            shape_index=delta_shape_idx,
+            font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT,
+            bold=True,
+        )
     _configure_summary_delta_badge(slide, shape_index=10, card_shape_index=9)
     _configure_summary_delta_badge(slide, shape_index=13, card_shape_index=12)
+    _configure_summary_delta_badge(slide, shape_index=19, card_shape_index=15)
 
     _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_HEAD)
-    for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16):
+    for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16, 19):
         _set_shape_font_name(slide, shape_index=idx, font_name=_PPT_FONT_BODY_MEDIUM)
 
     _remove_summary_legacy_artifacts(slide)
@@ -3749,6 +3833,7 @@ def generate_country_period_followup_ppt(
     functionality_status_filters: Sequence[str] | None = None,
     functionality_priority_filters: Sequence[str] | None = None,
     functionality_filters: Sequence[str] | None = None,
+    reference_day: pd.Timestamp | str | None = None,
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     if len(clean_source_ids) < 2:
@@ -3775,6 +3860,7 @@ def generate_country_period_followup_ppt(
         country=country_txt,
         source_ids=clean_source_ids,
         source_label_by_id=labels,
+        reference_day=pd.Timestamp(reference_day) if reference_day is not None else None,
     )
     template = _resolve_template_path(settings, explicit_path=template_path)
     prs = Presentation(str(template))
@@ -3852,7 +3938,7 @@ def generate_country_period_followup_ppt(
 
     risk_lists = build_period_risk_issue_lists(
         aggregate.dff,
-        fallback_analysis_day=aggregate.summary.window.current_end,
+        fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
@@ -3885,6 +3971,7 @@ def generate_country_period_followup_ppt(
         _append_functionality_zoom_slides(prs, summary=functionality_followup)
 
     _remove_slide_number_artifacts(prs)
+    validate_shapes_inside_slide(prs)
 
     buff = BytesIO()
     prs.save(buff)
