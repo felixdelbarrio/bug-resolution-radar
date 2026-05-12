@@ -342,29 +342,16 @@ def _parse_bool_flag(value: object, *, default: bool = False) -> bool:
 
 
 def _quincena_last_finished_only(settings: Settings) -> bool:
+    spanish_value = getattr(settings, "USAR_ULTIMA_QUINCENA_FINALIZADA", "")
+    if str(spanish_value or "").strip():
+        return _parse_bool_flag(
+            spanish_value,
+            default=_DEFAULT_QUINCENA_LAST_FINISHED_ONLY,
+        )
     return _parse_bool_flag(
         getattr(settings, "QUINCENA_LAST_FINISHED_ONLY", _DEFAULT_QUINCENA_LAST_FINISHED_ONLY),
         default=_DEFAULT_QUINCENA_LAST_FINISHED_ONLY,
     )
-
-
-def _infer_reference_day_from_df(df: pd.DataFrame | None) -> pd.Timestamp | None:
-    safe = _safe_df(df)
-    if safe.empty:
-        return None
-
-    candidates: list[pd.Timestamp] = []
-    for column in ("updated", "resolved", "created"):
-        if column not in safe.columns:
-            continue
-        parsed = _to_dt_naive(safe[column]).dropna()
-        if parsed.empty:
-            continue
-        candidates.append(pd.Timestamp(parsed.max()))
-
-    if not candidates:
-        return None
-    return max(candidates).normalize()
 
 
 def _analysis_reference_day(
@@ -372,13 +359,10 @@ def _analysis_reference_day(
     reference_day: pd.Timestamp | None = None,
     df: pd.DataFrame | None = None,
 ) -> pd.Timestamp:
+    del df
     service = TimeWindowService()
     if reference_day is not None:
         return service.normalize_reference_day(reference_day)
-
-    inferred = _infer_reference_day_from_df(df)
-    if inferred is not None:
-        return service.normalize_reference_day(inferred)
     return service.today()
 
 
