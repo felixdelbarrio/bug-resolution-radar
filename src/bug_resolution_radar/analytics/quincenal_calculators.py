@@ -82,6 +82,10 @@ class NormalizedIssueFrame:
     def finalized_day(self) -> pd.Series:
         return self.finalized_at.dt.normalize()
 
+    @property
+    def resolved_day(self) -> pd.Series:
+        return self.resolved_at.dt.normalize()
+
 
 @dataclass(frozen=True)
 class CreatedIncidentsResult:
@@ -101,10 +105,14 @@ class CreatedIncidentsCalculator:
         window: QuincenalWindow,
     ) -> CreatedIncidentsResult:
         created_day = frame.created_day
-        current = created_day.between(window.current_start, window.current_end, inclusive="both")
+        current_start = pd.Timestamp(window.current_start)
+        current_end = pd.Timestamp(window.current_end)
+        previous_start = pd.Timestamp(window.previous_start)
+        previous_end = pd.Timestamp(window.previous_end)
+        current = created_day.between(current_start, current_end, inclusive="both")
         previous = created_day.between(
-            window.previous_start,
-            window.previous_end,
+            previous_start,
+            previous_end,
             inclusive="both",
         )
         current = current.fillna(False).astype(bool)
@@ -135,16 +143,20 @@ class ClosedIncidentsCalculator:
         *,
         window: QuincenalWindow,
     ) -> ClosedIncidentsResult:
-        finalized_day = frame.finalized_day
-        assignable_closed = frame.closed_mask & finalized_day.notna()
-        current = assignable_closed & finalized_day.between(
-            window.current_start,
-            window.current_end,
+        resolved_day = frame.resolved_day
+        assignable_closed = frame.resolved_at.notna()
+        current_start = pd.Timestamp(window.current_start)
+        current_end = pd.Timestamp(window.current_end)
+        previous_start = pd.Timestamp(window.previous_start)
+        previous_end = pd.Timestamp(window.previous_end)
+        current = assignable_closed & resolved_day.between(
+            current_start,
+            current_end,
             inclusive="both",
         )
-        previous = assignable_closed & finalized_day.between(
-            window.previous_start,
-            window.previous_end,
+        previous = assignable_closed & resolved_day.between(
+            previous_start,
+            previous_end,
             inclusive="both",
         )
         current = current.fillna(False).astype(bool)
@@ -183,23 +195,26 @@ class ResolutionMetricsCalculator:
         *,
         window: QuincenalWindow,
     ) -> ResolutionMetricsResult:
-        finalized_day = frame.finalized_day
-        raw_days = (frame.finalized_at - frame.created_at).dt.total_seconds() / 86400.0
+        resolved_day = frame.resolved_day
+        raw_days = (frame.resolved_at - frame.created_at).dt.total_seconds() / 86400.0
         valid = (
-            frame.closed_mask
-            & frame.created_at.notna()
-            & frame.finalized_at.notna()
+            frame.created_at.notna()
+            & frame.resolved_at.notna()
             & raw_days.notna()
             & raw_days.ge(0.0)
         )
-        current = valid & finalized_day.between(
-            window.current_start,
-            window.current_end,
+        current_start = pd.Timestamp(window.current_start)
+        current_end = pd.Timestamp(window.current_end)
+        previous_start = pd.Timestamp(window.previous_start)
+        previous_end = pd.Timestamp(window.previous_end)
+        current = valid & resolved_day.between(
+            current_start,
+            current_end,
             inclusive="both",
         )
-        previous = valid & finalized_day.between(
-            window.previous_start,
-            window.previous_end,
+        previous = valid & resolved_day.between(
+            previous_start,
+            previous_end,
             inclusive="both",
         )
         current = current.fillna(False).astype(bool)
@@ -218,3 +233,32 @@ class ResolutionMetricsCalculator:
             current_max=current_max,
             previous_mean=previous_mean,
         )
+
+
+def build_inclusion_debug_frame(
+    frame: NormalizedIssueFrame,
+    *,
+    window: QuincenalWindow,
+    id_col: str = "key",
+) -> pd.DataFrame:
+    """Return current-window inclusion flags for tests and diagnostics."""
+
+    created = CreatedIncidentsCalculator().calculate(frame, window=window)
+    closed = ClosedIncidentsCalculator().calculate(frame, window=window)
+    if id_col in frame.df.columns:
+        issue_ids = frame.df[id_col].fillna("").astype(str)
+    elif "id" in frame.df.columns:
+        issue_ids = frame.df["id"].fillna("").astype(str)
+    else:
+        issue_ids = pd.Series(frame.df.index.astype(str), index=frame.df.index, dtype=str)
+
+    return pd.DataFrame(
+        {
+            "ID": issue_ids,
+            "created_date": frame.created_at.dt.strftime("%Y-%m-%d").fillna(""),
+            "resolved_date": frame.resolved_at.dt.strftime("%Y-%m-%d").fillna(""),
+            "included_in_created": created.current_mask.astype(bool),
+            "included_in_closed": closed.current_mask.astype(bool),
+        },
+        index=frame.df.index,
+    ).reset_index(drop=True)
