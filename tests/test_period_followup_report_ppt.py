@@ -169,6 +169,7 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
 
     assert out.slide_count == 15
@@ -230,6 +231,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
 
     assert out.slide_count == 15
@@ -280,6 +282,7 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs_critical = Presentation(BytesIO(out_critical.content))
     critical_blob = " ".join(
@@ -288,8 +291,8 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         if getattr(shape, "has_text_frame", False)
     ).upper()
     assert "CRITICIDAD ALTA" in critical_blob
-    assert "ALTAS:" in critical_blob
-    assert "RESTO:" in critical_blob
+    assert "CRITICIDADES ALTAS" in critical_blob
+    assert "RESTO" in critical_blob
 
     settings_maestras = Settings(
         PERIOD_PPT_TEMPLATE_PATH=str(template),
@@ -300,6 +303,7 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs_maestras = Presentation(BytesIO(out_maestras.content))
     maestras_blob = " ".join(
@@ -308,8 +312,8 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         if getattr(shape, "has_text_frame", False)
     ).upper()
     assert "INCIDENCIAS MAESTRAS" in maestras_blob
-    assert "MAESTRAS:" in maestras_blob
-    assert "RESTO:" in maestras_blob
+    assert "MAESTRAS" in maestras_blob
+    assert "RESTO" in maestras_blob
 
 
 def test_generate_country_period_followup_ppt_bundled_template_layout_regression() -> None:
@@ -364,6 +368,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now - pd.Timedelta(days=1),
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -427,12 +432,11 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
     ).upper()
     assert "CERRADASINCIDENCIA" not in s4_closed
     assert "RESOLUCIÓNDÍASDERESOLUCIÓN" not in s4_days
-    assert s4_blob.count("ALTAS:") == 1
-    assert s4_blob.count("RESTO:") == 1
-    assert "MAX:" in s4_blob
-    assert "MIN:" in s4_blob
-    assert "MAX: 7 DÍAS" in s4_blob
-    assert "MIN: 7 DÍAS" in s4_blob
+    assert s4_blob.count("CRITICIDADES ALTAS") == 1
+    assert "0 CRITICIDADES ALTAS" in s4_blob
+    assert "1 RESTO" in s4_blob
+    assert "7 DÍAS MAX" in s4_blob
+    assert "7 DÍAS MIN" in s4_blob
 
     # Long titles should be marked for in-shape fit in PowerPoint.
     s5_title = prs.slides[4].shapes[2]
@@ -822,6 +826,7 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     assert out.content
     assert called_chart_ids[:3] == ["timeseries", "timeseries", "timeseries"]
@@ -879,6 +884,7 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     dashboard_slide = prs.slides[
@@ -964,6 +970,7 @@ def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> N
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     dashboard_slide = prs.slides[
@@ -1014,6 +1021,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1133,6 +1141,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == 19
@@ -1245,6 +1254,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1397,6 +1407,7 @@ def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> 
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
@@ -1458,6 +1469,7 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs_default = Presentation(BytesIO(out_default.content))
     default_dashboard_idx = _find_slide_index(
@@ -1480,6 +1492,7 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
         functionality_priority_filters=["High", "Highest", "Supone un impedimento"],
+        reference_day=now,
     )
     prs_critical = Presentation(BytesIO(out_critical.content))
     critical_dashboard_idx = _find_slide_index(
@@ -1565,6 +1578,7 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1578,6 +1592,7 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
             country="México",
             source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         ),
+        reference_day=now,
     )
     expected_by_slide = {
         2: quincenal.aggregate.summary,
@@ -1591,8 +1606,8 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
             for shape in prs.slides[slide_idx].shapes
             if getattr(shape, "has_text_frame", False)
         )
-        max_match = re.search(r"MAX:\s*(\d+)\s*d[ií]as", slide_blob, flags=re.IGNORECASE)
-        min_match = re.search(r"MIN:\s*(\d+)\s*d[ií]as", slide_blob, flags=re.IGNORECASE)
+        max_match = re.search(r"(\d+)\s*d[ií]as\s*MAX", slide_blob, flags=re.IGNORECASE)
+        min_match = re.search(r"(\d+)\s*d[ií]as\s*MIN", slide_blob, flags=re.IGNORECASE)
         assert max_match is not None
         assert min_match is not None
         assert int(max_match.group(1)) == int(round(float(summary.resolution_days_max_now or 0.0)))
@@ -1644,6 +1659,7 @@ def test_period_followup_summary_metric_cards_keep_template_blue_text_color() ->
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1665,7 +1681,7 @@ def test_period_followup_summary_metric_cards_keep_template_blue_text_color() ->
         detail_shape = next(
             shape
             for shape in slide.shapes
-            if getattr(shape, "has_text_frame", False) and "TOTAL:" in str(shape.text or "")
+            if getattr(shape, "has_text_frame", False) and "en TOTAL" in str(shape.text or "")
         )
         closed_shape = next(
             shape
@@ -1749,14 +1765,15 @@ def test_period_followup_summary_uses_quincenal_flow_wording_and_removes_artifac
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=pd.Timestamp("2026-03-12T00:00:00+00:00"),
     )
 
     prs = Presentation(BytesIO(out.content))
     deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
-    assert "CREADAS DEL 01 AL 15 MAR" in deck_text
-    assert "15 FEB - 28 FEB" in deck_text
-    assert "TOTAL: 4" in deck_text
-    assert "CERRADAS DEL 01 AL 15 MAR" in deck_text
+    assert "CREADAS DEL 01 AL 12 MAR" in deck_text
+    assert "2 del 15-28 FEB" in deck_text
+    assert "4 en TOTAL" in deck_text
+    assert "CERRADAS DEL 01-12 MAR" in deck_text
     assert "AHORA" not in deck_text
     assert "ACUMULADO" not in deck_text
     assert "NUEVAS INCIDENCIAS" not in deck_text
@@ -1831,6 +1848,7 @@ def test_period_followup_functionality_trend_title_matches_template_style() -> N
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     trend_slide = prs.slides[_find_slide_index(prs, "Tendencia por funcionalidad")]

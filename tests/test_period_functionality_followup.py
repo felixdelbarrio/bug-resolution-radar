@@ -97,6 +97,7 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         source_label_by_id=labels,
+        reference_day=pd.Timestamp("2026-04-10T09:00:00+00:00"),
     )
 
     summary = build_period_functionality_followup_summary(
@@ -191,6 +192,7 @@ def test_build_period_functionality_followup_summary_dedupes_zoom_issue_keys() -
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         source_label_by_id=labels,
+        reference_day=pd.Timestamp("2026-04-10T09:00:00+00:00"),
     )
 
     summary = build_period_functionality_followup_summary(
@@ -249,6 +251,7 @@ def test_build_period_functionality_followup_summary_infers_root_cause_from_desc
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         source_label_by_id=labels,
+        reference_day=pd.Timestamp("2026-04-10T09:00:00+00:00"),
     )
 
     summary = build_period_functionality_followup_summary(
@@ -316,6 +319,7 @@ def test_build_period_functionality_followup_summary_orders_zoom_rows_by_priorit
         country="México",
         source_ids=["jira:mexico:senda"],
         source_label_by_id=labels,
+        reference_day=pd.Timestamp("2026-04-10T09:00:00+00:00"),
     )
 
     summary = build_period_functionality_followup_summary(
