@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.ui.insights.top_topics import _theme_color_map
 from bug_resolution_radar.ui.insights.top_topics import (
     _priority_ordered_topics,
     _rank_topic_candidates,
+    _theme_color_map,
 )
 
 

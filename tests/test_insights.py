@@ -4,9 +4,9 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.insights import (
     _tokenize_summary,
-    build_theme_render_order,
     build_theme_daily_trend,
     build_theme_fortnight_trend,
+    build_theme_render_order,
     find_similar_issue_clusters,
     is_other_theme_label,
     order_theme_labels,

@@ -21,11 +21,11 @@ from bug_resolution_radar.analytics.insights import (
 from bug_resolution_radar.analytics.insights import (
     top_non_other_theme as _top_non_other_theme,
 )
+from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
 from bug_resolution_radar.analytics.kpis import (
     build_open_age_priority_payload,
     build_timeseries_daily,
 )
-from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
 
 
 @dataclass(frozen=True)
