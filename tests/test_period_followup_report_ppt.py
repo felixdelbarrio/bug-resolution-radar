@@ -5,6 +5,7 @@ import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import pandas as pd
 from pptx import Presentation
@@ -16,6 +17,7 @@ from pptx.oxml.ns import qn
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
 from bug_resolution_radar.reports import period_followup_ppt as period_ppt_mod
+from bug_resolution_radar.reports.period_followup_layout import metric_card_typography
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_REPORT_AMBER_BG,
     BBVA_REPORT_RED_BG,
@@ -1660,11 +1662,139 @@ def test_period_followup_summary_metric_cards_keep_template_blue_text_color() ->
 
     for slide_idx in (2, 3, 4):
         slide = prs.slides[slide_idx]
-        reference_color = _first_run_color(slide.shapes[15])  # shape 16: ANTES/AHORA/ACUMULADO
+        detail_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False) and "TOTAL:" in str(shape.text or "")
+        )
+        closed_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False) and "CERRADA" in str(shape.text or "")
+        )
+        resolution_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+            and "DÍAS DE RESOLUCIÓN" in str(shape.text or "")
+        )
+        created_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False) and "CREADA" in str(shape.text or "")
+        )
+        reference_color = _first_run_color(detail_shape)
         assert reference_color == RGBColor(4, 19, 139)
-        assert _first_run_color(slide.shapes[8]) == reference_color  # shape 9
-        assert _first_run_color(slide.shapes[11]) == reference_color  # shape 12
-        assert _first_run_color(slide.shapes[14]) == reference_color  # shape 15
+        assert _first_run_color(closed_shape) == reference_color
+        assert _first_run_color(resolution_shape) == reference_color
+        assert _first_run_color(created_shape) == reference_color
+
+
+def test_period_followup_summary_uses_quincenal_flow_wording_and_removes_artifacts(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(period_ppt_mod, "_chart_png", lambda *args, **kwargs: b"")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Actual abierta",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-03-10T10:00:00+00:00",
+                "updated": "2026-03-12T10:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Previa cerrada",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": "2026-02-20T10:00:00+00:00",
+                "updated": "2026-03-11T10:00:00+00:00",
+                "resolved": "2026-03-11T10:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "B-1",
+                "summary": "Previa abierta",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-15T10:00:00+00:00",
+                "updated": "2026-03-12T10:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+            {
+                "key": "B-2",
+                "summary": "Actual cerrada",
+                "status": "Resolved",
+                "priority": "Highest",
+                "created": "2026-03-01T10:00:00+00:00",
+                "updated": "2026-03-12T10:00:00+00:00",
+                "resolved": "2026-03-12T10:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert "CREADAS DEL 01 AL 15 MAR" in deck_text
+    assert "15 FEB - 28 FEB" in deck_text
+    assert "TOTAL: 4" in deck_text
+    assert "CERRADAS DEL 01 AL 15 MAR" in deck_text
+    assert "AHORA" not in deck_text
+    assert "ACUMULADO" not in deck_text
+    assert "NUEVAS INCIDENCIAS" not in deck_text
+    assert "Ver detalle" not in deck_text
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            left = int(getattr(shape, "left", 0) or 0)
+            top = int(getattr(shape, "top", 0) or 0)
+            right = left + int(getattr(shape, "width", 0) or 0)
+            bottom = top + int(getattr(shape, "height", 0) or 0)
+            assert left >= 0
+            assert top >= 0
+            assert right <= int(prs.slide_width)
+            assert bottom <= int(prs.slide_height)
+
+    with ZipFile(BytesIO(out.content)) as pptx:
+        xml_payload = "\n".join(
+            pptx.read(name).decode("utf-8", errors="ignore")
+            for name in pptx.namelist()
+            if name.endswith(".xml")
+        )
+    assert 'type="slidenum"' not in xml_payload
+    assert "p. </a:t>" not in xml_payload
+
+
+def test_period_followup_metric_typography_handles_one_to_four_digit_values() -> None:
+    values = ["9", "69", "107", "138", "1024"]
+    sizes = [
+        metric_card_typography(value, "CREADAS DEL 01 AL 15 MAR").value_size_pt for value in values
+    ]
+
+    assert min(sizes) >= 17.0
+    assert sizes[0] >= sizes[-1]
+    for value in values:
+        typography = metric_card_typography(value, "CERRADAS DEL 01 AL 15 MAR")
+        assert typography.label_size_pt >= 8.6
+        assert typography.detail_size_pt >= 8.8
 
 
 def test_period_followup_functionality_trend_title_matches_template_style() -> None:

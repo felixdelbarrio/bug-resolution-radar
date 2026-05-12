@@ -53,10 +53,16 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.analytics.time_windows import TimeWindowService
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
+from bug_resolution_radar.reports.period_followup_layout import (
+    PERIOD_FOLLOWUP_LAYOUT,
+    apply_text_frame_margins,
+    metric_card_typography,
+)
 from bug_resolution_radar.reports.pptx_native_tables import (
     ellipsize_text,
     native_column_widths,
@@ -663,30 +669,6 @@ def _premium_sentence_case(value: object) -> str:
     return clean
 
 
-def _set_paragraph_value_after_colon(
-    slide: Any, *, shape_index: int, paragraph_index: int, value: int
-) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None or not getattr(shape, "has_text_frame", False):
-        return
-    paragraphs = list(shape.text_frame.paragraphs)
-    if paragraph_index >= len(paragraphs):
-        return
-    paragraph = paragraphs[paragraph_index]
-    runs = list(paragraph.runs)
-    if not runs:
-        paragraph.add_run()
-        runs = list(paragraph.runs)
-    target = runs[1] if len(runs) > 1 else runs[0]
-    src = str(getattr(target, "text", "") or "")
-    trail_match = re.search(r"\s+$", src)
-    trailing = trail_match.group(0) if trail_match is not None else ""
-    target.text = f": {int(value)}{trailing}"
-    for run in runs[2:]:
-        run.text = ""
-    _set_shape_text_fit(shape)
-
-
 def _set_shape_font_size(
     slide: Any,
     *,
@@ -759,14 +741,78 @@ def _set_shape_font_name(
                 continue
 
 
-def _move_shape_off_canvas(slide: Any, *, shape_index: int) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None:
-        return
+def _remove_shape_indices(slide: Any, *shape_indices: int) -> None:
+    shapes: list[Any] = []
+    seen: set[int] = set()
+    for shape_index in shape_indices:
+        shape = _shape_or_none(slide, int(shape_index))
+        if shape is None:
+            continue
+        marker = id(shape)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        shapes.append(shape)
+    for shape in shapes:
+        _remove_shape(shape)
+
+
+def _remove_slide_number_artifacts(prs: Any) -> None:
+    """Drop inherited PowerPoint page-number fields such as ``p. 3``."""
+
+    def _remove_slide_number_nodes(element: Any) -> None:
+        try:
+            nodes = list(element.iter())
+        except Exception:
+            nodes = []
+        for node in nodes:
+            tag = str(getattr(node, "tag", "") or "")
+            if not tag.endswith("}sp"):
+                continue
+            try:
+                xml = str(node.xml)
+            except Exception:
+                xml = ""
+            if 'type="slidenum"' not in xml and "p. </a:t>" not in xml:
+                continue
+            try:
+                node.getparent().remove(node)
+            except Exception:
+                continue
+
+    collections: list[Any] = []
     try:
-        shape.left = -int(shape.width or 100000) - 50_000
+        collections.extend(list(prs.slides))
     except Exception:
-        return
+        pass
+    try:
+        collections.extend(list(prs.slide_layouts))
+    except Exception:
+        pass
+    try:
+        collections.extend(list(prs.slide_masters))
+    except Exception:
+        pass
+
+    for owner in collections:
+        for shape in list(getattr(owner, "shapes", [])):
+            try:
+                xml = str(shape.element.xml)
+            except Exception:
+                xml = ""
+            if 'type="slidenum"' in xml or ">p. <" in xml or "p. </a:t>" in xml:
+                _remove_shape(shape)
+        _remove_slide_number_nodes(getattr(owner, "element", None))
+
+    try:
+        parts = list(prs.part.package.iter_parts())
+    except Exception:
+        parts = []
+    for part in parts:
+        partname = str(getattr(part, "partname", "") or "")
+        if "/slideLayouts/" not in partname and "/slideMasters/" not in partname:
+            continue
+        _remove_slide_number_nodes(getattr(part, "_element", None))
 
 
 def _to_roman(value: int) -> str:
@@ -978,22 +1024,30 @@ def _write_metric_card(
     value_text: str,
     label_text: str,
     extra_lines: Sequence[tuple[str, float, bool, bool, float]] | None = None,
-    value_size_pt: float = 25.0,
-    label_size_pt: float = 12.0,
+    value_size_pt: float | None = None,
+    label_size_pt: float | None = None,
     text_color_rgb: RGBColor | None = None,
 ) -> None:
     base_color = text_color_rgb if text_color_rgb is not None else RGBColor(0, 0, 0)
     tf = _shape_text_frame(slide, shape_index=shape_index)
     if tf is None:
         return
+    typography = metric_card_typography(value_text, label_text)
+    resolved_value_size = (
+        float(value_size_pt) if value_size_pt is not None else typography.value_size_pt
+    )
+    resolved_label_size = (
+        float(label_size_pt) if label_size_pt is not None else typography.label_size_pt
+    )
+    apply_text_frame_margins(tf, margin_pt=0.0)
     tf.clear()
     p0 = tf.paragraphs[0]
     _set_paragraph_value_label(
         p0,
         value_text=str(value_text or ""),
         label_text=str(label_text or ""),
-        value_size_pt=float(value_size_pt),
-        label_size_pt=float(label_size_pt),
+        value_size_pt=resolved_value_size,
+        label_size_pt=resolved_label_size,
         color_rgb=base_color,
     )
 
@@ -1020,6 +1074,7 @@ def _add_metric_split_column(
     bottom_value: int,
     value_suffix: str = "",
     text_color_rgb: RGBColor | None = None,
+    detail_size_pt: float | None = None,
 ) -> None:
     card = _shape_or_none(slide, card_shape_index)
     if card is None:
@@ -1038,7 +1093,7 @@ def _add_metric_split_column(
     if width <= 0 or height <= 0:
         return
 
-    # Mirror the visual geometry of the "NUEVAS INCIDENCIAS" right column.
+    # Mirror the visual geometry of the summary KPI right column.
     divider_left = left + int(width * 0.636)
     divider_top = top + int(height * 0.094)
     divider_height = int(height * 0.811)
@@ -1077,12 +1132,16 @@ def _add_metric_split_column(
     except Exception:
         pass
     tf.clear()
+    typography = metric_card_typography(top_value, f"{top_label} {bottom_label}")
+    resolved_detail_size = (
+        float(detail_size_pt) if detail_size_pt is not None else typography.detail_size_pt
+    )
 
     p0 = tf.paragraphs[0]
     _set_paragraph_single_run(
         p0,
         text=f"{str(top_label).strip()}: {int(top_value)}{str(value_suffix or '')}",
-        size_pt=12.0,
+        size_pt=resolved_detail_size,
         bold=True,
         color_rgb=base_color,
     )
@@ -1090,17 +1149,103 @@ def _add_metric_split_column(
     _set_paragraph_single_run(
         p1,
         text=f"{str(bottom_label).strip()}: {int(bottom_value)}{str(value_suffix or '')}",
-        size_pt=12.0,
+        size_pt=resolved_detail_size,
         bold=True,
         color_rgb=base_color,
         space_before_pt=0.3,
     )
 
 
-def _align_delta_badges_with_new_card(slide: Any) -> None:
-    # Legacy template markers are replaced by single, explicit delta badges.
-    for marker_idx in (11, 14, 18):
-        _move_shape_off_canvas(slide, shape_index=marker_idx)
+def _write_created_total_column(
+    slide: Any,
+    *,
+    card_shape_index: int,
+    detail_shape_index: int,
+    divider_shape_index: int,
+    previous_range_label: str,
+    previous_value: int,
+    total_value: int,
+    text_color_rgb: RGBColor | None = None,
+) -> None:
+    card = _shape_or_none(slide, card_shape_index)
+    detail = _shape_or_none(slide, detail_shape_index)
+    divider = _shape_or_none(slide, divider_shape_index)
+    if card is None or detail is None or not getattr(detail, "has_text_frame", False):
+        return
+
+    base_color = (
+        text_color_rgb
+        if text_color_rgb is not None
+        else (_first_run_color_rgb(detail) or RGBColor(4, 19, 139))
+    )
+
+    left = int(card.left)
+    top = int(card.top)
+    width = int(card.width)
+    height = int(card.height)
+    theme = PERIOD_FOLLOWUP_LAYOUT
+    divider_left = left + int(width * theme.split_column_ratio)
+    divider_top = top + int(height * theme.split_divider_top_ratio)
+    divider_height = int(height * theme.split_divider_height_ratio)
+    divider_width = max(int(width * theme.split_divider_width_ratio), 1)
+
+    if divider is not None:
+        divider.left = divider_left
+        divider.top = divider_top
+        divider.width = divider_width
+        divider.height = divider_height
+        try:
+            divider.line.color.rgb = base_color
+        except Exception:
+            pass
+
+    text_left = divider_left + int(width * theme.split_column_padding_ratio)
+    detail.left = text_left
+    detail.top = top + int(height * 0.078)
+    detail.width = max(
+        (left + width) - text_left - int(width * theme.split_column_right_padding_ratio), 1
+    )
+    detail.height = int(height * 0.845)
+    tf = detail.text_frame
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    apply_text_frame_margins(tf, margin_pt=0.0)
+    try:
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    tf.clear()
+    typography = metric_card_typography(total_value, previous_range_label)
+    detail_size = typography.detail_size_pt
+
+    p0 = tf.paragraphs[0]
+    _set_paragraph_single_run(
+        p0,
+        text=f"{str(previous_range_label).strip()}: {int(previous_value)}",
+        size_pt=detail_size,
+        bold=True,
+        color_rgb=base_color,
+    )
+    p1 = tf.add_paragraph()
+    _set_paragraph_single_run(
+        p1,
+        text=f"TOTAL: {int(total_value)}",
+        size_pt=detail_size,
+        bold=True,
+        color_rgb=base_color,
+        space_before_pt=0.3,
+    )
+
+
+def _remove_summary_legacy_artifacts(slide: Any) -> None:
+    # Legacy template markers, detail links, and created-flow delta no longer render.
+    _remove_shape_indices(slide, 19, 18, 14, 11, 8, 7)
 
 
 def _configure_summary_delta_badge(
@@ -2264,21 +2409,21 @@ def _populate_open_priority_executive_slide(
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     summary_metric_color = _first_run_color_rgb(_shape_or_none(slide, 16)) or RGBColor(4, 19, 139)
+    window_service = TimeWindowService()
+    created_label = window_service.format_current_created_label(
+        summary.window,
+        singular=int(summary.new_now) == 1,
+    )
+    closed_label = window_service.format_current_closed_label(
+        summary.window,
+        singular=int(summary.closed_now) == 1,
+    )
+    previous_created_label = window_service.format_previous_range_label(summary.window)
     _style_summary_open_criticity_cards(slide)
     _set_shape_text(slide, 3, title)
-    _set_paragraph_value_after_colon(
-        slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
-    )
-    _set_paragraph_value_after_colon(
-        slide, shape_index=16, paragraph_index=1, value=int(summary.new_now)
-    )
-    _set_paragraph_value_after_colon(
-        slide, shape_index=16, paragraph_index=2, value=int(summary.new_accumulated)
-    )
     delta_badges = {
         10: _summary_delta_badge(summary.closed_delta_pct),
         13: _summary_delta_badge(summary.resolution_delta_pct),
-        19: _summary_delta_badge(summary.new_delta_pct),
     }
     for shape_idx, (badge_text, badge_color) in delta_badges.items():
         _set_shape_text(slide, shape_idx, badge_text)
@@ -2314,14 +2459,24 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         slide,
         shape_index=15,
         value_text=str(int(summary.new_now)),
-        label_text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
+        label_text=created_label,
+        text_color_rgb=summary_metric_color,
+    )
+    _write_created_total_column(
+        slide,
+        card_shape_index=15,
+        detail_shape_index=16,
+        divider_shape_index=17,
+        previous_range_label=previous_created_label,
+        previous_value=int(summary.new_before),
+        total_value=int(summary.new_accumulated),
         text_color_rgb=summary_metric_color,
     )
     _write_metric_card(
         slide,
         shape_index=9,
         value_text=str(int(summary.closed_now)),
-        label_text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
+        label_text=closed_label,
         text_color_rgb=summary_metric_color,
     )
     _add_metric_split_column(
@@ -2354,18 +2509,14 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
 
     _set_shape_font_size(slide, shape_index=10, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
     _set_shape_font_size(slide, shape_index=13, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
-    _set_shape_font_size(slide, shape_index=19, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
     _configure_summary_delta_badge(slide, shape_index=10, card_shape_index=9)
     _configure_summary_delta_badge(slide, shape_index=13, card_shape_index=12)
-    _configure_summary_delta_badge(slide, shape_index=19, card_shape_index=15)
 
     _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_HEAD)
-    for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16, 19):
+    for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16):
         _set_shape_font_name(slide, shape_index=idx, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    _align_delta_badges_with_new_card(slide)
-    _move_shape_off_canvas(slide, shape_index=7)
-    _move_shape_off_canvas(slide, shape_index=8)
+    _remove_summary_legacy_artifacts(slide)
 
 
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
@@ -3732,6 +3883,8 @@ def generate_country_period_followup_ppt(
         default=False,
     ):
         _append_functionality_zoom_slides(prs, summary=functionality_followup)
+
+    _remove_slide_number_artifacts(prs)
 
     buff = BytesIO()
     prs.save(buff)
