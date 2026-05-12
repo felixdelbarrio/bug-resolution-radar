@@ -16,6 +16,18 @@ class MetricTypography:
 
 
 @dataclass(frozen=True)
+class KpiRow:
+    value_text: str
+    label_text: str
+
+
+@dataclass(frozen=True)
+class KpiSideMetric:
+    value_text: str
+    label_text: str
+
+
+@dataclass(frozen=True)
 class PeriodFollowupLayoutTheme:
     metric_value_base_pt: float = 25.0
     metric_value_min_pt: float = 17.0
@@ -30,6 +42,14 @@ class PeriodFollowupLayoutTheme:
     split_divider_top_ratio: float = 0.094
     split_divider_height_ratio: float = 0.811
     split_divider_width_ratio: float = 0.0018
+    split_text_top_ratio: float = 0.078
+    split_text_height_ratio: float = 0.845
+    split_metric_gap_pt: float = 0.85
+    delta_badge_width_ratio: float = 0.106
+    delta_badge_height_ratio: float = 0.152
+    delta_badge_right_gap_ratio: float = 0.014
+    delta_badge_min_left_ratio: float = 0.418
+    delta_badge_top_ratio: float = 0.088
 
 
 PERIOD_FOLLOWUP_LAYOUT = PeriodFollowupLayoutTheme()

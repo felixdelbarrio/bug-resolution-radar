@@ -49,6 +49,7 @@ jobs:
 
       - name: Upload CodeQL SARIF artifact
         uses: actions/upload-artifact@v6
+        continue-on-error: true
         with:
           name: codeql-sarif-${{ matrix.language }}
           path: sarif-results

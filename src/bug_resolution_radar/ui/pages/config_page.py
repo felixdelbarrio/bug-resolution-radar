@@ -2109,6 +2109,9 @@ def render(settings: Settings) -> None:
                         "QUINCENA_LAST_FINISHED_ONLY": (
                             "true" if bool(quincena_last_finished_only) else "false"
                         ),
+                        "USAR_ULTIMA_QUINCENA_FINALIZADA": (
+                            "true" if bool(quincena_last_finished_only) else "false"
+                        ),
                         "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED": (
                             "true" if bool(functionality_detail_enabled) else "false"
                         ),
