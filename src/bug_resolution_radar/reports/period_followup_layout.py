@@ -43,11 +43,10 @@ def metric_card_typography(
 ) -> MetricTypography:
     value_len = len(str(value_text or "").strip())
     label_len = len(str(label_text or "").strip())
-    value_penalty = max(value_len - 2, 0) * 2.2
-    label_penalty = max(label_len - 24, 0) * 0.16
-    total_penalty = value_penalty + label_penalty
-    value_size = max(theme.metric_value_base_pt - total_penalty, theme.metric_value_min_pt)
-    label_size = max(theme.metric_label_base_pt - (total_penalty * 0.36), theme.metric_label_min_pt)
+    value_penalty = max(value_len - 2, 0) * 2.2 + max(label_len - 28, 0) * 0.2
+    label_penalty = max(label_len - 18, 0) * 0.55 + max(value_len - 2, 0) * 0.25
+    value_size = max(theme.metric_value_base_pt - value_penalty, theme.metric_value_min_pt)
+    label_size = max(theme.metric_label_base_pt - label_penalty, theme.metric_label_min_pt)
     detail_size = max(
         theme.metric_detail_base_pt - max(label_len - 22, 0) * 0.12, theme.metric_detail_min_pt
     )
