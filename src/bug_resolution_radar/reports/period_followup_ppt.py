@@ -111,10 +111,18 @@ _ISSUE_TABLE_FONT_NAME = "Arial"
 _ISSUE_TABLE_BODY_FONT_SIZE_PT = 9.2
 _ISSUE_TABLE_HEADER_FONT_SIZE_PT = 8.4
 _ISSUE_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (15.0, 33.0, 17.0, 13.0, 11.0, 11.0)
-_RISK_TABLE_HEADERS: tuple[str, ...] = (
+_FUNCTIONALITY_ISSUE_TABLE_HEADERS: tuple[str, ...] = (
     "ID",
     "Descripción",
     "Funcionalidad/\nCausa raíz",
+    "Estado",
+    "Criticidad",
+    "Días abierta",
+)
+_RISK_ASSIGNEE_TABLE_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Descripción",
+    "Responsable",
     "Estado",
     "Criticidad",
     "Días abierta",
@@ -3029,23 +3037,28 @@ def _populate_issue_native_table(
     slide: Any,
     *,
     table_shape_index: int,
+    headers: Sequence[str],
     rows: Sequence[Sequence[str]],
     hyperlink_by_row: Mapping[int, str] | None = None,
 ) -> None:
+    table_headers = tuple(headers or ())
+    if not table_headers:
+        raise ValueError("Issue table headers are required.")
     data_rows = list(rows or [])
     if not data_rows:
-        data_rows = [["", "Sin incidencias para este criterio.", "", "", "", ""]]
+        filler = [""] * max(len(table_headers) - 2, 0)
+        data_rows = [["", "Sin incidencias para este criterio.", *filler]]
     geometry = _issue_table_geometry(data_row_count=len(data_rows))
     table_shape = _native_table_shape(
         slide,
         table_shape_index=table_shape_index,
         row_count=len(data_rows) + 1,
-        col_count=len(_RISK_TABLE_HEADERS),
+        col_count=len(table_headers),
         geometry=geometry,
     )
     populate_native_table(
         table_shape,
-        headers=_RISK_TABLE_HEADERS,
+        headers=table_headers,
         rows=data_rows,
         column_widths=native_column_widths(geometry[2], _ISSUE_TABLE_COLUMN_WEIGHTS),
         row_height=int(_ISSUE_TABLE_ROW_HEIGHT),
@@ -3268,6 +3281,7 @@ def _populate_functionality_zoom_slide(
     _populate_issue_native_table(
         slide,
         table_shape_index=2,
+        headers=_FUNCTIONALITY_ISSUE_TABLE_HEADERS,
         rows=rows,
         hyperlink_by_row=row_links,
     )
@@ -3302,7 +3316,7 @@ def _risk_issue_rows_for_table(
                     max_chars=125,
                 ),
                 ellipsize_text(
-                    _premium_sentence_case(str(issue.functionality or "")),
+                    str(issue.assignee or "").strip() or "(sin asignar)",
                     max_chars=65,
                 ),
                 ellipsize_text(str(issue.status or ""), max_chars=28),
@@ -3348,6 +3362,7 @@ def _populate_risk_issue_list_slide(
     _populate_issue_native_table(
         slide,
         table_shape_index=2,
+        headers=_RISK_ASSIGNEE_TABLE_HEADERS,
         rows=rows,
         hyperlink_by_row=row_links,
     )

@@ -1169,6 +1169,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad con bloqueo de operativa",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Luis Pérez",
                 "created": "2026-02-20T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1181,6 +1182,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Impedimento en autenticación para clientes",
                 "status": "Ready To Verify",
                 "priority": "Supone un impedimento",
+                "assignee": "Ana López",
                 "created": "2026-04-05T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1192,6 +1194,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Incidencia abierta antigua de prioridad media",
                 "status": "Analysing",
                 "priority": "Medium",
+                "assignee": "Marta Ruiz",
                 "created": "2026-02-01T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1203,6 +1206,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 1",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-21T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1214,6 +1218,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 2",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-22T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1225,6 +1230,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 3",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-23T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1236,6 +1242,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 4",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-24T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1319,7 +1326,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     expected_headers = {
         "ID",
         "Descripción",
-        "Funcionalidad/\nCausa raíz",
+        "Responsable",
         "Estado",
         "Criticidad",
         "Días abierta",
@@ -1335,16 +1342,18 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         assert period_ppt_mod._RISK_AGED_ORDER_NOTE in slide_text
         assert old_aged_note not in slide_text
         assert "2ºCrriticidad" not in slide_text
-    for slide_idx, expected_ids, order_note, forbidden in (
+    for slide_idx, expected_ids, expected_assignees, order_note, forbidden in (
         (
             high_detail_idx,
             ["EAM-77", "MEXBMI1-101"],
+            ["Ana López", "Luis Pérez"],
             period_ppt_mod._RISK_HIGH_PRIORITY_ORDER_NOTE,
             "SKSEMEX-9",
         ),
         (
             aged_detail_idx,
             ["SKSEMEX-9", "MEXBMI1-101"],
+            ["Marta Ruiz", "Luis Pérez"],
             period_ppt_mod._RISK_AGED_ORDER_NOTE,
             "",
         ),
@@ -1365,6 +1374,8 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
             table_shape.table.cell(row_idx, 0).text for row_idx in range(1, len(expected_ids) + 1)
         ]
         assert row_ids == expected_ids
+        for expected_assignee in expected_assignees:
+            assert expected_assignee in table_text
         if forbidden:
             assert forbidden not in table_text
         assert "Descripción" in table_text
