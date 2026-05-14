@@ -18,6 +18,7 @@ def test_high_priority_open_issue_list_orders_by_criticality_age_status() -> Non
                 "summary": "Bloqueo login",
                 "status": "Ready To Verify",
                 "priority": "Highest",
+                "assignee": "Ana",
                 "created": "2026-04-20T00:00:00+00:00",
             },
             {
@@ -25,6 +26,7 @@ def test_high_priority_open_issue_list_orders_by_criticality_age_status() -> Non
                 "summary": "Pagos no responde",
                 "status": "Analysing",
                 "priority": "Alto",
+                "assignee": "Luis",
                 "created": "2026-03-01T00:00:00+00:00",
             },
             {
@@ -32,6 +34,7 @@ def test_high_priority_open_issue_list_orders_by_criticality_age_status() -> Non
                 "summary": "Pagos listo para verificar",
                 "status": "Ready To Verify",
                 "priority": "High",
+                "assignee": "Marta",
                 "created": "2026-03-01T00:00:00+00:00",
             },
             {
@@ -55,6 +58,7 @@ def test_high_priority_open_issue_list_orders_by_criticality_age_status() -> Non
     rows = build_high_priority_open_issue_list(df, analysis_day=analysis_day)
 
     assert [row.key for row in rows] == ["NEW-HIGHEST", "HIGH-RTV", "OLD-ALTO"]
+    assert [row.assignee for row in rows] == ["Ana", "Marta", "Luis"]
     assert rows[1].open_days == 59
 
 
@@ -67,6 +71,7 @@ def test_aged_open_issue_list_orders_by_age_criticality_status() -> None:
                 "summary": "Transferencias fallan",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Luis",
                 "created": "2026-03-01T00:00:00+00:00",
             },
             {
@@ -74,6 +79,7 @@ def test_aged_open_issue_list_orders_by_age_criticality_status() -> None:
                 "summary": "App caída",
                 "status": "Blocked",
                 "priority": "Very High",
+                "assignee": "Ana",
                 "created": "2026-03-20T00:00:00+00:00",
             },
             {
@@ -81,6 +87,7 @@ def test_aged_open_issue_list_orders_by_age_criticality_status() -> None:
                 "summary": "Dato descuadrado",
                 "status": "Analysing",
                 "priority": "Medium",
+                "assignee": "   ",
                 "created": "2026-02-01T00:00:00+00:00",
             },
             {
@@ -98,4 +105,5 @@ def test_aged_open_issue_list_orders_by_age_criticality_status() -> None:
 
     assert [row.key for row in rows] == ["MEDIUM-OLDER", "HIGH-OLD", "VERY-HIGH"]
     assert [row.key for row in bundled.aged] == ["MEDIUM-OLDER", "HIGH-OLD", "VERY-HIGH"]
+    assert [row.assignee for row in rows] == ["(sin asignar)", "Luis", "Ana"]
     assert rows[1].functionality
