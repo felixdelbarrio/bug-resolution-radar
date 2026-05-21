@@ -87,6 +87,8 @@ def test_period_functionality_detail_setting_defaults_off() -> None:
     settings = Settings()
 
     assert str(settings.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED).strip().lower() == "false"
+    assert str(settings.PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED).strip().lower() == "false"
+    assert str(settings.FINALIST_STATUS_ANALYSIS_MODE).strip() == "selected_sources"
 
 
 def test_save_settings_payload_persists_period_report_preferences(
@@ -103,7 +105,9 @@ def test_save_settings_payload_persists_period_report_preferences(
         "values": {
             **Settings().model_dump(),
             "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED": "true",
+            "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED": "true",
             "OPEN_ISSUES_FOCUS_MODE": "maestras",
+            "FINALIST_STATUS_ANALYSIS_MODE": "country_finalist_status",
         },
         "supportedCountries": ["México"],
         "jiraSources": [],
@@ -117,7 +121,11 @@ def test_save_settings_payload_persists_period_report_preferences(
 
     values = saved["values"]
     assert values["PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"] == "true"
+    assert values["PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED"] == "true"
     assert values["OPEN_ISSUES_FOCUS_MODE"] == "maestras"
+    assert values["FINALIST_STATUS_ANALYSIS_MODE"] == "country_finalist_status"
     persisted = env_path.read_text(encoding="utf-8")
     assert "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED=true" in persisted
+    assert "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED=true" in persisted
     assert "OPEN_ISSUES_FOCUS_MODE=maestras" in persisted
+    assert "FINALIST_STATUS_ANALYSIS_MODE=country_finalist_status" in persisted

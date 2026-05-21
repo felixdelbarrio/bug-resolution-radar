@@ -241,6 +241,90 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
     assert out.content
 
 
+def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Path) -> None:
+    template = tmp_path / "template.pptx"
+    _build_minimal_template(template)
+    now = pd.Timestamp("2026-05-15T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "MEX-1",
+                "summary": "Jira pendiente",
+                "description": "Helix INC000104154954",
+                "status": "To Rework",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=20)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+            },
+            {
+                "key": "B-1",
+                "summary": "Issue B",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": (now - pd.Timedelta(days=10)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": (now - pd.Timedelta(days=1)).isoformat(),
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+                "source_type": "jira",
+            },
+        ]
+    )
+    discrepancies = pd.DataFrame(
+        [
+            {
+                "helix_id": "INC000104154954",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154954",
+                "jira_key": "MEX-1",
+                "jira_summary": "Jira pendiente",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Ana",
+                "jira_open_days": 20,
+                "jira_url": "https://jira.example.com/browse/MEX-1",
+                "source_alias": "Senda",
+            }
+        ]
+    )
+
+    off = generate_country_period_followup_ppt(
+        Settings(PERIOD_PPT_TEMPLATE_PATH=str(template)),
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        finalist_discrepancies_override=discrepancies,
+        reference_day=now,
+    )
+    off_text = " ".join(
+        _slide_all_text(slide) for slide in Presentation(BytesIO(off.content)).slides
+    )
+    assert "Incidencias con discrepancias en estado finalista" not in off_text
+
+    on = generate_country_period_followup_ppt(
+        Settings(
+            PERIOD_PPT_TEMPLATE_PATH=str(template),
+            PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED="true",
+        ),
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        finalist_discrepancies_override=discrepancies,
+        reference_day=now,
+    )
+    prs = Presentation(BytesIO(on.content))
+    on_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+
+    assert "Incidencias con discrepancias en estado finalista" in on_text
+    assert "JIRA: To Rework" in on_text
+    assert "Helix: Closed" in on_text
+
+
 def test_generate_country_period_followup_ppt_uses_open_focus_label_from_settings() -> None:
     template = bundled_period_ppt_template_path()
     now = pd.Timestamp("2026-03-15T00:00:00+00:00")

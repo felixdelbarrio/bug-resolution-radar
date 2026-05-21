@@ -255,6 +255,33 @@ export type IntelligencePayload = {
       issues: IssueRecord[];
     }>;
   };
+  finalistDiscrepancies: {
+    kpis: Array<{ label: string; value: string; detail: string }>;
+    filterOptions: {
+      jiraStatus: string[];
+      helixStatus: string[];
+      priority: string[];
+      assignee: string[];
+    };
+    groups: Array<{
+      helixId: string;
+      helixUrl: string;
+      helixStatus: string;
+      jiraCount: number;
+      issues: Array<{
+        key: string;
+        summary: string;
+        status: string;
+        priority: string;
+        assignee: string;
+        url: string;
+        sourceAlias: string;
+        openDays: number;
+      }>;
+    }>;
+    totalRows: number;
+    truncated: boolean;
+  };
   people: {
     cards: Array<{
       assignee: string;
@@ -396,6 +423,19 @@ export type SavedFilePayload = {
   fileSize: number;
 };
 
+export type NoteListPayload = {
+  total: number;
+  rows: Array<{
+    issueKey: string;
+    note: string;
+    enriched: boolean;
+    issue: Partial<IssueRecord> & {
+      source_alias?: string;
+      source_type?: string;
+    };
+  }>;
+};
+
 export type DownloadTargetPayload = {
   directory: string;
   configured: boolean;
@@ -475,6 +515,17 @@ export async function postJson<T>(path: string, payload: unknown): Promise<T> {
     },
     credentials: "same-origin",
     body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    await parseError(response);
+  }
+  return (await response.json()) as T;
+}
+
+export async function deleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    method: "DELETE",
+    credentials: "same-origin"
   });
   if (!response.ok) {
     await parseError(response);
