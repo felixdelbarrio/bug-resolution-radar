@@ -81,6 +81,13 @@ def _normalize_bool_setting(value: Any, *, default: bool = False) -> str:
     return "true" if default else "false"
 
 
+def _normalize_finalist_status_analysis_mode(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    if token in {"selected_sources", "country_finalist_status"}:
+        return token
+    return "selected_sources"
+
+
 def _group_configured_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     grouped: Dict[str, List[Dict[str, str]]] = {}
     for row in all_configured_sources(settings):
@@ -190,6 +197,13 @@ def save_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     merged_values["PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"] = _normalize_bool_setting(
         merged_values.get("PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"),
         default=False,
+    )
+    merged_values["PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED"] = _normalize_bool_setting(
+        merged_values.get("PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED"),
+        default=False,
+    )
+    merged_values["FINALIST_STATUS_ANALYSIS_MODE"] = _normalize_finalist_status_analysis_mode(
+        merged_values.get("FINALIST_STATUS_ANALYSIS_MODE")
     )
 
     new_settings = Settings.model_validate(merged_values)

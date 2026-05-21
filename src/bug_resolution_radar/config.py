@@ -397,7 +397,9 @@ class Settings(BaseModel):
     QUINCENA_LAST_FINISHED_ONLY: str = "false"
     USAR_ULTIMA_QUINCENA_FINALIZADA: str = ""
     PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED: str = "false"
+    PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED: str = "false"
     OPEN_ISSUES_FOCUS_MODE: str = "criticidad_alta"
+    FINALIST_STATUS_ANALYSIS_MODE: str = "selected_sources"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
 
 

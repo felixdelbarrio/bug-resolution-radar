@@ -21,6 +21,10 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
+    FinalistDiscrepancyIssueRow,
+    build_finalist_discrepancy_issue_list,
+)
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
     build_theme_fortnight_trend,
@@ -166,6 +170,11 @@ _RISK_HIGH_PRIORITY_ORDER_NOTE = (
 _RISK_AGED_ORDER_NOTE = (
     "Detalle - TODAS las incidencias abiertas - ordenado por 1º : Días abierta, "
     "2º: Criticidad y 3º: Estado"
+)
+_FINALIST_DISCREPANCIES_TITLE = "Incidencias con discrepancias en estado finalista"
+_FINALIST_DISCREPANCIES_ORDER_NOTE = (
+    "Detalle - Helix en estado finalista y Jira pendiente - ordenado por 1º : Criticidad, "
+    "2º: Días abierta, 3º: Estado y 4º: Helix ID"
 )
 
 
@@ -3040,7 +3049,7 @@ def _populate_issue_native_table(
     headers: Sequence[str],
     rows: Sequence[Sequence[str]],
     hyperlink_by_row: Mapping[int, str] | None = None,
-) -> None:
+) -> Any:
     table_headers = tuple(headers or ())
     if not table_headers:
         raise ValueError("Issue table headers are required.")
@@ -3071,6 +3080,7 @@ def _populate_issue_native_table(
         hyperlink_by_row=hyperlink_by_row,
         zebra=True,
     )
+    return table_shape
 
 
 def _populate_functionality_dashboard_native_table(
@@ -3453,6 +3463,166 @@ def _append_period_risk_issue_sections(
             period_label=period_label,
             cover_template_slide=cover_template_slide,
             zoom_template_slide=zoom_template_slide,
+        )
+
+
+def _chunk_finalist_discrepancy_issues(
+    issues: Sequence[FinalistDiscrepancyIssueRow],
+    *,
+    rows_per_slide: int,
+) -> list[tuple[FinalistDiscrepancyIssueRow, ...]]:
+    size = max(int(rows_per_slide or 0), 1)
+    items = list(issues or [])
+    if not items:
+        return [tuple()]
+    return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
+
+
+def _finalist_discrepancy_rows_for_table(
+    issues: Sequence[FinalistDiscrepancyIssueRow],
+    *,
+    empty_message: str,
+) -> tuple[list[list[str]], dict[int, str]]:
+    rows: list[list[str]] = []
+    row_links: dict[int, str] = {}
+    for idx, issue in enumerate(list(issues or [])):
+        jira_key = str(issue.jira_key or "").strip().upper()
+        helix_id = str(issue.helix_id or "").strip().upper()
+        rows.append(
+            [
+                f"{jira_key}\n{helix_id}".strip(),
+                ellipsize_text(
+                    _premium_sentence_case(str(issue.jira_summary or "")),
+                    max_chars=125,
+                ),
+                ellipsize_text(
+                    str(issue.jira_assignee or "").strip() or "(sin asignar)",
+                    max_chars=65,
+                ),
+                (
+                    f"JIRA: {ellipsize_text(str(issue.jira_status or ''), max_chars=22)}\n"
+                    f"Helix: {ellipsize_text(str(issue.helix_status or ''), max_chars=22)}"
+                ),
+                ellipsize_text(str(issue.jira_priority or ""), max_chars=18),
+                f"{int(issue.jira_open_days or 0)} días",
+            ]
+        )
+        if str(issue.jira_url or "").strip():
+            row_links[idx] = str(issue.jira_url or "").strip()
+    if not rows:
+        rows.append(
+            ["", str(empty_message or "Sin incidencias para este criterio."), "", "", "", ""]
+        )
+    return rows, row_links
+
+
+def _style_finalist_status_cells(table_shape: Any, issues_count: int) -> None:
+    if table_shape is None or not getattr(table_shape, "has_table", False):
+        return
+    table = table_shape.table
+    row_limit = min(max(int(issues_count or 0), 0), max(len(table.rows) - 1, 0))
+    jira_rgb = RGBColor(*hex_to_rgb(BBVA_REPORT_RED_TEXT))
+    helix_rgb = RGBColor(*hex_to_rgb(BBVA_REPORT_AMBER_TEXT))
+    try:
+        helix_rgb = RGBColor(34, 139, 74)
+    except Exception:
+        pass
+    for ridx in range(1, row_limit + 1):
+        try:
+            cell = table.cell(ridx, 3)
+        except Exception:
+            continue
+        original = str(cell.text or "")
+        parts = [part for part in original.splitlines() if part.strip()]
+        if len(parts) < 2:
+            continue
+        tf = cell.text_frame
+        tf.clear()
+        try:
+            tf.auto_size = MSO_AUTO_SIZE.NONE
+            tf.word_wrap = True
+            tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+        except Exception:
+            pass
+        for idx, (line, color) in enumerate(((parts[0], jira_rgb), (parts[1], helix_rgb))):
+            paragraph = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+            paragraph.alignment = PP_ALIGN.CENTER
+            paragraph.space_before = Pt(0)
+            paragraph.space_after = Pt(0)
+            run = paragraph.add_run()
+            run.text = line
+            run.font.size = Pt(8.5)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            run.font.bold = True
+            run.font.color.rgb = color
+
+
+def _populate_finalist_discrepancy_list_slide(
+    slide: Any,
+    *,
+    issues_page: Sequence[FinalistDiscrepancyIssueRow],
+    empty_message: str,
+    page_number: int,
+    total_pages: int,
+) -> None:
+    _ = total_pages
+    roman = _to_roman(int(page_number or 1))
+    page_suffix = f" ({roman})" if roman else f" ({int(page_number or 1)})"
+    _set_shape_text(slide, 1, f"{_FINALIST_DISCREPANCIES_TITLE}{page_suffix}")
+    _set_shape_font_name(slide, shape_index=1, font_name=_PPT_FONT_BODY_MEDIUM)
+    _set_shape_text(slide, 3, _FINALIST_DISCREPANCIES_ORDER_NOTE)
+    _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(*_TABLE_BODY_FG_RGB))
+    _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_BODY)
+    _set_shape_text(slide, 4, "")
+    _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
+
+    rows, row_links = _finalist_discrepancy_rows_for_table(
+        issues_page,
+        empty_message=empty_message,
+    )
+    table_shape = _populate_issue_native_table(
+        slide,
+        table_shape_index=2,
+        headers=_RISK_ASSIGNEE_TABLE_HEADERS,
+        rows=rows,
+        hyperlink_by_row=row_links,
+    )
+    _style_finalist_status_cells(table_shape, issues_count=len(issues_page))
+
+
+def _append_finalist_discrepancy_section(
+    prs: Any,
+    *,
+    period_label: str,
+    issues: Sequence[FinalistDiscrepancyIssueRow],
+) -> None:
+    template_path = _resolve_functionality_template_path()
+    template_prs = Presentation(str(template_path))
+    if len(template_prs.slides) < 3:
+        raise ValueError("La plantilla de funcionalidad debe contener la slide de zoom.")
+    zoom_template_slide = template_prs.slides[2]
+    if len(prs.slides) < 2:
+        raise ValueError("La plantilla de periodo debe contener la slide de portada de sección.")
+    cover_template_slide = prs.slides[1]
+    _append_period_risk_issue_cover(
+        prs,
+        cover_template_slide=cover_template_slide,
+        title=_FINALIST_DISCREPANCIES_TITLE,
+        period_label=period_label,
+    )
+    pages = _chunk_finalist_discrepancy_issues(
+        tuple(issues or ()),
+        rows_per_slide=_ISSUE_TABLE_ROWS_PER_SLIDE,
+    )
+    total_pages = len(pages)
+    for page_idx, page_rows in enumerate(pages, start=1):
+        slide = _append_slide_clone_from_source(prs, source_slide=zoom_template_slide)
+        _populate_finalist_discrepancy_list_slide(
+            slide,
+            issues_page=page_rows,
+            empty_message="Sin incidencias con discrepancias en estado finalista en el scope actual.",
+            page_number=page_idx,
+            total_pages=total_pages,
         )
 
 
@@ -3843,6 +4013,7 @@ def generate_country_period_followup_ppt(
     source_ids: Sequence[str],
     dff_override: pd.DataFrame | None = None,
     open_df_override: pd.DataFrame | None = None,
+    finalist_discrepancies_override: pd.DataFrame | None = None,
     template_path: str | None = None,
     applied_filter_summary: str = "",
     functionality_status_filters: Sequence[str] | None = None,
@@ -3955,6 +4126,9 @@ def generate_country_period_followup_ppt(
         aggregate.dff,
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
+    finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
+        finalist_discrepancies_override
+    )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
         jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
@@ -3984,6 +4158,15 @@ def generate_country_period_followup_ppt(
         default=False,
     ):
         _append_functionality_zoom_slides(prs, summary=functionality_followup)
+    if _parse_bool_flag(
+        getattr(settings, "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED", "false"),
+        default=False,
+    ):
+        _append_finalist_discrepancy_section(
+            prs,
+            period_label=functionality_followup.period_label,
+            issues=finalist_discrepancy_rows,
+        )
 
     _remove_slide_number_artifacts(prs)
     validate_shapes_inside_slide(prs)

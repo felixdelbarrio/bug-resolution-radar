@@ -8,6 +8,9 @@ from typing import Mapping, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
+    build_finalist_discrepancy_issue_list,
+)
 from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
@@ -48,6 +51,67 @@ def build_issue_export_frame(settings: Settings, *, query: DashboardQuery) -> pd
     """Return the filtered persisted dataframe used by tabular exports."""
     context = load_scope_context(settings, query=query)
     return _sorted_export_frame(context.dff, query=query)
+
+
+def build_finalist_discrepancies_export_frame(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+) -> pd.DataFrame:
+    """Return the business dataset shared by Insights Excel and PPT."""
+    context = load_scope_context(settings, query=query)
+    rows = build_finalist_discrepancy_issue_list(context.finalist_discrepancies)
+    return pd.DataFrame(
+        [
+            {
+                "Helix ID": row.helix_id,
+                "Estado Helix": row.helix_status,
+                "URL Helix": row.helix_url,
+                "JIRA key": row.jira_key,
+                "Resumen JIRA": row.jira_summary,
+                "Estado JIRA": row.jira_status,
+                "Prioridad JIRA": row.jira_priority,
+                "Responsable JIRA": row.jira_assignee,
+                "Días abierta JIRA": row.jira_open_days,
+                "Origen": row.source_alias,
+                "URL JIRA": row.jira_url,
+            }
+            for row in rows
+        ],
+        columns=[
+            "Helix ID",
+            "Estado Helix",
+            "URL Helix",
+            "JIRA key",
+            "Resumen JIRA",
+            "Estado JIRA",
+            "Prioridad JIRA",
+            "Responsable JIRA",
+            "Días abierta JIRA",
+            "Origen",
+            "URL JIRA",
+        ],
+    )
+
+
+def build_finalist_discrepancies_workbook_export(
+    settings: Settings,
+    *,
+    query: DashboardQuery,
+) -> IssueWorkbookExport:
+    frame = build_finalist_discrepancies_export_frame(settings, query=query)
+    sheet_name = "Discrepancias finalistas"
+    return IssueWorkbookExport(
+        content=dataframes_to_xlsx_bytes(
+            [(sheet_name, frame)],
+            include_index=False,
+            hyperlink_columns_by_sheet={
+                sheet_name: [("Helix ID", "URL Helix"), ("JIRA key", "URL JIRA")]
+            },
+        ),
+        sheet_names=(sheet_name,),
+        row_count=int(len(frame)),
+    )
 
 
 def _source_type_from_frame(df: pd.DataFrame) -> str:
