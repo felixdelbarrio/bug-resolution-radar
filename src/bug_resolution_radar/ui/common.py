@@ -34,6 +34,27 @@ from bug_resolution_radar.theme.semantic_colors import (
     status_color_map,
 )
 
+__all__ = (
+    "IssuesDocument",
+    "chip_palette_for_color",
+    "chip_style_from_color",
+    "chip_tone_for_color",
+    "df_from_issues_doc",
+    "flow_signal_color_map",
+    "load_issues_df",
+    "load_issues_doc",
+    "neutral_chip_style",
+    "normalize_text_col",
+    "open_issues_only",
+    "priority_color",
+    "priority_color_map",
+    "priority_rank",
+    "save_issues_doc",
+    "semantic_popover_css_rules",
+    "status_color",
+    "status_color_map",
+)
+
 
 def _css_attr_value(txt: str) -> str:
     return str(txt or "").replace("\\", "\\\\").replace('"', '\\"')

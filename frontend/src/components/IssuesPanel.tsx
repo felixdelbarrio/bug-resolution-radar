@@ -288,6 +288,7 @@ export function IssuesPanel({
                   <strong className="issue-card-title">{row.summary || "Sin título"}</strong>
                 </button>
                 {row.description ? <p className="issue-card-description">{row.description}</p> : null}
+                {row.note ? <p className="issue-card-note">{row.note}</p> : null}
                 <div className="issue-card-badges">
                   <span
                     className="issue-chip"
@@ -320,6 +321,7 @@ export function IssuesPanel({
                 <col className="issues-col-id" />
                 <col className="issues-col-summary" />
                 <col className="issues-col-description" />
+                <col className="issues-col-description" />
                 <col className="issues-col-status" />
                 <col className="issues-col-type" />
                 <col className="issues-col-priority" />
@@ -333,6 +335,7 @@ export function IssuesPanel({
                   <th>ID</th>
                   <th>Summary</th>
                   <th>Description</th>
+                  <th>Nota</th>
                   <th>Status</th>
                   <th>Type</th>
                   <th>Priority</th>
@@ -366,6 +369,9 @@ export function IssuesPanel({
                     </td>
                     <td className="issues-description-cell" title={row.description || ""}>
                       {row.description || "—"}
+                    </td>
+                    <td className="issues-description-cell" title={row.note || ""}>
+                      {row.note || "—"}
                     </td>
                     <td>
                       <span

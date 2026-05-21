@@ -19,7 +19,14 @@ class NotesStore:
             except Exception:
                 self._notes = {}
                 return
-            self._notes = raw if isinstance(raw, dict) else {}
+            if isinstance(raw, dict):
+                self._notes = {
+                    str(key).strip().upper(): str(value or "").strip()
+                    for key, value in raw.items()
+                    if str(key).strip() and str(value or "").strip()
+                }
+            else:
+                self._notes = {}
         else:
             self._notes = {}
 
@@ -30,7 +37,23 @@ class NotesStore:
         )
 
     def get(self, key: str) -> Optional[str]:
-        return self._notes.get(key)
+        return self._notes.get(str(key or "").strip().upper())
 
     def set(self, key: str, note: str) -> None:
-        self._notes[key] = note
+        clean_key = str(key or "").strip().upper()
+        clean_note = str(note or "").strip()
+        if not clean_key:
+            return
+        if not clean_note:
+            self.delete(clean_key)
+            return
+        self._notes[clean_key] = clean_note
+
+    def delete(self, key: str) -> None:
+        clean_key = str(key or "").strip().upper()
+        if not clean_key:
+            return
+        self._notes.pop(clean_key, None)
+
+    def items(self) -> list[tuple[str, str]]:
+        return sorted(self._notes.items(), key=lambda item: item[0])

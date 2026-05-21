@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import {
+  deleteJson,
   fetchJson,
   postJson,
   putJson,
@@ -15,6 +16,7 @@ import {
   type IssueKeysPayload,
   type IssuesPayload,
   type KanbanPayload,
+  type NoteListPayload,
   type TrendDetailPayload
 } from "../lib/api";
 import type { ShellContextValue } from "../components/AppShell";
@@ -243,6 +245,9 @@ export function DashboardPage() {
     if (keys.length === 0) {
       return;
     }
+    if (!dashboardState.params.notesIssueKey) {
+      return;
+    }
     if (keys.includes(dashboardState.params.notesIssueKey)) {
       return;
     }
@@ -321,12 +326,34 @@ export function DashboardPage() {
       Boolean(dashboardState.params.notesIssueKey)
   });
 
+  const notesList = useQuery({
+    queryKey: ["dashboard-notes-list", sharedScopeParams],
+    queryFn: () => fetchJson<NoteListPayload>("/api/notes", sharedScopeParams),
+    enabled: Boolean(workspace?.selectedCountry) && activePanel === "notes"
+  });
+
   const saveNote = useMutation({
     mutationFn: ({ issueKey, noteText }: { issueKey: string; noteText: string }) =>
       putJson(`/api/notes/${encodeURIComponent(issueKey)}`, { note: noteText }),
     onSuccess: async (_payload, variables) => {
       await queryClient.invalidateQueries({
         queryKey: ["dashboard-note", variables.issueKey]
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-notes-list"]
+      });
+    }
+  });
+
+  const deleteNote = useMutation({
+    mutationFn: (issueKey: string) =>
+      deleteJson(`/api/notes/${encodeURIComponent(issueKey)}`),
+    onSuccess: async (_payload, issueKey) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-note", issueKey]
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-notes-list"]
       });
     }
   });
@@ -630,6 +657,7 @@ export function DashboardPage() {
           insightsViewMode: dashboardState.params.insightsViewMode,
           insightsStatusManual: dashboardState.params.insightsStatusManual
         }}
+        queryParams={sharedScopeParams}
         onChange={dashboardState.update}
         onOpenIssue={openIssue}
       />
@@ -722,20 +750,27 @@ export function DashboardPage() {
     if (note.error) {
       return <QueryErrorState title="No se ha podido cargar la nota" error={note.error} />;
     }
+    if (notesList.error) {
+      return <QueryErrorState title="No se ha podido listar las notas" error={notesList.error} />;
+    }
 
     return (
       <NotesEditor
         issueKeys={issueKeys.data?.keys ?? []}
         selectedIssueKey={dashboardState.params.notesIssueKey}
         note={note.data?.note ?? ""}
-        isLoading={issueKeys.isLoading || note.isLoading}
+        notes={notesList.data?.rows ?? []}
+        isLoading={issueKeys.isLoading || note.isLoading || notesList.isLoading}
         isSaving={saveNote.isPending}
+        isDeleting={deleteNote.isPending}
         saveSucceeded={saveNote.isSuccess}
         onIssueChange={(issueKey) => {
           saveNote.reset();
+          deleteNote.reset();
           dashboardState.update({ notesIssueKey: issueKey });
         }}
         onSave={(issueKey, noteText) => saveNote.mutate({ issueKey, noteText })}
+        onDelete={(issueKey) => deleteNote.mutate(issueKey)}
       />
     );
   }

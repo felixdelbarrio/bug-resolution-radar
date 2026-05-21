@@ -29,14 +29,32 @@ from bug_resolution_radar.ui.insights.ops_health import render_ops_health_tab
 from bug_resolution_radar.ui.insights.period_summary import render_period_summary_tab
 from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_FUNCTIONALITY_KEY as _INSIGHTS_FUNCTIONALITY_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_FUNCTIONALITY_WIDGET_KEY as _INSIGHTS_FUNCTIONALITY_WIDGET_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_LAST_VIEW_MODE_KEY as _INSIGHTS_LAST_VIEW_MODE_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_PRIORITY_KEY as _INSIGHTS_PRIORITY_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_PRIORITY_WIDGET_KEY as _INSIGHTS_PRIORITY_WIDGET_KEY,
-    INSIGHTS_STATUS_MANUAL_KEY as _INSIGHTS_STATUS_MANUAL_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_STATUS_KEY as _INSIGHTS_STATUS_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
+    INSIGHTS_STATUS_MANUAL_KEY as _INSIGHTS_STATUS_MANUAL_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_STATUS_WIDGET_KEY as _INSIGHTS_STATUS_WIDGET_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_VIEW_MODE_KEY as _INSIGHTS_VIEW_MODE_KEY,
+)
+from bug_resolution_radar.ui.insights.state import (
     INSIGHTS_VIEW_MODE_WIDGET_KEY as _INSIGHTS_VIEW_MODE_WIDGET_KEY,
 )
 from bug_resolution_radar.ui.insights.top_topics import render_top_topics_tab

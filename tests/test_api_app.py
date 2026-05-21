@@ -448,6 +448,7 @@ def test_intelligence_endpoint_returns_streamlit_aligned_payload(
         "summary",
         "functionality",
         "duplicates",
+        "finalistDiscrepancies",
         "people",
         "opsHealth",
     ]
@@ -463,6 +464,7 @@ def test_intelligence_endpoint_returns_streamlit_aligned_payload(
         assert "avgOpenDays" in first
         assert "d. promedio" in str(first.get("label", ""))
     assert "brief" in payload["duplicates"]
+    assert "groups" in payload["finalistDiscrepancies"]
     assert "cards" in payload["people"]
     assert "kpis" in payload["opsHealth"]
 
@@ -825,6 +827,45 @@ def test_notes_endpoint_roundtrip(monkeypatch, tmp_path: Path) -> None:
     assert put_response.status_code == 200
     assert get_response.status_code == 200
     assert get_response.json()["note"] == "Investigar con backend"
+
+
+def test_notes_endpoint_rejects_invalid_issue_key(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.put("/api/notes/no-es-issue", json={"note": "Texto"})
+
+    assert response.status_code == 400
+    assert "formato JIRA o Helix" in response.json()["detail"]
+
+
+def test_notes_list_enrich_delete_and_empty_note_removes(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    assert client.put("/api/notes/RAD-1", json={"note": "Coordinar cierre"}).status_code == 200
+
+    listed = client.get(
+        "/api/notes",
+        params={"country": "España", "sourceId": source_id, "scopeMode": "source"},
+    )
+    assert listed.status_code == 200
+    rows = listed.json()["rows"]
+    assert rows[0]["issueKey"] == "RAD-1"
+    assert rows[0]["note"] == "Coordinar cierre"
+    assert rows[0]["enriched"] is True
+    assert rows[0]["issue"]["summary"] == "Error en login"
+
+    delete_response = client.delete("/api/notes/RAD-1")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["note"] == ""
+
+    assert client.put("/api/notes/RAD-1", json={"note": "Temporal"}).status_code == 200
+    assert client.put("/api/notes/RAD-1", json={"note": "   "}).status_code == 200
+    assert client.get("/api/notes/RAD-1").json()["note"] == ""
 
 
 def test_issues_export_endpoint_streams_file(monkeypatch, tmp_path: Path) -> None:

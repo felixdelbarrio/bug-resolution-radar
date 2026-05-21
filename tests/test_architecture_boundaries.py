@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "bug_resolution_radar"
 
 

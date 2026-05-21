@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Sequence
 
 import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.finalist_discrepancies import (
+    apply_effective_finalist_country_mode,
+    build_finalist_status_discrepancies,
+    is_country_finalist_status_mode,
+)
 from bug_resolution_radar.analytics.issues import normalize_text_col
 from bug_resolution_radar.analytics.quincenal_scope import (
     QUINCENAL_SCOPE_ALL,
@@ -17,7 +22,6 @@ from bug_resolution_radar.analytics.quincenal_scope import (
 )
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.repositories.issues_store import load_issues_df
 from bug_resolution_radar.reports.executive_ppt import (
     ExecutiveReportResult,
     generate_scope_executive_ppt,
@@ -26,11 +30,32 @@ from bug_resolution_radar.reports.period_followup_ppt import (
     PeriodFollowupReportResult,
     generate_country_period_followup_ppt,
 )
+from bug_resolution_radar.repositories.issues_store import load_issues_df
 from bug_resolution_radar.services.downloads import (
     default_download_dir as default_report_export_dir,
+)
+from bug_resolution_radar.services.downloads import (
     ensure_download_dir as ensure_report_export_dir,
+)
+from bug_resolution_radar.services.downloads import (
     save_download_content as save_report_content,
+)
+from bug_resolution_radar.services.downloads import (
     unique_download_path as unique_report_export_path,
+)
+
+__all__ = (
+    "ExecutiveReportResult",
+    "PeriodFollowupReportResult",
+    "PreparedReportContext",
+    "ReportFilters",
+    "build_report_filters",
+    "default_report_export_dir",
+    "ensure_report_export_dir",
+    "generate_executive_report_artifact",
+    "generate_period_followup_report_artifact",
+    "save_report_content",
+    "unique_report_export_path",
 )
 
 
@@ -47,6 +72,7 @@ class PreparedReportContext:
     scoped_df: pd.DataFrame
     dff: pd.DataFrame
     open_df: pd.DataFrame
+    finalist_discrepancies: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _normalize_tokens(values: Sequence[str] | None) -> tuple[str, ...]:
@@ -163,6 +189,38 @@ def _apply_quincenal_scope(
     return apply_issue_key_scope(df, keys=selected_keys)
 
 
+def _scope_country_df(df: pd.DataFrame, *, country: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    country_txt = str(country or "").strip()
+    if country_txt and "country" in df.columns:
+        return df.loc[df["country"].fillna("").astype(str).eq(country_txt)].copy(deep=False)
+    return df.copy(deep=False)
+
+
+def _scope_reference_day(df: pd.DataFrame) -> pd.Timestamp | None:
+    safe = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if safe.empty:
+        return None
+    candidates: list[pd.Timestamp] = []
+    for column in ("updated", "resolved", "created"):
+        if column not in safe.columns:
+            continue
+        parsed = pd.to_datetime(safe[column], errors="coerce", utc=True)
+        if not parsed.notna().any():
+            continue
+        value = pd.Timestamp(parsed.max())
+        try:
+            value = value.tz_convert(None)
+        except Exception:
+            try:
+                value = value.tz_localize(None)
+            except Exception:
+                pass
+        candidates.append(value)
+    return max(candidates).normalize() if candidates else None
+
+
 def _build_context_for_scope(
     settings: Settings,
     *,
@@ -181,6 +239,23 @@ def _build_context_for_scope(
         scoped_df = _scope_country_sources(base_df, country=country, source_ids=clean_source_ids)
 
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
+    country_df = apply_analysis_depth_filter(
+        _scope_country_df(base_df, country=country), settings=settings
+    )
+    reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
+    finalist_discrepancies = build_finalist_status_discrepancies(
+        country_df if not country_df.empty else scoped_df,
+        settings=settings,
+        country=country,
+        source_ids=clean_source_ids,
+        reference_day=reference_day,
+    )
+    if is_country_finalist_status_mode(settings) and not finalist_discrepancies.empty:
+        scoped_df = apply_effective_finalist_country_mode(
+            scoped_df,
+            discrepancies=finalist_discrepancies,
+            reference_window=reference_day,
+        )
     dff = _apply_explicit_filters(scoped_df, filters)
     dff = _apply_quincenal_scope(
         dff,
@@ -191,7 +266,12 @@ def _build_context_for_scope(
     )
     closed_mask = effective_closed_mask(dff) if not dff.empty else pd.Series(dtype=bool)
     open_df = dff.loc[~closed_mask].copy(deep=False) if not dff.empty else pd.DataFrame()
-    return PreparedReportContext(scoped_df=scoped_df, dff=dff, open_df=open_df)
+    return PreparedReportContext(
+        scoped_df=scoped_df,
+        dff=dff,
+        open_df=open_df,
+        finalist_discrepancies=finalist_discrepancies,
+    )
 
 
 def generate_executive_report_artifact(
@@ -255,6 +335,7 @@ def generate_period_followup_report_artifact(
         source_ids=source_ids,
         dff_override=context.dff,
         open_df_override=context.open_df,
+        finalist_discrepancies_override=context.finalist_discrepancies,
         applied_filter_summary=applied_filter_summary,
         functionality_status_filters=functionality_status_filters,
         functionality_priority_filters=functionality_priority_filters,

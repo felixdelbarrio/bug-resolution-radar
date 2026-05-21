@@ -1444,6 +1444,47 @@ textarea::placeholder {
   flex-wrap: wrap;
 }
 
+.notes-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.notes-list-item {
+  position: relative;
+  display: grid;
+  gap: 0.32rem;
+  padding: 0.78rem 2.6rem 0.78rem 0.82rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+  background: var(--bbva-surface);
+}
+
+.notes-list-item p {
+  margin: 0;
+  color: var(--bbva-text);
+  font-weight: 700;
+  line-height: 1.32;
+  word-break: break-word;
+}
+
+.notes-list-item small {
+  color: var(--bbva-text-muted);
+}
+
+.notes-delete-button {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.65rem;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: 999px;
+  background: var(--bbva-surface);
+  color: var(--bbva-danger);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
 .table-wrap {
   width: 100%;
   max-width: 100%;
@@ -1562,6 +1603,17 @@ textarea::placeholder {
 .issue-table-assignee {
   color: var(--bbva-text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.issue-card-note {
+  margin: 0;
+  padding: 0.65rem 0.72rem;
+  border-left: 3px solid var(--bbva-primary);
+  border-radius: var(--bbva-radius-sm);
+  background: color-mix(in srgb, var(--bbva-primary) 8%, var(--bbva-surface));
+  color: var(--bbva-text);
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 
 .table-row-selected {
@@ -2163,6 +2215,78 @@ textarea::placeholder {
 .insight-detail-block[data-tone="neutral"] summary strong,
 .insight-detail-block[data-tone="neutral"] summary::after {
   color: var(--bbva-text);
+}
+
+.finalist-hero-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-color: color-mix(in srgb, var(--bbva-danger) 24%, var(--bbva-border));
+}
+
+.finalist-summary-title a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.finalist-discrepancy-block summary {
+  align-items: center;
+}
+
+.finalist-summary-main {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 1 1 auto;
+}
+
+.finalist-summary-side {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.finalist-helix-description {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+  margin-top: 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--bbva-success) 18%, var(--bbva-border));
+  border-radius: var(--bbva-radius-sm);
+  background: color-mix(in srgb, var(--bbva-success) 6%, var(--bbva-surface));
+}
+
+.finalist-helix-description > span {
+  color: var(--bbva-success);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+}
+
+.finalist-helix-description p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--bbva-text);
+  line-height: 1.45;
+}
+
+.finalist-helix-chip {
+  border-color: color-mix(in srgb, var(--bbva-success) 32%, var(--bbva-border));
+  background: color-mix(in srgb, var(--bbva-success) 11%, var(--bbva-surface));
+  color: var(--bbva-success);
+}
+
+.finalist-issues-table .simple-table-head,
+.finalist-issues-table .simple-table-row {
+  grid-template-columns: 8.5rem minmax(220px, 1.8fr) minmax(130px, 0.9fr) minmax(110px, 0.75fr) minmax(140px, 0.85fr) 4.6rem;
 }
 
 .detail-actions-row {

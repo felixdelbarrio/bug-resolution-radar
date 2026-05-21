@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 from time import monotonic
@@ -22,6 +22,11 @@ from bug_resolution_radar.analytics.filtering import (
     apply_filters,
     normalize_filter_tokens,
     open_only,
+)
+from bug_resolution_radar.analytics.finalist_discrepancies import (
+    apply_effective_finalist_country_mode,
+    build_finalist_status_discrepancies,
+    is_country_finalist_status_mode,
 )
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
@@ -86,6 +91,7 @@ from bug_resolution_radar.services.insights_learning_store import (
     default_learning_path,
     learning_scope_key,
 )
+from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.services.workspace import WorkspaceSelection, apply_workspace_source_scope
 from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT
 from bug_resolution_radar.theme.plotly_style import apply_plotly_bbva
@@ -802,12 +808,23 @@ class DashboardScopeContext:
     open_df: pd.DataFrame
     source_ids: tuple[str, ...]
     kpis: dict[str, Any]
+    finalist_discrepancies: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
     df = load_issues_df(settings.DATA_PATH)
     scoped_df = apply_workspace_source_scope(df, settings=settings, selection=query.workspace)
     return apply_analysis_depth_filter(scoped_df, settings=settings)
+
+
+def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
+    df = load_issues_df(settings.DATA_PATH)
+    if df.empty:
+        return df
+    country_txt = str(country or "").strip()
+    if country_txt and "country" in df.columns:
+        df = df.loc[df["country"].fillna("").astype(str).eq(country_txt)].copy(deep=False)
+    return apply_analysis_depth_filter(df, settings=settings)
 
 
 def _data_revision_key(settings: Settings) -> tuple[str, int, int]:
@@ -839,6 +856,7 @@ def _scope_context_cache_key(
         tuple(str(item or "").strip() for item in list(query.issue_scope_keys or [])),
         str(query.issue_sort_col or "").strip(),
         str(query.issue_like_query or "").strip(),
+        str(getattr(settings, "FINALIST_STATUS_ANALYSIS_MODE", "") or "").strip().lower(),
     )
 
 
@@ -850,8 +868,23 @@ def _build_scope_context(
     include_timeseries_chart: bool,
 ) -> DashboardScopeContext:
     scoped_df = load_workspace_dataframe(settings, query=query)
-    dff = apply_filters(scoped_df, query.filters)
     source_ids = tuple(_active_source_ids(scoped_df, query=query))
+    country_df = load_country_dataframe(settings, country=query.workspace.country)
+    reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
+    finalist_discrepancies = build_finalist_status_discrepancies(
+        country_df if not country_df.empty else scoped_df,
+        settings=settings,
+        country=str(query.workspace.country or "").strip(),
+        source_ids=source_ids,
+        reference_day=reference_day,
+    )
+    if is_country_finalist_status_mode(settings) and not finalist_discrepancies.empty:
+        scoped_df = apply_effective_finalist_country_mode(
+            scoped_df,
+            discrepancies=finalist_discrepancies,
+            reference_window=reference_day,
+        )
+    dff = apply_filters(scoped_df, query.filters)
     dff = apply_dashboard_issue_scope(
         dff,
         settings=settings,
@@ -878,6 +911,7 @@ def _build_scope_context(
         open_df=open_df,
         source_ids=source_ids,
         kpis=dict(kpis or {}),
+        finalist_discrepancies=finalist_discrepancies,
     )
 
 
@@ -922,6 +956,7 @@ def _context_with_requested_kpis(
         open_df=context.open_df,
         source_ids=context.source_ids,
         kpis=dict(kpis or {}),
+        finalist_discrepancies=context.finalist_discrepancies,
     )
 
 
@@ -1085,6 +1120,19 @@ def build_issue_rows(
     for column in columns:
         if column not in page.columns:
             page[column] = ""
+    try:
+        notes_store = NotesStore(Path(settings.NOTES_PATH))
+        notes_store.load()
+        page["note"] = (
+            page["key"]
+            .fillna("")
+            .astype(str)
+            .map(lambda key: notes_store.get(str(key or "").strip()) or "")
+        )
+    except Exception:
+        page["note"] = ""
+    if "note" not in columns:
+        columns.append("note")
     for column in ("created", "updated", "resolved"):
         if column in page.columns:
             page[column] = page[column].astype(str).replace({"NaT": "", "nan": ""})
@@ -1101,6 +1149,7 @@ def build_issue_rows(
         "source_id",
         "country",
         "url",
+        "note",
     ):
         if column in page.columns:
             page[column] = page[column].fillna("").astype(str)
@@ -1889,10 +1938,10 @@ def _build_period_summary_payload(
                 "items": _issue_records_from_df(groups.new_now, limit=20),
             },
             {
-                "label": "Creadas en el mes actual",
+                "label": QUINCENAL_SCOPE_CREATED_MONTH,
                 "count": int(summary.new_accumulated),
-                "helpText": "mes actual",
-                "tone": _period_tone("Creadas en el mes actual"),
+                "helpText": "quincena actual + anterior",
+                "tone": _period_tone(QUINCENAL_SCOPE_CREATED_MONTH),
                 "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_MONTH,
                 "issueKeys": _issue_keys(groups.new_accumulated),
                 "items": _issue_records_from_df(groups.new_accumulated, limit=20),
@@ -2360,6 +2409,131 @@ def _build_ops_health_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _finalist_helix_text(row: pd.Series) -> str:
+    parts: list[str] = []
+    helix_id = str(row.get("helix_id", "") or "").strip().upper()
+    for column in ("helix_summary", "helix_description"):
+        value = str(row.get(column, "") or "").strip()
+        if value.upper() == helix_id:
+            continue
+        if value and value not in parts:
+            parts.append(value)
+    return "\n".join(parts) if parts else "Sin descripción Helix"
+
+
+def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[str, Any]:
+    safe = discrepancies if isinstance(discrepancies, pd.DataFrame) else pd.DataFrame()
+    if safe.empty:
+        return {
+            "kpis": [
+                {"label": "Helix finalistas con JIRA abierto", "value": "0", "detail": ""},
+                {"label": "JIRAs afectados", "value": "0", "detail": ""},
+                {"label": "IDs Helix únicos", "value": "0", "detail": ""},
+                {"label": "Días abiertos JIRA", "value": "0 / 0", "detail": "promedio / máximo"},
+            ],
+            "groups": [],
+            "totalRows": 0,
+            "truncated": False,
+        }
+
+    work = safe.copy(deep=False)
+    for column in (
+        "helix_id",
+        "helix_url",
+        "helix_summary",
+        "helix_description",
+        "helix_status",
+        "jira_key",
+        "jira_summary",
+        "jira_status",
+        "jira_priority",
+        "jira_assignee",
+        "jira_url",
+        "source_alias",
+    ):
+        if column not in work.columns:
+            work[column] = ""
+        work[column] = work[column].fillna("").astype(str)
+    if "jira_open_days" in work.columns:
+        work["jira_open_days"] = pd.to_numeric(work["jira_open_days"], errors="coerce").fillna(0.0)
+    else:
+        work["jira_open_days"] = 0.0
+
+    work["__priority_rank"] = work["jira_priority"].map(priority_rank).fillna(99)
+    work = work.sort_values(
+        by=["__priority_rank", "jira_open_days", "jira_status", "helix_id", "jira_key"],
+        ascending=[True, False, True, True, True],
+        kind="mergesort",
+    )
+    work = work.drop_duplicates(subset=["helix_id", "jira_key"], keep="first")
+
+    unique_helix = int(work["helix_id"].replace("", pd.NA).dropna().nunique())
+    unique_jira = int(work["jira_key"].replace("", pd.NA).dropna().nunique())
+    avg_days = float(work["jira_open_days"].mean()) if len(work) else 0.0
+    max_days = float(work["jira_open_days"].max()) if len(work) else 0.0
+
+    groups: list[dict[str, Any]] = []
+    max_groups = 120
+    for idx, (helix_id, bucket) in enumerate(work.groupby("helix_id", sort=False), start=1):
+        if idx > max_groups:
+            break
+        first = bucket.iloc[0]
+        issues: list[dict[str, Any]] = []
+        for _, row in bucket.head(40).iterrows():
+            issues.append(
+                {
+                    "key": str(row.get("jira_key", "") or ""),
+                    "summary": str(row.get("jira_summary", "") or ""),
+                    "status": str(row.get("jira_status", "") or ""),
+                    "priority": str(row.get("jira_priority", "") or ""),
+                    "assignee": str(row.get("jira_assignee", "") or ""),
+                    "url": str(row.get("jira_url", "") or ""),
+                    "sourceAlias": str(row.get("source_alias", "") or ""),
+                    "openDays": float(row.get("jira_open_days", 0.0) or 0.0),
+                }
+            )
+        groups.append(
+            {
+                "helixId": str(helix_id or ""),
+                "helixUrl": str(first.get("helix_url", "") or ""),
+                "helixStatus": str(first.get("helix_status", "") or ""),
+                "helixSummary": str(first.get("helix_summary", "") or ""),
+                "helixDescription": str(first.get("helix_description", "") or ""),
+                "helixText": _finalist_helix_text(first),
+                "jiraCount": int(len(bucket)),
+                "issues": issues,
+            }
+        )
+
+    return {
+        "kpis": [
+            {
+                "label": "Helix finalistas con JIRA abierto",
+                "value": f"{unique_helix:,}",
+                "detail": "Cruces detectados por ID Helix",
+            },
+            {
+                "label": "JIRAs afectados",
+                "value": f"{unique_jira:,}",
+                "detail": "Backlog pendiente en JIRA",
+            },
+            {
+                "label": "IDs Helix únicos",
+                "value": f"{unique_helix:,}",
+                "detail": "Incidencias finalistas",
+            },
+            {
+                "label": "Días abiertos JIRA",
+                "value": f"{avg_days:.0f} / {max_days:.0f}",
+                "detail": "promedio / máximo",
+            },
+        ],
+        "groups": groups,
+        "totalRows": int(len(work)),
+        "truncated": bool(work["helix_id"].nunique() > max_groups),
+    }
+
+
 def _build_functionality_followup_payload(
     *,
     settings: Settings,
@@ -2452,6 +2626,7 @@ def build_intelligence_snapshot(
         apply_default_status_when_empty=not bool(insights_status_manual),
     )
     duplicates = _build_duplicates_payload(dff_quincenal)
+    finalist_discrepancies = _build_finalist_discrepancies_payload(context.finalist_discrepancies)
     people = _build_people_payload(dff_quincenal)
     ops_health = _build_ops_health_payload(dff_quincenal)
     return {
@@ -2459,6 +2634,7 @@ def build_intelligence_snapshot(
             {"id": "summary", "label": "Resumen quincenal"},
             {"id": "functionality", "label": "Por funcionalidad"},
             {"id": "duplicates", "label": "Duplicados"},
+            {"id": "finalistDiscrepancies", "label": "Discrepancias finalistas"},
             {"id": "people", "label": "Personas"},
             {"id": "opsHealth", "label": "Salud operativa"},
         ],
@@ -2470,6 +2646,7 @@ def build_intelligence_snapshot(
         ),
         "functionality": functionality,
         "duplicates": duplicates,
+        "finalistDiscrepancies": finalist_discrepancies,
         "people": people,
         "opsHealth": ops_health,
     }

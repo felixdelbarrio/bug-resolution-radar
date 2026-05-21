@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from bug_resolution_radar.analytics.quincenal_scope import (
     QUINCENAL_SCOPE_ALL,
     quincenal_scope_options,
 )
+from bug_resolution_radar.common.issue_links import normalize_helix_id, normalize_jira_key
 from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
@@ -59,6 +61,7 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_kanban_columns,
     build_trend_detail,
+    load_scope_context,
 )
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
@@ -74,6 +77,7 @@ from bug_resolution_radar.services.ingest_contracts import (
 )
 from bug_resolution_radar.services.ingest_runner import run_helix_ingest, run_jira_ingest
 from bug_resolution_radar.services.issue_workbook_export import (
+    build_finalist_discrepancies_workbook_export,
     build_issue_export_frame,
     build_issue_workbook_export,
 )
@@ -104,6 +108,8 @@ from bug_resolution_radar.services.workspace import (
 )
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
 from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -526,6 +532,59 @@ def _notes_payload(settings: Settings, *, issue_key: str = "") -> dict[str, Any]
     }
 
 
+def _normalize_note_issue_key(issue_key: str) -> str:
+    raw = str(issue_key or "").strip().upper()
+    normalized = normalize_jira_key(raw) or normalize_helix_id(raw)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Issue debe tener formato JIRA o Helix válido.")
+    return normalized
+
+
+def _notes_list_payload(
+    settings: Settings, *, query: DashboardQuery | None = None
+) -> dict[str, Any]:
+    store = _notes_store(settings)
+    issue_meta: dict[str, dict[str, Any]] = {}
+    if query is not None:
+        try:
+            context = load_scope_context(settings, query=query)
+            dff = context.dff.copy(deep=False)
+        except Exception:
+            dff = pd.DataFrame()
+    else:
+        try:
+            dff = load_issues_df(settings.DATA_PATH)
+        except Exception:
+            dff = pd.DataFrame()
+    if isinstance(dff, pd.DataFrame) and not dff.empty and "key" in dff.columns:
+        for _, row in dff.iterrows():
+            key = str(row.get("key", "") or "").strip().upper()
+            if not key or key in issue_meta:
+                continue
+            issue_meta[key] = {
+                "key": key,
+                "summary": str(row.get("summary", "") or "").strip(),
+                "status": str(row.get("status", "") or "").strip(),
+                "priority": str(row.get("priority", "") or "").strip(),
+                "assignee": str(row.get("assignee", "") or "").strip(),
+                "url": str(row.get("url", "") or "").strip(),
+                "source_type": str(row.get("source_type", "") or "").strip(),
+                "source_alias": str(row.get("source_alias", "") or "").strip(),
+            }
+    rows: list[dict[str, Any]] = []
+    for key, note in store.items():
+        meta = issue_meta.get(str(key or "").strip().upper(), {})
+        rows.append(
+            {
+                "issueKey": key,
+                "note": note,
+                "issue": meta,
+                "enriched": bool(meta),
+            }
+        )
+    return {"total": len(rows), "rows": rows}
+
+
 def _download_headers(filename: str) -> dict[str, str]:
     return {"Content-Disposition": f'attachment; filename="{filename}"'}
 
@@ -546,6 +605,13 @@ def _issue_workbook_export_bytes(
             query=query,
             helix_only=helix_only,
         ).content
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _finalist_discrepancies_export_bytes(settings: Settings, *, query: DashboardQuery) -> bytes:
+    try:
+        return build_finalist_discrepancies_workbook_export(settings, query=query).content
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1047,6 +1113,62 @@ def create_app() -> FastAPI:
         export_path = save_download_content(settings, file_name=filename, content=content)
         return _saved_file_payload(export_path, file_name=filename)
 
+    @app.get("/api/issues/export/finalist-discrepancies")
+    def issues_export_finalist_discrepancies(
+        country: str = "",
+        sourceId: str = "",
+        scopeMode: str = "source",
+        status: str = "",
+        priority: str = "",
+        assignee: str = "",
+        quincenalScope: str = QUINCENAL_SCOPE_ALL,
+        issueKeys: str = "",
+        issueSortCol: str = "",
+        issueLikeQuery: str = "",
+    ) -> Response:
+        settings = load_settings()
+        query = _dashboard_query(
+            country=country,
+            source_id=sourceId,
+            scope_mode=scopeMode,
+            status=status,
+            priority=priority,
+            assignee=assignee,
+            quincenal_scope=quincenalScope,
+            issue_keys=issueKeys,
+            issue_sort_col=issueSortCol,
+            issue_like_query=issueLikeQuery,
+        )
+        content = _finalist_discrepancies_export_bytes(settings, query=query)
+        filename = download_filename("discrepancias_finalistas", ext="xlsx")
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=_download_headers(filename),
+        )
+
+    @app.post("/api/issues/export/finalist-discrepancies/save")
+    def issues_export_finalist_discrepancies_save(
+        payload: DashboardExportSaveRequest,
+    ) -> dict[str, Any]:
+        settings = load_settings()
+        query = _dashboard_query(
+            country=payload.country,
+            source_id=payload.sourceId,
+            scope_mode=payload.scopeMode,
+            status=_csv_join(payload.status),
+            priority=_csv_join(payload.priority),
+            assignee=_csv_join(payload.assignee),
+            quincenal_scope=payload.quincenalScope,
+            issue_keys=_csv_join(payload.issueKeys),
+            issue_sort_col=payload.issueSortCol,
+            issue_like_query=payload.issueLikeQuery,
+        )
+        content = _finalist_discrepancies_export_bytes(settings, query=query)
+        filename = download_filename("discrepancias_finalistas", ext="xlsx")
+        export_path = save_download_content(settings, file_name=filename, content=content)
+        return _saved_file_payload(export_path, file_name=filename)
+
     @app.get("/api/kanban")
     def kanban(
         country: str = "",
@@ -1075,18 +1197,79 @@ def create_app() -> FastAPI:
         )
         return build_kanban_columns(settings, query=query)
 
+    @app.get("/api/notes")
+    def list_notes(
+        country: str = "",
+        sourceId: str = "",
+        scopeMode: str = "source",
+        status: str = "",
+        priority: str = "",
+        assignee: str = "",
+        quincenalScope: str = QUINCENAL_SCOPE_ALL,
+        issueKeys: str = "",
+        issueSortCol: str = "",
+        issueLikeQuery: str = "",
+    ) -> dict[str, Any]:
+        settings = load_settings()
+        query = None
+        if str(country or "").strip():
+            query = _dashboard_query(
+                country=country,
+                source_id=sourceId,
+                scope_mode=scopeMode,
+                status=status,
+                priority=priority,
+                assignee=assignee,
+                quincenal_scope=quincenalScope,
+                issue_keys=issueKeys,
+                issue_sort_col=issueSortCol,
+                issue_like_query=issueLikeQuery,
+            )
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": "", "notes_action": "list"},
+        )
+        return _notes_list_payload(settings, query=query)
+
     @app.get("/api/notes/{issue_key}")
     def get_note(issue_key: str) -> dict[str, Any]:
         settings = load_settings()
-        return _notes_payload(settings, issue_key=issue_key)
+        clean_key = _normalize_note_issue_key(issue_key)
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": clean_key, "notes_action": "get"},
+        )
+        return _notes_payload(settings, issue_key=clean_key)
 
     @app.put("/api/notes/{issue_key}")
     def put_note(issue_key: str, payload: NoteRequest) -> dict[str, Any]:
         settings = load_settings()
+        clean_key = _normalize_note_issue_key(issue_key)
         store = _notes_store(settings)
-        store.set(str(issue_key or "").strip(), str(payload.note or ""))
+        note_text = str(payload.note or "").strip()
+        store.set(clean_key, note_text)
         store.save()
-        return _notes_payload(settings, issue_key=issue_key)
+        LOGGER.info(
+            "notes_action",
+            extra={
+                "notes_issue": clean_key,
+                "notes_action": "delete" if not note_text else "save",
+            },
+        )
+        return _notes_payload(settings, issue_key=clean_key)
+
+    @app.delete("/api/notes/{issue_key}")
+    def delete_note(issue_key: str) -> dict[str, Any]:
+        settings = load_settings()
+        clean_key = _normalize_note_issue_key(issue_key)
+        store = _notes_store(settings)
+        store.delete(clean_key)
+        store.save()
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": clean_key, "notes_action": "delete"},
+        )
+        return _notes_payload(settings, issue_key=clean_key)
 
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:

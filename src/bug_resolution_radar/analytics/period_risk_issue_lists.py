@@ -9,7 +9,11 @@ from typing import Sequence
 import pandas as pd
 
 from bug_resolution_radar.analytics.insights import classify_theme
-from bug_resolution_radar.analytics.issues import priority_rank, status_progress_rank
+from bug_resolution_radar.analytics.issues import (
+    normalize_text_col,
+    priority_rank,
+    status_progress_rank,
+)
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 from bug_resolution_radar.analytics.topic_expandable_summary import infer_root_cause_label
 
@@ -19,6 +23,7 @@ class PeriodRiskIssueRow:
     key: str
     summary: str
     functionality: str
+    assignee: str
     status: str
     priority: str
     open_days: int
@@ -167,6 +172,15 @@ def _prepare_open_issue_frame(
         work["__status_rank"] = work["status"].map(status_progress_rank)
     else:
         work["__status_rank"] = 99
+    if "assignee" in work.columns:
+        work["__assignee"] = (
+            normalize_text_col(work["assignee"], "(sin asignar)")
+            .astype(str)
+            .str.strip()
+            .replace("", "(sin asignar)")
+        )
+    else:
+        work["__assignee"] = "(sin asignar)"
     return work.loc[work["__issue_key"].ne("")].copy(deep=False)
 
 
@@ -181,6 +195,8 @@ def _rows_from_prepared(df: pd.DataFrame) -> tuple[PeriodRiskIssueRow, ...]:
                 key=str(row.get("__issue_key", "") or "").strip(),
                 summary=str(row.get("summary", "") or "").strip(),
                 functionality=_display_functionality(row),
+                assignee=str(row.get("__assignee", "(sin asignar)") or "").strip()
+                or "(sin asignar)",
                 status=str(row.get("status", "") or "").strip(),
                 priority=str(row.get("priority", "") or "").strip(),
                 open_days=int(round(float(row.get("__open_days", 0.0) or 0.0))),

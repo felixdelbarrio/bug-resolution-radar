@@ -1,10 +1,20 @@
 import { useState, type CSSProperties } from "react";
-import type { IntelligencePayload, IssueRecord } from "../lib/api";
+import {
+  postJson,
+  type IntelligencePayload,
+  type IssueRecord,
+  type SavedFilePayload
+} from "../lib/api";
 import {
   neutralChipStyle,
   semanticChipStyle
 } from "../lib/semanticColors";
 import { cn } from "../lib/cn";
+import {
+  buildHelixIssueUrl,
+  buildJiraIssueUrl,
+  linkifyIssueReferences
+} from "../lib/issueLinks";
 import { ChartFigure } from "./ChartFigure";
 
 type InsightsPanelProps = {
@@ -14,6 +24,7 @@ type InsightsPanelProps = {
     insightsViewMode: string;
     insightsStatusManual: string;
   };
+  queryParams: Record<string, string | string[] | boolean | number>;
   onChange: (patch: Record<string, string | string[]>) => void;
   onOpenIssue: (row: IssueRecord) => Promise<void>;
 };
@@ -213,9 +224,187 @@ function formatTopicPercentage(pct: number) {
   }).format(Number.isFinite(pct) ? pct : 0)}%`;
 }
 
+function finalistIssueToRecord(
+  issue: IntelligencePayload["finalistDiscrepancies"]["groups"][number]["issues"][number]
+): IssueRecord {
+  return {
+    key: issue.key,
+    summary: issue.summary,
+    description: "",
+    status: issue.status,
+    priority: issue.priority,
+    assignee: issue.assignee,
+    created: "",
+    updated: "",
+    resolved: "",
+    url: issue.url,
+    source_alias: issue.sourceAlias,
+    source_type: "jira",
+    ageDays: Number.isFinite(issue.openDays) ? issue.openDays : 0
+  };
+}
+
+function FinalistDiscrepanciesPanel({
+  data,
+  queryParams,
+  onOpenIssue
+}: {
+  data: IntelligencePayload["finalistDiscrepancies"];
+  queryParams: Record<string, string | string[] | boolean | number>;
+  onOpenIssue: (row: IssueRecord) => Promise<void>;
+}) {
+  const [downloadState, setDownloadState] = useState<"saving" | null>(null);
+  const [feedback, setFeedback] = useState<string>("");
+  const groups = data.groups;
+
+  async function handleDownload() {
+    try {
+      setFeedback("");
+      setDownloadState("saving");
+      const saved = await postJson<SavedFilePayload>(
+        "/api/issues/export/finalist-discrepancies/save",
+        {
+          ...queryParams,
+          format: "xlsx"
+        }
+      );
+      setFeedback(`Excel guardado: ${saved.fileName}`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "No se pudo guardar el Excel.");
+    } finally {
+      setDownloadState(null);
+    }
+  }
+
+  return (
+    <section className="page-stack">
+      <section className="surface-panel finalist-hero-panel">
+        <div>
+          <p className="section-kicker">Helix cerrado / JIRA pendiente</p>
+          <h3>Impacto en backlog por estados finalistas</h3>
+        </div>
+        <button
+          type="button"
+          className="action-button"
+          disabled={downloadState === "saving"}
+          onClick={() => void handleDownload()}
+        >
+          {downloadState === "saving" ? "Guardando..." : "Excel"}
+        </button>
+      </section>
+
+      {feedback ? <p className="inline-caption">{feedback}</p> : null}
+      {data.truncated ? (
+        <p className="inline-caption">
+          Resultado limitado para mantener el panel ágil. Usa el Excel para el detalle completo.
+        </p>
+      ) : null}
+
+      <div className="ops-kpi-grid-react">
+        {data.kpis.map((kpi) => (
+          <article className="mini-kpi-card" data-tone="risk" key={kpi.label}>
+            <span>{kpi.label}</span>
+            <strong>{kpi.value}</strong>
+            <small>{kpi.detail}</small>
+          </article>
+        ))}
+      </div>
+
+      {groups.length === 0 ? (
+        <section className="surface-panel empty-panel">
+          <h3>Sin discrepancias finalistas</h3>
+          <p>No hay Helix finalistas con JIRA pendiente para la selección actual.</p>
+        </section>
+      ) : null}
+
+      {groups.map((group) => {
+        const helixUrl = buildHelixIssueUrl(group.helixId, group.helixUrl);
+        return (
+          <details
+            className="insight-detail-block finalist-discrepancy-block"
+            data-tone="flow"
+            key={group.helixId}
+          >
+          <summary>
+            <span className="finalist-summary-main">
+              <span className="finalist-summary-title">
+                {helixUrl ? (
+                  <a href={helixUrl} target="_blank" rel="noopener noreferrer">
+                    {group.helixId}
+                  </a>
+                ) : (
+                  group.helixId
+                )}
+              </span>
+              <span className="issue-chip finalist-helix-chip">
+                Helix: {group.helixStatus || "(sin estado)"}
+              </span>
+            </span>
+            <span className="finalist-summary-side">
+              <strong>{group.jiraCount} JIRA</strong>
+            </span>
+          </summary>
+          <div className="finalist-helix-description">
+            <span>Helix</span>
+            <p>
+              {linkifyIssueReferences(group.helixText || "Sin descripción Helix", {
+                helixUrls: { [group.helixId]: group.helixUrl },
+                className: "issue-inline-link"
+              })}
+            </p>
+          </div>
+          <div className="simple-table finalist-issues-table">
+            <div className="simple-table-head">
+              <span>JIRA</span>
+              <span>Resumen</span>
+              <span>Estado</span>
+              <span>Prioridad</span>
+              <span>Responsable</span>
+              <span>Días</span>
+            </div>
+            {group.issues.map((issue) => (
+              <div className="simple-table-row" key={`${group.helixId}-${issue.key}`}>
+                {buildJiraIssueUrl(issue.key, issue.url) ? (
+                  <a
+                    className="issue-inline-link"
+                    href={buildJiraIssueUrl(issue.key, issue.url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {issue.key}
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="issue-inline-link issue-key-anchor-button"
+                    onClick={() => void onOpenIssue(finalistIssueToRecord(issue))}
+                  >
+                    {issue.key}
+                  </button>
+                )}
+                <span>{issue.summary || "Sin título"}</span>
+                <span className="issue-chip" style={semanticChipStyle(issue.status, "status")}>
+                  JIRA: {issue.status || "—"}
+                </span>
+                <span className="issue-chip" style={semanticChipStyle(issue.priority, "priority")}>
+                  {issue.priority || "—"}
+                </span>
+                <span>{issue.assignee || "—"}</span>
+                <span>{Math.round(issue.openDays || 0)}d</span>
+              </div>
+            ))}
+          </div>
+        </details>
+        );
+      })}
+    </section>
+  );
+}
+
 export function InsightsPanel({
   data,
   params,
+  queryParams,
   onChange,
   onOpenIssue
 }: InsightsPanelProps) {
@@ -533,6 +722,14 @@ export function InsightsPanel({
                 </details>
               )))}
         </section>
+      ) : null}
+
+      {activeTab === "finalistDiscrepancies" ? (
+        <FinalistDiscrepanciesPanel
+          data={data.finalistDiscrepancies}
+          queryParams={queryParams}
+          onOpenIssue={onOpenIssue}
+        />
       ) : null}
 
       {activeTab === "people" ? (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -53,7 +54,7 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
         OPEN_ISSUES_FOCUS_MODE="maestras",
     )
 
-    now = pd.Timestamp("2026-03-15T00:00:00+00:00")
+    now = pd.Timestamp("2026-03-12T00:00:00+00:00")
     df = pd.DataFrame(
         [
             {
@@ -146,7 +147,7 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
     assert summary.new_now == 2
     assert summary.new_before == 3
     assert summary.closed_now == 1
-    assert summary.new_accumulated == 2
+    assert summary.new_accumulated == 5
     assert summary.resolution_days_now is not None
     assert int(round(summary.resolution_days_now)) == 19
     assert summary.resolution_days_min_now is not None
@@ -213,7 +214,7 @@ def test_build_country_quincenal_result_defaults_to_high_criticality_focus() -> 
     assert summary.open_other_total == 1
 
 
-def test_build_country_quincenal_result_uses_natural_month_fortnight_by_default() -> None:
+def test_build_country_quincenal_result_uses_current_partial_fortnight_by_default() -> None:
     ref_day = pd.Timestamp("2026-03-26T00:00:00+00:00")
     settings = Settings(
         QUINCENA_LAST_FINISHED_ONLY="false",
@@ -255,10 +256,10 @@ def test_build_country_quincenal_result_uses_natural_month_fortnight_by_default(
     )
 
     window = result.aggregate.summary.window
-    assert window.current_start == pd.Timestamp("2026-03-16")
-    assert window.current_end == pd.Timestamp("2026-03-31")
-    assert window.previous_start == pd.Timestamp("2026-03-01")
-    assert window.previous_end == pd.Timestamp("2026-03-15")
+    assert window.current_start == date(2026, 3, 15)
+    assert window.current_end == date(2026, 3, 26)
+    assert window.previous_start == date(2026, 3, 1)
+    assert window.previous_end == date(2026, 3, 14)
     assert result.aggregate.summary.new_now == 1
     assert result.aggregate.summary.new_before == 1
 
@@ -272,17 +273,6 @@ def test_build_country_quincenal_result_uses_last_finished_when_enabled() -> Non
     df = pd.DataFrame(
         [
             {
-                "key": "A-1",
-                "summary": "Primera quincena mes actual",
-                "status": "New",
-                "created": "2026-03-10T00:00:00+00:00",
-                "updated": "2026-03-10T00:00:00+00:00",
-                "resolved": None,
-                "country": "México",
-                "source_id": "jira:mexico:core",
-                "source_type": "jira",
-            },
-            {
                 "key": "A-2",
                 "summary": "Segunda quincena mes actual",
                 "status": "New",
@@ -295,6 +285,17 @@ def test_build_country_quincenal_result_uses_last_finished_when_enabled() -> Non
             },
             {
                 "key": "A-3",
+                "summary": "Primera quincena mes actual",
+                "status": "New",
+                "created": "2026-03-10T00:00:00+00:00",
+                "updated": "2026-03-10T00:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:core",
+                "source_type": "jira",
+            },
+            {
+                "key": "A-4",
                 "summary": "Segunda quincena mes previo",
                 "status": "New",
                 "created": "2026-02-20T00:00:00+00:00",
@@ -316,15 +317,21 @@ def test_build_country_quincenal_result_uses_last_finished_when_enabled() -> Non
     )
 
     window = result.aggregate.summary.window
-    assert window.current_start == pd.Timestamp("2026-03-01")
-    assert window.current_end == pd.Timestamp("2026-03-15")
-    assert window.previous_start == pd.Timestamp("2026-02-16")
-    assert window.previous_end == pd.Timestamp("2026-02-28")
+    assert window.current_start == date(2026, 3, 1)
+    assert window.current_end == date(2026, 3, 14)
+    assert window.previous_start == date(2026, 2, 15)
+    assert window.previous_end == date(2026, 2, 28)
     assert result.aggregate.summary.new_now == 1
     assert result.aggregate.summary.new_before == 1
 
 
-def test_build_country_quincenal_result_infers_reference_day_from_scoped_data() -> None:
+def test_build_country_quincenal_result_defaults_reference_day_to_service_today(
+    monkeypatch: object,
+) -> None:
+    monkeypatch.setattr(
+        "bug_resolution_radar.analytics.period_summary.TimeWindowService.today",
+        lambda self: pd.Timestamp("2026-03-12"),
+    )
     settings = Settings(
         QUINCENA_LAST_FINISHED_ONLY="false",
         JIRA_SOURCES_JSON='[{"country":"México","alias":"Core","jql":"project = CORE"}]',
@@ -364,8 +371,8 @@ def test_build_country_quincenal_result_infers_reference_day_from_scoped_data() 
     )
 
     window = result.aggregate.summary.window
-    assert window.current_start == pd.Timestamp("2026-03-16")
-    assert window.current_end == pd.Timestamp("2026-03-31")
+    assert window.current_start == date(2026, 3, 1)
+    assert window.current_end == date(2026, 3, 12)
 
 
 def test_build_country_quincenal_result_orders_open_focus_by_priority_then_status() -> None:

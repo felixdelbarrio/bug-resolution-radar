@@ -439,6 +439,10 @@ export function SettingsPage() {
   const analysisLookbackOptions = Array.from(
     new Set([1, 3, 6, 12, 18, 24, Number.parseInt(asText(values.ANALYSIS_LOOKBACK_MONTHS), 10) || 12])
   ).sort((left, right) => left - right);
+  const finalistAnalysisMode =
+    asText(values.FINALIST_STATUS_ANALYSIS_MODE || "selected_sources") === "country_finalist_status"
+      ? "country_finalist_status"
+      : "selected_sources";
 
   function setValue(key: string, next: string | number) {
     setDraft({
@@ -467,6 +471,7 @@ export function SettingsPage() {
       ["dashboard-issues"],
       ["dashboard-kanban"],
       ["dashboard-note-keys"],
+      ["dashboard-notes-list"],
       ["cache-inventory"]
     ].forEach((queryKey) => {
       void queryClient.invalidateQueries({ queryKey });
@@ -497,8 +502,15 @@ export function SettingsPage() {
         QUINCENA_LAST_FINISHED_ONLY: normalizeBool(values.QUINCENA_LAST_FINISHED_ONLY)
           ? "true"
           : "false",
+        FINALIST_STATUS_ANALYSIS_MODE: finalistAnalysisMode,
         PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED: normalizeBool(
           values.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED,
+          false
+        )
+          ? "true"
+          : "false",
+        PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED: normalizeBool(
+          values.PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED,
           false
         )
           ? "true"
@@ -779,6 +791,30 @@ export function SettingsPage() {
             </article>
 
             <article className="surface-card page-stack">
+              <h3>Modalidad del análisis</h3>
+              <div className="radio-stack">
+                <label className="radio-card">
+                  <input
+                    type="radio"
+                    checked={finalistAnalysisMode === "selected_sources"}
+                    onChange={() => setValue("FINALIST_STATUS_ANALYSIS_MODE", "selected_sources")}
+                  />
+                  <span>Considerar sólo orígenes seleccionados</span>
+                </label>
+                <label className="radio-card">
+                  <input
+                    type="radio"
+                    checked={finalistAnalysisMode === "country_finalist_status"}
+                    onChange={() =>
+                      setValue("FINALIST_STATUS_ANALYSIS_MODE", "country_finalist_status")
+                    }
+                  />
+                  <span>Considerar solo estados finalistas del país</span>
+                </label>
+              </div>
+            </article>
+
+            <article className="surface-card page-stack">
               <h3>Alcance quincenal</h3>
               <label className="checkbox-field checkbox-field-panel">
                 <input
@@ -852,6 +888,22 @@ export function SettingsPage() {
                 }
               />
               <span>Detalle Incidencias abiertas por funcionalidad</span>
+            </label>
+            <label className="checkbox-field checkbox-field-panel">
+              <input
+                type="checkbox"
+                checked={normalizeBool(
+                  values.PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED,
+                  false
+                )}
+                onChange={(event) =>
+                  setValue(
+                    "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED",
+                    event.target.checked ? "true" : "false"
+                  )
+                }
+              />
+              <span>Incluir informe de incidencias con discrepancias en estado finalista</span>
             </label>
             <div className="page-stack">
               <h4>Criterio de foco en abiertas</h4>

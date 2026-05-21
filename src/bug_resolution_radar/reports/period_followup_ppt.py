@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from copy import deepcopy
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Sequence, cast
+from uuid import uuid4
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -21,6 +23,10 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
+    FinalistDiscrepancyIssueRow,
+    build_finalist_discrepancy_issue_list,
+)
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
     build_theme_fortnight_trend,
@@ -53,10 +59,20 @@ from bug_resolution_radar.analytics.period_summary import (
     source_label_map,
 )
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
+from bug_resolution_radar.analytics.time_windows import TimeWindowService
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
+from bug_resolution_radar.common.issue_links import linkify_issue_references
 from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
+from bug_resolution_radar.reports.period_followup_layout import (
+    PERIOD_FOLLOWUP_LAYOUT,
+    KpiRow,
+    KpiSideMetric,
+    apply_text_frame_margins,
+    iter_out_of_viewport_shapes,
+    metric_card_typography,
+)
 from bug_resolution_radar.reports.pptx_native_tables import (
     ellipsize_text,
     native_column_widths,
@@ -88,6 +104,8 @@ from bug_resolution_radar.theme.design_tokens import (
 )
 from bug_resolution_radar.theme.semantic_colors import priority_color_map
 
+LOGGER = logging.getLogger(__name__)
+
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
 _FUNCTIONALITY_TEMPLATE_FILENAME = "Seguimiento de incidencias por funcionalidad.pptx"
@@ -102,10 +120,18 @@ _ISSUE_TABLE_FONT_NAME = "Arial"
 _ISSUE_TABLE_BODY_FONT_SIZE_PT = 9.2
 _ISSUE_TABLE_HEADER_FONT_SIZE_PT = 8.4
 _ISSUE_TABLE_COLUMN_WEIGHTS: tuple[float, ...] = (15.0, 33.0, 17.0, 13.0, 11.0, 11.0)
-_RISK_TABLE_HEADERS: tuple[str, ...] = (
+_FUNCTIONALITY_ISSUE_TABLE_HEADERS: tuple[str, ...] = (
     "ID",
     "Descripción",
     "Funcionalidad/\nCausa raíz",
+    "Estado",
+    "Criticidad",
+    "Días abierta",
+)
+_RISK_ASSIGNEE_TABLE_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Descripción",
+    "Responsable",
     "Estado",
     "Criticidad",
     "Días abierta",
@@ -149,6 +175,11 @@ _RISK_HIGH_PRIORITY_ORDER_NOTE = (
 _RISK_AGED_ORDER_NOTE = (
     "Detalle - TODAS las incidencias abiertas - ordenado por 1º : Días abierta, "
     "2º: Criticidad y 3º: Estado"
+)
+_FINALIST_DISCREPANCIES_TITLE = "Incidencias con discrepancias en estado finalista"
+_FINALIST_DISCREPANCIES_ORDER_NOTE = (
+    "Detalle - Helix en estado finalista y Jira pendiente - ordenado por 1º : Criticidad, "
+    "2º: Días abierta, 3º: Estado y 4º: Helix ID"
 )
 
 
@@ -663,30 +694,6 @@ def _premium_sentence_case(value: object) -> str:
     return clean
 
 
-def _set_paragraph_value_after_colon(
-    slide: Any, *, shape_index: int, paragraph_index: int, value: int
-) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None or not getattr(shape, "has_text_frame", False):
-        return
-    paragraphs = list(shape.text_frame.paragraphs)
-    if paragraph_index >= len(paragraphs):
-        return
-    paragraph = paragraphs[paragraph_index]
-    runs = list(paragraph.runs)
-    if not runs:
-        paragraph.add_run()
-        runs = list(paragraph.runs)
-    target = runs[1] if len(runs) > 1 else runs[0]
-    src = str(getattr(target, "text", "") or "")
-    trail_match = re.search(r"\s+$", src)
-    trailing = trail_match.group(0) if trail_match is not None else ""
-    target.text = f": {int(value)}{trailing}"
-    for run in runs[2:]:
-        run.text = ""
-    _set_shape_text_fit(shape)
-
-
 def _set_shape_font_size(
     slide: Any,
     *,
@@ -759,14 +766,102 @@ def _set_shape_font_name(
                 continue
 
 
-def _move_shape_off_canvas(slide: Any, *, shape_index: int) -> None:
-    shape = _shape_or_none(slide, shape_index)
-    if shape is None:
-        return
+def _remove_shape_indices(slide: Any, *shape_indices: int) -> None:
+    shapes: list[Any] = []
+    seen: set[int] = set()
+    for shape_index in shape_indices:
+        shape = _shape_or_none(slide, int(shape_index))
+        if shape is None:
+            continue
+        marker = id(shape)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        shapes.append(shape)
+    for shape in shapes:
+        _remove_shape(shape)
+
+
+def _remove_slide_number_artifacts(prs: Any) -> None:
+    """Drop inherited PowerPoint page-number fields such as ``p. 3``."""
+
+    def _remove_slide_number_nodes(element: Any) -> None:
+        try:
+            nodes = list(element.iter())
+        except Exception:
+            nodes = []
+        for node in nodes:
+            tag = str(getattr(node, "tag", "") or "")
+            if not tag.endswith("}sp"):
+                continue
+            try:
+                xml = str(node.xml)
+            except Exception:
+                xml = ""
+            if 'type="slidenum"' not in xml and "p. </a:t>" not in xml:
+                continue
+            try:
+                node.getparent().remove(node)
+            except Exception:
+                continue
+
+    collections: list[Any] = []
     try:
-        shape.left = -int(shape.width or 100000) - 50_000
+        collections.extend(list(prs.slides))
     except Exception:
+        pass
+    try:
+        collections.extend(list(prs.slide_layouts))
+    except Exception:
+        pass
+    try:
+        collections.extend(list(prs.slide_masters))
+    except Exception:
+        pass
+
+    for owner in collections:
+        for shape in list(getattr(owner, "shapes", [])):
+            try:
+                xml = str(shape.element.xml)
+            except Exception:
+                xml = ""
+            if 'type="slidenum"' in xml or ">p. <" in xml or "p. </a:t>" in xml:
+                _remove_shape(shape)
+        _remove_slide_number_nodes(getattr(owner, "element", None))
+
+    try:
+        parts = list(prs.part.package.iter_parts())
+    except Exception:
+        parts = []
+    for part in parts:
+        partname = str(getattr(part, "partname", "") or "")
+        if "/slideLayouts/" not in partname and "/slideMasters/" not in partname:
+            continue
+        _remove_slide_number_nodes(getattr(part, "_element", None))
+
+
+def validate_shapes_inside_slide(prs: Any) -> None:
+    slide_width = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
+    slide_height = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
+    offenders = list(
+        iter_out_of_viewport_shapes(
+            getattr(prs, "slides", []),
+            slide_width=slide_width,
+            slide_height=slide_height,
+        )
+    )
+    if not offenders:
         return
+    details: list[str] = []
+    for shape in offenders[:8]:
+        details.append(
+            "shape"
+            f"(left={int(getattr(shape, 'left', 0) or 0)}, "
+            f"top={int(getattr(shape, 'top', 0) or 0)}, "
+            f"width={int(getattr(shape, 'width', 0) or 0)}, "
+            f"height={int(getattr(shape, 'height', 0) or 0)})"
+        )
+    raise ValueError("El informe contiene shapes fuera del canvas: " + "; ".join(details))
 
 
 def _to_roman(value: int) -> str:
@@ -888,10 +983,44 @@ def _set_paragraph_value_label(
         label_run.font.name = str(label_font_name or _PPT_FONT_BODY_MEDIUM)
     except Exception:
         pass
-    label_run.font.bold = True
+    label_run.font.bold = False
     if color_rgb is not None:
         label_run.font.color.rgb = color_rgb
     paragraph.space_before = Pt(0)
+    paragraph.space_after = Pt(0)
+
+
+def _set_paragraph_kpi_side_metric(
+    paragraph: Any,
+    *,
+    metric: KpiSideMetric,
+    size_pt: float,
+    color_rgb: RGBColor | None = None,
+    space_before_pt: float = 0.0,
+) -> None:
+    paragraph.clear()
+    value_run = paragraph.add_run()
+    value_run.text = f"{str(metric.value_text or '').strip()} "
+    value_run.font.size = Pt(float(size_pt))
+    try:
+        value_run.font.name = _PPT_FONT_BODY_MEDIUM
+    except Exception:
+        pass
+    value_run.font.bold = True
+    if color_rgb is not None:
+        value_run.font.color.rgb = color_rgb
+
+    label_run = paragraph.add_run()
+    label_run.text = str(metric.label_text or "").strip()
+    label_run.font.size = Pt(float(size_pt))
+    try:
+        label_run.font.name = _PPT_FONT_BODY_MEDIUM
+    except Exception:
+        pass
+    label_run.font.bold = False
+    if color_rgb is not None:
+        label_run.font.color.rgb = color_rgb
+    paragraph.space_before = Pt(float(space_before_pt))
     paragraph.space_after = Pt(0)
 
 
@@ -978,22 +1107,35 @@ def _write_metric_card(
     value_text: str,
     label_text: str,
     extra_lines: Sequence[tuple[str, float, bool, bool, float]] | None = None,
-    value_size_pt: float = 25.0,
-    label_size_pt: float = 12.0,
+    value_size_pt: float | None = None,
+    label_size_pt: float | None = None,
     text_color_rgb: RGBColor | None = None,
 ) -> None:
     base_color = text_color_rgb if text_color_rgb is not None else RGBColor(0, 0, 0)
     tf = _shape_text_frame(slide, shape_index=shape_index)
     if tf is None:
         return
+    row = KpiRow(value_text=str(value_text or ""), label_text=str(label_text or ""))
+    typography = metric_card_typography(row.value_text, row.label_text)
+    resolved_value_size = (
+        float(value_size_pt) if value_size_pt is not None else typography.value_size_pt
+    )
+    resolved_label_size = (
+        float(label_size_pt) if label_size_pt is not None else typography.label_size_pt
+    )
+    apply_text_frame_margins(tf, margin_pt=0.0)
+    try:
+        tf.word_wrap = False
+    except Exception:
+        pass
     tf.clear()
     p0 = tf.paragraphs[0]
     _set_paragraph_value_label(
         p0,
-        value_text=str(value_text or ""),
-        label_text=str(label_text or ""),
-        value_size_pt=float(value_size_pt),
-        label_size_pt=float(label_size_pt),
+        value_text=row.value_text,
+        label_text=row.label_text,
+        value_size_pt=resolved_value_size,
+        label_size_pt=resolved_label_size,
         color_rgb=base_color,
     )
 
@@ -1018,8 +1160,9 @@ def _add_metric_split_column(
     top_value: int,
     bottom_label: str,
     bottom_value: int,
-    value_suffix: str = "",
+    value_unit: str = "",
     text_color_rgb: RGBColor | None = None,
+    detail_size_pt: float | None = None,
 ) -> None:
     card = _shape_or_none(slide, card_shape_index)
     if card is None:
@@ -1038,11 +1181,11 @@ def _add_metric_split_column(
     if width <= 0 or height <= 0:
         return
 
-    # Mirror the visual geometry of the "NUEVAS INCIDENCIAS" right column.
-    divider_left = left + int(width * 0.636)
-    divider_top = top + int(height * 0.094)
-    divider_height = int(height * 0.811)
-    divider_width = max(int(width * 0.0018), 1)
+    theme = PERIOD_FOLLOWUP_LAYOUT
+    divider_left = left + int(width * theme.split_column_ratio)
+    divider_top = top + int(height * theme.split_divider_top_ratio)
+    divider_height = int(height * theme.split_divider_height_ratio)
+    divider_width = max(int(width * theme.split_divider_width_ratio), 1)
 
     divider = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.RECTANGLE,
@@ -1055,10 +1198,12 @@ def _add_metric_split_column(
     divider.fill.fore_color.rgb = base_color
     divider.line.fill.background()
 
-    text_left = divider_left + int(width * 0.012)
-    text_top = top + int(height * 0.078)
-    text_width = max((left + width) - text_left - int(width * 0.040), 1)
-    text_height = int(height * 0.845)
+    text_left = divider_left + int(width * theme.split_column_padding_ratio)
+    text_top = top + int(height * theme.split_text_top_ratio)
+    text_width = max(
+        (left + width) - text_left - int(width * theme.split_column_right_padding_ratio), 1
+    )
+    text_height = int(height * theme.split_text_height_ratio)
     split_box = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
     tf = split_box.text_frame
     try:
@@ -1077,30 +1222,128 @@ def _add_metric_split_column(
     except Exception:
         pass
     tf.clear()
+    typography = metric_card_typography(top_value, f"{top_label} {bottom_label}")
+    resolved_detail_size = (
+        float(detail_size_pt) if detail_size_pt is not None else typography.detail_size_pt
+    )
+    unit = str(value_unit or "").strip()
+    top_metric = KpiSideMetric(
+        value_text=str(int(top_value)),
+        label_text=f"{unit} {str(top_label).strip()}".strip(),
+    )
+    bottom_metric = KpiSideMetric(
+        value_text=str(int(bottom_value)),
+        label_text=f"{unit} {str(bottom_label).strip()}".strip(),
+    )
 
     p0 = tf.paragraphs[0]
-    _set_paragraph_single_run(
+    _set_paragraph_kpi_side_metric(
         p0,
-        text=f"{str(top_label).strip()}: {int(top_value)}{str(value_suffix or '')}",
-        size_pt=12.0,
-        bold=True,
+        metric=top_metric,
+        size_pt=resolved_detail_size,
         color_rgb=base_color,
     )
     p1 = tf.add_paragraph()
-    _set_paragraph_single_run(
+    _set_paragraph_kpi_side_metric(
         p1,
-        text=f"{str(bottom_label).strip()}: {int(bottom_value)}{str(value_suffix or '')}",
-        size_pt=12.0,
-        bold=True,
+        metric=bottom_metric,
+        size_pt=resolved_detail_size,
         color_rgb=base_color,
-        space_before_pt=0.3,
+        space_before_pt=theme.split_metric_gap_pt,
     )
 
 
-def _align_delta_badges_with_new_card(slide: Any) -> None:
-    # Legacy template markers are replaced by single, explicit delta badges.
-    for marker_idx in (11, 14, 18):
-        _move_shape_off_canvas(slide, shape_index=marker_idx)
+def _write_created_total_column(
+    slide: Any,
+    *,
+    card_shape_index: int,
+    detail_shape_index: int,
+    divider_shape_index: int,
+    previous_range_label: str,
+    previous_value: int,
+    total_value: int,
+    text_color_rgb: RGBColor | None = None,
+) -> None:
+    card = _shape_or_none(slide, card_shape_index)
+    detail = _shape_or_none(slide, detail_shape_index)
+    divider = _shape_or_none(slide, divider_shape_index)
+    if card is None or detail is None or not getattr(detail, "has_text_frame", False):
+        return
+
+    base_color = (
+        text_color_rgb
+        if text_color_rgb is not None
+        else (_first_run_color_rgb(detail) or RGBColor(4, 19, 139))
+    )
+
+    left = int(card.left)
+    top = int(card.top)
+    width = int(card.width)
+    height = int(card.height)
+    theme = PERIOD_FOLLOWUP_LAYOUT
+    divider_left = left + int(width * theme.split_column_ratio)
+    divider_top = top + int(height * theme.split_divider_top_ratio)
+    divider_height = int(height * theme.split_divider_height_ratio)
+    divider_width = max(int(width * theme.split_divider_width_ratio), 1)
+
+    if divider is not None:
+        divider.left = divider_left
+        divider.top = divider_top
+        divider.width = divider_width
+        divider.height = divider_height
+        try:
+            divider.line.color.rgb = base_color
+        except Exception:
+            pass
+
+    text_left = divider_left + int(width * theme.split_column_padding_ratio)
+    detail.left = text_left
+    detail.top = top + int(height * theme.split_text_top_ratio)
+    detail.width = max(
+        (left + width) - text_left - int(width * theme.split_column_right_padding_ratio), 1
+    )
+    detail.height = int(height * theme.split_text_height_ratio)
+    tf = detail.text_frame
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    apply_text_frame_margins(tf, margin_pt=0.0)
+    try:
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    tf.clear()
+    typography = metric_card_typography(total_value, previous_range_label)
+    detail_size = typography.detail_size_pt
+
+    p0 = tf.paragraphs[0]
+    _set_paragraph_kpi_side_metric(
+        p0,
+        metric=KpiSideMetric(
+            value_text=str(int(previous_value)),
+            label_text=f"del {str(previous_range_label).strip()}",
+        ),
+        size_pt=detail_size,
+        color_rgb=base_color,
+    )
+    p1 = tf.add_paragraph()
+    _set_paragraph_kpi_side_metric(
+        p1,
+        metric=KpiSideMetric(value_text=str(int(total_value)), label_text="en TOTAL"),
+        size_pt=detail_size,
+        color_rgb=base_color,
+        space_before_pt=theme.split_metric_gap_pt,
+    )
+
+
+def _remove_summary_legacy_artifacts(slide: Any) -> None:
+    # Legacy template markers, detail links, and stray arrows no longer render.
+    _remove_shape_indices(slide, 18, 14, 11, 8, 7)
 
 
 def _configure_summary_delta_badge(
@@ -1118,15 +1361,16 @@ def _configure_summary_delta_badge(
         card = _shape_or_none(slide, int(card_shape_index))
         if card is not None:
             try:
-                divider_left = int(card.left) + int(card.width * 0.636)
-                badge_width = max(int(card.width * 0.106), 1)
-                badge_height = max(int(card.height * 0.152), 1)
-                badge_right = divider_left - int(card.width * 0.014)
+                theme = PERIOD_FOLLOWUP_LAYOUT
+                divider_left = int(card.left) + int(card.width * theme.split_column_ratio)
+                badge_width = max(int(card.width * theme.delta_badge_width_ratio), 1)
+                badge_height = max(int(card.height * theme.delta_badge_height_ratio), 1)
+                badge_right = divider_left - int(card.width * theme.delta_badge_right_gap_ratio)
                 shape.width = badge_width
                 shape.height = badge_height
-                min_left = int(card.left) + int(card.width * 0.418)
+                min_left = int(card.left) + int(card.width * theme.delta_badge_min_left_ratio)
                 shape.left = max(badge_right - badge_width, min_left)
-                shape.top = int(card.top) + int(card.height * 0.088)
+                shape.top = int(card.top) + int(card.height * theme.delta_badge_top_ratio)
             except Exception:
                 pass
 
@@ -1904,7 +2148,7 @@ def _populate_open_aging_executive_slide(
         settings,
         dff=scope_result.dff,
         open_df=scope_result.open_df,
-        reference_now=scope_result.summary.window.current_end,
+        reference_now=pd.Timestamp(scope_result.summary.window.current_end),
     )
     if chart_png:
         _overlay_picture_contain(
@@ -2264,17 +2508,18 @@ def _populate_open_priority_executive_slide(
 def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalScopeResult) -> None:
     summary = scope_result.summary
     summary_metric_color = _first_run_color_rgb(_shape_or_none(slide, 16)) or RGBColor(4, 19, 139)
+    window_service = TimeWindowService()
+    created_label = window_service.format_current_created_label(
+        summary.window,
+        singular=int(summary.new_now) == 1,
+    )
+    closed_label = window_service.format_current_closed_label(
+        summary.window,
+        singular=int(summary.closed_now) == 1,
+    )
+    previous_created_label = window_service.format_previous_range_label(summary.window)
     _style_summary_open_criticity_cards(slide)
     _set_shape_text(slide, 3, title)
-    _set_paragraph_value_after_colon(
-        slide, shape_index=16, paragraph_index=0, value=int(summary.new_before)
-    )
-    _set_paragraph_value_after_colon(
-        slide, shape_index=16, paragraph_index=1, value=int(summary.new_now)
-    )
-    _set_paragraph_value_after_colon(
-        slide, shape_index=16, paragraph_index=2, value=int(summary.new_accumulated)
-    )
     delta_badges = {
         10: _summary_delta_badge(summary.closed_delta_pct),
         13: _summary_delta_badge(summary.resolution_delta_pct),
@@ -2283,10 +2528,10 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     for shape_idx, (badge_text, badge_color) in delta_badges.items():
         _set_shape_text(slide, shape_idx, badge_text)
         _set_shape_font_color(slide, shape_index=shape_idx, color_rgb=badge_color)
-    focus_split_label = (
+    focus_side_label = (
         "MAESTRAS"
         if str(summary.open_group_mode or "").strip() == OPEN_ISSUES_FOCUS_MODE_MAESTRAS
-        else "ALTAS"
+        else "CRITICIDADES ALTAS"
     )
     _write_open_criticity_card(
         slide,
@@ -2314,20 +2559,30 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         slide,
         shape_index=15,
         value_text=str(int(summary.new_now)),
-        label_text="NUEVA INCIDENCIA" if int(summary.new_now) == 1 else "NUEVAS INCIDENCIAS",
+        label_text=created_label,
+        text_color_rgb=summary_metric_color,
+    )
+    _write_created_total_column(
+        slide,
+        card_shape_index=15,
+        detail_shape_index=16,
+        divider_shape_index=17,
+        previous_range_label=previous_created_label,
+        previous_value=int(summary.new_before),
+        total_value=int(summary.new_accumulated),
         text_color_rgb=summary_metric_color,
     )
     _write_metric_card(
         slide,
         shape_index=9,
         value_text=str(int(summary.closed_now)),
-        label_text="INCIDENCIA CERRADA" if int(summary.closed_now) == 1 else "INCIDENCIAS CERRADAS",
+        label_text=closed_label,
         text_color_rgb=summary_metric_color,
     )
     _add_metric_split_column(
         slide,
         card_shape_index=9,
-        top_label=str(focus_split_label),
+        top_label=str(focus_side_label),
         top_value=int(summary.closed_focus_now),
         bottom_label="RESTO",
         bottom_value=int(summary.closed_other_now),
@@ -2336,10 +2591,10 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         slide,
         shape_index=12,
         value_text=str(_fmt_days(summary.resolution_days_now)),
-        label_text="DÍAS DE RESOLUCIÓN",
-        extra_lines=[
-            ("(EN PROM.)", 8.1, True, True, 0.0),
-        ],
+        label_text="DÍAS DE RESOLUCIÓN (EN PROMEDIO)",
+        extra_lines=(
+            [("SIN DATOS", 8.1, True, False, 0.25)] if summary.resolution_days_now is None else None
+        ),
         text_color_rgb=summary_metric_color,
     )
     _add_metric_split_column(
@@ -2349,12 +2604,16 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         top_value=int(_fmt_days(summary.resolution_days_max_now)),
         bottom_label="MIN",
         bottom_value=int(_fmt_days(summary.resolution_days_min_now)),
-        value_suffix=" días",
+        value_unit="días",
     )
 
-    _set_shape_font_size(slide, shape_index=10, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
-    _set_shape_font_size(slide, shape_index=13, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
-    _set_shape_font_size(slide, shape_index=19, font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT, bold=True)
+    for delta_shape_idx in (10, 13, 19):
+        _set_shape_font_size(
+            slide,
+            shape_index=delta_shape_idx,
+            font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT,
+            bold=True,
+        )
     _configure_summary_delta_badge(slide, shape_index=10, card_shape_index=9)
     _configure_summary_delta_badge(slide, shape_index=13, card_shape_index=12)
     _configure_summary_delta_badge(slide, shape_index=19, card_shape_index=15)
@@ -2363,9 +2622,7 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16, 19):
         _set_shape_font_name(slide, shape_index=idx, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    _align_delta_badges_with_new_card(slide)
-    _move_shape_off_canvas(slide, shape_index=7)
-    _move_shape_off_canvas(slide, shape_index=8)
+    _remove_summary_legacy_artifacts(slide)
 
 
 def _update_cover_period(slide: Any, *, period_label: str) -> None:
@@ -2794,23 +3051,28 @@ def _populate_issue_native_table(
     slide: Any,
     *,
     table_shape_index: int,
+    headers: Sequence[str],
     rows: Sequence[Sequence[str]],
     hyperlink_by_row: Mapping[int, str] | None = None,
-) -> None:
+) -> Any:
+    table_headers = tuple(headers or ())
+    if not table_headers:
+        raise ValueError("Issue table headers are required.")
     data_rows = list(rows or [])
     if not data_rows:
-        data_rows = [["", "Sin incidencias para este criterio.", "", "", "", ""]]
+        filler = [""] * max(len(table_headers) - 2, 0)
+        data_rows = [["", "Sin incidencias para este criterio.", *filler]]
     geometry = _issue_table_geometry(data_row_count=len(data_rows))
     table_shape = _native_table_shape(
         slide,
         table_shape_index=table_shape_index,
         row_count=len(data_rows) + 1,
-        col_count=len(_RISK_TABLE_HEADERS),
+        col_count=len(table_headers),
         geometry=geometry,
     )
     populate_native_table(
         table_shape,
-        headers=_RISK_TABLE_HEADERS,
+        headers=table_headers,
         rows=data_rows,
         column_widths=native_column_widths(geometry[2], _ISSUE_TABLE_COLUMN_WEIGHTS),
         row_height=int(_ISSUE_TABLE_ROW_HEIGHT),
@@ -2823,6 +3085,7 @@ def _populate_issue_native_table(
         hyperlink_by_row=hyperlink_by_row,
         zebra=True,
     )
+    return table_shape
 
 
 def _populate_functionality_dashboard_native_table(
@@ -3033,6 +3296,7 @@ def _populate_functionality_zoom_slide(
     _populate_issue_native_table(
         slide,
         table_shape_index=2,
+        headers=_FUNCTIONALITY_ISSUE_TABLE_HEADERS,
         rows=rows,
         hyperlink_by_row=row_links,
     )
@@ -3067,7 +3331,7 @@ def _risk_issue_rows_for_table(
                     max_chars=125,
                 ),
                 ellipsize_text(
-                    _premium_sentence_case(str(issue.functionality or "")),
+                    str(issue.assignee or "").strip() or "(sin asignar)",
                     max_chars=65,
                 ),
                 ellipsize_text(str(issue.status or ""), max_chars=28),
@@ -3113,8 +3377,17 @@ def _populate_risk_issue_list_slide(
     _populate_issue_native_table(
         slide,
         table_shape_index=2,
+        headers=_RISK_ASSIGNEE_TABLE_HEADERS,
         rows=rows,
         hyperlink_by_row=row_links,
+    )
+    LOGGER.info(
+        "period_followup_slide_rows",
+        extra={
+            "run_id": uuid4().hex[:12],
+            "slide_name": str(title or "").strip(),
+            "rows_generated": int(len(issues_page or ())),
+        },
     )
 
 
@@ -3203,6 +3476,274 @@ def _append_period_risk_issue_sections(
             period_label=period_label,
             cover_template_slide=cover_template_slide,
             zoom_template_slide=zoom_template_slide,
+        )
+
+
+def _chunk_finalist_discrepancy_issues(
+    issues: Sequence[FinalistDiscrepancyIssueRow],
+    *,
+    rows_per_slide: int,
+) -> list[tuple[FinalistDiscrepancyIssueRow, ...]]:
+    size = max(int(rows_per_slide or 0), 1)
+    items = list(issues or [])
+    if not items:
+        return [tuple()]
+    return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
+
+
+def _finalist_discrepancy_rows_for_table(
+    issues: Sequence[FinalistDiscrepancyIssueRow],
+    *,
+    empty_message: str,
+) -> tuple[list[list[str]], dict[int, str], dict[int, str]]:
+    rows: list[list[str]] = []
+    row_links: dict[int, str] = {}
+    description_by_row: dict[int, str] = {}
+    for idx, issue in enumerate(list(issues or [])):
+        jira_key = str(issue.jira_key or "").strip().upper()
+        description_text = (
+            f"JIRA: {str(issue.jira_summary or '').strip() or 'Sin título JIRA'}\n"
+            f"Helix: {str(issue.helix_text or '').strip() or 'Sin descripción Helix'}"
+        )
+        rows.append(
+            [
+                jira_key,
+                ellipsize_text(description_text, max_chars=150),
+                ellipsize_text(
+                    str(issue.jira_assignee or "").strip() or "(sin asignar)",
+                    max_chars=65,
+                ),
+                (
+                    f"JIRA: {ellipsize_text(str(issue.jira_status or ''), max_chars=22)}\n"
+                    f"Helix: {ellipsize_text(str(issue.helix_status or ''), max_chars=22)}"
+                ),
+                ellipsize_text(str(issue.jira_priority or ""), max_chars=18),
+                f"{int(issue.jira_open_days or 0)} días",
+            ]
+        )
+        if str(issue.jira_url or "").strip():
+            row_links[idx] = str(issue.jira_url or "").strip()
+        description_by_row[idx] = rows[-1][1]
+    if not rows:
+        rows.append(
+            ["", str(empty_message or "Sin incidencias para este criterio."), "", "", "", ""]
+        )
+    return rows, row_links, description_by_row
+
+
+def _write_linkified_issue_cell(
+    cell: Any,
+    text: str,
+    *,
+    jira_url: str,
+    helix_id: str,
+    helix_url: str,
+) -> None:
+    tf = getattr(cell, "text_frame", None)
+    if tf is None:
+        return
+    try:
+        tf.clear()
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.word_wrap = True
+        tf.margin_left = Inches(0.04)
+        tf.margin_right = Inches(0.04)
+        tf.margin_top = Inches(0.02)
+        tf.margin_bottom = Inches(0.02)
+    except Exception:
+        pass
+    try:
+        cell.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    jira_key = ""
+    if jira_url:
+        match = re.search(_ALPHANUM_KEY_RE, str(jira_url or ""))
+        jira_key = str(match.group(0)).upper() if match else ""
+    segments_by_line = [
+        linkify_issue_references(
+            line,
+            jira_urls={jira_key: jira_url} if jira_key and jira_url else {},
+            helix_urls={str(helix_id or "").upper(): helix_url} if helix_url else {},
+        )
+        for line in str(text or "").splitlines()
+    ]
+    if not segments_by_line:
+        segments_by_line = [()]
+    body_rgb = RGBColor(*_TABLE_BODY_FG_RGB)
+    for line_idx, segments in enumerate(segments_by_line):
+        paragraph = tf.paragraphs[0] if line_idx == 0 else tf.add_paragraph()
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.space_before = Pt(0)
+        paragraph.space_after = Pt(0)
+        if not segments:
+            run = paragraph.add_run()
+            run.text = ""
+            run.font.size = Pt(_ISSUE_TABLE_BODY_FONT_SIZE_PT)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            continue
+        for segment in segments:
+            run = paragraph.add_run()
+            run.text = segment.text
+            run.font.size = Pt(_ISSUE_TABLE_BODY_FONT_SIZE_PT)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            try:
+                run.font.color.rgb = body_rgb
+            except Exception:
+                pass
+            if segment.url:
+                try:
+                    run.hyperlink.address = segment.url
+                    run.font.underline = True
+                except Exception:
+                    pass
+
+
+def _linkify_finalist_description_cells(
+    table_shape: Any,
+    *,
+    issues_page: Sequence[FinalistDiscrepancyIssueRow],
+    description_by_row: Mapping[int, str],
+) -> None:
+    if table_shape is None or not getattr(table_shape, "has_table", False):
+        return
+    table = table_shape.table
+    for idx, issue in enumerate(list(issues_page or [])):
+        if idx not in description_by_row:
+            continue
+        try:
+            cell = table.cell(idx + 1, 1)
+        except Exception:
+            continue
+        _write_linkified_issue_cell(
+            cell,
+            description_by_row[idx],
+            jira_url=str(issue.jira_url or "").strip(),
+            helix_id=str(issue.helix_id or "").strip().upper(),
+            helix_url=str(issue.helix_url or "").strip(),
+        )
+
+
+def _style_finalist_status_cells(table_shape: Any, issues_count: int) -> None:
+    if table_shape is None or not getattr(table_shape, "has_table", False):
+        return
+    table = table_shape.table
+    row_limit = min(max(int(issues_count or 0), 0), max(len(table.rows) - 1, 0))
+    jira_rgb = RGBColor(*hex_to_rgb(BBVA_REPORT_RED_TEXT))
+    helix_rgb = RGBColor(*hex_to_rgb(BBVA_REPORT_AMBER_TEXT))
+    try:
+        helix_rgb = RGBColor(34, 139, 74)
+    except Exception:
+        pass
+    for ridx in range(1, row_limit + 1):
+        try:
+            cell = table.cell(ridx, 3)
+        except Exception:
+            continue
+        original = str(cell.text or "")
+        parts = [part for part in original.splitlines() if part.strip()]
+        if len(parts) < 2:
+            continue
+        tf = cell.text_frame
+        tf.clear()
+        try:
+            tf.auto_size = MSO_AUTO_SIZE.NONE
+            tf.word_wrap = True
+            tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+        except Exception:
+            pass
+        for idx, (line, color) in enumerate(((parts[0], jira_rgb), (parts[1], helix_rgb))):
+            paragraph = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+            paragraph.alignment = PP_ALIGN.CENTER
+            paragraph.space_before = Pt(0)
+            paragraph.space_after = Pt(0)
+            run = paragraph.add_run()
+            run.text = line
+            run.font.size = Pt(8.5)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            run.font.bold = True
+            run.font.color.rgb = color
+
+
+def _populate_finalist_discrepancy_list_slide(
+    slide: Any,
+    *,
+    issues_page: Sequence[FinalistDiscrepancyIssueRow],
+    empty_message: str,
+    page_number: int,
+    total_pages: int,
+) -> None:
+    _ = total_pages
+    roman = _to_roman(int(page_number or 1))
+    page_suffix = f" ({roman})" if roman else f" ({int(page_number or 1)})"
+    _set_shape_text(slide, 1, f"{_FINALIST_DISCREPANCIES_TITLE}{page_suffix}")
+    _set_shape_font_name(slide, shape_index=1, font_name=_PPT_FONT_BODY_MEDIUM)
+    _set_shape_text(slide, 3, _FINALIST_DISCREPANCIES_ORDER_NOTE)
+    _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(*_TABLE_BODY_FG_RGB))
+    _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_BODY)
+    _set_shape_text(slide, 4, "")
+    _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
+
+    rows, row_links, description_by_row = _finalist_discrepancy_rows_for_table(
+        issues_page,
+        empty_message=empty_message,
+    )
+    table_shape = _populate_issue_native_table(
+        slide,
+        table_shape_index=2,
+        headers=_RISK_ASSIGNEE_TABLE_HEADERS,
+        rows=rows,
+        hyperlink_by_row=row_links,
+    )
+    _linkify_finalist_description_cells(
+        table_shape,
+        issues_page=issues_page,
+        description_by_row=description_by_row,
+    )
+    _style_finalist_status_cells(table_shape, issues_count=len(issues_page))
+    LOGGER.info(
+        "period_followup_slide_rows",
+        extra={
+            "run_id": uuid4().hex[:12],
+            "slide_name": _FINALIST_DISCREPANCIES_TITLE,
+            "rows_generated": int(len(issues_page or ())),
+        },
+    )
+
+
+def _append_finalist_discrepancy_section(
+    prs: Any,
+    *,
+    period_label: str,
+    issues: Sequence[FinalistDiscrepancyIssueRow],
+) -> None:
+    template_path = _resolve_functionality_template_path()
+    template_prs = Presentation(str(template_path))
+    if len(template_prs.slides) < 3:
+        raise ValueError("La plantilla de funcionalidad debe contener la slide de zoom.")
+    zoom_template_slide = template_prs.slides[2]
+    if len(prs.slides) < 2:
+        raise ValueError("La plantilla de periodo debe contener la slide de portada de sección.")
+    cover_template_slide = prs.slides[1]
+    _append_period_risk_issue_cover(
+        prs,
+        cover_template_slide=cover_template_slide,
+        title=_FINALIST_DISCREPANCIES_TITLE,
+        period_label=period_label,
+    )
+    pages = _chunk_finalist_discrepancy_issues(
+        tuple(issues or ()),
+        rows_per_slide=_ISSUE_TABLE_ROWS_PER_SLIDE,
+    )
+    total_pages = len(pages)
+    for page_idx, page_rows in enumerate(pages, start=1):
+        slide = _append_slide_clone_from_source(prs, source_slide=zoom_template_slide)
+        _populate_finalist_discrepancy_list_slide(
+            slide,
+            issues_page=page_rows,
+            empty_message="Sin incidencias con discrepancias en estado finalista en el scope actual.",
+            page_number=page_idx,
+            total_pages=total_pages,
         )
 
 
@@ -3593,11 +4134,13 @@ def generate_country_period_followup_ppt(
     source_ids: Sequence[str],
     dff_override: pd.DataFrame | None = None,
     open_df_override: pd.DataFrame | None = None,
+    finalist_discrepancies_override: pd.DataFrame | None = None,
     template_path: str | None = None,
     applied_filter_summary: str = "",
     functionality_status_filters: Sequence[str] | None = None,
     functionality_priority_filters: Sequence[str] | None = None,
     functionality_filters: Sequence[str] | None = None,
+    reference_day: pd.Timestamp | str | None = None,
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     if len(clean_source_ids) < 2:
@@ -3624,6 +4167,7 @@ def generate_country_period_followup_ppt(
         country=country_txt,
         source_ids=clean_source_ids,
         source_label_by_id=labels,
+        reference_day=pd.Timestamp(reference_day) if reference_day is not None else None,
     )
     template = _resolve_template_path(settings, explicit_path=template_path)
     prs = Presentation(str(template))
@@ -3701,7 +4245,10 @@ def generate_country_period_followup_ppt(
 
     risk_lists = build_period_risk_issue_lists(
         aggregate.dff,
-        fallback_analysis_day=aggregate.summary.window.current_end,
+        fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
+    )
+    finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
+        finalist_discrepancies_override
     )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
@@ -3732,6 +4279,18 @@ def generate_country_period_followup_ppt(
         default=False,
     ):
         _append_functionality_zoom_slides(prs, summary=functionality_followup)
+    if _parse_bool_flag(
+        getattr(settings, "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED", "false"),
+        default=False,
+    ):
+        _append_finalist_discrepancy_section(
+            prs,
+            period_label=functionality_followup.period_label,
+            issues=finalist_discrepancy_rows,
+        )
+
+    _remove_slide_number_artifacts(prs)
+    validate_shapes_inside_slide(prs)
 
     buff = BytesIO()
     prs.save(buff)

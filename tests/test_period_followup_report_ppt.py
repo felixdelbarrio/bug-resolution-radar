@@ -5,6 +5,7 @@ import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import pandas as pd
 from pptx import Presentation
@@ -16,6 +17,7 @@ from pptx.oxml.ns import qn
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
 from bug_resolution_radar.reports import period_followup_ppt as period_ppt_mod
+from bug_resolution_radar.reports.period_followup_layout import metric_card_typography
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_REPORT_AMBER_BG,
     BBVA_REPORT_RED_BG,
@@ -167,6 +169,7 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
 
     assert out.slide_count == 15
@@ -228,6 +231,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
 
     assert out.slide_count == 15
@@ -235,6 +239,157 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
+
+
+def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Path) -> None:
+    template = tmp_path / "template.pptx"
+    _build_minimal_template(template)
+    now = pd.Timestamp("2026-05-15T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "EAM-94000",
+                "summary": "Jira pendiente",
+                "description": "Helix INC000104154954",
+                "status": "To Rework",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=20)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+                "url": "https://jira.example.com/browse/EAM-94000",
+            },
+            {
+                "key": "EAM-93998",
+                "summary": "Jira pendiente adicional",
+                "description": "Tambien ligada a INC000104154954",
+                "status": "To Rework",
+                "priority": "High",
+                "assignee": "Bea",
+                "created": (now - pd.Timedelta(days=25)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+                "url": "https://jira.example.com/browse/EAM-93998",
+            },
+            {
+                "key": "B-1",
+                "summary": "Issue B",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": (now - pd.Timedelta(days=10)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": (now - pd.Timedelta(days=1)).isoformat(),
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+                "source_type": "jira",
+            },
+        ]
+    )
+    discrepancies = pd.DataFrame(
+        [
+            {
+                "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado",
+                "helix_description": "Resolución de INC000104154954 validada en Helix",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154954",
+                "jira_key": "EAM-94000",
+                "jira_summary": "Jira pendiente",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Ana",
+                "jira_open_days": 20,
+                "jira_url": "https://jira.example.com/browse/EAM-94000",
+                "source_alias": "Senda",
+            },
+            {
+                "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado",
+                "helix_description": "Resolución de INC000104154954 validada en Helix",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154954",
+                "jira_key": "EAM-93998",
+                "jira_summary": "Jira pendiente adicional",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Bea",
+                "jira_open_days": 25,
+                "jira_url": "https://jira.example.com/browse/EAM-93998",
+                "source_alias": "Senda",
+            },
+        ]
+    )
+
+    off = generate_country_period_followup_ppt(
+        Settings(PERIOD_PPT_TEMPLATE_PATH=str(template)),
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        finalist_discrepancies_override=discrepancies,
+        reference_day=now,
+    )
+    off_text = " ".join(
+        _slide_all_text(slide) for slide in Presentation(BytesIO(off.content)).slides
+    )
+    assert "Incidencias con discrepancias en estado finalista" not in off_text
+
+    on = generate_country_period_followup_ppt(
+        Settings(
+            PERIOD_PPT_TEMPLATE_PATH=str(template),
+            PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED="true",
+        ),
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        finalist_discrepancies_override=discrepancies,
+        reference_day=now,
+    )
+    prs = Presentation(BytesIO(on.content))
+    on_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+
+    assert "Incidencias con discrepancias en estado finalista" in on_text
+    assert "JIRA: To Rework" in on_text
+    assert "Helix: Closed" in on_text
+    assert "EAM-93998" in on_text
+    assert any(
+        "Incidencias abiertas por criticidad alta" in _slide_all_text(slide)
+        and "EAM-93998" in _slide_all_text(slide)
+        for slide in prs.slides
+    )
+
+    finalist_slide = next(
+        slide
+        for slide in prs.slides
+        if "Incidencias con discrepancias en estado finalista" in _slide_all_text(slide)
+        and "EAM-94000" in _slide_all_text(slide)
+    )
+    table = _native_tables(finalist_slide)[0].table
+    id_values = [str(table.cell(row_idx, 0).text or "") for row_idx in range(1, len(table.rows))]
+    assert "EAM-94000" in id_values
+    assert "EAM-93998" in id_values
+    assert all("INC000104154954" not in value for value in id_values)
+
+    description_values = [
+        str(table.cell(row_idx, 1).text or "") for row_idx in range(1, len(table.rows))
+    ]
+    assert any("INC000104154954" in value for value in description_values)
+    first_id_runs = list(table.cell(1, 0).text_frame.paragraphs[0].runs)
+    assert first_id_runs
+    assert str(first_id_runs[0].hyperlink.address or "").startswith("https://jira.example.com")
+    description_runs = [
+        run for paragraph in table.cell(1, 1).text_frame.paragraphs for run in paragraph.runs
+    ]
+    assert any(
+        "INC000104154954" in str(run.text or "")
+        and str(run.hyperlink.address or "").startswith("https://helix.example.com")
+        for run in description_runs
+    )
 
 
 def test_generate_country_period_followup_ppt_uses_open_focus_label_from_settings() -> None:
@@ -278,6 +433,7 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs_critical = Presentation(BytesIO(out_critical.content))
     critical_blob = " ".join(
@@ -286,8 +442,8 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         if getattr(shape, "has_text_frame", False)
     ).upper()
     assert "CRITICIDAD ALTA" in critical_blob
-    assert "ALTAS:" in critical_blob
-    assert "RESTO:" in critical_blob
+    assert "CRITICIDADES ALTAS" in critical_blob
+    assert "RESTO" in critical_blob
 
     settings_maestras = Settings(
         PERIOD_PPT_TEMPLATE_PATH=str(template),
@@ -298,6 +454,7 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs_maestras = Presentation(BytesIO(out_maestras.content))
     maestras_blob = " ".join(
@@ -306,8 +463,8 @@ def test_generate_country_period_followup_ppt_uses_open_focus_label_from_setting
         if getattr(shape, "has_text_frame", False)
     ).upper()
     assert "INCIDENCIAS MAESTRAS" in maestras_blob
-    assert "MAESTRAS:" in maestras_blob
-    assert "RESTO:" in maestras_blob
+    assert "MAESTRAS" in maestras_blob
+    assert "RESTO" in maestras_blob
 
 
 def test_generate_country_period_followup_ppt_bundled_template_layout_regression() -> None:
@@ -362,6 +519,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now - pd.Timedelta(days=1),
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -425,12 +583,11 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
     ).upper()
     assert "CERRADASINCIDENCIA" not in s4_closed
     assert "RESOLUCIÓNDÍASDERESOLUCIÓN" not in s4_days
-    assert s4_blob.count("ALTAS:") == 1
-    assert s4_blob.count("RESTO:") == 1
-    assert "MAX:" in s4_blob
-    assert "MIN:" in s4_blob
-    assert "MAX: 7 DÍAS" in s4_blob
-    assert "MIN: 7 DÍAS" in s4_blob
+    assert s4_blob.count("CRITICIDADES ALTAS") == 1
+    assert "0 CRITICIDADES ALTAS" in s4_blob
+    assert "1 RESTO" in s4_blob
+    assert "7 DÍAS MAX" in s4_blob
+    assert "7 DÍAS MIN" in s4_blob
 
     # Long titles should be marked for in-shape fit in PowerPoint.
     s5_title = prs.slides[4].shapes[2]
@@ -820,6 +977,7 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     assert out.content
     assert called_chart_ids[:3] == ["timeseries", "timeseries", "timeseries"]
@@ -877,6 +1035,7 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     dashboard_slide = prs.slides[
@@ -962,6 +1121,7 @@ def test_generate_country_period_followup_ppt_top3_lines_include_avg_days() -> N
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     dashboard_slide = prs.slides[
@@ -1012,6 +1172,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1131,6 +1292,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == 19
@@ -1158,6 +1320,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad con bloqueo de operativa",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Luis Pérez",
                 "created": "2026-02-20T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1170,6 +1333,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Impedimento en autenticación para clientes",
                 "status": "Ready To Verify",
                 "priority": "Supone un impedimento",
+                "assignee": "Ana López",
                 "created": "2026-04-05T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1181,6 +1345,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Incidencia abierta antigua de prioridad media",
                 "status": "Analysing",
                 "priority": "Medium",
+                "assignee": "Marta Ruiz",
                 "created": "2026-02-01T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1192,6 +1357,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 1",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-21T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1203,6 +1369,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 2",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-22T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1214,6 +1381,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 3",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-23T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1225,6 +1393,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
                 "summary": "Alta criticidad adicional 4",
                 "status": "New",
                 "priority": "High",
+                "assignee": "Equipo Core",
                 "created": "2026-02-24T09:00:00+00:00",
                 "updated": now.isoformat(),
                 "resolved": None,
@@ -1243,6 +1412,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1307,7 +1477,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     expected_headers = {
         "ID",
         "Descripción",
-        "Funcionalidad/\nCausa raíz",
+        "Responsable",
         "Estado",
         "Criticidad",
         "Días abierta",
@@ -1323,16 +1493,18 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
         assert period_ppt_mod._RISK_AGED_ORDER_NOTE in slide_text
         assert old_aged_note not in slide_text
         assert "2ºCrriticidad" not in slide_text
-    for slide_idx, expected_ids, order_note, forbidden in (
+    for slide_idx, expected_ids, expected_assignees, order_note, forbidden in (
         (
             high_detail_idx,
             ["EAM-77", "MEXBMI1-101"],
+            ["Ana López", "Luis Pérez"],
             period_ppt_mod._RISK_HIGH_PRIORITY_ORDER_NOTE,
             "SKSEMEX-9",
         ),
         (
             aged_detail_idx,
             ["SKSEMEX-9", "MEXBMI1-101"],
+            ["Marta Ruiz", "Luis Pérez"],
             period_ppt_mod._RISK_AGED_ORDER_NOTE,
             "",
         ),
@@ -1353,6 +1525,8 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
             table_shape.table.cell(row_idx, 0).text for row_idx in range(1, len(expected_ids) + 1)
         ]
         assert row_ids == expected_ids
+        for expected_assignee in expected_assignees:
+            assert expected_assignee in table_text
         if forbidden:
             assert forbidden not in table_text
         assert "Descripción" in table_text
@@ -1395,6 +1569,7 @@ def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> 
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
@@ -1456,6 +1631,7 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs_default = Presentation(BytesIO(out_default.content))
     default_dashboard_idx = _find_slide_index(
@@ -1478,6 +1654,7 @@ def test_generate_country_period_followup_ppt_functionality_wording_depends_on_p
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
         functionality_priority_filters=["High", "Highest", "Supone un impedimento"],
+        reference_day=now,
     )
     prs_critical = Presentation(BytesIO(out_critical.content))
     critical_dashboard_idx = _find_slide_index(
@@ -1563,6 +1740,7 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1576,6 +1754,7 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
             country="México",
             source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         ),
+        reference_day=now,
     )
     expected_by_slide = {
         2: quincenal.aggregate.summary,
@@ -1589,8 +1768,8 @@ def test_period_followup_ppt_resolution_min_max_matches_closed_in_selected_fortn
             for shape in prs.slides[slide_idx].shapes
             if getattr(shape, "has_text_frame", False)
         )
-        max_match = re.search(r"MAX:\s*(\d+)\s*d[ií]as", slide_blob, flags=re.IGNORECASE)
-        min_match = re.search(r"MIN:\s*(\d+)\s*d[ií]as", slide_blob, flags=re.IGNORECASE)
+        max_match = re.search(r"(\d+)\s*d[ií]as\s*MAX", slide_blob, flags=re.IGNORECASE)
+        min_match = re.search(r"(\d+)\s*d[ií]as\s*MIN", slide_blob, flags=re.IGNORECASE)
         assert max_match is not None
         assert min_match is not None
         assert int(max_match.group(1)) == int(round(float(summary.resolution_days_max_now or 0.0)))
@@ -1642,6 +1821,7 @@ def test_period_followup_summary_metric_cards_keep_template_blue_text_color() ->
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
 
@@ -1660,11 +1840,140 @@ def test_period_followup_summary_metric_cards_keep_template_blue_text_color() ->
 
     for slide_idx in (2, 3, 4):
         slide = prs.slides[slide_idx]
-        reference_color = _first_run_color(slide.shapes[15])  # shape 16: ANTES/AHORA/ACUMULADO
+        detail_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False) and "en TOTAL" in str(shape.text or "")
+        )
+        closed_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False) and "CERRADA" in str(shape.text or "")
+        )
+        resolution_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+            and "DÍAS DE RESOLUCIÓN" in str(shape.text or "")
+        )
+        created_shape = next(
+            shape
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False) and "CREADA" in str(shape.text or "")
+        )
+        reference_color = _first_run_color(detail_shape)
         assert reference_color == RGBColor(4, 19, 139)
-        assert _first_run_color(slide.shapes[8]) == reference_color  # shape 9
-        assert _first_run_color(slide.shapes[11]) == reference_color  # shape 12
-        assert _first_run_color(slide.shapes[14]) == reference_color  # shape 15
+        assert _first_run_color(closed_shape) == reference_color
+        assert _first_run_color(resolution_shape) == reference_color
+        assert _first_run_color(created_shape) == reference_color
+
+
+def test_period_followup_summary_uses_quincenal_flow_wording_and_removes_artifacts(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(period_ppt_mod, "_chart_png", lambda *args, **kwargs: b"")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "A-1",
+                "summary": "Actual abierta",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-03-10T10:00:00+00:00",
+                "updated": "2026-03-12T10:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "A-2",
+                "summary": "Previa cerrada",
+                "status": "Resolved",
+                "priority": "Medium",
+                "created": "2026-02-20T10:00:00+00:00",
+                "updated": "2026-03-11T10:00:00+00:00",
+                "resolved": "2026-03-11T10:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+            },
+            {
+                "key": "B-1",
+                "summary": "Previa abierta",
+                "status": "New",
+                "priority": "High",
+                "created": "2026-02-15T10:00:00+00:00",
+                "updated": "2026-03-12T10:00:00+00:00",
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+            {
+                "key": "B-2",
+                "summary": "Actual cerrada",
+                "status": "Resolved",
+                "priority": "Highest",
+                "created": "2026-03-01T10:00:00+00:00",
+                "updated": "2026-03-12T10:00:00+00:00",
+                "resolved": "2026-03-12T10:00:00+00:00",
+                "country": "México",
+                "source_id": "jira:mexico:gema",
+            },
+        ]
+    )
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        reference_day=pd.Timestamp("2026-03-12T00:00:00+00:00"),
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert "CREADAS DEL 01 AL 12 MAR" in deck_text
+    assert "2 del 15-28 FEB" in deck_text
+    assert "4 en TOTAL" in deck_text
+    assert "CERRADAS DEL 01-12 MAR" in deck_text
+    assert "AHORA" not in deck_text
+    assert "ACUMULADO" not in deck_text
+    assert "NUEVAS INCIDENCIAS" not in deck_text
+    assert "Ver detalle" not in deck_text
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            left = int(getattr(shape, "left", 0) or 0)
+            top = int(getattr(shape, "top", 0) or 0)
+            right = left + int(getattr(shape, "width", 0) or 0)
+            bottom = top + int(getattr(shape, "height", 0) or 0)
+            assert left >= 0
+            assert top >= 0
+            assert right <= int(prs.slide_width)
+            assert bottom <= int(prs.slide_height)
+
+    with ZipFile(BytesIO(out.content)) as pptx:
+        xml_payload = "\n".join(
+            pptx.read(name).decode("utf-8", errors="ignore")
+            for name in pptx.namelist()
+            if name.endswith(".xml")
+        )
+    assert 'type="slidenum"' not in xml_payload
+    assert "p. </a:t>" not in xml_payload
+
+
+def test_period_followup_metric_typography_handles_one_to_four_digit_values() -> None:
+    values = ["9", "69", "107", "138", "1024"]
+    sizes = [
+        metric_card_typography(value, "CREADAS DEL 01 AL 15 MAR").value_size_pt for value in values
+    ]
+
+    assert min(sizes) >= 17.0
+    assert sizes[0] >= sizes[-1]
+    for value in values:
+        typography = metric_card_typography(value, "CERRADAS DEL 01 AL 15 MAR")
+        assert typography.label_size_pt >= 8.6
+        assert typography.detail_size_pt >= 8.8
 
 
 def test_period_followup_functionality_trend_title_matches_template_style() -> None:
@@ -1701,6 +2010,7 @@ def test_period_followup_functionality_trend_title_matches_template_style() -> N
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
         dff_override=dff,
+        reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
     trend_slide = prs.slides[_find_slide_index(prs, "Tendencia por funcionalidad")]
