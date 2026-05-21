@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from bug_resolution_radar.analytics.quincenal_scope import (
     QUINCENAL_SCOPE_ALL,
     quincenal_scope_options,
 )
+from bug_resolution_radar.common.issue_links import normalize_helix_id, normalize_jira_key
 from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
@@ -106,6 +108,8 @@ from bug_resolution_radar.services.workspace import (
 )
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
 from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -526,6 +530,14 @@ def _notes_payload(settings: Settings, *, issue_key: str = "") -> dict[str, Any]
         "issueKey": current_key,
         "note": store.get(current_key) or "",
     }
+
+
+def _normalize_note_issue_key(issue_key: str) -> str:
+    raw = str(issue_key or "").strip().upper()
+    normalized = normalize_jira_key(raw) or normalize_helix_id(raw)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Issue debe tener formato JIRA o Helix válido.")
+    return normalized
 
 
 def _notes_list_payload(
@@ -1213,28 +1225,51 @@ def create_app() -> FastAPI:
                 issue_sort_col=issueSortCol,
                 issue_like_query=issueLikeQuery,
             )
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": "", "notes_action": "list"},
+        )
         return _notes_list_payload(settings, query=query)
 
     @app.get("/api/notes/{issue_key}")
     def get_note(issue_key: str) -> dict[str, Any]:
         settings = load_settings()
-        return _notes_payload(settings, issue_key=issue_key)
+        clean_key = _normalize_note_issue_key(issue_key)
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": clean_key, "notes_action": "get"},
+        )
+        return _notes_payload(settings, issue_key=clean_key)
 
     @app.put("/api/notes/{issue_key}")
     def put_note(issue_key: str, payload: NoteRequest) -> dict[str, Any]:
         settings = load_settings()
+        clean_key = _normalize_note_issue_key(issue_key)
         store = _notes_store(settings)
-        store.set(str(issue_key or "").strip(), str(payload.note or ""))
+        note_text = str(payload.note or "").strip()
+        store.set(clean_key, note_text)
         store.save()
-        return _notes_payload(settings, issue_key=issue_key)
+        LOGGER.info(
+            "notes_action",
+            extra={
+                "notes_issue": clean_key,
+                "notes_action": "delete" if not note_text else "save",
+            },
+        )
+        return _notes_payload(settings, issue_key=clean_key)
 
     @app.delete("/api/notes/{issue_key}")
     def delete_note(issue_key: str) -> dict[str, Any]:
         settings = load_settings()
+        clean_key = _normalize_note_issue_key(issue_key)
         store = _notes_store(settings)
-        store.delete(str(issue_key or "").strip())
+        store.delete(clean_key)
         store.save()
-        return _notes_payload(settings, issue_key=issue_key)
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": clean_key, "notes_action": "delete"},
+        )
+        return _notes_payload(settings, issue_key=clean_key)
 
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:

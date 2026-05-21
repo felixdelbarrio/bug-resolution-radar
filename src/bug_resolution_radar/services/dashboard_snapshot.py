@@ -2409,6 +2409,18 @@ def _build_ops_health_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _finalist_helix_text(row: pd.Series) -> str:
+    parts: list[str] = []
+    helix_id = str(row.get("helix_id", "") or "").strip().upper()
+    for column in ("helix_summary", "helix_description"):
+        value = str(row.get(column, "") or "").strip()
+        if value.upper() == helix_id:
+            continue
+        if value and value not in parts:
+            parts.append(value)
+    return "\n".join(parts) if parts else "Sin descripción Helix"
+
+
 def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[str, Any]:
     safe = discrepancies if isinstance(discrepancies, pd.DataFrame) else pd.DataFrame()
     if safe.empty:
@@ -2419,12 +2431,6 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
                 {"label": "IDs Helix únicos", "value": "0", "detail": ""},
                 {"label": "Días abiertos JIRA", "value": "0 / 0", "detail": "promedio / máximo"},
             ],
-            "filterOptions": {
-                "jiraStatus": [],
-                "helixStatus": [],
-                "priority": [],
-                "assignee": [],
-            },
             "groups": [],
             "totalRows": 0,
             "truncated": False,
@@ -2434,6 +2440,8 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
     for column in (
         "helix_id",
         "helix_url",
+        "helix_summary",
+        "helix_description",
         "helix_status",
         "jira_key",
         "jira_summary",
@@ -2451,17 +2459,18 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
     else:
         work["jira_open_days"] = 0.0
 
-    unique_helix = int(work["helix_id"].replace("", pd.NA).dropna().nunique())
-    unique_jira = int(work["jira_key"].replace("", pd.NA).dropna().nunique())
-    avg_days = float(work["jira_open_days"].mean()) if len(work) else 0.0
-    max_days = float(work["jira_open_days"].max()) if len(work) else 0.0
-
     work["__priority_rank"] = work["jira_priority"].map(priority_rank).fillna(99)
     work = work.sort_values(
         by=["__priority_rank", "jira_open_days", "jira_status", "helix_id", "jira_key"],
         ascending=[True, False, True, True, True],
         kind="mergesort",
     )
+    work = work.drop_duplicates(subset=["helix_id", "jira_key"], keep="first")
+
+    unique_helix = int(work["helix_id"].replace("", pd.NA).dropna().nunique())
+    unique_jira = int(work["jira_key"].replace("", pd.NA).dropna().nunique())
+    avg_days = float(work["jira_open_days"].mean()) if len(work) else 0.0
+    max_days = float(work["jira_open_days"].max()) if len(work) else 0.0
 
     groups: list[dict[str, Any]] = []
     max_groups = 120
@@ -2488,17 +2497,11 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
                 "helixId": str(helix_id or ""),
                 "helixUrl": str(first.get("helix_url", "") or ""),
                 "helixStatus": str(first.get("helix_status", "") or ""),
+                "helixSummary": str(first.get("helix_summary", "") or ""),
+                "helixDescription": str(first.get("helix_description", "") or ""),
+                "helixText": _finalist_helix_text(first),
                 "jiraCount": int(len(bucket)),
                 "issues": issues,
-            }
-        )
-
-    def _options(column: str) -> list[str]:
-        return sorted(
-            {
-                str(value or "").strip()
-                for value in work[column].fillna("").astype(str).tolist()
-                if str(value or "").strip()
             }
         )
 
@@ -2525,12 +2528,6 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
                 "detail": "promedio / máximo",
             },
         ],
-        "filterOptions": {
-            "jiraStatus": _options("jira_status"),
-            "helixStatus": _options("helix_status"),
-            "priority": _options("jira_priority"),
-            "assignee": _options("jira_assignee"),
-        },
         "groups": groups,
         "totalRows": int(len(work)),
         "truncated": bool(work["helix_id"].nunique() > max_groups),

@@ -10,6 +10,11 @@ import {
   semanticChipStyle
 } from "../lib/semanticColors";
 import { cn } from "../lib/cn";
+import {
+  buildHelixIssueUrl,
+  buildJiraIssueUrl,
+  linkifyIssueReferences
+} from "../lib/issueLinks";
 import { ChartFigure } from "./ChartFigure";
 
 type InsightsPanelProps = {
@@ -248,31 +253,9 @@ function FinalistDiscrepanciesPanel({
   queryParams: Record<string, string | string[] | boolean | number>;
   onOpenIssue: (row: IssueRecord) => Promise<void>;
 }) {
-  const [search, setSearch] = useState("");
-  const [jiraStatus, setJiraStatus] = useState<string[]>([]);
-  const [helixStatus, setHelixStatus] = useState<string[]>([]);
-  const [priority, setPriority] = useState<string[]>([]);
-  const [assignee, setAssignee] = useState<string[]>([]);
   const [downloadState, setDownloadState] = useState<"saving" | null>(null);
   const [feedback, setFeedback] = useState<string>("");
-
-  const normalizedSearch = search.trim().toLowerCase();
-  const groups = data.groups
-    .map((group) => {
-      const filteredIssues = group.issues.filter((issue) => {
-        if (jiraStatus.length > 0 && !jiraStatus.includes(issue.status)) return false;
-        if (helixStatus.length > 0 && !helixStatus.includes(group.helixStatus)) return false;
-        if (priority.length > 0 && !priority.includes(issue.priority)) return false;
-        if (assignee.length > 0 && !assignee.includes(issue.assignee)) return false;
-        if (!normalizedSearch) return true;
-        return [group.helixId, issue.key, issue.summary, issue.status, issue.priority, issue.assignee]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedSearch);
-      });
-      return { ...group, issues: filteredIssues };
-    })
-    .filter((group) => group.issues.length > 0 || (!normalizedSearch && group.jiraCount === 0));
+  const groups = data.groups;
 
   async function handleDownload() {
     try {
@@ -327,46 +310,6 @@ function FinalistDiscrepanciesPanel({
         ))}
       </div>
 
-      <section className="insights-filter-shell">
-        <div className="insights-filter-grid finalist-filter-grid">
-          <label className="field">
-            <span>Buscar</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Helix ID, JIRA key o texto"
-            />
-          </label>
-          <FilterCombo
-            label="Estado JIRA"
-            options={data.filterOptions.jiraStatus}
-            selected={jiraStatus}
-            kind="status"
-            onChange={setJiraStatus}
-          />
-          <FilterCombo
-            label="Estado Helix"
-            options={data.filterOptions.helixStatus}
-            selected={helixStatus}
-            kind="status"
-            onChange={setHelixStatus}
-          />
-          <FilterCombo
-            label="Prioridad"
-            options={data.filterOptions.priority}
-            selected={priority}
-            kind="priority"
-            onChange={setPriority}
-          />
-          <FilterCombo
-            label="Responsable"
-            options={data.filterOptions.assignee}
-            selected={assignee}
-            onChange={setAssignee}
-          />
-        </div>
-      </section>
-
       {groups.length === 0 ? (
         <section className="surface-panel empty-panel">
           <h3>Sin discrepancias finalistas</h3>
@@ -374,27 +317,42 @@ function FinalistDiscrepanciesPanel({
         </section>
       ) : null}
 
-      {groups.map((group) => (
-        <details
-          className="insight-detail-block finalist-discrepancy-block"
-          data-tone="flow"
-          key={group.helixId}
-        >
+      {groups.map((group) => {
+        const helixUrl = buildHelixIssueUrl(group.helixId, group.helixUrl);
+        return (
+          <details
+            className="insight-detail-block finalist-discrepancy-block"
+            data-tone="flow"
+            key={group.helixId}
+          >
           <summary>
-            <span className="finalist-summary-title">
-              {group.helixUrl ? (
-                <a href={group.helixUrl} target="_blank" rel="noreferrer">
-                  {group.helixId}
-                </a>
-              ) : (
-                group.helixId
-              )}
+            <span className="finalist-summary-main">
+              <span className="finalist-summary-title">
+                {helixUrl ? (
+                  <a href={helixUrl} target="_blank" rel="noopener noreferrer">
+                    {group.helixId}
+                  </a>
+                ) : (
+                  group.helixId
+                )}
+              </span>
+              <span className="issue-chip finalist-helix-chip">
+                Helix: {group.helixStatus || "(sin estado)"}
+              </span>
             </span>
-            <span className="issue-chip finalist-helix-chip">
-              Helix: {group.helixStatus || "(sin estado)"}
+            <span className="finalist-summary-side">
+              <strong>{group.jiraCount} JIRA</strong>
             </span>
-            <strong>{group.issues.length} JIRA</strong>
           </summary>
+          <div className="finalist-helix-description">
+            <span>Helix</span>
+            <p>
+              {linkifyIssueReferences(group.helixText || "Sin descripción Helix", {
+                helixUrls: { [group.helixId]: group.helixUrl },
+                className: "issue-inline-link"
+              })}
+            </p>
+          </div>
           <div className="simple-table finalist-issues-table">
             <div className="simple-table-head">
               <span>JIRA</span>
@@ -406,13 +364,24 @@ function FinalistDiscrepanciesPanel({
             </div>
             {group.issues.map((issue) => (
               <div className="simple-table-row" key={`${group.helixId}-${issue.key}`}>
-                <button
-                  type="button"
-                  className="issue-inline-link issue-key-anchor-button"
-                  onClick={() => void onOpenIssue(finalistIssueToRecord(issue))}
-                >
-                  {issue.key}
-                </button>
+                {buildJiraIssueUrl(issue.key, issue.url) ? (
+                  <a
+                    className="issue-inline-link"
+                    href={buildJiraIssueUrl(issue.key, issue.url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {issue.key}
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="issue-inline-link issue-key-anchor-button"
+                    onClick={() => void onOpenIssue(finalistIssueToRecord(issue))}
+                  >
+                    {issue.key}
+                  </button>
+                )}
                 <span>{issue.summary || "Sin título"}</span>
                 <span className="issue-chip" style={semanticChipStyle(issue.status, "status")}>
                   JIRA: {issue.status || "—"}
@@ -426,7 +395,8 @@ function FinalistDiscrepanciesPanel({
             ))}
           </div>
         </details>
-      ))}
+        );
+      })}
     </section>
   );
 }

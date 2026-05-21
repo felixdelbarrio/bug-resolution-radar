@@ -1,7 +1,7 @@
 """JIRA/Helix finalist-state cross checks.
 
 This module is the single source of truth for:
-- extracting Helix incident ids from JIRA descriptions,
+- extracting Helix incident ids from JIRA functional text,
 - linking JIRA rows with Helix rows inside the active country/scope,
 - evaluating final-state discrepancies,
 - applying the effective country finalist-state mode.
@@ -15,12 +15,20 @@ the viewed period does not close a JIRA issue inside that period.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Sequence
+from uuid import uuid4
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issues import priority_rank, status_progress_rank
 from bug_resolution_radar.analytics.status_semantics import is_finalist_status
+from bug_resolution_radar.common.issue_links import (
+    HELIX_ID_RE,
+    build_helix_issue_url,
+    build_jira_issue_url,
+)
 from bug_resolution_radar.config import Settings
 
 ANALYSIS_MODE_SELECTED_SOURCES = "selected_sources"
@@ -29,7 +37,7 @@ VALID_FINALIST_STATUS_ANALYSIS_MODES: frozenset[str] = frozenset(
     {ANALYSIS_MODE_SELECTED_SOURCES, ANALYSIS_MODE_COUNTRY_FINALIST_STATUS}
 )
 
-_HELIX_ID_RE = re.compile(r"\bINC\d{8,}\b", flags=re.IGNORECASE)
+LOGGER = logging.getLogger(__name__)
 
 _DISCREPANCY_COLUMNS: tuple[str, ...] = (
     "country",
@@ -82,7 +90,7 @@ def extract_helix_ids_from_text(text: object) -> tuple[str, ...]:
         return ()
     out: list[str] = []
     seen: set[str] = set()
-    for match in _HELIX_ID_RE.finditer(raw):
+    for match in HELIX_ID_RE.finditer(raw):
         token = str(match.group(0) or "").strip().upper()
         if not token or token in seen:
             continue
@@ -187,8 +195,10 @@ def build_jira_helix_links(
     country: str | None = None,
     source_ids: Sequence[str] | None = None,
     mode: str = ANALYSIS_MODE_SELECTED_SOURCES,
+    run_id: str = "",
 ) -> pd.DataFrame:
-    """Build vectorized JIRA-to-Helix links based on Helix ids in JIRA descriptions."""
+    """Build vectorized JIRA-to-Helix links based on Helix ids in JIRA text fields."""
+    log_run_id = str(run_id or uuid4().hex[:12])
     safe = _safe_frame(df)
     if safe.empty:
         return _empty_discrepancies()
@@ -206,7 +216,11 @@ def build_jira_helix_links(
         return _empty_discrepancies()
 
     jira = jira_df.copy(deep=False)
-    jira["__helix_ids"] = _series_text(jira, "description").map(extract_helix_ids_from_text)
+    # Real JQL feeds may carry the Helix incident in either the long description
+    # or the short title/summary. We scan both once, dedupe extracted IDs, and
+    # keep the actual row relationship 1:N through explode + merge.
+    jira_text = _series_text(jira, "description") + "\n" + _series_text(jira, "summary")
+    jira["__helix_ids"] = jira_text.map(extract_helix_ids_from_text)
     jira = jira.loc[jira["__helix_ids"].map(bool)].copy(deep=False)
     if jira.empty:
         return _empty_discrepancies()
@@ -262,14 +276,38 @@ def build_jira_helix_links(
         },
         index=helix.index,
     )
-    helix_side = helix_side.drop_duplicates(subset=["helix_id", "helix_source_id"], keep="first")
+    helix_before = int(len(helix_side))
+    helix_side = helix_side.drop_duplicates(subset=["helix_id"], keep="first")
+    helix_duplicates_removed = max(helix_before - int(len(helix_side)), 0)
     links = jira_side.merge(helix_side, on="helix_id", how="inner", sort=False)
     if links.empty:
         return _empty_discrepancies()
+    links_before = int(len(links))
     links = links.drop_duplicates(
-        subset=["country", "source_id", "jira_key", "helix_id", "helix_source_id"],
+        subset=["country", "source_id", "jira_key", "helix_id"],
         keep="first",
     )
+    duplicates_removed = max(links_before - int(len(links)), 0) + helix_duplicates_removed
+    for helix_id, bucket in links.groupby("helix_id", sort=False):
+        jira_keys = sorted(
+            {
+                str(value or "").strip().upper()
+                for value in bucket["jira_key"].tolist()
+                if str(value or "").strip()
+            }
+        )
+        LOGGER.info(
+            "finalist_jira_helix_links",
+            extra={
+                "run_id": log_run_id,
+                "helix_id": str(helix_id or ""),
+                "jira_keys": jira_keys,
+                "jira_count": len(jira_keys),
+                "matched_by": "jira_text_helix_id",
+                "duplicates_removed": int(duplicates_removed),
+                "excluded_reason": "",
+            },
+        )
     for column in _DISCREPANCY_COLUMNS:
         if column not in links.columns:
             links[column] = pd.NA
@@ -315,14 +353,28 @@ def build_finalist_status_discrepancies(
     reference_day: pd.Timestamp | str | None = None,
 ) -> pd.DataFrame:
     """Return JIRA-open/Helix-finalist discrepancies for the requested scope."""
+    run_id = uuid4().hex[:12]
     mode = finalist_status_analysis_mode(settings)
     links = build_jira_helix_links(
         df,
         country=country,
         source_ids=source_ids,
         mode=mode,
+        run_id=run_id,
     )
     if links.empty:
+        LOGGER.info(
+            "finalist_discrepancies_empty",
+            extra={
+                "run_id": run_id,
+                "helix_id": "",
+                "jira_keys": [],
+                "jira_count": 0,
+                "matched_by": "jira_text_helix_id",
+                "duplicates_removed": 0,
+                "excluded_reason": "no_jira_helix_links",
+            },
+        )
         return _empty_discrepancies()
 
     work = links.copy(deep=False)
@@ -348,7 +400,34 @@ def build_finalist_status_discrepancies(
         work = work.loc[work["helix_finalized_at"].notna() & work["helix_finalized_at"].le(ref_end)]
 
     if work.empty:
+        LOGGER.info(
+            "finalist_discrepancies_empty",
+            extra={
+                "run_id": run_id,
+                "helix_id": "",
+                "jira_keys": [],
+                "jira_count": 0,
+                "matched_by": "jira_text_helix_id",
+                "duplicates_removed": 0,
+                "excluded_reason": "helix_finalized_outside_window",
+            },
+        )
         return _empty_discrepancies()
+
+    jira_base_url = str(getattr(settings, "JIRA_BASE_URL", "") or "").strip()
+    helix_base_url = str(
+        getattr(settings, "HELIX_ARSQL_DASHBOARD_URL", "")
+        or getattr(settings, "HELIX_DASHBOARD_URL", "")
+        or ""
+    ).strip()
+    work["jira_url"] = [
+        build_jira_issue_url(key, base_url=jira_base_url, existing_url=url)
+        for key, url in zip(work["jira_key"].tolist(), work["jira_url"].tolist())
+    ]
+    work["helix_url"] = [
+        build_helix_issue_url(helix_id, base_url=helix_base_url, existing_url=url)
+        for helix_id, url in zip(work["helix_id"].tolist(), work["helix_url"].tolist())
+    ]
 
     reference = ref_end or pd.Timestamp.now().normalize()
     work["jira_open_days"] = (
@@ -364,12 +443,44 @@ def build_finalist_status_discrepancies(
     )
     out = work.loc[mask].copy(deep=False)
     if out.empty:
+        LOGGER.info(
+            "finalist_discrepancies_empty",
+            extra={
+                "run_id": run_id,
+                "helix_id": "",
+                "jira_keys": [],
+                "jira_count": 0,
+                "matched_by": "jira_text_helix_id",
+                "duplicates_removed": 0,
+                "excluded_reason": "no_open_jira_with_finalist_helix",
+            },
+        )
         return _empty_discrepancies()
+    out["__priority_rank"] = out["jira_priority"].map(priority_rank).fillna(99)
+    out["__status_rank"] = out["jira_status"].map(status_progress_rank).fillna(99)
     out = out.sort_values(
-        by=["helix_finalized_at", "helix_id", "jira_key"],
-        ascending=[False, True, True],
+        by=["__priority_rank", "jira_open_days", "__status_rank", "helix_id", "jira_key"],
+        ascending=[True, False, True, True, True],
         kind="mergesort",
     )
+    for helix_id, bucket in out.groupby("helix_id", sort=False):
+        jira_keys = [
+            str(value or "").strip().upper()
+            for value in bucket["jira_key"].tolist()
+            if str(value or "").strip()
+        ]
+        LOGGER.info(
+            "finalist_discrepancies_built",
+            extra={
+                "run_id": run_id,
+                "helix_id": str(helix_id or ""),
+                "jira_keys": jira_keys,
+                "jira_count": len(jira_keys),
+                "matched_by": "jira_text_helix_id",
+                "duplicates_removed": 0,
+                "excluded_reason": "",
+            },
+        )
     return out.loc[:, list(_DISCREPANCY_COLUMNS)].copy(deep=False)
 
 

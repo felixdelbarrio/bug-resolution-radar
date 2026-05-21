@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
+from uuid import uuid4
 
 import pandas as pd
 
@@ -17,6 +19,8 @@ from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.services.dashboard_snapshot import DashboardQuery, load_scope_context
 from bug_resolution_radar.services.helix_raw_export import build_helix_raw_export_frame
 from bug_resolution_radar.services.tabular_export import dataframes_to_xlsx_bytes
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,8 @@ def build_finalist_discrepancies_export_frame(
         [
             {
                 "Helix ID": row.helix_id,
+                "Título Helix": row.helix_summary,
+                "Descripción Helix": row.helix_text,
                 "Estado Helix": row.helix_status,
                 "URL Helix": row.helix_url,
                 "JIRA key": row.jira_key,
@@ -80,6 +86,8 @@ def build_finalist_discrepancies_export_frame(
         ],
         columns=[
             "Helix ID",
+            "Título Helix",
+            "Descripción Helix",
             "Estado Helix",
             "URL Helix",
             "JIRA key",
@@ -101,6 +109,14 @@ def build_finalist_discrepancies_workbook_export(
 ) -> IssueWorkbookExport:
     frame = build_finalist_discrepancies_export_frame(settings, query=query)
     sheet_name = "Discrepancias finalistas"
+    LOGGER.info(
+        "finalist_discrepancies_export",
+        extra={
+            "run_id": uuid4().hex[:12],
+            "slide_name": sheet_name,
+            "rows_generated": int(len(frame)),
+        },
+    )
     return IssueWorkbookExport(
         content=dataframes_to_xlsx_bytes(
             [(sheet_name, frame)],

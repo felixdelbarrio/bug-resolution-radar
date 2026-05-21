@@ -248,7 +248,7 @@ def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Pat
     dff = pd.DataFrame(
         [
             {
-                "key": "MEX-1",
+                "key": "EAM-94000",
                 "summary": "Jira pendiente",
                 "description": "Helix INC000104154954",
                 "status": "To Rework",
@@ -260,6 +260,22 @@ def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Pat
                 "country": "México",
                 "source_id": "jira:mexico:senda",
                 "source_type": "jira",
+                "url": "https://jira.example.com/browse/EAM-94000",
+            },
+            {
+                "key": "EAM-93998",
+                "summary": "Jira pendiente adicional",
+                "description": "Tambien ligada a INC000104154954",
+                "status": "To Rework",
+                "priority": "High",
+                "assignee": "Bea",
+                "created": (now - pd.Timedelta(days=25)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+                "url": "https://jira.example.com/browse/EAM-93998",
             },
             {
                 "key": "B-1",
@@ -279,17 +295,34 @@ def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Pat
         [
             {
                 "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado",
+                "helix_description": "Resolución de INC000104154954 validada en Helix",
                 "helix_status": "Closed",
                 "helix_url": "https://helix.example.com/INC000104154954",
-                "jira_key": "MEX-1",
+                "jira_key": "EAM-94000",
                 "jira_summary": "Jira pendiente",
                 "jira_status": "To Rework",
                 "jira_priority": "High",
                 "jira_assignee": "Ana",
                 "jira_open_days": 20,
-                "jira_url": "https://jira.example.com/browse/MEX-1",
+                "jira_url": "https://jira.example.com/browse/EAM-94000",
                 "source_alias": "Senda",
-            }
+            },
+            {
+                "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado",
+                "helix_description": "Resolución de INC000104154954 validada en Helix",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154954",
+                "jira_key": "EAM-93998",
+                "jira_summary": "Jira pendiente adicional",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Bea",
+                "jira_open_days": 25,
+                "jira_url": "https://jira.example.com/browse/EAM-93998",
+                "source_alias": "Senda",
+            },
         ]
     )
 
@@ -323,6 +356,40 @@ def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Pat
     assert "Incidencias con discrepancias en estado finalista" in on_text
     assert "JIRA: To Rework" in on_text
     assert "Helix: Closed" in on_text
+    assert "EAM-93998" in on_text
+    assert any(
+        "Incidencias abiertas por criticidad alta" in _slide_all_text(slide)
+        and "EAM-93998" in _slide_all_text(slide)
+        for slide in prs.slides
+    )
+
+    finalist_slide = next(
+        slide
+        for slide in prs.slides
+        if "Incidencias con discrepancias en estado finalista" in _slide_all_text(slide)
+        and "EAM-94000" in _slide_all_text(slide)
+    )
+    table = _native_tables(finalist_slide)[0].table
+    id_values = [str(table.cell(row_idx, 0).text or "") for row_idx in range(1, len(table.rows))]
+    assert "EAM-94000" in id_values
+    assert "EAM-93998" in id_values
+    assert all("INC000104154954" not in value for value in id_values)
+
+    description_values = [
+        str(table.cell(row_idx, 1).text or "") for row_idx in range(1, len(table.rows))
+    ]
+    assert any("INC000104154954" in value for value in description_values)
+    first_id_runs = list(table.cell(1, 0).text_frame.paragraphs[0].runs)
+    assert first_id_runs
+    assert str(first_id_runs[0].hyperlink.address or "").startswith("https://jira.example.com")
+    description_runs = [
+        run for paragraph in table.cell(1, 1).text_frame.paragraphs for run in paragraph.runs
+    ]
+    assert any(
+        "INC000104154954" in str(run.text or "")
+        and str(run.hyperlink.address or "").startswith("https://helix.example.com")
+        for run in description_runs
+    )
 
 
 def test_generate_country_period_followup_ppt_uses_open_focus_label_from_settings() -> None:
