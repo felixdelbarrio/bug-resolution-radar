@@ -19,9 +19,24 @@ class FinalistDiscrepancyIssueRow:
     jira_open_days: int
     jira_url: str
     helix_id: str
+    helix_summary: str
+    helix_description: str
     helix_status: str
     helix_url: str
     source_alias: str = ""
+
+    @property
+    def helix_text(self) -> str:
+        summary = str(self.helix_summary or "").strip()
+        description = str(self.helix_description or "").strip()
+        helix_id = str(self.helix_id or "").strip().upper()
+        parts: list[str] = []
+        for value in (summary, description):
+            if value.strip().upper() == helix_id:
+                continue
+            if value and value not in parts:
+                parts.append(value)
+        return "\n".join(parts) if parts else "Sin descripción Helix"
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -79,6 +94,8 @@ def build_finalist_discrepancy_issue_list(
                 jira_open_days=int(round(float(row.get("__open_days", 0.0) or 0.0))),
                 jira_url=_text(row, "jira_url"),
                 helix_id=helix_id,
+                helix_summary=_text(row, "helix_summary"),
+                helix_description=_text(row, "helix_description"),
                 helix_status=_text(row, "helix_status"),
                 helix_url=_text(row, "helix_url"),
                 source_alias=_text(row, "source_alias"),

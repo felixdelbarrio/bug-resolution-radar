@@ -257,16 +257,13 @@ export type IntelligencePayload = {
   };
   finalistDiscrepancies: {
     kpis: Array<{ label: string; value: string; detail: string }>;
-    filterOptions: {
-      jiraStatus: string[];
-      helixStatus: string[];
-      priority: string[];
-      assignee: string[];
-    };
     groups: Array<{
       helixId: string;
       helixUrl: string;
       helixStatus: string;
+      helixSummary: string;
+      helixDescription: string;
+      helixText: string;
       jiraCount: number;
       issues: Array<{
         key: string;

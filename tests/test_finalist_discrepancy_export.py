@@ -25,6 +25,8 @@ def test_finalist_discrepancies_workbook_export(monkeypatch: Any, tmp_path) -> N
         [
             {
                 "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado",
+                "helix_description": "Cierre funcional INC000104154954",
                 "helix_status": "Closed",
                 "helix_url": "https://helix.example.com/INC000104154954",
                 "jira_key": "MEX-1",
@@ -35,7 +37,22 @@ def test_finalist_discrepancies_workbook_export(monkeypatch: Any, tmp_path) -> N
                 "jira_open_days": 20,
                 "jira_url": "https://jira.example.com/browse/MEX-1",
                 "source_alias": "Senda",
-            }
+            },
+            {
+                "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado",
+                "helix_description": "Cierre funcional INC000104154954",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154954",
+                "jira_key": "MEX-2",
+                "jira_summary": "Pendiente tambien",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Luis",
+                "jira_open_days": 30,
+                "jira_url": "https://jira.example.com/browse/MEX-2",
+                "source_alias": "Senda",
+            },
         ]
     )
     context = DashboardScopeContext(
@@ -57,10 +74,21 @@ def test_finalist_discrepancies_workbook_export(monkeypatch: Any, tmp_path) -> N
         query=query,
     )
 
-    assert export.row_count == 1
+    assert export.row_count == 2
     wb = load_workbook(BytesIO(export.content))
     ws = wb["Discrepancias finalistas"]
     headers = [cell.value for cell in ws[1]]
-    assert headers[:5] == ["Helix ID", "Estado Helix", "JIRA key", "Resumen JIRA", "Estado JIRA"]
+    assert headers[:7] == [
+        "Helix ID",
+        "Título Helix",
+        "Descripción Helix",
+        "Estado Helix",
+        "JIRA key",
+        "Resumen JIRA",
+        "Estado JIRA",
+    ]
     assert ws["A2"].value == "INC000104154954"
-    assert ws["C2"].value == "MEX-1"
+    assert ws["E2"].value == "MEX-2"
+    assert ws["E3"].value == "MEX-1"
+    assert ws["A2"].hyperlink.target == "https://helix.example.com/INC000104154954"
+    assert ws["E2"].hyperlink.target == "https://jira.example.com/browse/MEX-2"

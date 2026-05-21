@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from copy import deepcopy
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Sequence, cast
+from uuid import uuid4
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -60,6 +62,7 @@ from bug_resolution_radar.analytics.status_semantics import effective_closed_mas
 from bug_resolution_radar.analytics.time_windows import TimeWindowService
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
+from bug_resolution_radar.common.issue_links import linkify_issue_references
 from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
@@ -100,6 +103,8 @@ from bug_resolution_radar.theme.design_tokens import (
     hex_to_rgb,
 )
 from bug_resolution_radar.theme.semantic_colors import priority_color_map
+
+LOGGER = logging.getLogger(__name__)
 
 _REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _EMU_PER_INCH = 914400.0
@@ -3376,6 +3381,14 @@ def _populate_risk_issue_list_slide(
         rows=rows,
         hyperlink_by_row=row_links,
     )
+    LOGGER.info(
+        "period_followup_slide_rows",
+        extra={
+            "run_id": uuid4().hex[:12],
+            "slide_name": str(title or "").strip(),
+            "rows_generated": int(len(issues_page or ())),
+        },
+    )
 
 
 def _append_period_risk_issue_cover(
@@ -3482,19 +3495,20 @@ def _finalist_discrepancy_rows_for_table(
     issues: Sequence[FinalistDiscrepancyIssueRow],
     *,
     empty_message: str,
-) -> tuple[list[list[str]], dict[int, str]]:
+) -> tuple[list[list[str]], dict[int, str], dict[int, str]]:
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
+    description_by_row: dict[int, str] = {}
     for idx, issue in enumerate(list(issues or [])):
         jira_key = str(issue.jira_key or "").strip().upper()
-        helix_id = str(issue.helix_id or "").strip().upper()
+        description_text = (
+            f"JIRA: {str(issue.jira_summary or '').strip() or 'Sin título JIRA'}\n"
+            f"Helix: {str(issue.helix_text or '').strip() or 'Sin descripción Helix'}"
+        )
         rows.append(
             [
-                f"{jira_key}\n{helix_id}".strip(),
-                ellipsize_text(
-                    _premium_sentence_case(str(issue.jira_summary or "")),
-                    max_chars=125,
-                ),
+                jira_key,
+                ellipsize_text(description_text, max_chars=150),
                 ellipsize_text(
                     str(issue.jira_assignee or "").strip() or "(sin asignar)",
                     max_chars=65,
@@ -3509,11 +3523,105 @@ def _finalist_discrepancy_rows_for_table(
         )
         if str(issue.jira_url or "").strip():
             row_links[idx] = str(issue.jira_url or "").strip()
+        description_by_row[idx] = rows[-1][1]
     if not rows:
         rows.append(
             ["", str(empty_message or "Sin incidencias para este criterio."), "", "", "", ""]
         )
-    return rows, row_links
+    return rows, row_links, description_by_row
+
+
+def _write_linkified_issue_cell(
+    cell: Any,
+    text: str,
+    *,
+    jira_url: str,
+    helix_id: str,
+    helix_url: str,
+) -> None:
+    tf = getattr(cell, "text_frame", None)
+    if tf is None:
+        return
+    try:
+        tf.clear()
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.word_wrap = True
+        tf.margin_left = Inches(0.04)
+        tf.margin_right = Inches(0.04)
+        tf.margin_top = Inches(0.02)
+        tf.margin_bottom = Inches(0.02)
+    except Exception:
+        pass
+    try:
+        cell.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    jira_key = ""
+    if jira_url:
+        match = re.search(_ALPHANUM_KEY_RE, str(jira_url or ""))
+        jira_key = str(match.group(0)).upper() if match else ""
+    segments_by_line = [
+        linkify_issue_references(
+            line,
+            jira_urls={jira_key: jira_url} if jira_key and jira_url else {},
+            helix_urls={str(helix_id or "").upper(): helix_url} if helix_url else {},
+        )
+        for line in str(text or "").splitlines()
+    ]
+    if not segments_by_line:
+        segments_by_line = [()]
+    body_rgb = RGBColor(*_TABLE_BODY_FG_RGB)
+    for line_idx, segments in enumerate(segments_by_line):
+        paragraph = tf.paragraphs[0] if line_idx == 0 else tf.add_paragraph()
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.space_before = Pt(0)
+        paragraph.space_after = Pt(0)
+        if not segments:
+            run = paragraph.add_run()
+            run.text = ""
+            run.font.size = Pt(_ISSUE_TABLE_BODY_FONT_SIZE_PT)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            continue
+        for segment in segments:
+            run = paragraph.add_run()
+            run.text = segment.text
+            run.font.size = Pt(_ISSUE_TABLE_BODY_FONT_SIZE_PT)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            try:
+                run.font.color.rgb = body_rgb
+            except Exception:
+                pass
+            if segment.url:
+                try:
+                    run.hyperlink.address = segment.url
+                    run.font.underline = True
+                except Exception:
+                    pass
+
+
+def _linkify_finalist_description_cells(
+    table_shape: Any,
+    *,
+    issues_page: Sequence[FinalistDiscrepancyIssueRow],
+    description_by_row: Mapping[int, str],
+) -> None:
+    if table_shape is None or not getattr(table_shape, "has_table", False):
+        return
+    table = table_shape.table
+    for idx, issue in enumerate(list(issues_page or [])):
+        if idx not in description_by_row:
+            continue
+        try:
+            cell = table.cell(idx + 1, 1)
+        except Exception:
+            continue
+        _write_linkified_issue_cell(
+            cell,
+            description_by_row[idx],
+            jira_url=str(issue.jira_url or "").strip(),
+            helix_id=str(issue.helix_id or "").strip().upper(),
+            helix_url=str(issue.helix_url or "").strip(),
+        )
 
 
 def _style_finalist_status_cells(table_shape: Any, issues_count: int) -> None:
@@ -3576,7 +3684,7 @@ def _populate_finalist_discrepancy_list_slide(
     _set_shape_text(slide, 4, "")
     _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    rows, row_links = _finalist_discrepancy_rows_for_table(
+    rows, row_links, description_by_row = _finalist_discrepancy_rows_for_table(
         issues_page,
         empty_message=empty_message,
     )
@@ -3587,7 +3695,20 @@ def _populate_finalist_discrepancy_list_slide(
         rows=rows,
         hyperlink_by_row=row_links,
     )
+    _linkify_finalist_description_cells(
+        table_shape,
+        issues_page=issues_page,
+        description_by_row=description_by_row,
+    )
     _style_finalist_status_cells(table_shape, issues_count=len(issues_page))
+    LOGGER.info(
+        "period_followup_slide_rows",
+        extra={
+            "run_id": uuid4().hex[:12],
+            "slide_name": _FINALIST_DISCREPANCIES_TITLE,
+            "rows_generated": int(len(issues_page or ())),
+        },
+    )
 
 
 def _append_finalist_discrepancy_section(

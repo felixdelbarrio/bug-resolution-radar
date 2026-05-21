@@ -113,9 +113,25 @@ def test_intelligence_payload_includes_finalist_discrepancies_tab(
                 "url": "https://jira.local/browse/MEX-1",
             },
             {
+                "key": "MEX-2",
+                "summary": "Jira pendiente 2",
+                "description": "Helix INC000104154954",
+                "status": "Open",
+                "priority": "High",
+                "assignee": "Bea",
+                "created": "2026-04-29T10:00:00Z",
+                "updated": "2026-05-04T10:00:00Z",
+                "resolved": "",
+                "source_type": "jira",
+                "source_alias": "Core",
+                "source_id": "jira:mexico:core",
+                "country": "México",
+                "url": "https://jira.local/browse/MEX-2",
+            },
+            {
                 "key": "INC000104154954",
                 "summary": "Helix cerrado",
-                "description": "Detalle",
+                "description": "Detalle INC000104154954",
                 "status": "Closed",
                 "priority": "High",
                 "created": "2026-04-30T10:00:00Z",
@@ -140,9 +156,11 @@ def test_intelligence_payload_includes_finalist_discrepancies_tab(
         "finalistDiscrepancies",
     ]
     discrepancies = payload["finalistDiscrepancies"]
-    assert discrepancies["totalRows"] == 1
+    assert discrepancies["totalRows"] == 2
     assert discrepancies["groups"][0]["helixId"] == "INC000104154954"
-    assert discrepancies["groups"][0]["issues"][0]["key"] == "MEX-1"
+    assert discrepancies["groups"][0]["helixText"] == "Helix cerrado\nDetalle INC000104154954"
+    assert discrepancies["groups"][0]["jiraCount"] == 2
+    assert {issue["key"] for issue in discrepancies["groups"][0]["issues"]} == {"MEX-1", "MEX-2"}
 
 
 def test_country_finalist_mode_updates_open_kpis_consistently(

@@ -245,6 +245,9 @@ export function DashboardPage() {
     if (keys.length === 0) {
       return;
     }
+    if (!dashboardState.params.notesIssueKey) {
+      return;
+    }
     if (keys.includes(dashboardState.params.notesIssueKey)) {
       return;
     }

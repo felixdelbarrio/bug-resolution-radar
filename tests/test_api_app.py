@@ -829,6 +829,17 @@ def test_notes_endpoint_roundtrip(monkeypatch, tmp_path: Path) -> None:
     assert get_response.json()["note"] == "Investigar con backend"
 
 
+def test_notes_endpoint_rejects_invalid_issue_key(monkeypatch, tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.put("/api/notes/no-es-issue", json={"note": "Texto"})
+
+    assert response.status_code == 400
+    assert "formato JIRA o Helix" in response.json()["detail"]
+
+
 def test_notes_list_enrich_delete_and_empty_note_removes(monkeypatch, tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     source_id = _seed_issues(settings)

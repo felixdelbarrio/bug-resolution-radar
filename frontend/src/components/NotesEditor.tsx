@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { NoteListPayload } from "../lib/api";
+import { isValidIssueReference } from "../lib/issueLinks";
 
 type NotesEditorProps = {
   issueKeys: string[];
@@ -30,6 +31,7 @@ export function NotesEditor({
 }: NotesEditorProps) {
   const [issueDraft, setIssueDraft] = useState(selectedIssueKey);
   const [draft, setDraft] = useState("");
+  const [validationMessage, setValidationMessage] = useState("");
 
   useEffect(() => {
     setIssueDraft(selectedIssueKey);
@@ -49,7 +51,33 @@ export function NotesEditor({
   }, [issueKeys]);
 
   const cleanIssueKey = issueDraft.trim().toUpperCase();
-  const canSave = Boolean(cleanIssueKey) && !isSaving;
+  const cleanNote = draft.trim();
+  const issueIsValid = isValidIssueReference(cleanIssueKey);
+  const canSave = Boolean(cleanIssueKey) && issueIsValid && Boolean(cleanNote) && !isSaving;
+
+  function handleSave() {
+    if (!cleanIssueKey) {
+      setValidationMessage("Introduce un issue JIRA o Helix.");
+      return;
+    }
+    if (!issueIsValid) {
+      setValidationMessage("El issue debe tener formato JIRA o Helix válido.");
+      return;
+    }
+    if (!cleanNote) {
+      setValidationMessage("La nota no puede estar vacía.");
+      return;
+    }
+    setValidationMessage("");
+    onSave(cleanIssueKey, cleanNote);
+  }
+
+  function handleClear() {
+    setIssueDraft("");
+    setDraft("");
+    setValidationMessage("");
+    onIssueChange("");
+  }
 
   return (
     <section className="notes-layout">
@@ -66,9 +94,8 @@ export function NotesEditor({
             list="notes-issue-suggestions"
             value={issueDraft}
             onChange={(event) => {
-              const next = event.target.value;
-              setIssueDraft(next);
-              onIssueChange(next.trim().toUpperCase());
+              setIssueDraft(event.target.value);
+              setValidationMessage("");
             }}
             placeholder="MEXBMI1-12345"
           />
@@ -83,7 +110,10 @@ export function NotesEditor({
           <textarea
             className="notes-area"
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setValidationMessage("");
+            }}
             placeholder="Anota contexto operativo para esta issue..."
           />
         </label>
@@ -92,14 +122,21 @@ export function NotesEditor({
             type="button"
             className="action-button"
             disabled={!canSave}
-            onClick={() => onSave(cleanIssueKey, draft)}
+            onClick={handleSave}
           >
             Guardar nota
           </button>
           <button
             type="button"
             className="secondary-button"
-            disabled={!cleanIssueKey || isDeleting}
+            onClick={handleClear}
+          >
+            Limpiar
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!cleanIssueKey || !issueIsValid || isDeleting}
             onClick={() => onDelete(cleanIssueKey)}
             aria-label="Eliminar nota"
             title="Eliminar nota"
@@ -110,6 +147,7 @@ export function NotesEditor({
           {!isLoading && saveSucceeded ? (
             <span className="minor-copy">Nota guardada localmente.</span>
           ) : null}
+          {validationMessage ? <span className="minor-copy">{validationMessage}</span> : null}
         </div>
       </section>
 
@@ -129,7 +167,12 @@ export function NotesEditor({
                 <button
                   type="button"
                   className="issue-inline-link issue-key-anchor-button"
-                  onClick={() => onIssueChange(row.issueKey)}
+                  onClick={() => {
+                    setIssueDraft(row.issueKey);
+                    setDraft(row.note);
+                    setValidationMessage("");
+                    onIssueChange(row.issueKey);
+                  }}
                 >
                   {row.issueKey}
                 </button>
