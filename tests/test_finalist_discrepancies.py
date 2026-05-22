@@ -4,6 +4,8 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.finalist_discrepancies import (
     ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
+    ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+    POST_JQL_LOOKUP_HELIX_KIND,
     apply_effective_finalist_country_mode,
     build_finalist_status_discrepancies,
     build_jira_helix_links,
@@ -203,6 +205,52 @@ def test_country_finalist_mode_uses_country_helix_and_closes_jira_effectively() 
     assert discrepancies["jira_key"].tolist() == ["MEX-1"]
     assert pd.to_datetime(enriched.loc[enriched["key"].eq("MEX-1"), "resolved"]).notna().all()
     assert pd.to_datetime(enriched.loc[enriched["key"].eq("MEX-2"), "resolved"]).isna().all()
+
+
+def test_finalist_modes_do_not_mix_configured_and_ad_hoc_helix() -> None:
+    df = pd.concat(
+        [
+            _df().loc[lambda frame: frame["key"].isin(["MEX-1", "INC000104154954"])],
+            pd.DataFrame(
+                [
+                    {
+                        "country": "México",
+                        "source_type": "helix",
+                        "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                        "source_alias": "Lookup estados finalistas Jira",
+                        "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
+                        "key": "INC000104154954",
+                        "summary": "Helix ad hoc",
+                        "description": "Lookup ad hoc",
+                        "status": "Resolved",
+                        "updated": "2026-05-04T00:00:00Z",
+                        "resolved": "2026-05-04T00:00:00Z",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    configured = build_finalist_status_discrepancies(
+        df,
+        settings=Settings(FINALIST_STATUS_ANALYSIS_MODE=ANALYSIS_MODE_COUNTRY_FINALIST_STATUS),
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        reference_day=pd.Timestamp("2026-05-10"),
+    )
+    ad_hoc = build_finalist_status_discrepancies(
+        df,
+        settings=Settings(
+            FINALIST_STATUS_ANALYSIS_MODE=ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP
+        ),
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        reference_day=pd.Timestamp("2026-05-10"),
+    )
+
+    assert configured["helix_source_id"].tolist() == ["helix:mexico:smartit"]
+    assert ad_hoc["helix_source_id"].tolist() == ["helix:mexico:lookup-estados-finalistas-jira"]
 
 
 def test_helix_id_maps_to_multiple_jira_and_dedupes_by_jira_key() -> None:

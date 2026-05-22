@@ -577,7 +577,7 @@ def _render_workspace_scope(
                     )
                 else:
                     labels = [
-                        source_label_by_id.get(str(sid), str(sid)) for sid in configured_rollup[:2]
+                        source_label_by_id.get(str(sid), str(sid)) for sid in configured_rollup
                     ]
                     if labels:
                         st.caption(f"Agregado país activo: {' · '.join(labels)}")

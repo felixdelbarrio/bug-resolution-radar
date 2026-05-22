@@ -25,7 +25,7 @@ from tenacity import (
 from ..analytics.status_semantics import is_finalist_status
 from ..common.security import sanitize_cookie_header, validate_service_base_url
 from ..common.utils import now_iso
-from ..config import build_source_id
+from ..config import Settings, build_source_id
 from ..models.schema_helix import HelixDocument, HelixWorkItem
 from .browser_runtime import (
     is_target_page_open_in_configured_browser as _is_target_page_open_in_browser,
@@ -1351,6 +1351,12 @@ def ingest_helix(
     incident_ids: Optional[List[str]] = None,
     incident_ids_only: bool = False,
     matched_jira_keys_by_incident_id: Optional[Dict[str, List[str]]] = None,
+    allow_interactive_bootstrap: bool = True,
+    helix_lookup_kind: str = "",
+    lookup_run_id: str = "",
+    lookup_at: str = "",
+    lookup_status: str = "",
+    lookup_error: str = "",
 ) -> Tuple[bool, str, Optional[HelixDocument]]:
     country_value = str(country or "").strip()
     alias_value = str(source_alias or "").strip() or "Helix principal"
@@ -1550,6 +1556,8 @@ def ingest_helix(
 
     def _ensure_login_bootstrap_page_open(*, force_recheck: bool = False) -> bool:
         nonlocal bootstrap_page_checked, bootstrap_page_ready
+        if not allow_interactive_bootstrap:
+            return False
         if not can_bootstrap_page:
             return False
         if bootstrap_page_checked and not force_recheck:
@@ -1578,6 +1586,8 @@ def ingest_helix(
         force_interactive: bool = False,
     ) -> Tuple[Optional[str], str]:
         nonlocal bootstrap_page_ready
+        if not allow_interactive_bootstrap:
+            return None, ""
         page_ready = False
         if not force_interactive:
             page_ready = _ensure_login_bootstrap_page_open(force_recheck=True)
@@ -1613,7 +1623,11 @@ def ingest_helix(
 
     cookie, cookie_source_host, cookie_error = _read_auth_cookie_from_browser()
     cookie_names_from_header = _cookie_names_from_header(cookie or "")
-    if (not cookie or not _has_auth_cookie(cookie_names_from_header)) and not manual_cookie_mode:
+    if (
+        (not cookie or not _has_auth_cookie(cookie_names_from_header))
+        and not manual_cookie_mode
+        and allow_interactive_bootstrap
+    ):
         bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
         if bootstrapped_cookie:
             cookie = bootstrapped_cookie
@@ -1621,6 +1635,12 @@ def ingest_helix(
             cookie_names_from_header = _cookie_names_from_header(cookie)
 
     if not cookie:
+        if not allow_interactive_bootstrap:
+            return (
+                False,
+                f"{source_label}: Helix session unavailable for non-interactive ARSQL lookup.",
+                None,
+            )
         details = f" Detalle: {cookie_error}" if cookie_error else ""
         hint = ""
         if not auth_cookie_hosts:
@@ -1650,7 +1670,7 @@ def ingest_helix(
 
     def _refresh_auth_session(trigger: str) -> Tuple[bool, str]:
         fresh_cookie, fresh_cookie_host, cookie_refresh_error = _read_auth_cookie_from_browser()
-        if not fresh_cookie and not manual_cookie_mode:
+        if not fresh_cookie and not manual_cookie_mode and allow_interactive_bootstrap:
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
             if bootstrapped_cookie:
                 fresh_cookie = bootstrapped_cookie
@@ -1672,7 +1692,11 @@ def ingest_helix(
         refreshed_cookie_names = _cookies_to_jar(
             session, fresh_cookie, host=(fresh_cookie_host or host)
         )
-        if not _has_auth_cookie(refreshed_cookie_names) and not manual_cookie_mode:
+        if (
+            not _has_auth_cookie(refreshed_cookie_names)
+            and not manual_cookie_mode
+            and allow_interactive_bootstrap
+        ):
             bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
                 force_interactive=True
             )
@@ -1714,7 +1738,7 @@ def ingest_helix(
             )
 
         if _looks_like_sso_redirect(refresh_preflight):
-            if not manual_cookie_mode:
+            if not manual_cookie_mode and allow_interactive_bootstrap:
                 bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser(
                     force_interactive=True
                 )
@@ -1733,6 +1757,11 @@ def ingest_helix(
                     if retry_preflight is not None:
                         refresh_preflight = retry_preflight
             if _looks_like_sso_redirect(refresh_preflight):
+                if not allow_interactive_bootstrap:
+                    return (
+                        False,
+                        f"{source_label}: Helix session unavailable for non-interactive ARSQL lookup.",
+                    )
                 return (
                     False,
                     f"{source_label}: Helix no autenticado tras refresco ({trigger}). "
@@ -1937,7 +1966,7 @@ def ingest_helix(
             preflight_name = "/dashboards/"
             _sync_arsql_origin_headers()
         if not arsql_uid:
-            if not manual_cookie_mode:
+            if not manual_cookie_mode and allow_interactive_bootstrap:
                 bootstrapped_cookie, bootstrapped_host = _bootstrap_cookie_from_browser()
                 if bootstrapped_cookie:
                     try:
@@ -1956,6 +1985,13 @@ def ingest_helix(
                         preflight_name = "/dashboards/"
                         _sync_arsql_origin_headers()
         if not arsql_uid:
+            if not allow_interactive_bootstrap:
+                return (
+                    False,
+                    f"{source_label}: Helix session unavailable for non-interactive ARSQL lookup. "
+                    "Configura HELIX_ARSQL_DATASOURCE_UID para lookup no interactivo.",
+                    None,
+                )
             return (
                 False,
                 f"{source_label}: no se pudo autodetectar HELIX_ARSQL_DATASOURCE_UID. "
@@ -2312,7 +2348,12 @@ def ingest_helix(
                     "service_origin_buug": str(
                         mapped_item.service_origin_buug or (buug_names[0] if buug_names else "")
                     ).strip(),
+                    "helix_lookup_kind": str(helix_lookup_kind or "").strip(),
                     "matched_jira_keys": sorted(set(matched_jira_keys)),
+                    "lookup_run_id": str(lookup_run_id or "").strip(),
+                    "lookup_at": str(lookup_at or "").strip(),
+                    "lookup_status": str(lookup_status or "").strip(),
+                    "lookup_error": str(lookup_error or "").strip(),
                 }
             )
             if allowed_business_incident_types and not is_allowed_helix_business_incident_type(
@@ -2369,4 +2410,49 @@ def ingest_helix(
             f"Filtrados por entorno: {filtered_out_by_environment}."
         ),
         doc,
+    )
+
+
+def lookup_helix_incidents_by_arsql(
+    settings: Settings,
+    *,
+    country: str,
+    service_origin_buug: str,
+    incident_ids: List[str],
+    source_alias: str,
+    source_id: str,
+    matched_jira_keys_by_incident_id: Optional[Dict[str, List[str]]] = None,
+    cache_doc: Optional[HelixDocument] = None,
+    batch_size: int = 25,
+    allow_interactive_bootstrap: bool = False,
+    lookup_run_id: str = "",
+    lookup_at: str = "",
+    helix_lookup_kind: str = "",
+) -> Tuple[bool, str, Optional[HelixDocument]]:
+    """Lookup explicit INC ids through ARSQL without opening browser windows by default."""
+    helix_browser = (
+        str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip() or "chrome"
+    )
+    return ingest_helix(
+        browser=helix_browser,
+        country=str(country or "").strip(),
+        source_alias=str(source_alias or "").strip(),
+        source_id=str(source_id or "").strip(),
+        proxy=str(getattr(settings, "HELIX_PROXY", "") or "").strip(),
+        ssl_verify=str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip(),
+        service_origin_buug=str(service_origin_buug or "").strip(),
+        service_origin_n1=getattr(settings, "HELIX_ARSQL_SOURCE_SERVICE_N1", ""),
+        service_origin_n2=getattr(settings, "HELIX_ARSQL_SOURCE_SERVICE_N2", ""),
+        chunk_size=max(int(batch_size or 0), 1),
+        dry_run=False,
+        existing_doc=HelixDocument.empty(),
+        cache_doc=cache_doc,
+        incident_ids=list(incident_ids or []),
+        incident_ids_only=True,
+        matched_jira_keys_by_incident_id=matched_jira_keys_by_incident_id,
+        allow_interactive_bootstrap=bool(allow_interactive_bootstrap),
+        helix_lookup_kind=str(helix_lookup_kind or "").strip(),
+        lookup_run_id=str(lookup_run_id or "").strip(),
+        lookup_at=str(lookup_at or "").strip(),
+        lookup_status="success",
     )

@@ -44,7 +44,10 @@ def _normalize_source_rows(
         alias = str(raw.get("alias") or "").strip()
         if not country or not alias:
             continue
+        source_id = str(raw.get("source_id") or "").strip()
         clean: Dict[str, str] = {"country": country, "alias": alias}
+        if source_id:
+            clean["source_id"] = source_id
         if source_type == "jira":
             po_team_leader = str(raw.get("po_team_leader") or "").strip()
             if po_team_leader:

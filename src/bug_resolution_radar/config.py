@@ -346,11 +346,12 @@ def _normalized_helix_source_rows_for_storage(settings: "Settings") -> List[Dict
         alias = _coerce_str(row.get("alias"))
         if not country or not alias:
             continue
-        sid = build_source_id("helix", country, alias)
+        sid = _coerce_str(row.get("source_id")) or build_source_id("helix", country, alias)
         if sid in seen:
             continue
         seen.add(sid)
         payload: Dict[str, str] = {
+            "source_id": sid,
             "country": country,
             "alias": alias,
             "service_origin_buug": helix_service_origin_buug_for_country(country),
@@ -428,6 +429,7 @@ class Settings(BaseModel):
     HELIX_ARSQL_GRAFANA_DEVICE_ID: str = ""
     HELIX_ARSQL_DASHBOARD_URL: str = ""
     HELIX_INC_LOOKUP_BATCH_SIZE: int = 25
+    HELIX_INC_LOOKUP_TTL_HOURS: int = 24
     HELIX_BROWSER_LOGIN_WAIT_SECONDS: int = 90
     HELIX_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
@@ -550,7 +552,7 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
         jql = _decode_env_multiline(_coerce_str(row.get("jql")))
         if not country or not alias or not jql:
             continue
-        sid = build_source_id("jira", country, alias)
+        sid = _coerce_str(row.get("source_id")) or build_source_id("jira", country, alias)
         if sid in seen:
             continue
         seen.add(sid)
@@ -582,7 +584,7 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
         service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
         if not country or not alias:
             continue
-        sid = build_source_id("helix", country, alias)
+        sid = _coerce_str(row.get("source_id")) or build_source_id("helix", country, alias)
         if sid in seen:
             continue
         seen.add(sid)

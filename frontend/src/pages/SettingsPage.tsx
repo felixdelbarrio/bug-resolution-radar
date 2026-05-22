@@ -135,7 +135,7 @@ function withSourceDrafts(rows: WorkspaceSource[]) {
 function emptyJiraRow(country: string): SourceDraftRow {
   return {
     draftKey: nextSourceDraftKey(),
-    source_id: buildSourceId("jira", country, ""),
+    source_id: "",
     source_type: "jira",
     country,
     alias: "",
@@ -148,7 +148,7 @@ function emptyJiraRow(country: string): SourceDraftRow {
 function emptyHelixRow(country: string): SourceDraftRow {
   return {
     draftKey: nextSourceDraftKey(),
-    source_id: buildSourceId("helix", country, ""),
+    source_id: "",
     source_type: "helix",
     country,
     alias: "",
@@ -188,7 +188,9 @@ function SourceTable({
         }
         return {
           ...nextRow,
-          source_id: buildSourceId(nextRow.source_type, nextRow.country, nextRow.alias)
+          source_id:
+            nextRow.source_id ||
+            (nextRow.alias ? buildSourceId(nextRow.source_type, nextRow.country, nextRow.alias) : "")
         };
       })
     );

@@ -36,7 +36,12 @@ class HelixWorkItem(BaseModel):
     service_origin_buug: str = ""
     source_alias: str = ""
     source_id: str = ""
+    helix_lookup_kind: str = ""
     matched_jira_keys: List[str] = Field(default_factory=list)
+    lookup_run_id: str = ""
+    lookup_at: str = ""
+    lookup_status: str = ""
+    lookup_error: str = ""
     raw_fields: Dict[str, Any] = Field(default_factory=dict)
 
 

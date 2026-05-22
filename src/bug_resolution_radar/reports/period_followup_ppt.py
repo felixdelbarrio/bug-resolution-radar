@@ -63,7 +63,7 @@ from bug_resolution_radar.analytics.time_windows import TimeWindowService
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 from bug_resolution_radar.common.issue_links import linkify_issue_references
-from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
+from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
@@ -3332,12 +3332,44 @@ def _chunk_risk_issues(
     return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
 
 
-def _assignee_with_po_text(assignee: object, po_team_leader: object) -> str:
+def _assignee_with_po_text(
+    assignee: object,
+    po_team_leader: object,
+    *,
+    assignee_max_chars: int = 48,
+    po_max_chars: int = 44,
+) -> str:
     assignee_text = str(assignee or "").strip() or "(sin asignar)"
     po_text = str(po_team_leader or "").strip()
+    assignee_text = ellipsize_text(assignee_text, max_chars=assignee_max_chars)
     if not po_text:
         return assignee_text
+    po_text = ellipsize_text(po_text, max_chars=po_max_chars)
     return f"{assignee_text}\n({po_text})"
+
+
+def _enrich_po_team_leader_from_sources(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+    safe = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if safe.empty or "source_id" not in safe.columns:
+        return safe
+    source_po = {
+        str(source.get("source_id") or "").strip(): str(source.get("po_team_leader") or "").strip()
+        for source in jira_sources(settings)
+        if str(source.get("source_id") or "").strip()
+        and str(source.get("po_team_leader") or "").strip()
+    }
+    if not source_po:
+        return safe
+    out = safe.copy(deep=False)
+    if "po_team_leader" not in out.columns:
+        out["po_team_leader"] = ""
+    current_po = out["po_team_leader"].fillna("").astype(str).str.strip()
+    source_ids = out["source_id"].fillna("").astype(str).str.strip()
+    out["po_team_leader"] = [
+        po or source_po.get(source_id, "")
+        for po, source_id in zip(current_po.tolist(), source_ids.tolist())
+    ]
+    return out
 
 
 def _risk_issue_rows_for_table(
@@ -3356,10 +3388,7 @@ def _risk_issue_rows_for_table(
                     _premium_sentence_case(str(issue.summary or "")),
                     max_chars=125,
                 ),
-                ellipsize_text(
-                    _assignee_with_po_text(issue.assignee, issue.po_team_leader),
-                    max_chars=82,
-                ),
+                _assignee_with_po_text(issue.assignee, issue.po_team_leader),
                 ellipsize_text(str(issue.status or ""), max_chars=28),
                 ellipsize_text(str(issue.priority or ""), max_chars=18),
                 f"{int(issue.open_days or 0)} días",
@@ -3535,10 +3564,7 @@ def _finalist_discrepancy_rows_for_table(
             [
                 jira_key,
                 ellipsize_text(description_text, max_chars=150),
-                ellipsize_text(
-                    _assignee_with_po_text(issue.jira_assignee, issue.po_team_leader),
-                    max_chars=82,
-                ),
+                _assignee_with_po_text(issue.jira_assignee, issue.po_team_leader),
                 (
                     f"JIRA: {ellipsize_text(str(issue.jira_status or ''), max_chars=22)}\n"
                     f"Helix: {ellipsize_text(str(issue.helix_status or ''), max_chars=22)}"
@@ -4288,7 +4314,7 @@ def generate_country_period_followup_ppt(
     )
 
     risk_lists = build_period_risk_issue_lists(
-        aggregate.dff,
+        _enrich_po_team_leader_from_sources(aggregate.dff, settings),
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
