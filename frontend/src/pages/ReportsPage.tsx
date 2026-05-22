@@ -14,9 +14,8 @@ export function ReportsPage() {
     savedPath?: string;
   } | null>(null);
   const reportMode = new URLSearchParams(location.search).get("reportMode") ?? "executive";
-  const isCountryRollupActive =
-    Boolean(workspace?.hasCountryRollup) && dashboardState.params.scopeMode === "country";
-  const activeReportMode = isCountryRollupActive && reportMode === "period" ? "period" : "executive";
+  const canGeneratePeriod = Boolean(dashboardState.params.country || workspace?.selectedCountry);
+  const activeReportMode = canGeneratePeriod && reportMode === "period" ? "period" : "executive";
   const periodSourceIds = workspace?.countryRollupSourceIds ?? [];
 
   const executive = useMutation({
@@ -147,7 +146,7 @@ export function ReportsPage() {
           </button>
         </article>
 
-        {isCountryRollupActive ? (
+        {canGeneratePeriod ? (
           <article
             className={cn(
               "surface-panel",
@@ -162,12 +161,14 @@ export function ReportsPage() {
             </div>
             <p className="minor-copy">
               Alcance: {dashboardState.params.country || "sin país"} ·{" "}
-              {periodSourceIds.length} orígenes agregados configurados
+              {periodSourceIds.length > 0
+                ? `${periodSourceIds.length} orígenes agregados configurados`
+                : "sin agregados configurados; se omiten slides agregadas"}
             </p>
             <button
               type="button"
               className="action-button"
-              disabled={period.isPending || !dashboardState.params.country || periodSourceIds.length < 2}
+              disabled={period.isPending || !dashboardState.params.country}
               onClick={() => {
                 setFeedback(null);
                 period.mutate();

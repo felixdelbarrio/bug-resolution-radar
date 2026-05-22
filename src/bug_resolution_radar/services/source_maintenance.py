@@ -47,14 +47,17 @@ def remove_jira_source_from_settings(settings: Settings, source_id: str) -> Tupl
     if not removed:
         return settings, False
 
-    payload = [
-        {
+    payload = []
+    for row in kept:
+        source_payload = {
             "country": str(row.get("country") or "").strip(),
             "alias": str(row.get("alias") or "").strip(),
             "jql": str(row.get("jql") or "").strip(),
         }
-        for row in kept
-    ]
+        po_team_leader = str(row.get("po_team_leader") or "").strip()
+        if po_team_leader:
+            source_payload["po_team_leader"] = po_team_leader
+        payload.append(source_payload)
     updated = settings.model_copy(update={"JIRA_SOURCES_JSON": to_env_json(payload)})
     return updated, True
 

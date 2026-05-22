@@ -33,8 +33,13 @@ from bug_resolution_radar.config import Settings
 
 ANALYSIS_MODE_SELECTED_SOURCES = "selected_sources"
 ANALYSIS_MODE_COUNTRY_FINALIST_STATUS = "country_finalist_status"
+ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP = "country_finalist_status_lookup"
 VALID_FINALIST_STATUS_ANALYSIS_MODES: frozenset[str] = frozenset(
-    {ANALYSIS_MODE_SELECTED_SOURCES, ANALYSIS_MODE_COUNTRY_FINALIST_STATUS}
+    {
+        ANALYSIS_MODE_SELECTED_SOURCES,
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+    }
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -61,6 +66,7 @@ _DISCREPANCY_COLUMNS: tuple[str, ...] = (
     "jira_open_days",
     "jira_priority",
     "jira_assignee",
+    "po_team_leader",
     "jira_url",
     "source_id",
     "source_alias",
@@ -78,7 +84,14 @@ def finalist_status_analysis_mode(settings: Settings | None) -> str:
 
 
 def is_country_finalist_status_mode(settings: Settings | None) -> bool:
-    return finalist_status_analysis_mode(settings) == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS
+    return finalist_status_analysis_mode(settings) in {
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+    }
+
+
+def is_country_finalist_status_lookup_mode(settings: Settings | None) -> bool:
+    return finalist_status_analysis_mode(settings) == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP
 
 
 def extract_helix_ids_from_text(text: object) -> tuple[str, ...]:
@@ -175,7 +188,10 @@ def _scope_for_links(
     selected_mask = _source_mask(country_filtered, source_ids)
     jira_mask = stype.eq("jira")
     helix_mask = stype.eq("helix")
-    if mode == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS:
+    if mode in {
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+    }:
         jira_df = country_filtered.loc[jira_mask & selected_mask].copy(deep=False)
         if jira_df.empty and not list(source_ids or []):
             jira_df = country_filtered.loc[jira_mask].copy(deep=False)
@@ -255,6 +271,7 @@ def build_jira_helix_links(
             "jira_resolved": jira["resolved"] if "resolved" in jira.columns else pd.NaT,
             "jira_priority": _series_text(jira, "priority"),
             "jira_assignee": _series_text(jira, "assignee"),
+            "po_team_leader": _series_text(jira, "po_team_leader"),
             "jira_url": _series_text(jira, "url"),
             "source_id": _series_text(jira, "source_id"),
             "source_alias": _series_text(jira, "source_alias"),

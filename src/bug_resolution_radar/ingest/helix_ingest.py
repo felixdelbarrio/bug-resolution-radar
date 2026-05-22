@@ -417,6 +417,20 @@ def _sql_in_filter(field_sql: str, values: Optional[List[str]]) -> Optional[str]
     return f"{field_sql} IN ({quoted})"
 
 
+def _dedupe_incident_ids(values: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in list(values or []):
+        txt = str(value or "").strip().upper()
+        if not re.fullmatch(r"INC\d{8,}", txt):
+            continue
+        if txt in seen:
+            continue
+        seen.add(txt)
+        out.append(txt)
+    return out
+
+
 def _build_arsql_endpoint(base_root: str, datasource_uid: str) -> str:
     root = str(base_root or "").strip().rstrip("/")
     uid = str(datasource_uid or "").strip()
@@ -626,6 +640,7 @@ def _build_arsql_sql(
     companies: Optional[List[str]] = None,
     environments: Optional[List[str]] = None,
     time_fields: Optional[List[str]] = None,
+    incident_ids_only: bool = False,
 ) -> str:
     disabled = {str(x or "").strip() for x in (disabled_fields or set()) if str(x or "").strip()}
 
@@ -739,7 +754,9 @@ def _build_arsql_sql(
         if not _is_disabled(field_name)
     ]
     incident_ids_filter = _sql_in_filter(_field_ref("Incident Number"), incident_ids)
-    if time_clauses and incident_ids_filter:
+    if incident_ids_only and incident_ids_filter:
+        where_parts.append(incident_ids_filter)
+    elif time_clauses and incident_ids_filter:
         where_parts.append("(" + " OR ".join(time_clauses + [incident_ids_filter]) + ")")
     elif time_clauses:
         where_parts.append("(" + " OR ".join(time_clauses) + ")")
@@ -1331,6 +1348,9 @@ def ingest_helix(
     dry_run: bool = False,
     existing_doc: Optional[HelixDocument] = None,
     cache_doc: Optional[HelixDocument] = None,
+    incident_ids: Optional[List[str]] = None,
+    incident_ids_only: bool = False,
+    matched_jira_keys_by_incident_id: Optional[Dict[str, List[str]]] = None,
 ) -> Tuple[bool, str, Optional[HelixDocument]]:
     country_value = str(country or "").strip()
     alias_value = str(source_alias or "").strip() or "Helix principal"
@@ -1785,6 +1805,11 @@ def ingest_helix(
         max_ids=pending_ids_max,
         include_outside_window=True,
     )
+    explicit_incident_ids = _dedupe_incident_ids(incident_ids)
+    if explicit_incident_ids:
+        arsql_pending_incident_ids = _dedupe_incident_ids(
+            list(arsql_pending_incident_ids) + explicit_incident_ids
+        )
     create_window_rule = (
         f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )
@@ -1846,6 +1871,7 @@ def ingest_helix(
             companies=arsql_companies,
             environments=arsql_environments_filter,
             time_fields=arsql_time_fields,
+            incident_ids_only=bool(incident_ids_only and explicit_incident_ids),
         )
         return {
             "date_format": "DD/MM/YYYY",
@@ -2271,6 +2297,24 @@ def ingest_helix(
             )
             if mapped_item is None:
                 continue
+            matched_jira_keys = [
+                str(key or "").strip().upper()
+                for key in list(
+                    dict(matched_jira_keys_by_incident_id or {}).get(
+                        str(mapped_item.id or "").strip().upper(), []
+                    )
+                    or []
+                )
+                if str(key or "").strip()
+            ]
+            mapped_item = mapped_item.model_copy(
+                update={
+                    "service_origin_buug": str(
+                        mapped_item.service_origin_buug or (buug_names[0] if buug_names else "")
+                    ).strip(),
+                    "matched_jira_keys": sorted(set(matched_jira_keys)),
+                }
+            )
             if allowed_business_incident_types and not is_allowed_helix_business_incident_type(
                 mapped_item.incident_type
             ):

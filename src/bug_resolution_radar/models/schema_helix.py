@@ -12,9 +12,12 @@ class HelixWorkItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
+    internal_id: str = ""
     summary: str = ""
+    description: str = ""
     status: str = ""
     status_raw: str = ""
+    status_reason: str = ""
     priority: str = ""
     incident_type: str = ""
     service: str = ""
@@ -30,8 +33,10 @@ class HelixWorkItem(BaseModel):
     source_service_n1: str = ""
     url: str = ""
     country: str = ""
+    service_origin_buug: str = ""
     source_alias: str = ""
     source_id: str = ""
+    matched_jira_keys: List[str] = Field(default_factory=list)
     raw_fields: Dict[str, Any] = Field(default_factory=dict)
 
 
