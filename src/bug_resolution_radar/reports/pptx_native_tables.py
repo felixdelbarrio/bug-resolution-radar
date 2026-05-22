@@ -288,37 +288,38 @@ def _set_cell_text(
     except Exception:
         pass
 
-    paragraphs = list(tf.paragraphs)
-    if not paragraphs:
-        paragraph = tf.add_paragraph()
-    else:
-        paragraph = paragraphs[0]
-    try:
-        paragraph.clear()
-    except Exception:
-        pass
-    paragraph.alignment = align
-    paragraph.space_before = Pt(0)
-    paragraph.space_after = Pt(0)
-
-    run = paragraph.add_run()
-    run.text = str(text or "")
-    run.font.size = Pt(max(float(font_size_pt), 1.0))
-    try:
-        run.font.name = font_name
-    except Exception:
-        pass
-    run.font.bold = bool(bold)
-    try:
-        run.font.color.rgb = color_rgb
-    except Exception:
-        pass
-    if hyperlink:
+    lines = str(text or "").splitlines() or [""]
+    for line_idx, line in enumerate(lines):
+        paragraph = tf.paragraphs[0] if line_idx == 0 else tf.add_paragraph()
         try:
-            run.hyperlink.address = str(hyperlink).strip()
-            run.font.underline = True
+            paragraph.clear()
         except Exception:
             pass
+        paragraph.alignment = align
+        paragraph.space_before = Pt(0.4 if line_idx else 0)
+        paragraph.space_after = Pt(0)
+
+        run = paragraph.add_run()
+        run.text = str(line or "")
+        resolved_size = max(float(font_size_pt), 1.0)
+        if line_idx > 0:
+            resolved_size = max(resolved_size * 0.78, 1.0)
+        run.font.size = Pt(resolved_size)
+        try:
+            run.font.name = font_name
+        except Exception:
+            pass
+        run.font.bold = bool(bold) if line_idx == 0 else False
+        try:
+            run.font.color.rgb = color_rgb
+        except Exception:
+            pass
+        if hyperlink and line_idx == 0:
+            try:
+                run.hyperlink.address = str(hyperlink).strip()
+                run.font.underline = True
+            except Exception:
+                pass
 
 
 def _set_cell_border(cell: Any, *, color_rgb: RGBColor, width_emu: int) -> None:

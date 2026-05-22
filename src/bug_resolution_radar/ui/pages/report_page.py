@@ -15,7 +15,7 @@ from bug_resolution_radar.analytics.analysis_window import (
     max_available_backlog_months,
     parse_analysis_lookback_months,
 )
-from bug_resolution_radar.config import Settings, all_configured_sources, rollup_source_ids
+from bug_resolution_radar.config import Settings, all_configured_sources, country_rollup_sources
 from bug_resolution_radar.reports import (
     build_report_filters,
     generate_executive_report_artifact,
@@ -630,19 +630,16 @@ def _render_period_followup_report(settings: Settings) -> None:
         st.warning("No hay orígenes con datos para el país seleccionado.")
         return
 
-    selected_source_ids = rollup_source_ids(
-        settings,
-        country=country,
-        available_source_ids=available_source_ids,
-    )
-    if len(selected_source_ids) < 2:
-        st.warning(
-            "Configura dos orígenes en Configuración → Agregados → Orígenes agregados por país."
+    configured_rollups = country_rollup_sources(settings).get(country, [])
+    selected_source_ids = [sid for sid in configured_rollups if sid in set(available_source_ids)]
+    if selected_source_ids:
+        source_labels = [source_label_by_id.get(sid, sid) for sid in selected_source_ids]
+        st.info(f"Orígenes agregados seleccionados: {', '.join(source_labels)}")
+    else:
+        st.info(
+            "No hay orígenes agregados configurados para este país. "
+            "El seguimiento se generará con los datos del país y omitirá las slides agregadas."
         )
-        return
-    selected_source_ids = list(selected_source_ids[:2])
-    source_labels = [source_label_by_id.get(sid, sid) for sid in selected_source_ids]
-    st.info(f"Orígenes seleccionados: {source_labels[0]} · {source_labels[1]}")
 
     scoped_df = _scope_country_sources(df_all, country=country, source_ids=selected_source_ids)
     if scoped_df.empty:

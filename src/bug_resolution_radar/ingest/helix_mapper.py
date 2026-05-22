@@ -439,17 +439,29 @@ def map_helix_values_to_item(
 
     base = str(base_url or "").strip().rstrip("/")
     if smartit_id and base:
-        url = f"{base}/app/#/incidentPV/{smartit_id}"
+        url = f"{base}/app/#/incident/{smartit_id}"
     else:
         url = str(ticket_console_url or f"{base}/app/#/ticket-console").strip()
 
     raw_status = _extract_text(values.get("status"))
     raw_priority = _extract_text(values.get("priority"))
+    summary = _as_text(values.get("summary") or values.get("description"))
+    description = _as_text(
+        values.get("detailedDescription")
+        or values.get("Detailed Description")
+        or values.get("description2")
+        or values.get("description")
+    )
     return HelixWorkItem(
         id=incident_number,
-        summary=_as_text(values.get("summary") or values.get("description")),
+        internal_id=smartit_id,
+        summary=summary,
+        description=description if description != summary else "",
         status=map_helix_status(raw_status),
         status_raw=raw_status,
+        status_reason=_extract_text(
+            values.get("statusReason") or values.get("Status Reason") or values.get("status_reason")
+        ),
         priority=map_helix_priority(raw_priority),
         incident_type=map_helix_incident_type(values.get("incidentType"), values),
         service=_extract_text(values.get("service")),
@@ -470,6 +482,12 @@ def map_helix_values_to_item(
         source_service_n1=_extract_custom_attr(values, "bbva_sourceservicen1"),
         url=url,
         country=country,
+        service_origin_buug=_extract_text(
+            values.get("bbva_sourceservicebuug")
+            or values.get("BBVA_SourceServiceBUUG")
+            or values.get("BBVA_SourceServiceCompany")
+            or values.get("Contact Company")
+        ),
         source_alias=source_alias,
         source_id=source_id,
         raw_fields=_raw_fields_snapshot(values),

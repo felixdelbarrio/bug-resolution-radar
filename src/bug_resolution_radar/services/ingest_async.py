@@ -242,6 +242,23 @@ def _append_progress(
         entry.messages.append({"ok": bool(ok), "message": str(message or "").strip()})
 
 
+def _append_message(
+    connector: str,
+    *,
+    run_id: int,
+    ok: bool,
+    message: str,
+) -> None:
+    key = _normalize_connector(connector)
+    with _LOCK:
+        entry = _entry(key)
+        if int(entry.run_id) != int(run_id):
+            return
+        if entry.state != "running":
+            return
+        entry.messages.append({"ok": bool(ok), "message": str(message or "").strip()})
+
+
 def _mark_source_started(
     connector: str,
     *,
@@ -380,6 +397,12 @@ def start_ingest_job(
                             message=msg,
                             completed_sources=completed,
                             total_sources=total,
+                        ),
+                        on_message=lambda ok, msg: _append_message(
+                            key,
+                            run_id=run_id,
+                            ok=ok,
+                            message=msg,
                         ),
                     )
                 else:

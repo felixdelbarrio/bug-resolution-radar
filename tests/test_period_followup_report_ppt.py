@@ -986,6 +986,166 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     assert called_chart_ids == ["timeseries", "timeseries", "timeseries"]
 
 
+def test_period_followup_ppt_handles_three_rollup_sources(monkeypatch: Any, tmp_path: Path) -> None:
+    _ = tmp_path
+    now = pd.Timestamp("2026-03-15T00:00:00+00:00")
+    rows = []
+    for idx, (source_id, alias) in enumerate(
+        (
+            ("jira:mexico:senda", "Senda"),
+            ("jira:mexico:gema", "Gema"),
+            ("jira:mexico:core", "Core"),
+        ),
+        start=1,
+    ):
+        rows.append(
+            {
+                "key": f"MEX-{idx}",
+                "summary": f"Issue {alias}",
+                "status": "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=idx)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": source_id,
+                "source_type": "jira",
+            }
+        )
+    dff = pd.DataFrame(rows)
+    settings = Settings(
+        PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+        JIRA_SOURCES_JSON=(
+            '[{"country":"México","alias":"Senda","jql":"project = SENDA"},'
+            '{"country":"México","alias":"Gema","jql":"project = GEMA"},'
+            '{"country":"México","alias":"Core","jql":"project = CORE"}]'
+        ),
+    )
+    chart_scopes: list[tuple[str, ...]] = []
+
+    def _fake_chart_png(
+        _settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, chart_id: str
+    ) -> bytes:
+        _ = (open_df, chart_id)
+        chart_scopes.append(tuple(sorted(dff["source_id"].dropna().astype(str).unique())))
+        return b""
+
+    monkeypatch.setattr(period_ppt_mod, "_chart_png", _fake_chart_png)
+    monkeypatch.setattr(
+        period_ppt_mod, "_append_functionality_followup_slides", lambda *a, **k: None
+    )
+    monkeypatch.setattr(period_ppt_mod, "_append_period_risk_issue_sections", lambda *a, **k: None)
+    monkeypatch.setattr(
+        period_ppt_mod, "_populate_open_aging_executive_slide", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        period_ppt_mod, "_populate_open_priority_executive_slide", lambda *a, **k: None
+    )
+    monkeypatch.setattr(period_ppt_mod, "validate_shapes_inside_slide", lambda *a, **k: None)
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema", "jira:mexico:core"],
+        dff_override=dff,
+        reference_day=now,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    full_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert out.source_ids == ("jira:mexico:senda", "jira:mexico:gema", "jira:mexico:core")
+    assert out.slide_count == 9
+    assert "SENDA" in full_text
+    assert "GEMA" in full_text
+    assert "CORE" in full_text
+    assert chart_scopes == [
+        ("jira:mexico:core", "jira:mexico:gema", "jira:mexico:senda"),
+        ("jira:mexico:senda",),
+        ("jira:mexico:gema",),
+        ("jira:mexico:core",),
+    ]
+
+
+def test_period_followup_ppt_without_rollups_omits_aggregate_and_source_summary_slides(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    template = tmp_path / "template.pptx"
+    _build_compact_template(template)
+    now = pd.Timestamp("2026-03-15T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "MEX-1",
+                "summary": "Issue país",
+                "status": "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        period_ppt_mod, "_append_functionality_followup_slides", lambda *a, **k: None
+    )
+    monkeypatch.setattr(period_ppt_mod, "_append_period_risk_issue_sections", lambda *a, **k: None)
+    monkeypatch.setattr(
+        period_ppt_mod, "_populate_open_aging_executive_slide", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        period_ppt_mod, "_populate_open_priority_executive_slide", lambda *a, **k: None
+    )
+
+    out = generate_country_period_followup_ppt(
+        Settings(PERIOD_PPT_TEMPLATE_PATH=str(template)),
+        country="México",
+        source_ids=[],
+        dff_override=dff,
+        reference_day=now,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    full_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert out.source_ids == ()
+    assert out.slide_count == 5
+    assert "vista agregada" not in full_text
+    assert "Seguimiento de incidencias - SENDA" not in full_text
+
+
+def test_period_followup_ppt_renders_po_under_assignee() -> None:
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    table_shape = period_ppt_mod._populate_issue_native_table(
+        slide,
+        table_shape_index=0,
+        headers=period_ppt_mod._RISK_ASSIGNEE_TABLE_HEADERS,
+        rows=[
+            [
+                "MEX-1",
+                "Issue",
+                period_ppt_mod._assignee_with_po_text(
+                    "MARCELA FONSECA MONTEALEGRE", "Víctor Expósito"
+                ),
+                "Open",
+                "High",
+                "5 días",
+            ]
+        ],
+    )
+    assignee_cell = table_shape.table.cell(1, 2)
+
+    assert assignee_cell.text == "MARCELA FONSECA MONTEALEGRE\n(Víctor Expósito)"
+    assert len(assignee_cell.text_frame.paragraphs) >= 2
+    first_run = assignee_cell.text_frame.paragraphs[0].runs[0]
+    po_run = assignee_cell.text_frame.paragraphs[1].runs[0]
+    assert po_run.font.size.pt < first_run.font.size.pt
+    assert period_ppt_mod._assignee_with_po_text("MARCELA", "") == "MARCELA"
+
+
 def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -> None:
     now = pd.Timestamp("2026-04-10T00:00:00+00:00")
     dff = pd.DataFrame(

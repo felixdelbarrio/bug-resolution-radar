@@ -67,6 +67,17 @@ function buildSourceId(sourceType: string, country: string, alias: string) {
   return `${slugToken(sourceType)}:${slugToken(country)}:${slugToken(alias)}`;
 }
 
+function helixServiceOriginBuugForCountry(country: string) {
+  const byCountry: Record<string, string> = {
+    argentina: "BBVA Argentina",
+    colombia: "BBVA Colombia",
+    espana: "BBVA España",
+    mexico: "BBVA México",
+    peru: "BBVA Perú"
+  };
+  return byCountry[slugToken(country)] ?? "";
+}
+
 function parseCsv(raw: string | number | undefined) {
   return String(raw ?? "")
     .split(",")
@@ -128,6 +139,7 @@ function emptyJiraRow(country: string): SourceDraftRow {
     source_type: "jira",
     country,
     alias: "",
+    po_team_leader: "",
     jql: "",
     markedForDeletion: false
   };
@@ -140,7 +152,7 @@ function emptyHelixRow(country: string): SourceDraftRow {
     source_type: "helix",
     country,
     alias: "",
-    service_origin_buug: "BBVA México",
+    service_origin_buug: helixServiceOriginBuugForCountry(country),
     service_origin_n1: "ENTERPRISE WEB",
     service_origin_n2: "",
     markedForDeletion: false
@@ -171,6 +183,9 @@ function SourceTable({
           return row;
         }
         const nextRow = { ...row, ...patch };
+        if (!nextRow.source_type || nextRow.source_type === "helix") {
+          nextRow.service_origin_buug = helixServiceOriginBuugForCountry(nextRow.country);
+        }
         return {
           ...nextRow,
           source_id: buildSourceId(nextRow.source_type, nextRow.country, nextRow.alias)
@@ -191,11 +206,12 @@ function SourceTable({
         </button>
       </div>
 
-      <div className="source-table-grid">
+      <div className={cn("source-table-grid", isJira ? "source-table-grid-jira" : "source-table-grid-helix")}>
         <div className="source-table-head">
           <span>Eliminar</span>
           <span>País</span>
           <span>Alias</span>
+          {isJira ? <span>PO / Team Leader</span> : null}
           {isJira ? <span>JQL</span> : null}
           {!isJira ? <span>Servicio Origen BU/UG</span> : null}
           {!isJira ? <span>Servicio Origen N1</span> : null}
@@ -227,6 +243,12 @@ function SourceTable({
             />
             {isJira ? (
               <input
+                value={row.po_team_leader ?? ""}
+                onChange={(event) => updateRow(index, { po_team_leader: event.target.value })}
+              />
+            ) : null}
+            {isJira ? (
+              <input
                 value={row.jql ?? ""}
                 onChange={(event) => updateRow(index, { jql: event.target.value })}
               />
@@ -234,9 +256,8 @@ function SourceTable({
             {!isJira ? (
               <input
                 value={row.service_origin_buug ?? ""}
-                onChange={(event) =>
-                  updateRow(index, { service_origin_buug: event.target.value })
-                }
+                readOnly
+                aria-readonly="true"
               />
             ) : null}
             {!isJira ? (
@@ -277,7 +298,7 @@ function RollupSourceSelector({
     .map((source) => `${source.alias} · ${String(source.source_type || "").toUpperCase()}`);
   const summary =
     selectedLabels.length === 0
-      ? "Selecciona hasta 2 orígenes"
+      ? "Selecciona orígenes"
       : selectedLabels.length === 1
         ? selectedLabels[0]
         : `${selectedLabels.length} orígenes seleccionados`;
@@ -286,7 +307,7 @@ function RollupSourceSelector({
     <article className="rollup-country-card">
       <div>
         <strong>{country}</strong>
-        <p>Selecciona hasta 2 orígenes por país.</p>
+        <p>Selecciona todos los orígenes agregados que apliquen al país.</p>
       </div>
 
       {sources.length === 0 ? (
@@ -304,24 +325,21 @@ function RollupSourceSelector({
           <div className="filter-combo-menu rollup-select-menu">
             {sources.map((source) => {
               const checked = selectedIds.includes(source.source_id);
-              const maxReached = !checked && selectedIds.length >= 2;
               return (
                 <label
                   key={source.source_id}
                   className={cn(
                     "filter-check rollup-select-option",
-                    checked && "rollup-select-option-active",
-                    maxReached && "rollup-select-option-disabled"
+                    checked && "rollup-select-option-active"
                   )}
                 >
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={maxReached}
                     onChange={() => {
                       const nextIds = checked
                         ? selectedIds.filter((item) => item !== source.source_id)
-                        : [...selectedIds, source.source_id].slice(0, 2);
+                        : [...selectedIds, source.source_id];
                       onChange(nextIds);
                     }}
                   />
@@ -440,9 +458,13 @@ export function SettingsPage() {
     new Set([1, 3, 6, 12, 18, 24, Number.parseInt(asText(values.ANALYSIS_LOOKBACK_MONTHS), 10) || 12])
   ).sort((left, right) => left - right);
   const finalistAnalysisMode =
-    asText(values.FINALIST_STATUS_ANALYSIS_MODE || "selected_sources") === "country_finalist_status"
+    asText(values.FINALIST_STATUS_ANALYSIS_MODE || "selected_sources") ===
+    "country_finalist_status"
       ? "country_finalist_status"
-      : "selected_sources";
+      : asText(values.FINALIST_STATUS_ANALYSIS_MODE || "selected_sources") ===
+          "country_finalist_status_lookup"
+        ? "country_finalist_status_lookup"
+        : "selected_sources";
 
   function setValue(key: string, next: string | number) {
     setDraft({
@@ -692,7 +714,9 @@ export function SettingsPage() {
         const allowedSourceIds = new Set(
           (configuredSourcesByCountry.get(country) ?? []).map((source) => source.source_id)
         );
-        const selected = sourceIds.filter((sourceId) => allowedSourceIds.has(sourceId)).slice(0, 2);
+        const selected = sourceIds.filter((sourceId, index) => {
+          return allowedSourceIds.has(sourceId) && sourceIds.indexOf(sourceId) === index;
+        });
         return selected.length > 0 ? [[country, selected]] : [];
       })
     );
@@ -809,7 +833,17 @@ export function SettingsPage() {
                       setValue("FINALIST_STATUS_ANALYSIS_MODE", "country_finalist_status")
                     }
                   />
-                  <span>Considerar solo estados finalistas del país</span>
+                  <span>Cruzar con estados finalistas ingestados del país</span>
+                </label>
+                <label className="radio-card">
+                  <input
+                    type="radio"
+                    checked={finalistAnalysisMode === "country_finalist_status_lookup"}
+                    onChange={() =>
+                      setValue("FINALIST_STATUS_ANALYSIS_MODE", "country_finalist_status_lookup")
+                    }
+                  />
+                  <span>Buscar estados finalistas del país</span>
                 </label>
               </div>
             </article>
@@ -1200,7 +1234,7 @@ export function SettingsPage() {
               Esta selección se usa en Vista País, Insights quincenal y el informe de seguimiento del periodo.
             </p>
             <p className="inline-caption">
-              Igual que en Streamlit, aquí eliges hasta 2 orígenes por país.
+              Igual que en Streamlit, aquí eliges todos los orígenes agregados necesarios por país.
             </p>
             <div className="rollup-country-stack">
               {countries.map((country) => {

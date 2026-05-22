@@ -49,6 +49,7 @@ def test_finalist_discrepancies_workbook_export(monkeypatch: Any, tmp_path) -> N
                 "jira_status": "To Rework",
                 "jira_priority": "High",
                 "jira_assignee": "Luis",
+                "po_team_leader": "Víctor Expósito",
                 "jira_open_days": 30,
                 "jira_url": "https://jira.example.com/browse/MEX-2",
                 "source_alias": "Senda",
@@ -87,8 +88,14 @@ def test_finalist_discrepancies_workbook_export(monkeypatch: Any, tmp_path) -> N
         "Resumen JIRA",
         "Estado JIRA",
     ]
+    assert "Responsable JIRA" in headers
+    assert "PO / Team Leader JIRA" in headers
+    assert headers.index("PO / Team Leader JIRA") == headers.index("Responsable JIRA") + 1
     assert ws["A2"].value == "INC000104154954"
     assert ws["E2"].value == "MEX-2"
     assert ws["E3"].value == "MEX-1"
+    assert ws.cell(row=2, column=headers.index("PO / Team Leader JIRA") + 1).value == (
+        "Víctor Expósito"
+    )
     assert ws["A2"].hyperlink.target == "https://helix.example.com/INC000104154954"
     assert ws["E2"].hyperlink.target == "https://jira.example.com/browse/MEX-2"

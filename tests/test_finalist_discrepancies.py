@@ -29,6 +29,7 @@ def _df() -> pd.DataFrame:
                 "status": "To Rework",
                 "priority": "High",
                 "assignee": "Ana",
+                "po_team_leader": "Víctor Expósito",
                 "created": "2026-05-01T00:00:00Z",
                 "updated": "2026-05-05T00:00:00Z",
                 "resolved": pd.NaT,
@@ -154,6 +155,7 @@ def test_discrepancy_when_helix_finalist_and_jira_open() -> None:
 
     assert out["jira_key"].tolist() == ["MEX-1"]
     assert out.iloc[0]["helix_id"] == "INC000104154954"
+    assert out.iloc[0]["po_team_leader"] == "Víctor Expósito"
     assert bool(out.iloc[0]["helix_status_is_finalist"]) is True
     assert bool(out.iloc[0]["jira_status_is_finalist"]) is False
 
