@@ -39,6 +39,9 @@ SourceStartCallback = Callable[[str, int, int], None]
 MessageCallback = Callable[[bool, str], None]
 
 LOGGER = logging.getLogger(__name__)
+_NONINTERACTIVE_HELIX_SESSION_UNAVAILABLE = (
+    "Helix session unavailable for non-interactive ARSQL lookup"
+)
 
 
 def _get_helix_path(settings: Settings) -> str:
@@ -323,6 +326,10 @@ def _lookup_diagnostic_item(
     )
 
 
+def _is_noninteractive_session_unavailable(message: Any) -> bool:
+    return _NONINTERACTIVE_HELIX_SESSION_UNAVAILABLE.lower() in str(message or "").lower()
+
+
 def _run_post_jql_helix_lookup(
     settings: Settings,
     *,
@@ -534,6 +541,41 @@ def _run_post_jql_helix_lookup(
             messages.append({"ok": bool(ok), "message": message})
             if on_source_result is not None:
                 on_source_result(bool(ok), message, completed_batches, total_batches)
+            if not ok and _is_noninteractive_session_unavailable(message):
+                remaining_ids = [
+                    str(inc_id or "").strip().upper()
+                    for pending_batch in batches[batch_index:]
+                    for inc_id in pending_batch
+                    if str(inc_id or "").strip()
+                ]
+                if remaining_ids:
+                    missing_total += len(remaining_ids)
+                    merged_helix = _merge_helix_items(
+                        merged_helix,
+                        [
+                            _lookup_diagnostic_item(
+                                inc_id=inc_id,
+                                country=country_txt,
+                                service_origin_buug=service_origin_buug,
+                                source_id=source_id,
+                                source_alias=source_alias,
+                                matched_jira_keys=inc_map.get(inc_id, []),
+                                run_id=run_id,
+                                lookup_at=lookup_at,
+                                lookup_status="error",
+                                lookup_error=message,
+                            )
+                            for inc_id in remaining_ids
+                        ],
+                    )
+                    skipped_message = (
+                        f"{country_txt}: lookup Helix post-JQL detenido tras error de sesión; "
+                        f"{len(remaining_ids)} INC restantes quedan diagnosticados sin reintentar."
+                    )
+                    messages.append({"ok": False, "message": skipped_message})
+                    if on_message is not None:
+                        on_message(False, skipped_message)
+                break
 
     issues_doc.ingested_at = now_iso()
     helix_repo.save(merged_helix)

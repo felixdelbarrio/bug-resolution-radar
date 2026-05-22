@@ -8,7 +8,6 @@ from typing import Any, Dict, List
 
 from bug_resolution_radar.config import (
     Settings,
-    all_configured_sources,
     country_rollup_sources,
     helix_service_origin_buug_for_country,
     helix_sources,
@@ -20,6 +19,7 @@ from bug_resolution_radar.config import (
 )
 from bug_resolution_radar.repositories.issues_store import load_issues_workspace_index
 from bug_resolution_radar.services.workspace import (
+    configured_sources_by_country,
     merge_sources_by_country,
 )
 
@@ -140,21 +140,6 @@ def _normalize_country_rollup_sources(
     return rows
 
 
-def _group_configured_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
-    grouped: Dict[str, List[Dict[str, str]]] = {}
-    for row in all_configured_sources(settings):
-        country = str(row.get("country") or "").strip()
-        source_id = str(row.get("source_id") or "").strip()
-        if not country or not source_id:
-            continue
-        grouped.setdefault(country, []).append(
-            {str(key): str(value).strip() for key, value in dict(row).items() if str(value).strip()}
-        )
-    for country, rows in list(grouped.items()):
-        grouped[country] = sorted(rows, key=_source_sort_key)
-    return grouped
-
-
 def _sources_by_country_from_index(
     index_payload: Dict[str, Any],
 ) -> Dict[str, List[Dict[str, str]]]:
@@ -181,7 +166,7 @@ def _sources_by_country_from_index(
 
 
 def _rollup_eligible_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
-    configured = _group_configured_sources_by_country(settings)
+    configured = configured_sources_by_country(settings)
     try:
         index_payload = load_issues_workspace_index(settings.DATA_PATH)
     except Exception:
