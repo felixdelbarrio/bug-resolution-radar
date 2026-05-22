@@ -24,9 +24,8 @@ from bug_resolution_radar.analytics.filtering import (
     open_only,
 )
 from bug_resolution_radar.analytics.finalist_discrepancies import (
-    apply_effective_finalist_country_mode,
+    apply_effective_finalist_lookup_state,
     build_finalist_status_discrepancies,
-    is_country_finalist_status_mode,
 )
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
@@ -856,7 +855,6 @@ def _scope_context_cache_key(
         tuple(str(item or "").strip() for item in list(query.issue_scope_keys or [])),
         str(query.issue_sort_col or "").strip(),
         str(query.issue_like_query or "").strip(),
-        str(getattr(settings, "FINALIST_STATUS_ANALYSIS_MODE", "") or "").strip().lower(),
     )
 
 
@@ -878,8 +876,8 @@ def _build_scope_context(
         source_ids=source_ids,
         reference_day=reference_day,
     )
-    if is_country_finalist_status_mode(settings) and not finalist_discrepancies.empty:
-        scoped_df = apply_effective_finalist_country_mode(
+    if not finalist_discrepancies.empty:
+        scoped_df = apply_effective_finalist_lookup_state(
             scoped_df,
             discrepancies=finalist_discrepancies,
             reference_window=reference_day,

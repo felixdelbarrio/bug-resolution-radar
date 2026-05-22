@@ -91,17 +91,6 @@ def _normalize_bool_setting(value: Any, *, default: bool = False) -> str:
     return "true" if default else "false"
 
 
-def _normalize_finalist_status_analysis_mode(value: Any) -> str:
-    token = str(value or "").strip().lower()
-    if token in {
-        "selected_sources",
-        "country_finalist_status",
-        "country_finalist_status_lookup",
-    }:
-        return token
-    return "selected_sources"
-
-
 def _normalize_country_rollup_sources(
     values: Dict[str, Any],
     *,
@@ -227,13 +216,6 @@ def save_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     merged_values["PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"] = _normalize_bool_setting(
         merged_values.get("PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED"),
         default=False,
-    )
-    merged_values["PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED"] = _normalize_bool_setting(
-        merged_values.get("PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED"),
-        default=False,
-    )
-    merged_values["FINALIST_STATUS_ANALYSIS_MODE"] = _normalize_finalist_status_analysis_mode(
-        merged_values.get("FINALIST_STATUS_ANALYSIS_MODE")
     )
 
     new_settings = Settings.model_validate(merged_values)

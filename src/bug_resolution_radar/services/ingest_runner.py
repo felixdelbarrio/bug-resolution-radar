@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 from typing import Any, Callable, Dict, List
@@ -16,7 +16,6 @@ from bug_resolution_radar.analytics.finalist_discrepancies import (
     extract_helix_ids_from_text,
     is_post_jql_lookup_helix_source,
 )
-from bug_resolution_radar.analytics.status_semantics import is_finalist_status
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
@@ -99,7 +98,7 @@ def _ad_hoc_lookup_items_by_incident(
     country: str,
 ) -> Dict[str, HelixWorkItem]:
     country_txt = str(country or "").strip()
-    source_id = _post_jql_lookup_source_id(country_txt)
+    source_id = _finalist_lookup_source_id(country_txt)
     out: Dict[str, HelixWorkItem] = {}
     for item in list(getattr(doc, "items", []) or []):
         if country_txt and str(item.country or "").strip() != country_txt:
@@ -136,20 +135,10 @@ def _ad_hoc_lookup_items_by_incident(
 
 def _lookup_item_requires_refresh(
     item: HelixWorkItem | None,
-    *,
-    now: datetime,
-    ttl_hours: int,
 ) -> bool:
     if item is None:
         return True
-    if not is_finalist_status(str(item.status or item.status_raw or "")):
-        return True
-    lookup_at = _parse_lookup_dt(item.lookup_at)
-    if lookup_at is None:
-        return True
-    if ttl_hours <= 0:
-        return True
-    return lookup_at + timedelta(hours=int(ttl_hours)) <= now
+    return not _is_lookup_terminal_status(str(item.status or item.status_raw or ""))
 
 
 def _jira_incidents_by_country(
@@ -206,19 +195,6 @@ def _lookup_batch_size(settings: Settings) -> int:
     )
 
 
-def _lookup_ttl_hours(settings: Settings) -> int:
-    env_value = os.getenv("HELIX_INC_LOOKUP_TTL_HOURS", "")
-    raw = env_value or getattr(settings, "HELIX_INC_LOOKUP_TTL_HOURS", "24")
-    try:
-        parsed = int(str(raw).strip())
-    except Exception:
-        parsed = 24
-    return min(
-        24 * 30,
-        max(0, parsed),
-    )
-
-
 def _parse_lookup_dt(value: Any) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -232,7 +208,7 @@ def _parse_lookup_dt(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _post_jql_lookup_source_id(country: str) -> str:
+def _finalist_lookup_source_id(country: str) -> str:
     return build_source_id("helix", str(country or "").strip(), POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS)
 
 
@@ -252,6 +228,10 @@ def _arsql_endpoint_for_logs(settings: Settings) -> str:
 def _is_closed_status(value: str) -> bool:
     token = str(value or "").strip().lower()
     return token in {"closed", "resolved", "done", "deployed", "accepted", "cancelled", "canceled"}
+
+
+def _is_lookup_terminal_status(value: str) -> bool:
+    return str(value or "").strip().lower() in {"closed", "resolved"}
 
 
 def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
@@ -330,7 +310,7 @@ def _is_noninteractive_session_unavailable(message: Any) -> bool:
     return _NONINTERACTIVE_HELIX_SESSION_UNAVAILABLE.lower() in str(message or "").lower()
 
 
-def _run_post_jql_helix_lookup(
+def _run_finalist_status_lookup(
     settings: Settings,
     *,
     selected_sources: List[Dict[str, str]],
@@ -345,13 +325,12 @@ def _run_post_jql_helix_lookup(
     merged_helix = helix_repo.load() or HelixDocument.empty()
     inc_by_country = _jira_incidents_by_country(issues_doc, selected_sources=selected_sources)
     batch_size = _lookup_batch_size(settings)
-    ttl_hours = _lookup_ttl_hours(settings)
     lookup_now = datetime.now(timezone.utc)
     lookup_at = lookup_now.isoformat()
     arsql_endpoint = _arsql_endpoint_for_logs(settings)
 
     if not inc_by_country:
-        message = "Lookup Helix post-JQL omitido: no se encontraron referencias INC en Jira."
+        message = "Lookup Helix omitido: no se encontraron referencias INC en Jira."
         if on_message is not None:
             on_message(True, message)
         return issues_doc, {
@@ -359,6 +338,9 @@ def _run_post_jql_helix_lookup(
             "summary": message,
             "countries": 0,
             "inc_total": 0,
+            "total_batches": 0,
+            "success_count": 0,
+            "total_sources": 0,
             "found_count": 0,
             "missing_count": 0,
             "error_count": 0,
@@ -369,6 +351,7 @@ def _run_post_jql_helix_lookup(
     found_total = 0
     missing_total = 0
     error_count = 0
+    batch_success_count = 0
     total_batches = 0
     completed_batches = 0
 
@@ -378,11 +361,7 @@ def _run_post_jql_helix_lookup(
         pending = {
             inc_id: jira_keys
             for inc_id, jira_keys in inc_map.items()
-            if _lookup_item_requires_refresh(
-                ad_hoc_items.get(str(inc_id).strip().upper()),
-                now=lookup_now,
-                ttl_hours=ttl_hours,
-            )
+            if _lookup_item_requires_refresh(ad_hoc_items.get(str(inc_id).strip().upper()))
         }
         if pending:
             pending_by_country[country] = pending
@@ -390,8 +369,8 @@ def _run_post_jql_helix_lookup(
 
     if not pending_by_country:
         message = (
-            "Lookup Helix post-JQL omitido: todos los INC encontrados ya están en histórico "
-            "ad hoc finalista dentro del TTL."
+            "Lookup Helix omitido: todos los INC encontrados ya están localizados "
+            "en histórico ad hoc con estado Closed/Resolved."
         )
         if on_message is not None:
             on_message(True, message)
@@ -400,6 +379,9 @@ def _run_post_jql_helix_lookup(
             "summary": message,
             "countries": len(inc_by_country),
             "inc_total": sum(len(v) for v in inc_by_country.values()),
+            "total_batches": 0,
+            "success_count": 0,
+            "total_sources": 0,
             "found_count": 0,
             "missing_count": 0,
             "error_count": 0,
@@ -409,14 +391,14 @@ def _run_post_jql_helix_lookup(
     if on_message is not None:
         on_message(
             True,
-            "JQL terminado. Iniciando fase post-JQL: Buscar estados finalistas del país.",
+            "Iniciando ingesta: Buscar estados finalistas del país.",
         )
 
     for country, inc_map in pending_by_country.items():
         country_txt = str(country or "").strip()
         service_origin_buug = helix_service_origin_buug_for_country(country_txt)
         source_alias = POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS
-        source_id = _post_jql_lookup_source_id(country_txt)
+        source_id = _finalist_lookup_source_id(country_txt)
         inc_ids = list(inc_map.keys())
         batches = _chunked(inc_ids, size=batch_size)
         for batch_index, batch in enumerate(batches, start=1):
@@ -488,6 +470,8 @@ def _run_post_jql_helix_lookup(
                 if not ok:
                     error_count += 1
                     error_text = message or "lookup_batch_failed"
+                else:
+                    batch_success_count += 1
                 found_total += found_count
                 missing_total += missing_count
             except Exception as exc:
@@ -569,7 +553,7 @@ def _run_post_jql_helix_lookup(
                         ],
                     )
                     skipped_message = (
-                        f"{country_txt}: lookup Helix post-JQL detenido tras error de sesión; "
+                        f"{country_txt}: lookup Helix detenido tras error de sesión; "
                         f"{len(remaining_ids)} INC restantes quedan diagnosticados sin reintentar."
                     )
                     messages.append({"ok": False, "message": skipped_message})
@@ -583,7 +567,7 @@ def _run_post_jql_helix_lookup(
 
     state = "success" if error_count == 0 else ("partial" if found_total > 0 else "error")
     summary = (
-        "Lookup Helix post-JQL finalizado: "
+        "Lookup Helix finalizado: "
         f"{found_total} INC recuperados, {missing_total} sin resultado, {error_count} lotes con error."
     )
     return issues_doc, {
@@ -591,11 +575,37 @@ def _run_post_jql_helix_lookup(
         "summary": summary,
         "countries": len(pending_by_country),
         "inc_total": sum(len(v) for v in pending_by_country.values()),
+        "total_batches": int(total_batches),
+        "success_count": int(batch_success_count),
+        "total_sources": int(total_batches),
         "found_count": int(found_total),
         "missing_count": int(missing_total),
         "error_count": int(error_count),
         "messages": messages,
     }
+
+
+def run_finalist_lookup_ingest(
+    settings: Settings,
+    *,
+    selected_sources: List[Dict[str, str]],
+    on_source_result: SourceProgressCallback | None = None,
+    on_source_start: SourceStartCallback | None = None,
+    on_message: MessageCallback | None = None,
+) -> dict[str, Any]:
+    issues_doc = load_issues_doc(settings.DATA_PATH)
+    _, result = _run_finalist_status_lookup(
+        settings,
+        selected_sources=list(selected_sources or []),
+        issues_doc=issues_doc,
+        on_source_result=on_source_result,
+        on_source_start=on_source_start,
+        on_message=on_message,
+    )
+    normalized = dict(result or {})
+    normalized["success_count"] = int(normalized.get("success_count") or 0)
+    normalized["total_sources"] = int(normalized.get("total_sources") or 0)
+    return normalized
 
 
 def run_jira_ingest(
@@ -647,37 +657,17 @@ def run_jira_ingest(
     if success_count > 0 and (not persist_each_source or checkpoints_saved <= 0):
         save_issues_doc(settings.DATA_PATH, work_doc)
 
-    lookup_result: dict[str, Any] | None = None
-    if success_count > 0:
-        work_doc, lookup_result = _run_post_jql_helix_lookup(
-            settings,
-            selected_sources=sources,
-            issues_doc=work_doc,
-            on_source_result=on_source_result,
-            on_source_start=on_source_start,
-            on_message=on_message,
-        )
-        messages.extend(list(lookup_result.get("messages") or []))
-
-    base_state = (
+    state = (
         "success"
         if success_count == total_sources and total_sources > 0
         else ("partial" if success_count > 0 else "error")
     )
-    lookup_state = str((lookup_result or {}).get("state") or "").strip().lower()
-    state = base_state
-    if lookup_state in {"partial", "error"}:
-        state = "partial" if base_state in {"success", "partial"} else "error"
     return {
         "state": state,
-        "summary": (
-            f"Reingesta Jira finalizada: {success_count}/{total_sources} fuentes OK."
-            + (f" {lookup_result.get('summary')}" if lookup_result else "")
-        ),
+        "summary": f"Reingesta Jira finalizada: {success_count}/{total_sources} fuentes OK.",
         "success_count": int(success_count),
         "total_sources": int(total_sources),
         "messages": messages,
-        "post_jql_lookup": lookup_result,
     }
 
 

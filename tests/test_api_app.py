@@ -629,6 +629,10 @@ def test_ingest_overview_endpoint_exposes_streamlit_aligned_contract(
     assert payload["jira"]["lastIngest"]["issues_count"] == 1
     assert payload["helix"]["configuredCount"] == 1
     assert payload["helix"]["lastIngest"]["data_path"].endswith("helix.json")
+    assert payload["finalist_lookup"]["configuredCount"] == 1
+    assert payload["finalist_lookup"]["selectedSourceIds"] == [
+        build_source_id("jira", "España", "Core")
+    ]
 
 
 def test_ingest_selection_endpoint_persists_source_selection(
@@ -752,6 +756,49 @@ def test_ingest_start_endpoint_uses_async_progress_contract(
     assert payload["runId"] == 7
     assert captured["connector"] == "jira"
     assert len(captured["selected_sources"]) == 1
+
+
+def test_finalist_lookup_start_endpoint_uses_jira_sources(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = build_source_id("jira", "España", "Core")
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    captured = {}
+
+    def _fake_start(connector: str, *, settings: Settings, selected_sources: list[dict[str, str]]):
+        del settings
+        captured["connector"] = connector
+        captured["selected_sources"] = selected_sources
+        return {
+            "started": True,
+            "connector": connector,
+            "runId": 8,
+            "state": "running",
+            "active": True,
+            "startedAt": "2026-04-14T10:00:00+00:00",
+            "finishedAt": "",
+            "totalSources": len(selected_sources),
+            "completedSources": 0,
+            "successCount": 0,
+            "summary": "",
+            "messages": [],
+            "result": None,
+        }
+
+    monkeypatch.setattr(api_app, "start_ingest_job", _fake_start)
+
+    client = TestClient(api_app.create_app())
+    response = client.post("/api/ingest/finalist-lookup/start", json={"sourceIds": [source_id]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["started"] is True
+    assert payload["connector"] == "finalist_lookup"
+    assert captured["connector"] == "finalist_lookup"
+    assert captured["selected_sources"][0]["source_id"] == source_id
 
 
 def test_ingest_progress_endpoint_returns_latest_snapshot(

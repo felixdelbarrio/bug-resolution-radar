@@ -30,6 +30,7 @@ from bug_resolution_radar.services.ingest_circuit_breaker import (
     IngestCircuitBreaker,
 )
 from bug_resolution_radar.services.ingest_profiler import IngestRunProfiler
+from bug_resolution_radar.services.ingest_runner import run_finalist_lookup_ingest
 from bug_resolution_radar.ui.common import load_issues_doc, save_issues_doc
 
 
@@ -97,7 +98,7 @@ def _progress_append_message(
         entry.messages.append((bool(ok), str(msg or "").strip()))
         if count_source:
             entry.completed_sources = max(0, int(entry.completed_sources) + 1)
-        if ok:
+        if count_source and ok:
             entry.success_count = max(0, int(entry.success_count) + 1)
 
 
@@ -239,7 +240,7 @@ def _render_progress_status(
         with st.container(border=True, key=ui_key):
             if state == "running":
                 st.markdown(f"**{title}: ingesta en curso · ejecución {run_id}**")
-                st.caption(f"Progreso: {completed}/{total} fuentes finalizadas.")
+                st.caption(f"Progreso: {completed}/{total} pasos finalizados.")
             else:
                 st.markdown(f"**{headline}**")
                 st.caption(f"Ejecución: {run_id}")
@@ -610,6 +611,75 @@ def _start_helix_ingest_job(settings: Settings, *, selected_sources: List[Dict[s
     return True
 
 
+def _start_finalist_lookup_ingest_job(
+    settings: Settings, *, selected_sources: List[Dict[str, str]]
+) -> bool:
+    sources = [dict(src) for src in selected_sources]
+    run_id = _progress_start("finalist_lookup", total_sources=max(1, len(sources)))
+    if run_id is None:
+        return False
+    settings_snapshot = settings.model_copy(deep=True)
+    profiler = IngestRunProfiler(connector="finalist_lookup", run_id=run_id)
+
+    def _worker() -> None:
+        try:
+            with profiler.phase(phase="lookup_helix_finalist_status"):
+                result = run_finalist_lookup_ingest(
+                    settings_snapshot,
+                    selected_sources=sources,
+                    on_source_start=lambda label, index, total: _progress_append_message(
+                        "finalist_lookup",
+                        ok=True,
+                        msg=f"Iniciando {label} ({index}/{total}).",
+                        count_source=False,
+                        run_id=run_id,
+                    ),
+                    on_source_result=lambda ok, msg, _completed, _total: _progress_append_message(
+                        "finalist_lookup",
+                        ok=ok,
+                        msg=msg,
+                        count_source=True,
+                        run_id=run_id,
+                    ),
+                    on_message=lambda ok, msg: _progress_append_message(
+                        "finalist_lookup",
+                        ok=ok,
+                        msg=msg,
+                        count_source=False,
+                        run_id=run_id,
+                    ),
+                )
+            _progress_finish(
+                "finalist_lookup",
+                state=str(result.get("state") or "error"),
+                summary=str(result.get("summary") or "Lookup Helix finalizado."),
+                run_id=run_id,
+            )
+        except Exception as e:
+            _progress_append_message(
+                "finalist_lookup",
+                ok=False,
+                msg=f"Error inesperado buscando estados finalistas ({type(e).__name__}): {e}",
+                count_source=False,
+                run_id=run_id,
+            )
+            _progress_finish(
+                "finalist_lookup",
+                state="error",
+                summary="La búsqueda de estados finalistas terminó con error.",
+                run_id=run_id,
+            )
+        finally:
+            _persist_ingest_profile(
+                profiler=profiler,
+                connector="finalist_lookup",
+                summary_fallback="Búsqueda de estados finalistas finalizada.",
+            )
+
+    threading.Thread(target=_worker, name="finalist-lookup-ingest-worker", daemon=True).start()
+    return True
+
+
 def _get_helix_path(settings: Settings) -> str:
     p = (getattr(settings, "HELIX_DATA_PATH", "") or "").strip()
     return p or "data/helix.json"
@@ -943,7 +1013,7 @@ def _persist_helix_ingest_disabled_sources(
 def render(settings: Settings) -> None:
     # Avoid emoji icons in tab labels: some environments render them as empty squares.
     running_any = False
-    t_jira, t_helix = st.tabs(["Jira", "Helix"])
+    t_jira, t_helix, t_finalist_lookup = st.tabs(["Jira", "Helix", "Buscar estados finalistas"])
 
     with t_jira:
         jira_cfg = jira_sources(settings)
@@ -1288,6 +1358,47 @@ def render(settings: Settings) -> None:
                 reset_display=helix_running,
             )
         )
+
+    with t_finalist_lookup:
+        st.markdown("### Buscar estados finalistas del país")
+        st.caption(
+            "Usa las INC encontradas en las fuentes Jira seleccionadas y consulta Helix por "
+            "ARSQL no interactivo. Las INC ya localizadas como Closed/Resolved en el histórico "
+            "ad hoc se omiten."
+        )
+        st.caption(
+            f"Fuentes Jira usadas para extraer INC: {len(jira_cfg_selected)}/{len(jira_cfg)}"
+        )
+        _render_sources_preview(jira_cfg_selected, ["country", "alias", "jql"])
+        finalist_running = (
+            str(_progress_snapshot("finalist_lookup").get("state") or "").strip().lower()
+            == "running"
+        )
+        if st.button(
+            "Buscar estados finalistas",
+            key="btn_run_finalist_lookup",
+            disabled=finalist_running,
+        ):
+            if not jira_cfg:
+                st.error("No hay fuentes Jira configuradas.")
+            elif not jira_cfg_selected:
+                st.warning("Selecciona al menos una fuente Jira en la pestaña Jira.")
+            else:
+                if _start_finalist_lookup_ingest_job(
+                    settings,
+                    selected_sources=jira_cfg_selected,
+                ):
+                    st.rerun()
+                else:
+                    st.warning("Ya hay una búsqueda de estados finalistas en curso.")
+
+        finalist_progress_slot = st.empty()
+        finalist_running = _render_progress_status(
+            connector="finalist_lookup",
+            title="Buscar estados finalistas",
+            slot=finalist_progress_slot,
+        )
+        running_any = running_any or finalist_running
 
     if running_any:
         # Keep ingest page state live while background jobs progress.

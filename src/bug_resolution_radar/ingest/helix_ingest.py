@@ -1844,7 +1844,7 @@ def ingest_helix(
         f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )
     if exact_incident_lookup:
-        # Exact post-JQL lookups must not inherit broad-ingest filters such as
+        # Exact finalist lookups must not inherit broad-ingest filters such as
         # ENTERPRISE WEB, environment or business type; the Incident Number and
         # country BU/UG are the stable keys for closed historical records.
         incident_types_filter: List[str] = []

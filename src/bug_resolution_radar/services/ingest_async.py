@@ -11,16 +11,20 @@ from typing import Any, Dict, Iterator, List
 
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.services.ingest_runner import run_helix_ingest, run_jira_ingest
+from bug_resolution_radar.services.ingest_runner import (
+    run_finalist_lookup_ingest,
+    run_helix_ingest,
+    run_jira_ingest,
+)
 
-_CONNECTORS = {"jira", "helix"}
+_CONNECTORS = {"jira", "helix", "finalist_lookup"}
 
 
 @dataclass
 class _IngestProgress:
     connector: str
     run_id: int = 0
-    state: str = "idle"  # idle | running | success | partial | error
+    state: str = "idle"  # idle | running | success | partial | error | skipped_*
     started_at: str = ""
     finished_at: str = ""
     total_sources: int = 0
@@ -56,7 +60,7 @@ def _resolve_max_run_seconds(settings: Settings, *, connector: str, total_source
         return max(60, configured)
 
     safe_sources = max(1, int(total_sources or 0))
-    if token == "helix":
+    if token in {"helix", "finalist_lookup"}:
         per_source = _coerce_int(getattr(settings, "HELIX_MAX_INGEST_SECONDS", 900), 900)
         grace = 180
     else:
@@ -405,7 +409,7 @@ def start_ingest_job(
                             message=msg,
                         ),
                     )
-                else:
+                elif key == "helix":
                     result = run_helix_ingest(
                         settings_snapshot,
                         selected_sources=sources,
@@ -423,6 +427,32 @@ def start_ingest_job(
                             message=msg,
                             completed_sources=completed,
                             total_sources=total,
+                        ),
+                    )
+                else:
+                    result = run_finalist_lookup_ingest(
+                        settings_snapshot,
+                        selected_sources=sources,
+                        on_source_start=lambda label, index, total: _mark_source_started(
+                            key,
+                            run_id=run_id,
+                            source_label=label,
+                            source_index=index,
+                            total_sources=total,
+                        ),
+                        on_source_result=lambda ok, msg, completed, total: _append_progress(
+                            key,
+                            run_id=run_id,
+                            ok=ok,
+                            message=msg,
+                            completed_sources=completed,
+                            total_sources=total,
+                        ),
+                        on_message=lambda ok, msg: _append_message(
+                            key,
+                            run_id=run_id,
+                            ok=ok,
+                            message=msg,
                         ),
                     )
             _finish_progress(key, run_id=run_id, result=result)
