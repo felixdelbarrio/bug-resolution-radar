@@ -1839,15 +1839,25 @@ def ingest_helix(
         arsql_pending_incident_ids = _dedupe_incident_ids(
             list(arsql_pending_incident_ids) + explicit_incident_ids
         )
+    exact_incident_lookup = bool(incident_ids_only and explicit_incident_ids)
     create_window_rule = (
         f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )
-    # Keep official extraction filters for business type/environment/time fields.
-    # Only the temporal window changes according to configured analysis depth.
-    incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
-    allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
-    arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
-    arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
+    if exact_incident_lookup:
+        # Exact post-JQL lookups must not inherit broad-ingest filters such as
+        # ENTERPRISE WEB, environment or business type; the Incident Number and
+        # country BU/UG are the stable keys for closed historical records.
+        incident_types_filter: List[str] = []
+        allowed_business_incident_types: List[str] = []
+        arsql_environments_filter: List[str] = []
+        arsql_time_fields: List[str] = []
+    else:
+        # Keep official extraction filters for business type/environment/time fields.
+        # Only the temporal window changes according to configured analysis depth.
+        incident_types_filter = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+        allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
+        arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
+        arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
     buug_names = (
         _csv_list(service_origin_buug, "")
         if service_origin_buug is not None
@@ -1855,22 +1865,26 @@ def ingest_helix(
     )
     companies_filter = [{"name": name} for name in buug_names]
 
-    arsql_source_service_n1 = _csv_list(
-        (
-            service_origin_n1
-            if service_origin_n1 is not None
-            else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1")
-        ),
-        "ENTERPRISE WEB",
-    )
-    arsql_source_service_n2 = _csv_list(
-        (
-            service_origin_n2
-            if service_origin_n2 is not None
-            else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N2")
-        ),
-        "",
-    )
+    if exact_incident_lookup:
+        arsql_source_service_n1: List[str] = []
+        arsql_source_service_n2: List[str] = []
+    else:
+        arsql_source_service_n1 = _csv_list(
+            (
+                service_origin_n1
+                if service_origin_n1 is not None
+                else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N1")
+            ),
+            "ENTERPRISE WEB",
+        )
+        arsql_source_service_n2 = _csv_list(
+            (
+                service_origin_n2
+                if service_origin_n2 is not None
+                else os.getenv("HELIX_ARSQL_SOURCE_SERVICE_N2")
+            ),
+            "",
+        )
     arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
     allowed_env_tokens = {
         _normalize_space_token(x) for x in arsql_environments_filter if str(x).strip()
@@ -2148,7 +2162,9 @@ def ingest_helix(
         source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
         source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
         arsql_environments_q = ",".join(arsql_environments_filter) or "all"
-        arsql_time_fields_q = ",".join(arsql_time_fields) or "default"
+        arsql_time_fields_q = ",".join(arsql_time_fields) or (
+            "none" if exact_incident_lookup else "default"
+        )
         select_mode_q = "wide" if arsql_include_all_fields else "narrow"
         disabled_fields_q = ",".join(sorted(arsql_disabled_fields)) or "none"
         outcome_note_q = str(outcome_note or "").strip()

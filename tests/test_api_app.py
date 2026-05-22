@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 from datetime import datetime, timezone
 from io import BytesIO
@@ -359,6 +360,73 @@ def test_bootstrap_infers_workspace_sources_from_data_when_settings_are_empty(
     assert "semantic" in payload["designTokens"]
     assert payload["designTokens"]["semantic"]["statusByKey"]["new"] == "#E85D63"
     assert "--bbva-primary" in payload["designTokens"]["theme"]["light"]
+
+
+def test_bootstrap_keeps_all_configured_rollup_sources_even_without_rows(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source_ids = [
+        "jira:mexico:gema-core",
+        "jira:mexico:senda-alpha",
+        "jira:mexico:senda-bex",
+        "jira:mexico:senda-kaizen",
+    ]
+    settings = Settings(
+        APP_TITLE="Radar",
+        DATA_PATH=str((tmp_path / "issues.json").resolve()),
+        NOTES_PATH=str((tmp_path / "notes.json").resolve()),
+        INSIGHTS_LEARNING_PATH=str((tmp_path / "learning.json").resolve()),
+        HELIX_DATA_PATH=str((tmp_path / "helix.json").resolve()),
+        JIRA_SOURCES_JSON=(
+            "["
+            '{"source_id":"jira:mexico:gema-core","country":"México","alias":"GEMA - (Core)","jql":"project = GEMA"},'
+            '{"source_id":"jira:mexico:senda-alpha","country":"México","alias":"SENDA (Alpha BEX)","jql":"project = ALPHA"},'
+            '{"source_id":"jira:mexico:senda-bex","country":"México","alias":"SENDA (BEX Arquitectura de Canales)","jql":"project = BEX"},'
+            '{"source_id":"jira:mexico:senda-kaizen","country":"México","alias":"SENDA (Kaizen Senda)","jql":"project = KAIZEN"}'
+            "]"
+        ),
+        HELIX_SOURCES_JSON="[]",
+        COUNTRY_ROLLUP_SOURCES_JSON=(
+            json.dumps([{"country": "México", "source_ids": source_ids}], ensure_ascii=False)
+        ),
+        REPORT_PPT_DOWNLOAD_DIR=str((tmp_path / "exports").resolve()),
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key=f"MX-{idx}",
+                    summary="Issue",
+                    status="Open",
+                    type="Bug",
+                    priority="High",
+                    created=now,
+                    updated=now,
+                    country="México",
+                    source_alias=f"Source {idx}",
+                    source_id=source_id,
+                    source_type="jira",
+                )
+                for idx, source_id in enumerate(source_ids[:3], start=1)
+            ]
+        ),
+    )
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get(
+        "/api/bootstrap",
+        params={"country": "México", "scopeMode": "country"},
+    )
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["scopeMode"] == "country"
+    assert workspace["countryRollupSourceIds"] == source_ids
+    assert {source["source_id"] for source in workspace["sources"]} >= set(source_ids)
 
 
 def test_scope_context_cache_reuses_filtered_context_for_same_query(
