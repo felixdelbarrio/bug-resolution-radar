@@ -1086,6 +1086,9 @@ def _normalize_jira_rows(
             continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
+        source_id = _as_str(row.get("__source_id__")) or (
+            build_source_id("jira", country, alias) if country and alias else ""
+        )
         po_team_leader = _as_str(row.get("po_team_leader"))
         jql = _as_str(row.get("jql"))
 
@@ -1107,6 +1110,8 @@ def _normalize_jira_rows(
             continue
         seen.add(dedup_key)
         payload = {"country": country, "alias": alias, "jql": jql}
+        if source_id:
+            payload["source_id"] = source_id
         if po_team_leader:
             payload["po_team_leader"] = po_team_leader
         out.append(payload)
@@ -1126,6 +1131,9 @@ def _normalize_helix_rows(
             continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
+        source_id = _as_str(row.get("__source_id__")) or (
+            build_source_id("helix", country, alias) if country and alias else ""
+        )
         service_origin_buug = helix_service_origin_buug_for_country(country)
         service_origin_n1 = _as_str(row.get("service_origin_n1"))
         service_origin_n2 = _as_str(row.get("service_origin_n2"))
@@ -1156,6 +1164,8 @@ def _normalize_helix_rows(
             "country": country,
             "alias": alias,
         }
+        if source_id:
+            payload["source_id"] = source_id
         if service_origin_buug:
             payload["service_origin_buug"] = service_origin_buug
         if service_origin_n1:

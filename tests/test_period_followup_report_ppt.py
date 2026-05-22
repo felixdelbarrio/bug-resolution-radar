@@ -1144,6 +1144,39 @@ def test_period_followup_ppt_renders_po_under_assignee() -> None:
     po_run = assignee_cell.text_frame.paragraphs[1].runs[0]
     assert po_run.font.size.pt < first_run.font.size.pt
     assert period_ppt_mod._assignee_with_po_text("MARCELA", "") == "MARCELA"
+    long_po = period_ppt_mod._assignee_with_po_text(
+        "RODRIGO GALLEGOS SUAREZ",
+        "Juan Vicente Guerrero con un nombre extremadamente largo para tabla",
+        po_max_chars=24,
+    )
+    assert long_po.startswith("RODRIGO GALLEGOS SUAREZ\n(")
+    assert long_po.endswith("…)")
+
+
+def test_period_followup_ppt_enriches_po_from_source_config() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "key": "MEX-1",
+                "summary": "Issue",
+                "status": "Open",
+                "priority": "High",
+                "created": "2026-05-01T00:00:00Z",
+                "source_id": "jira:mexico:core",
+            }
+        ]
+    )
+    out = period_ppt_mod._enrich_po_team_leader_from_sources(
+        df,
+        Settings(
+            JIRA_SOURCES_JSON=(
+                '[{"source_id":"jira:mexico:core","country":"México","alias":"Core",'
+                '"po_team_leader":"Juan Vicente Guerrero","jql":"project = CORE"}]'
+            )
+        ),
+    )
+
+    assert out.loc[0, "po_team_leader"] == "Juan Vicente Guerrero"
 
 
 def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -> None:

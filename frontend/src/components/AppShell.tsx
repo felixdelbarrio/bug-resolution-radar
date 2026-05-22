@@ -231,7 +231,6 @@ export function AppShell() {
     }
     const labels = workspace.sources
       .filter((source) => workspace.countryRollupSourceIds.includes(source.source_id))
-      .slice(0, 2)
       .map((source) => `${source.alias} · ${String(source.source_type || "").toUpperCase()}`);
     return labels.join(" · ");
   }, [workspace]);

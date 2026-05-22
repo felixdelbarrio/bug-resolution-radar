@@ -35,6 +35,7 @@ class NormalizedIssue(BaseModel):
     source_type: str = "jira"
     source_alias: str = ""
     source_id: str = ""
+    helix_lookup_kind: str = ""
 
 
 class IssuesDocument(BaseModel):

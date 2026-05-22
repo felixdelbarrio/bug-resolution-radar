@@ -29,11 +29,13 @@ from bug_resolution_radar.common.issue_links import (
     build_helix_issue_url,
     build_jira_issue_url,
 )
-from bug_resolution_radar.config import Settings
+from bug_resolution_radar.config import Settings, jira_sources
 
 ANALYSIS_MODE_SELECTED_SOURCES = "selected_sources"
 ANALYSIS_MODE_COUNTRY_FINALIST_STATUS = "country_finalist_status"
 ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP = "country_finalist_status_lookup"
+POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS = "Lookup estados finalistas Jira"
+POST_JQL_LOOKUP_HELIX_KIND = "post_jql_inc_lookup"
 VALID_FINALIST_STATUS_ANALYSIS_MODES: frozenset[str] = frozenset(
     {
         ANALYSIS_MODE_SELECTED_SOURCES,
@@ -92,6 +94,22 @@ def is_country_finalist_status_mode(settings: Settings | None) -> bool:
 
 def is_country_finalist_status_lookup_mode(settings: Settings | None) -> bool:
     return finalist_status_analysis_mode(settings) == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP
+
+
+def is_post_jql_lookup_helix_source(
+    source_id: str | None,
+    source_alias: str | None,
+    helix_lookup_kind: str | None = None,
+) -> bool:
+    """Return whether a Helix row comes from the ad hoc post-JQL INC lookup."""
+    kind = str(helix_lookup_kind or "").strip().lower()
+    if kind == POST_JQL_LOOKUP_HELIX_KIND:
+        return True
+    alias = str(source_alias or "").strip().casefold()
+    if alias == POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS.casefold():
+        return True
+    sid = str(source_id or "").strip().casefold()
+    return sid.startswith("helix:") and sid.endswith(":lookup-estados-finalistas-jira")
 
 
 def extract_helix_ids_from_text(text: object) -> tuple[str, ...]:
@@ -195,7 +213,24 @@ def _scope_for_links(
         jira_df = country_filtered.loc[jira_mask & selected_mask].copy(deep=False)
         if jira_df.empty and not list(source_ids or []):
             jira_df = country_filtered.loc[jira_mask].copy(deep=False)
-        helix_df = country_filtered.loc[helix_mask].copy(deep=False)
+        helix_source_id = _series_text(country_filtered, "source_id")
+        helix_source_alias = _series_text(country_filtered, "source_alias")
+        helix_lookup_kind = _series_text(country_filtered, "helix_lookup_kind")
+        ad_hoc_mask = pd.Series(
+            [
+                is_post_jql_lookup_helix_source(sid, alias, kind)
+                for sid, alias, kind in zip(
+                    helix_source_id.tolist(),
+                    helix_source_alias.tolist(),
+                    helix_lookup_kind.tolist(),
+                )
+            ],
+            index=country_filtered.index,
+        )
+        if mode == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP:
+            helix_df = country_filtered.loc[helix_mask & ad_hoc_mask].copy(deep=False)
+        else:
+            helix_df = country_filtered.loc[helix_mask & ~ad_hoc_mask].copy(deep=False)
         return jira_df, helix_df
     scoped = country_filtered.loc[selected_mask].copy(deep=False)
     scoped_stype = _source_type(scoped)
@@ -395,6 +430,19 @@ def build_finalist_status_discrepancies(
         return _empty_discrepancies()
 
     work = links.copy(deep=False)
+    source_po_by_id = {
+        str(source.get("source_id") or "").strip(): str(source.get("po_team_leader") or "").strip()
+        for source in jira_sources(settings)
+        if str(source.get("source_id") or "").strip()
+        and str(source.get("po_team_leader") or "").strip()
+    }
+    if source_po_by_id:
+        existing_po = _series_text(work, "po_team_leader")
+        source_id_values = _series_text(work, "source_id")
+        work["po_team_leader"] = [
+            current.strip() or source_po_by_id.get(source_id.strip(), "")
+            for current, source_id in zip(existing_po.tolist(), source_id_values.tolist())
+        ]
     work["helix_status_is_finalist"] = work["helix_status"].map(is_finalist_status).astype(bool)
     work["jira_status_is_finalist"] = work["jira_status"].map(is_finalist_status).astype(bool)
     work["helix_finalized_at"] = _finalized_at(

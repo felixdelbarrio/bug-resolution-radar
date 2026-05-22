@@ -4,22 +4,30 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import monotonic
 from typing import Any, Callable, Dict, List
 from uuid import uuid4
 
 from bug_resolution_radar.analytics.finalist_discrepancies import (
+    POST_JQL_LOOKUP_HELIX_KIND,
+    POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS,
     extract_helix_ids_from_text,
-    is_country_finalist_status_lookup_mode,
+    is_post_jql_lookup_helix_source,
 )
+from bug_resolution_radar.analytics.status_semantics import is_finalist_status
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
     helix_service_origin_buug_for_country,
 )
-from bug_resolution_radar.ingest.helix_ingest import ingest_helix
+from bug_resolution_radar.ingest.helix_ingest import (
+    _build_arsql_endpoint,
+    ingest_helix,
+    lookup_helix_incidents_by_arsql,
+)
 from bug_resolution_radar.ingest.jira_ingest import ingest_jira
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
@@ -82,16 +90,63 @@ def _merge_helix_items(doc: HelixDocument, incoming: List[HelixWorkItem]) -> Hel
     return doc
 
 
-def _existing_helix_ids_by_country(doc: HelixDocument, *, country: str) -> set[str]:
+def _ad_hoc_lookup_items_by_incident(
+    doc: HelixDocument,
+    *,
+    country: str,
+) -> Dict[str, HelixWorkItem]:
     country_txt = str(country or "").strip()
-    out: set[str] = set()
+    source_id = _post_jql_lookup_source_id(country_txt)
+    out: Dict[str, HelixWorkItem] = {}
     for item in list(getattr(doc, "items", []) or []):
         if country_txt and str(item.country or "").strip() != country_txt:
             continue
-        item_id = str(item.id or "").strip().upper()
-        if item_id:
-            out.add(item_id)
+        if not is_post_jql_lookup_helix_source(
+            str(item.source_id or "").strip(),
+            str(item.source_alias or "").strip(),
+            str(item.helix_lookup_kind or "").strip(),
+        ):
+            continue
+        if str(item.source_id or "").strip() and str(item.source_id or "").strip() != source_id:
+            continue
+        inc_id = str(item.id or "").strip().upper()
+        if not inc_id:
+            continue
+        current = out.get(inc_id)
+        if current is None:
+            out[inc_id] = item
+            continue
+        current_dt = (
+            _parse_lookup_dt(current.lookup_at)
+            or _parse_lookup_dt(current.last_modified)
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
+        candidate_dt = (
+            _parse_lookup_dt(item.lookup_at)
+            or _parse_lookup_dt(item.last_modified)
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
+        if candidate_dt >= current_dt:
+            out[inc_id] = item
     return out
+
+
+def _lookup_item_requires_refresh(
+    item: HelixWorkItem | None,
+    *,
+    now: datetime,
+    ttl_hours: int,
+) -> bool:
+    if item is None:
+        return True
+    if not is_finalist_status(str(item.status or item.status_raw or "")):
+        return True
+    lookup_at = _parse_lookup_dt(item.lookup_at)
+    if lookup_at is None:
+        return True
+    if ttl_hours <= 0:
+        return True
+    return lookup_at + timedelta(hours=int(ttl_hours)) <= now
 
 
 def _jira_incidents_by_country(
@@ -148,6 +203,49 @@ def _lookup_batch_size(settings: Settings) -> int:
     )
 
 
+def _lookup_ttl_hours(settings: Settings) -> int:
+    env_value = os.getenv("HELIX_INC_LOOKUP_TTL_HOURS", "")
+    raw = env_value or getattr(settings, "HELIX_INC_LOOKUP_TTL_HOURS", "24")
+    try:
+        parsed = int(str(raw).strip())
+    except Exception:
+        parsed = 24
+    return min(
+        24 * 30,
+        max(0, parsed),
+    )
+
+
+def _parse_lookup_dt(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _post_jql_lookup_source_id(country: str) -> str:
+    return build_source_id("helix", str(country or "").strip(), POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS)
+
+
+def _arsql_endpoint_for_logs(settings: Settings) -> str:
+    root = str(
+        getattr(settings, "HELIX_ARSQL_BASE_URL", "") or os.getenv("HELIX_ARSQL_BASE_URL", "")
+    ).strip()
+    uid = str(
+        getattr(settings, "HELIX_ARSQL_DATASOURCE_UID", "")
+        or os.getenv("HELIX_ARSQL_DATASOURCE_UID", "")
+    ).strip()
+    if not root or not uid:
+        return ""
+    return _build_arsql_endpoint(root, uid)
+
+
 def _is_closed_status(value: str) -> bool:
     token = str(value or "").strip().lower()
     return token in {"closed", "resolved", "done", "deployed", "accepted", "cancelled", "canceled"}
@@ -187,6 +285,41 @@ def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
         source_type="helix",
         source_alias=str(item.source_alias or "").strip(),
         source_id=str(item.source_id or "").strip(),
+        helix_lookup_kind=str(item.helix_lookup_kind or "").strip(),
+    )
+
+
+def _lookup_diagnostic_item(
+    *,
+    inc_id: str,
+    country: str,
+    service_origin_buug: str,
+    source_id: str,
+    source_alias: str,
+    matched_jira_keys: List[str],
+    run_id: str,
+    lookup_at: str,
+    lookup_status: str,
+    lookup_error: str = "",
+) -> HelixWorkItem:
+    return HelixWorkItem(
+        id=str(inc_id or "").strip().upper(),
+        country=str(country or "").strip(),
+        service_origin_buug=str(service_origin_buug or "").strip(),
+        source_id=str(source_id or "").strip(),
+        source_alias=str(source_alias or "").strip(),
+        helix_lookup_kind=POST_JQL_LOOKUP_HELIX_KIND,
+        matched_jira_keys=sorted(
+            {
+                str(key or "").strip().upper()
+                for key in list(matched_jira_keys or [])
+                if str(key or "").strip()
+            }
+        ),
+        lookup_run_id=str(run_id or "").strip(),
+        lookup_at=str(lookup_at or "").strip(),
+        lookup_status=str(lookup_status or "").strip(),
+        lookup_error=str(lookup_error or "").strip(),
     )
 
 
@@ -205,13 +338,17 @@ def _run_post_jql_helix_lookup(
     merged_helix = helix_repo.load() or HelixDocument.empty()
     inc_by_country = _jira_incidents_by_country(issues_doc, selected_sources=selected_sources)
     batch_size = _lookup_batch_size(settings)
+    ttl_hours = _lookup_ttl_hours(settings)
+    lookup_now = datetime.now(timezone.utc)
+    lookup_at = lookup_now.isoformat()
+    arsql_endpoint = _arsql_endpoint_for_logs(settings)
 
     if not inc_by_country:
         message = "Lookup Helix post-JQL omitido: no se encontraron referencias INC en Jira."
         if on_message is not None:
             on_message(True, message)
         return issues_doc, {
-            "state": "skipped",
+            "state": "skipped_no_inc",
             "summary": message,
             "countries": 0,
             "inc_total": 0,
@@ -221,11 +358,6 @@ def _run_post_jql_helix_lookup(
             "messages": [{"ok": True, "message": message}],
         }
 
-    helix_browser = (
-        str(getattr(settings, "HELIX_BROWSER", "chrome") or "chrome").strip() or "chrome"
-    )
-    helix_proxy = str(getattr(settings, "HELIX_PROXY", "") or "").strip()
-    helix_ssl_verify = str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip()
     messages: list[dict[str, Any]] = []
     found_total = 0
     missing_total = 0
@@ -235,11 +367,15 @@ def _run_post_jql_helix_lookup(
 
     pending_by_country: Dict[str, Dict[str, List[str]]] = {}
     for country, inc_map in inc_by_country.items():
-        existing = _existing_helix_ids_by_country(merged_helix, country=country)
+        ad_hoc_items = _ad_hoc_lookup_items_by_incident(merged_helix, country=country)
         pending = {
             inc_id: jira_keys
             for inc_id, jira_keys in inc_map.items()
-            if str(inc_id).strip().upper() not in existing
+            if _lookup_item_requires_refresh(
+                ad_hoc_items.get(str(inc_id).strip().upper()),
+                now=lookup_now,
+                ttl_hours=ttl_hours,
+            )
         }
         if pending:
             pending_by_country[country] = pending
@@ -247,12 +383,13 @@ def _run_post_jql_helix_lookup(
 
     if not pending_by_country:
         message = (
-            "Lookup Helix post-JQL omitido: todos los INC encontrados ya existen en cache Helix."
+            "Lookup Helix post-JQL omitido: todos los INC encontrados ya están en histórico "
+            "ad hoc finalista dentro del TTL."
         )
         if on_message is not None:
             on_message(True, message)
         return issues_doc, {
-            "state": "skipped",
+            "state": "skipped_cached",
             "summary": message,
             "countries": len(inc_by_country),
             "inc_total": sum(len(v) for v in inc_by_country.values()),
@@ -271,8 +408,8 @@ def _run_post_jql_helix_lookup(
     for country, inc_map in pending_by_country.items():
         country_txt = str(country or "").strip()
         service_origin_buug = helix_service_origin_buug_for_country(country_txt)
-        source_alias = "Lookup estados finalistas Jira"
-        source_id = build_source_id("helix", country_txt, source_alias)
+        source_alias = POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS
+        source_id = _post_jql_lookup_source_id(country_txt)
         inc_ids = list(inc_map.keys())
         batches = _chunked(inc_ids, size=batch_size)
         for batch_index, batch in enumerate(batches, start=1):
@@ -289,23 +426,20 @@ def _run_post_jql_helix_lookup(
             error_text = ""
             ok = False
             try:
-                ok, msg, lookup_doc = ingest_helix(
-                    browser=helix_browser,
+                ok, msg, lookup_doc = lookup_helix_incidents_by_arsql(
+                    settings,
                     country=country_txt,
+                    service_origin_buug=service_origin_buug,
+                    incident_ids=batch,
                     source_alias=source_alias,
                     source_id=source_id,
-                    proxy=helix_proxy,
-                    ssl_verify=helix_ssl_verify,
-                    service_origin_buug=service_origin_buug,
-                    service_origin_n1=getattr(settings, "HELIX_ARSQL_SOURCE_SERVICE_N1", ""),
-                    service_origin_n2=getattr(settings, "HELIX_ARSQL_SOURCE_SERVICE_N2", ""),
-                    chunk_size=batch_size,
-                    dry_run=False,
-                    existing_doc=HelixDocument.empty(),
                     cache_doc=merged_helix,
-                    incident_ids=batch,
-                    incident_ids_only=True,
                     matched_jira_keys_by_incident_id=inc_map,
+                    batch_size=batch_size,
+                    allow_interactive_bootstrap=False,
+                    lookup_run_id=run_id,
+                    lookup_at=lookup_at,
+                    helix_lookup_kind=POST_JQL_LOOKUP_HELIX_KIND,
                 )
                 batch_items = list(getattr(lookup_doc, "items", []) or []) if lookup_doc else []
                 found_ids = {str(item.id or "").strip().upper() for item in batch_items}
@@ -317,12 +451,33 @@ def _run_post_jql_helix_lookup(
                     issues_doc = _merge_issues(
                         issues_doc, [_helix_item_to_issue(item) for item in batch_items]
                     )
+                missing_ids = [
+                    str(inc_id or "").strip().upper()
+                    for inc_id in batch
+                    if str(inc_id or "").strip().upper() not in found_ids
+                ]
+                if missing_ids:
+                    merged_helix = _merge_helix_items(
+                        merged_helix,
+                        [
+                            _lookup_diagnostic_item(
+                                inc_id=inc_id,
+                                country=country_txt,
+                                service_origin_buug=service_origin_buug,
+                                source_id=source_id,
+                                source_alias=source_alias,
+                                matched_jira_keys=inc_map.get(inc_id, []),
+                                run_id=run_id,
+                                lookup_at=lookup_at,
+                                lookup_status="missing" if ok else "error",
+                                lookup_error="" if ok else str(msg or "").strip(),
+                            )
+                            for inc_id in missing_ids
+                        ],
+                    )
                 message = str(msg or "").strip()
                 if missing_count > 0:
-                    message = (
-                        f"{message} Missing INC: "
-                        f"{', '.join([inc for inc in batch if inc not in found_ids])}"
-                    ).strip()
+                    message = (f"{message} Missing INC: {', '.join(missing_ids)}").strip()
                 if not ok:
                     error_count += 1
                     error_text = message or "lookup_batch_failed"
@@ -337,6 +492,24 @@ def _run_post_jql_helix_lookup(
                     f"{error_text}"
                 )
                 missing_total += len(batch)
+                merged_helix = _merge_helix_items(
+                    merged_helix,
+                    [
+                        _lookup_diagnostic_item(
+                            inc_id=inc_id,
+                            country=country_txt,
+                            service_origin_buug=service_origin_buug,
+                            source_id=source_id,
+                            source_alias=source_alias,
+                            matched_jira_keys=inc_map.get(inc_id, []),
+                            run_id=run_id,
+                            lookup_at=lookup_at,
+                            lookup_status="error",
+                            lookup_error=error_text,
+                        )
+                        for inc_id in batch
+                    ],
+                )
 
             duration_ms = int((monotonic() - started) * 1000.0)
             LOGGER.info(
@@ -354,6 +527,8 @@ def _run_post_jql_helix_lookup(
                     "missing_count": int(missing_count),
                     "error": error_text,
                     "duration_ms": duration_ms,
+                    "interactive_bootstrap": False,
+                    "arsql_endpoint": arsql_endpoint,
                 },
             )
             messages.append({"ok": bool(ok), "message": message})
@@ -431,7 +606,7 @@ def run_jira_ingest(
         save_issues_doc(settings.DATA_PATH, work_doc)
 
     lookup_result: dict[str, Any] | None = None
-    if success_count > 0 and is_country_finalist_status_lookup_mode(settings):
+    if success_count > 0:
         work_doc, lookup_result = _run_post_jql_helix_lookup(
             settings,
             selected_sources=sources,

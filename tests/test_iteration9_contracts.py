@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -9,11 +10,15 @@ import pandas as pd
 
 import bug_resolution_radar.config as config_mod
 from bug_resolution_radar.analytics.finalist_discrepancies import (
+    ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
     ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+    ANALYSIS_MODE_SELECTED_SOURCES,
+    POST_JQL_LOOKUP_HELIX_KIND,
     build_finalist_status_discrepancies,
 )
 from bug_resolution_radar.config import (
     Settings,
+    all_configured_sources,
     country_rollup_sources,
     helix_service_origin_buug_for_country,
     jira_sources,
@@ -174,6 +179,31 @@ def test_country_rollups_allow_three_or_more_sources_and_validate_country() -> N
     ]
 
 
+def test_rollup_source_id_stays_stable_when_source_alias_changes() -> None:
+    settings = Settings(
+        JIRA_SOURCES_JSON=(
+            '[{"source_id":"jira:mexico:core-stable","country":"México",'
+            '"alias":"Core nuevo","jql":"project = CORE"}]'
+        ),
+        HELIX_SOURCES_JSON=(
+            '[{"source_id":"helix:mexico:smartit-stable","country":"México",'
+            '"alias":"SmartIT nuevo","service_origin_n1":"ENTERPRISE WEB"}]'
+        ),
+        COUNTRY_ROLLUP_SOURCES_JSON=(
+            '[{"country":"México","source_ids":['
+            '"jira:mexico:core-stable","helix:mexico:smartit-stable"]}]'
+        ),
+    )
+
+    assert country_rollup_sources(settings)["México"] == [
+        "jira:mexico:core-stable",
+        "helix:mexico:smartit-stable",
+    ]
+    labels = {source["source_id"]: source["alias"] for source in all_configured_sources(settings)}
+    assert labels["jira:mexico:core-stable"] == "Core nuevo"
+    assert labels["helix:mexico:smartit-stable"] == "SmartIT nuevo"
+
+
 def test_save_settings_payload_persists_lookup_mode_and_validated_rollups(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
@@ -227,6 +257,7 @@ def test_streamlit_and_frontend_do_not_expose_editable_helix_buug_or_two_limit()
     )
     settings_source = (root / "frontend/src/pages/SettingsPage.tsx").read_text(encoding="utf-8")
     reports_source = (root / "frontend/src/pages/ReportsPage.tsx").read_text(encoding="utf-8")
+    streamlit_app_source = (root / "src/bug_resolution_radar/ui/app.py").read_text(encoding="utf-8")
 
     assert 'disabled=["service_origin_buug"]' in streamlit_source
     assert "max_selections=2" not in streamlit_source
@@ -238,6 +269,7 @@ def test_streamlit_and_frontend_do_not_expose_editable_helix_buug_or_two_limit()
     assert "Considerar solo estados finalistas del país" not in settings_source
     assert "periodSourceIds.length < 2" not in reports_source
     assert "sin agregados configurados; se omiten slides agregadas" in reports_source
+    assert "configured_rollup[:2]" not in streamlit_app_source
 
 
 def test_jira_issue_normalization_sets_po_team_leader() -> None:
@@ -387,10 +419,11 @@ def test_run_jira_ingest_lookup_persists_helix_internal_id_and_partial_progress(
         save_issues_doc(str(data_path), jira_doc)
         return True, "Jira OK", jira_doc
 
-    def _fake_helix(**kwargs: Any) -> tuple[bool, str, HelixDocument]:
+    def _fake_helix(*_: Any, **kwargs: Any) -> tuple[bool, str, HelixDocument]:
         batch = list(kwargs.get("incident_ids") or [])
         assert kwargs["service_origin_buug"] == "BBVA México"
-        assert kwargs["incident_ids_only"] is True
+        assert kwargs["allow_interactive_bootstrap"] is False
+        assert kwargs["helix_lookup_kind"] == POST_JQL_LOOKUP_HELIX_KIND
         if batch == ["INC000104216019"]:
             raise RuntimeError("fallo controlado")
         item = HelixWorkItem(
@@ -411,7 +444,7 @@ def test_run_jira_ingest_lookup_persists_helix_internal_id_and_partial_progress(
         return True, "Helix OK", HelixDocument(items=[item])
 
     monkeypatch.setattr(ingest_runner, "ingest_jira", _fake_jira)
-    monkeypatch.setattr(ingest_runner, "ingest_helix", _fake_helix)
+    monkeypatch.setattr(ingest_runner, "lookup_helix_incidents_by_arsql", _fake_helix)
     events: list[tuple[str, str]] = []
     caplog.set_level(logging.INFO, logger="bug_resolution_radar.services.ingest_runner")
 
@@ -493,11 +526,11 @@ def test_run_jira_ingest_lookup_skips_without_inc_references(
     )
 
     assert result["state"] == "success"
-    assert result["post_jql_lookup"]["state"] == "skipped"
+    assert result["post_jql_lookup"]["state"] == "skipped_no_inc"
     assert "no se encontraron referencias INC" in result["post_jql_lookup"]["summary"]
 
 
-def test_lookup_does_not_query_incidents_already_in_helix_repo(
+def test_lookup_does_not_query_finalist_ad_hoc_incidents_within_ttl(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
     data_path = tmp_path / "issues.json"
@@ -509,7 +542,10 @@ def test_lookup_does_not_query_incidents_already_in_helix_repo(
                     id="INC000104216018",
                     status="Closed",
                     country="México",
-                    source_id="helix:mexico:existing",
+                    source_id="helix:mexico:lookup-estados-finalistas-jira",
+                    source_alias="Lookup estados finalistas Jira",
+                    helix_lookup_kind=POST_JQL_LOOKUP_HELIX_KIND,
+                    lookup_at="2026-05-22T00:00:00+00:00",
                 )
             ]
         )
@@ -518,6 +554,7 @@ def test_lookup_does_not_query_incidents_already_in_helix_repo(
         DATA_PATH=str(data_path),
         HELIX_DATA_PATH=str(helix_path),
         FINALIST_STATUS_ANALYSIS_MODE=ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+        HELIX_INC_LOOKUP_TTL_HOURS=24,
     )
     jira_doc = IssuesDocument(
         issues=[
@@ -542,7 +579,16 @@ def test_lookup_does_not_query_incidents_already_in_helix_repo(
         return True, "unexpected", HelixDocument.empty()
 
     monkeypatch.setattr(ingest_runner, "ingest_jira", lambda **_: (True, "Jira OK", jira_doc))
-    monkeypatch.setattr(ingest_runner, "ingest_helix", _fail_if_called)
+    monkeypatch.setattr(ingest_runner, "lookup_helix_incidents_by_arsql", _fail_if_called)
+    monkeypatch.setattr(
+        ingest_runner,
+        "datetime",
+        type(
+            "_FrozenDateTime",
+            (datetime,),
+            {"now": classmethod(lambda cls, tz=None: datetime(2026, 5, 22, 1, tzinfo=tz))},
+        ),
+    )
 
     result = run_jira_ingest(
         settings,
@@ -556,5 +602,67 @@ def test_lookup_does_not_query_incidents_already_in_helix_repo(
         ],
     )
 
-    assert result["post_jql_lookup"]["state"] == "skipped"
+    assert result["post_jql_lookup"]["state"] == "skipped_cached"
     assert called is False
+
+
+def test_run_jira_ingest_lookup_runs_for_all_finalist_analysis_modes(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    calls: list[str] = []
+
+    def _fake_jira(**_: Any) -> tuple[bool, str, IssuesDocument]:
+        return (
+            True,
+            "Jira OK",
+            IssuesDocument(
+                issues=[
+                    NormalizedIssue(
+                        key="MEX-1",
+                        summary="Cruce INC000104216018",
+                        status="Open",
+                        type="Bug",
+                        priority="High",
+                        country="México",
+                        source_type="jira",
+                        source_id="jira:mexico:core",
+                        source_alias="Core",
+                    )
+                ]
+            ),
+        )
+
+    def _fake_lookup(*_: Any, **kwargs: Any) -> tuple[bool, str, HelixDocument]:
+        calls.append(str(kwargs.get("source_id") or ""))
+        return True, "Helix OK", HelixDocument.empty()
+
+    monkeypatch.setattr(ingest_runner, "ingest_jira", _fake_jira)
+    monkeypatch.setattr(ingest_runner, "lookup_helix_incidents_by_arsql", _fake_lookup)
+
+    for mode in (
+        ANALYSIS_MODE_SELECTED_SOURCES,
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
+        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
+    ):
+        result = run_jira_ingest(
+            Settings(
+                DATA_PATH=str(tmp_path / f"{mode}.json"),
+                HELIX_DATA_PATH=str(tmp_path / f"{mode}-helix.json"),
+                FINALIST_STATUS_ANALYSIS_MODE=mode,
+            ),
+            selected_sources=[
+                {
+                    "source_id": "jira:mexico:core",
+                    "country": "México",
+                    "alias": "Core",
+                    "jql": "project = CORE",
+                }
+            ],
+        )
+        assert result["post_jql_lookup"]["state"] == "success"
+
+    assert calls == [
+        "helix:mexico:lookup-estados-finalistas-jira",
+        "helix:mexico:lookup-estados-finalistas-jira",
+        "helix:mexico:lookup-estados-finalistas-jira",
+    ]
