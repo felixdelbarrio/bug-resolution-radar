@@ -445,7 +445,7 @@ def test_multi_country_sources_parsing_and_ids() -> None:
     )
 
     countries = cfg.supported_countries(settings)
-    assert countries == ["México", "España", "Peru", "Colombia", "Argentina"]
+    assert countries == ["México", "España", "Perú", "Colombia", "Argentina"]
 
     jira_cfg = cfg.jira_sources(settings)
     helix_cfg = cfg.helix_sources(settings)

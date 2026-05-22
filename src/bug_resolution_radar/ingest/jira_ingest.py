@@ -314,6 +314,7 @@ def _jira_issue_to_normalized(
     country: str,
     alias: str,
     source_id: str,
+    po_team_leader: str = "",
 ) -> NormalizedIssue:
     fields = issue_payload.get("fields") or {}
     rendered_fields = issue_payload.get("renderedFields") or {}
@@ -334,6 +335,7 @@ def _jira_issue_to_normalized(
         updated=fields.get("updated"),
         resolved=fields.get("resolutiondate"),
         assignee=_dict_text(fields.get("assignee"), key="displayName"),
+        po_team_leader=str(po_team_leader or "").strip(),
         reporter=_dict_text(fields.get("reporter"), key="displayName"),
         labels=fields.get("labels") or [],
         components=_components_names(fields.get("components") or []),
@@ -384,7 +386,7 @@ def _bootstrap_jira_cookie_from_browser(
 
 def _resolve_source_scope(
     settings: Settings, source: Optional[Dict[str, str]]
-) -> Tuple[str, str, str, str]:
+) -> Tuple[str, str, str, str, str]:
     countries = supported_countries(settings)
     fallback_country = countries[0] if countries else "México"
 
@@ -392,10 +394,11 @@ def _resolve_source_scope(
         country = str(source.get("country") or "").strip() or fallback_country
         alias = str(source.get("alias") or "").strip() or "Jira principal"
         jql = str(source.get("jql") or "").strip()
+        po_team_leader = str(source.get("po_team_leader") or "").strip()
         source_id = str(source.get("source_id") or "").strip() or build_source_id(
             "jira", country, alias
         )
-        return country, alias, source_id, jql
+        return country, alias, source_id, jql, po_team_leader
 
     configured_sources = jira_sources(settings)
     if configured_sources:
@@ -403,14 +406,15 @@ def _resolve_source_scope(
         country = str(primary.get("country") or "").strip() or fallback_country
         alias = str(primary.get("alias") or "").strip() or "Jira principal"
         jql = str(primary.get("jql") or "").strip()
+        po_team_leader = str(primary.get("po_team_leader") or "").strip()
         source_id = str(primary.get("source_id") or "").strip() or build_source_id(
             "jira", country, alias
         )
-        return country, alias, source_id, jql
+        return country, alias, source_id, jql, po_team_leader
 
     alias = "Jira principal"
     source_id = build_source_id("jira", fallback_country, alias)
-    return fallback_country, alias, source_id, ""
+    return fallback_country, alias, source_id, "", ""
 
 
 def _merge_key(issue: NormalizedIssue) -> str:
@@ -427,7 +431,7 @@ def ingest_jira(
     existing_doc: Optional[IssuesDocument] = None,
     source: Optional[Dict[str, str]] = None,
 ) -> Tuple[bool, str, Optional[IssuesDocument]]:
-    country, alias, source_id, jql = _resolve_source_scope(settings, source)
+    country, alias, source_id, jql, po_team_leader = _resolve_source_scope(settings, source)
     source_label = f"{country} · {alias}"
 
     if not jql:
@@ -602,6 +606,7 @@ def ingest_jira(
                 country=country,
                 alias=alias,
                 source_id=source_id,
+                po_team_leader=po_team_leader,
             )
             for it in data.get("issues", [])
             if isinstance(it, dict)

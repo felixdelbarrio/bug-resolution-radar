@@ -25,6 +25,7 @@ from bug_resolution_radar.config import (
     all_configured_sources,
     build_source_id,
     country_rollup_sources,
+    helix_service_origin_buug_for_country,
     helix_sources,
     jira_sources,
     normalize_analysis_lookback_months,
@@ -177,6 +178,8 @@ def _source_rows_export_df(df: pd.DataFrame, *, source_type: str) -> pd.DataFram
             for k, v in row_copy.items()
             if k != "__source_id__" and not str(k).startswith("__")
         }
+        if source_type == "helix" and country:
+            business_fields["service_origin_buug"] = helix_service_origin_buug_for_country(country)
         if not any(business_fields.values()):
             continue
 
@@ -235,9 +238,12 @@ def _editor_rows_from_source_rows(
             "alias": _as_str(row.get("alias")),
         }
         if source_type == "jira":
+            payload["po_team_leader"] = _as_str(row.get("po_team_leader"))
             payload["jql"] = _as_str(row.get("jql"))
         else:
-            payload["service_origin_buug"] = _as_str(row.get("service_origin_buug"))
+            payload["service_origin_buug"] = helix_service_origin_buug_for_country(
+                payload["country"]
+            )
             payload["service_origin_n1"] = _as_str(row.get("service_origin_n1"))
             payload["service_origin_n2"] = _as_str(row.get("service_origin_n2"))
         out.append(payload)
@@ -1041,6 +1047,7 @@ def _rows_from_jira_settings(settings: Settings, countries: List[str]) -> List[D
                 "__source_id__": _as_str(src.get("source_id")),
                 "country": country,
                 "alias": _as_str(src.get("alias")),
+                "po_team_leader": _as_str(src.get("po_team_leader")),
                 "jql": _as_str(src.get("jql")),
             }
         )
@@ -1059,7 +1066,7 @@ def _rows_from_helix_settings(settings: Settings, countries: List[str]) -> List[
                 "__source_id__": _as_str(src.get("source_id")),
                 "country": country,
                 "alias": _as_str(src.get("alias")),
-                "service_origin_buug": _as_str(src.get("service_origin_buug")),
+                "service_origin_buug": helix_service_origin_buug_for_country(country),
                 "service_origin_n1": _as_str(src.get("service_origin_n1")),
                 "service_origin_n2": _as_str(src.get("service_origin_n2")),
             }
@@ -1079,6 +1086,10 @@ def _normalize_jira_rows(
             continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
+        source_id = _as_str(row.get("__source_id__")) or (
+            build_source_id("jira", country, alias) if country and alias else ""
+        )
+        po_team_leader = _as_str(row.get("po_team_leader"))
         jql = _as_str(row.get("jql"))
 
         if not country and not alias and not jql:
@@ -1098,7 +1109,12 @@ def _normalize_jira_rows(
             errors.append(f"Jira fila {idx}: alias duplicado para {country}.")
             continue
         seen.add(dedup_key)
-        out.append({"country": country, "alias": alias, "jql": jql})
+        payload = {"country": country, "alias": alias, "jql": jql}
+        if source_id:
+            payload["source_id"] = source_id
+        if po_team_leader:
+            payload["po_team_leader"] = po_team_leader
+        out.append(payload)
 
     return out, errors
 
@@ -1115,7 +1131,10 @@ def _normalize_helix_rows(
             continue
         country = _as_str(row.get("country"))
         alias = _as_str(row.get("alias"))
-        service_origin_buug = _as_str(row.get("service_origin_buug"))
+        source_id = _as_str(row.get("__source_id__")) or (
+            build_source_id("helix", country, alias) if country and alias else ""
+        )
+        service_origin_buug = helix_service_origin_buug_for_country(country)
         service_origin_n1 = _as_str(row.get("service_origin_n1"))
         service_origin_n2 = _as_str(row.get("service_origin_n2"))
 
@@ -1145,6 +1164,8 @@ def _normalize_helix_rows(
             "country": country,
             "alias": alias,
         }
+        if source_id:
+            payload["source_id"] = source_id
         if service_origin_buug:
             payload["service_origin_buug"] = service_origin_buug
         if service_origin_n1:
@@ -1444,6 +1465,7 @@ def render(settings: Settings) -> None:
             "__source_id__": "",
             "country": countries[0] if countries else "",
             "alias": "",
+            "po_team_leader": "",
             "jql": "",
         }
         jira_rows_state_key = "cfg_jira_sources_rows_state"
@@ -1464,11 +1486,12 @@ def render(settings: Settings) -> None:
             num_rows="fixed",
             width="stretch",
             key="cfg_jira_sources_editor",
-            column_order=["__delete__", "country", "alias", "jql"],
+            column_order=["__delete__", "country", "alias", "po_team_leader", "jql"],
             column_config={
                 "__delete__": st.column_config.CheckboxColumn("Eliminar"),
                 "country": st.column_config.SelectboxColumn("country", options=countries),
                 "alias": st.column_config.TextColumn("alias"),
+                "po_team_leader": st.column_config.TextColumn("PO / Team Leader"),
                 "jql": st.column_config.TextColumn("jql"),
             },
         )
@@ -1670,12 +1693,13 @@ def render(settings: Settings) -> None:
         st.markdown("### Fuentes Helix por país")
         st.caption("Alias y filtros de servicio por fuente. La conexión Helix se define arriba.")
         helix_rows = _rows_from_helix_settings(settings, countries)
+        default_helix_country = countries[0] if countries else ""
         helix_default_row = {
             "__delete__": False,
             "__source_id__": "",
-            "country": countries[0] if countries else "",
+            "country": default_helix_country,
             "alias": "",
-            "service_origin_buug": "BBVA México",
+            "service_origin_buug": helix_service_origin_buug_for_country(default_helix_country),
             "service_origin_n1": "ENTERPRISE WEB",
             "service_origin_n2": "",
         }
@@ -1690,6 +1714,15 @@ def render(settings: Settings) -> None:
         helix_rows_for_editor = st.session_state.get(
             helix_rows_state_key, helix_rows or [helix_default_row]
         )
+        helix_rows_for_editor = [
+            {
+                **dict(row),
+                "service_origin_buug": helix_service_origin_buug_for_country(
+                    _as_str(dict(row).get("country"))
+                ),
+            }
+            for row in list(helix_rows_for_editor or [])
+        ]
         helix_df = pd.DataFrame(helix_rows_for_editor)
         helix_editor = st.data_editor(
             helix_df,
@@ -1713,8 +1746,17 @@ def render(settings: Settings) -> None:
                 "service_origin_n1": st.column_config.TextColumn("Servicio Origen N1 (CSV)"),
                 "service_origin_n2": st.column_config.TextColumn("Servicio Origen N2 (CSV)"),
             },
+            disabled=["service_origin_buug"],
         )
-        st.session_state[helix_rows_state_key] = helix_editor.to_dict(orient="records")
+        st.session_state[helix_rows_state_key] = [
+            {
+                **dict(row),
+                "service_origin_buug": helix_service_origin_buug_for_country(
+                    _as_str(dict(row).get("country"))
+                ),
+            }
+            for row in helix_editor.to_dict(orient="records")
+        ]
         st.caption("Descarga o carga fuentes Helix en formato Excel.")
         c_h_export, c_h_import = st.columns(2)
         with c_h_export:
@@ -1923,6 +1965,31 @@ def render(settings: Settings) -> None:
                     f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
                 )
 
+            with st.container(border=True, key="cfg_prefs_card_finalist_mode"):
+                st.markdown("#### Modalidad del análisis")
+                finalist_mode_options = [
+                    "selected_sources",
+                    "country_finalist_status",
+                    "country_finalist_status_lookup",
+                ]
+                finalist_mode_labels = {
+                    "selected_sources": "Considerar sólo orígenes seleccionados",
+                    "country_finalist_status": "Cruzar con estados finalistas ingestados del país",
+                    "country_finalist_status_lookup": "Buscar estados finalistas del país",
+                }
+                finalist_mode_default = str(
+                    getattr(settings, "FINALIST_STATUS_ANALYSIS_MODE", "selected_sources") or ""
+                ).strip()
+                if finalist_mode_default not in finalist_mode_options:
+                    finalist_mode_default = "selected_sources"
+                finalist_status_analysis_mode = st.radio(
+                    "Análisis de estados finalistas",
+                    options=finalist_mode_options,
+                    index=finalist_mode_options.index(finalist_mode_default),
+                    format_func=lambda mode: finalist_mode_labels.get(str(mode), str(mode)),
+                    key="cfg_finalist_status_analysis_mode",
+                )
+
             with st.container(border=True, key="cfg_prefs_card_quincena"):
                 st.markdown("#### Alcance quincenal")
                 quincena_last_finished_default = _boolish(
@@ -1980,6 +2047,18 @@ def render(settings: Settings) -> None:
                         "Activa el paginado de slides de detalle por funcionalidad después "
                         "del dashboard funcional."
                     ),
+                )
+                finalist_discrepancies_default = _boolish(
+                    getattr(settings, "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED", "false"),
+                    default=False,
+                )
+                st.session_state.setdefault(
+                    "cfg_period_report_finalist_discrepancies_enabled",
+                    finalist_discrepancies_default,
+                )
+                finalist_discrepancies_enabled = st.checkbox(
+                    "Incluir informe de incidencias con discrepancias en estado finalista",
+                    key="cfg_period_report_finalist_discrepancies_enabled",
                 )
 
                 st.markdown("##### Criterio de foco en abiertas")
@@ -2115,6 +2194,10 @@ def render(settings: Settings) -> None:
                         "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED": (
                             "true" if bool(functionality_detail_enabled) else "false"
                         ),
+                        "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED": (
+                            "true" if bool(finalist_discrepancies_enabled) else "false"
+                        ),
+                        "FINALIST_STATUS_ANALYSIS_MODE": str(finalist_status_analysis_mode).strip(),
                         "OPEN_ISSUES_FOCUS_MODE": normalize_open_issues_focus_mode(
                             open_issues_focus_mode
                         ),
@@ -2139,7 +2222,8 @@ def render(settings: Settings) -> None:
         st.markdown("### Orígenes agregados por país")
         st.caption(
             "Esta selección se usa en Vista País (agregada), Insights quincenal y "
-            "el informe Seguimiento del periodo. Se recomienda 2 orígenes por país."
+            "el informe Seguimiento del periodo. Puedes seleccionar todos los orígenes "
+            "agregados que necesite cada país."
         )
         configured_rollup_by_country = country_rollup_sources(settings)
         rollup_selection_by_country: Dict[str, List[str]] = {}
@@ -2164,7 +2248,7 @@ def render(settings: Settings) -> None:
 
                 configured_ids = [
                     sid
-                    for sid in configured_rollup_by_country.get(country, [])[:2]
+                    for sid in configured_rollup_by_country.get(country, [])
                     if sid in set(options)
                 ]
 
@@ -2181,7 +2265,6 @@ def render(settings: Settings) -> None:
                     default=configured_ids,
                     key=f"cfg_rollup_sources_{idx}",
                     format_func=_format_rollup_source_id,
-                    max_selections=2,
                 )
                 selected_clean = [sid for sid in selected_ids if str(sid).strip() in set(options)]
                 if selected_clean:

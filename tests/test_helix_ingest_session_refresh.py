@@ -484,7 +484,8 @@ def test_ingest_helix_arsql_paginates_with_offset(monkeypatch: Any) -> None:
     assert "ingesta Helix OK" in msg
     assert doc is not None
     assert len(doc.items) == 3
-    assert doc.items[0].url.endswith("/app/#/incidentPV/IDGE189LA8XVSATJYQ1ATJYQ1AVIXN")
+    assert doc.items[0].internal_id == "IDGE189LA8XVSATJYQ1ATJYQ1AVIXN"
+    assert doc.items[0].url.endswith("/app/#/incident/IDGE189LA8XVSATJYQ1ATJYQ1AVIXN")
     assert offsets == [0, 2, 3]
 
 
@@ -728,6 +729,39 @@ def test_ingest_helix_bootstraps_browser_when_cookie_missing(monkeypatch: Any) -
     assert opened_urls == [
         "chrome:https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console"
     ]
+
+
+def test_ingest_helix_noninteractive_lookup_does_not_open_browser_without_cookie(
+    monkeypatch: Any,
+) -> None:
+    def fail_open(*_args: Any, **_kwargs: Any) -> bool:
+        raise AssertionError("browser should not be opened for non-interactive lookup")
+
+    def fail_open_many(*_args: Any, **_kwargs: Any) -> int:
+        raise AssertionError("browser should not be opened for non-interactive lookup")
+
+    monkeypatch.setattr(helix_mod, "_open_url_in_configured_browser", fail_open)
+    monkeypatch.setattr(helix_mod, "_open_urls_in_configured_browser", fail_open_many)
+    monkeypatch.setattr(helix_mod, "get_helix_session_cookie", lambda *_a, **_k: "")
+    monkeypatch.setenv("HELIX_ARSQL_BASE_URL", "https://itsmhelixbbva-ir1.onbmc.com")
+    monkeypatch.setenv("HELIX_ARSQL_DATASOURCE_UID", "ZFPVLzQnz")
+    monkeypatch.setenv(
+        "HELIX_DASHBOARD_URL",
+        "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
+    )
+
+    ok, msg, doc = helix_mod.ingest_helix(
+        browser="chrome",
+        country="México",
+        service_origin_buug="BBVA México",
+        incident_ids=["INC000104216018"],
+        incident_ids_only=True,
+        allow_interactive_bootstrap=False,
+    )
+
+    assert ok is False
+    assert doc is None
+    assert "Helix session unavailable for non-interactive ARSQL lookup" in msg
 
 
 def test_ingest_helix_does_not_open_browser_when_cookie_exists_even_if_page_not_open(

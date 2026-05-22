@@ -24,6 +24,7 @@ class NormalizedIssue(BaseModel):
     updated: Optional[str] = None
     resolved: Optional[str] = None
     assignee: str = ""
+    po_team_leader: str = ""
     reporter: str = ""
     labels: List[str] = Field(default_factory=list)
     components: List[str] = Field(default_factory=list)
@@ -34,6 +35,7 @@ class NormalizedIssue(BaseModel):
     source_type: str = "jira"
     source_alias: str = ""
     source_id: str = ""
+    helix_lookup_kind: str = ""
 
 
 class IssuesDocument(BaseModel):

@@ -13,6 +13,7 @@ import pandas as pd
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
+    helix_service_origin_buug_for_country,
     helix_sources,
     jira_sources,
     supported_countries,
@@ -20,7 +21,7 @@ from bug_resolution_radar.config import (
 
 _SUPPORTED_SOURCE_TYPES = {"jira", "helix"}
 _EXPORT_COLUMNS: dict[str, list[str]] = {
-    "jira": ["source_id", "country", "alias", "jql"],
+    "jira": ["source_id", "country", "alias", "po_team_leader", "jql"],
     "helix": [
         "source_id",
         "country",
@@ -57,6 +58,12 @@ _HEADER_ALIASES: dict[str, dict[str, str]] = {
         "country": "country",
         "pais": "country",
         "alias": "alias",
+        "po": "po_team_leader",
+        "team_leader": "po_team_leader",
+        "po_team_leader": "po_team_leader",
+        "po_teamleader": "po_team_leader",
+        "po_lider_equipo": "po_team_leader",
+        "po_team_leader_": "po_team_leader",
         "jql": "jql",
         "query": "jql",
         "consulta": "jql",
@@ -150,9 +157,12 @@ def _build_export_rows(settings: Settings, *, source_type: str) -> list[dict[str
             "alias": _as_text(row.get("alias")),
         }
         if normalized_type == "jira":
+            payload["po_team_leader"] = _as_text(row.get("po_team_leader"))
             payload["jql"] = _as_text(row.get("jql"))
         else:
-            payload["service_origin_buug"] = _as_text(row.get("service_origin_buug"))
+            payload["service_origin_buug"] = helix_service_origin_buug_for_country(
+                _as_text(row.get("country"))
+            )
             payload["service_origin_n1"] = _as_text(row.get("service_origin_n1"))
             payload["service_origin_n2"] = _as_text(row.get("service_origin_n2"))
         out.append(payload)
@@ -168,6 +178,10 @@ def _rows_frame_from_source_rows(
     out_rows: list[dict[str, str]] = []
     for row in list(source_rows or []):
         payload = {column: _as_text(row.get(column)) for column in cols}
+        if source_type == "helix":
+            payload["service_origin_buug"] = helix_service_origin_buug_for_country(
+                payload.get("country", "")
+            )
         out_rows.append(payload)
     return pd.DataFrame(out_rows, columns=cols)
 
@@ -354,10 +368,14 @@ def _parse_source_rows_from_frame(
             "alias": alias,
         }
         if normalized_type == "jira":
+            clean["po_team_leader"] = _as_text(row_data.get("po_team_leader", ""))
             clean["jql"] = _as_text(row_data.get("jql", ""))
         else:
+            clean["service_origin_buug"] = helix_service_origin_buug_for_country(country)
             for key in ("service_origin_buug", "service_origin_n1", "service_origin_n2"):
                 val = _as_text(row_data.get(key, ""))
+                if key == "service_origin_buug":
+                    val = clean["service_origin_buug"]
                 if val:
                     clean[key] = val
         rows.append(clean)

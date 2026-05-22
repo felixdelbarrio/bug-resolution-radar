@@ -104,11 +104,18 @@ def _candidate_env_example_paths() -> List[Path]:
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "México",
     "España",
-    "Peru",
+    "Perú",
     "Colombia",
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
+HELIX_SERVICE_ORIGIN_BUUG_BY_COUNTRY: Dict[str, str] = {
+    "Argentina": "BBVA Argentina",
+    "Colombia": "BBVA Colombia",
+    "España": "BBVA España",
+    "México": "BBVA México",
+    "Perú": "BBVA Perú",
+}
 _PERIOD_TEMPLATE_PRIMARY_FILENAME = "Seguimiento de incidencias del periodo.pptx"
 _PERIOD_TEMPLATE_ALTERNATE_FILENAMES = (
     _PERIOD_TEMPLATE_PRIMARY_FILENAME,
@@ -300,6 +307,17 @@ def _normalize_country(value: str, *, supported: List[str]) -> str:
     return ""
 
 
+def helix_service_origin_buug_for_country(country: str) -> str:
+    """Return the configured Helix Servicio Origen BU/UG for a supported country."""
+    country_norm = _normalize_country(
+        _coerce_str(country),
+        supported=list(HELIX_SERVICE_ORIGIN_BUUG_BY_COUNTRY.keys()),
+    )
+    if not country_norm:
+        return ""
+    return HELIX_SERVICE_ORIGIN_BUUG_BY_COUNTRY.get(country_norm, "")
+
+
 def _parse_json_list(raw: str) -> List[Dict[str, Any]]:
     txt = _coerce_str(raw)
     if not txt:
@@ -315,6 +333,37 @@ def _parse_json_list(raw: str) -> List[Dict[str, Any]]:
         if isinstance(row, dict):
             out.append(dict(row))
     return out
+
+
+def _normalized_helix_source_rows_for_storage(settings: "Settings") -> List[Dict[str, str]]:
+    countries = supported_countries(settings)
+    rows = _parse_json_list(getattr(settings, "HELIX_SOURCES_JSON", ""))
+
+    out: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
+        alias = _coerce_str(row.get("alias"))
+        if not country or not alias:
+            continue
+        sid = _coerce_str(row.get("source_id")) or build_source_id("helix", country, alias)
+        if sid in seen:
+            continue
+        seen.add(sid)
+        payload: Dict[str, str] = {
+            "source_id": sid,
+            "country": country,
+            "alias": alias,
+            "service_origin_buug": helix_service_origin_buug_for_country(country),
+        }
+        service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
+        service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
+        if service_origin_n1:
+            payload["service_origin_n1"] = service_origin_n1
+        if service_origin_n2:
+            payload["service_origin_n2"] = service_origin_n2
+        out.append(payload)
+    return sorted(out, key=_source_sort_key)
 
 
 def build_source_id(source_type: str, country: str, alias: str) -> str:
@@ -379,6 +428,8 @@ class Settings(BaseModel):
     HELIX_ARSQL_GRAFANA_ORG_ID: str = ""
     HELIX_ARSQL_GRAFANA_DEVICE_ID: str = ""
     HELIX_ARSQL_DASHBOARD_URL: str = ""
+    HELIX_INC_LOOKUP_BATCH_SIZE: int = 25
+    HELIX_INC_LOOKUP_TTL_HOURS: int = 24
     HELIX_BROWSER_LOGIN_WAIT_SECONDS: int = 90
     HELIX_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
 
@@ -437,7 +488,12 @@ def save_settings(settings: Settings, *, drop_keys: Set[str] | List[str] | None 
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     normalized_drop_keys = {str(key).strip() for key in (drop_keys or set()) if str(key).strip()}
     existing = {k: v for k, v in dotenv_values(ENV_PATH).items() if k}
-    data = settings.model_dump()
+    normalized_settings = settings.model_copy(
+        update={
+            "HELIX_SOURCES_JSON": to_env_json(_normalized_helix_source_rows_for_storage(settings)),
+        }
+    )
+    data = normalized_settings.model_dump()
     serialized_data: Dict[str, str] = {}
     for k, v in data.items():
         value = v
@@ -492,22 +548,24 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
     for row in rows:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
         alias = _coerce_str(row.get("alias"))
+        po_team_leader = _coerce_str(row.get("po_team_leader"))
         jql = _decode_env_multiline(_coerce_str(row.get("jql")))
         if not country or not alias or not jql:
             continue
-        sid = build_source_id("jira", country, alias)
+        sid = _coerce_str(row.get("source_id")) or build_source_id("jira", country, alias)
         if sid in seen:
             continue
         seen.add(sid)
-        out.append(
-            {
-                "source_type": "jira",
-                "source_id": sid,
-                "country": country,
-                "alias": alias,
-                "jql": jql,
-            }
-        )
+        payload = {
+            "source_type": "jira",
+            "source_id": sid,
+            "country": country,
+            "alias": alias,
+            "jql": jql,
+        }
+        if po_team_leader:
+            payload["po_team_leader"] = po_team_leader
+        out.append(payload)
 
     return sorted(out, key=_source_sort_key)
 
@@ -521,12 +579,12 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
     for row in rows:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
         alias = _coerce_str(row.get("alias"))
-        service_origin_buug = _coerce_str(row.get("service_origin_buug"))
+        service_origin_buug = helix_service_origin_buug_for_country(country)
         service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
         service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
         if not country or not alias:
             continue
-        sid = build_source_id("helix", country, alias)
+        sid = _coerce_str(row.get("source_id")) or build_source_id("helix", country, alias)
         if sid in seen:
             continue
         seen.add(sid)

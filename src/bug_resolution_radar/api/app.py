@@ -1647,10 +1647,10 @@ def create_app() -> FastAPI:
         source_ids = [
             str(item).strip() for item in list(payload.sourceIds or []) if str(item).strip()
         ]
-        if not country or not source_ids:
+        if not country:
             raise HTTPException(
                 status_code=400,
-                detail="Selecciona país y al menos una fuente para el seguimiento.",
+                detail="Selecciona país para el seguimiento.",
             )
         try:
             artifact = generate_period_followup_report_artifact(
@@ -1684,10 +1684,10 @@ def create_app() -> FastAPI:
         source_ids = [
             str(item).strip() for item in list(payload.sourceIds or []) if str(item).strip()
         ]
-        if not country or not source_ids:
+        if not country:
             raise HTTPException(
                 status_code=400,
-                detail="Selecciona país y al menos una fuente para el seguimiento.",
+                detail="Selecciona país para el seguimiento.",
             )
         try:
             artifact = generate_period_followup_report_artifact(

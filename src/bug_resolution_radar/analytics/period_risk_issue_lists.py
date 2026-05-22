@@ -28,6 +28,7 @@ class PeriodRiskIssueRow:
     priority: str
     open_days: int
     url: str = ""
+    po_team_leader: str = ""
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,10 @@ def _prepare_open_issue_frame(
         )
     else:
         work["__assignee"] = "(sin asignar)"
+    if "po_team_leader" in work.columns:
+        work["__po_team_leader"] = work["po_team_leader"].fillna("").astype(str).str.strip()
+    else:
+        work["__po_team_leader"] = ""
     return work.loc[work["__issue_key"].ne("")].copy(deep=False)
 
 
@@ -197,6 +202,7 @@ def _rows_from_prepared(df: pd.DataFrame) -> tuple[PeriodRiskIssueRow, ...]:
                 functionality=_display_functionality(row),
                 assignee=str(row.get("__assignee", "(sin asignar)") or "").strip()
                 or "(sin asignar)",
+                po_team_leader=str(row.get("__po_team_leader", "") or "").strip(),
                 status=str(row.get("status", "") or "").strip(),
                 priority=str(row.get("priority", "") or "").strip(),
                 open_days=int(round(float(row.get("__open_days", 0.0) or 0.0))),

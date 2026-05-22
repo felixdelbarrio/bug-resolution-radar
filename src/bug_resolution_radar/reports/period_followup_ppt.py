@@ -63,7 +63,7 @@ from bug_resolution_radar.analytics.time_windows import TimeWindowService
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 from bug_resolution_radar.common.issue_links import linkify_issue_references
-from bug_resolution_radar.config import Settings, resolve_period_ppt_template_path
+from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
@@ -435,6 +435,15 @@ def _append_slide_clone(prs: Any, *, source_index: int) -> None:
                 if attr_name.startswith(_REL_NS) and attr_value in rid_map:
                     node.set(attr_name, rid_map[attr_value])
         dest.shapes._spTree.insert_element_before(clone, "p:extLst")
+
+
+def _move_slide(prs: Any, *, from_index: int, to_index: int) -> None:
+    if int(from_index) == int(to_index):
+        return
+    slides = prs.slides._sldIdLst
+    sld_id = slides[int(from_index)]
+    del slides[int(from_index)]
+    slides.insert(int(to_index), sld_id)
 
 
 def _append_slide_clone_from_source(prs: Any, *, source_slide: Any) -> Any:
@@ -3062,7 +3071,16 @@ def _populate_issue_native_table(
     if not data_rows:
         filler = [""] * max(len(table_headers) - 2, 0)
         data_rows = [["", "Sin incidencias para este criterio.", *filler]]
+    row_height = int(_ISSUE_TABLE_ROW_HEIGHT)
+    if any("\n(" in str(cell or "") for row in data_rows for cell in list(row or [])):
+        row_height = int(row_height * 1.18)
     geometry = _issue_table_geometry(data_row_count=len(data_rows))
+    geometry = (
+        geometry[0],
+        geometry[1],
+        geometry[2],
+        int(_ISSUE_TABLE_HEADER_HEIGHT) + row_height * max(len(data_rows), 1),
+    )
     table_shape = _native_table_shape(
         slide,
         table_shape_index=table_shape_index,
@@ -3075,7 +3093,7 @@ def _populate_issue_native_table(
         headers=table_headers,
         rows=data_rows,
         column_widths=native_column_widths(geometry[2], _ISSUE_TABLE_COLUMN_WEIGHTS),
-        row_height=int(_ISSUE_TABLE_ROW_HEIGHT),
+        row_height=row_height,
         header_height=int(_ISSUE_TABLE_HEADER_HEIGHT),
         font_name=_ISSUE_TABLE_FONT_NAME,
         body_font_size_pt=_ISSUE_TABLE_BODY_FONT_SIZE_PT,
@@ -3314,6 +3332,46 @@ def _chunk_risk_issues(
     return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
 
 
+def _assignee_with_po_text(
+    assignee: object,
+    po_team_leader: object,
+    *,
+    assignee_max_chars: int = 48,
+    po_max_chars: int = 44,
+) -> str:
+    assignee_text = str(assignee or "").strip() or "(sin asignar)"
+    po_text = str(po_team_leader or "").strip()
+    assignee_text = ellipsize_text(assignee_text, max_chars=assignee_max_chars)
+    if not po_text:
+        return assignee_text
+    po_text = ellipsize_text(po_text, max_chars=po_max_chars)
+    return f"{assignee_text}\n({po_text})"
+
+
+def _enrich_po_team_leader_from_sources(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+    safe = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if safe.empty or "source_id" not in safe.columns:
+        return safe
+    source_po = {
+        str(source.get("source_id") or "").strip(): str(source.get("po_team_leader") or "").strip()
+        for source in jira_sources(settings)
+        if str(source.get("source_id") or "").strip()
+        and str(source.get("po_team_leader") or "").strip()
+    }
+    if not source_po:
+        return safe
+    out = safe.copy(deep=False)
+    if "po_team_leader" not in out.columns:
+        out["po_team_leader"] = ""
+    current_po = out["po_team_leader"].fillna("").astype(str).str.strip()
+    source_ids = out["source_id"].fillna("").astype(str).str.strip()
+    out["po_team_leader"] = [
+        po or source_po.get(source_id, "")
+        for po, source_id in zip(current_po.tolist(), source_ids.tolist())
+    ]
+    return out
+
+
 def _risk_issue_rows_for_table(
     issues: Sequence[PeriodRiskIssueRow],
     *,
@@ -3330,10 +3388,7 @@ def _risk_issue_rows_for_table(
                     _premium_sentence_case(str(issue.summary or "")),
                     max_chars=125,
                 ),
-                ellipsize_text(
-                    str(issue.assignee or "").strip() or "(sin asignar)",
-                    max_chars=65,
-                ),
+                _assignee_with_po_text(issue.assignee, issue.po_team_leader),
                 ellipsize_text(str(issue.status or ""), max_chars=28),
                 ellipsize_text(str(issue.priority or ""), max_chars=18),
                 f"{int(issue.open_days or 0)} días",
@@ -3509,10 +3564,7 @@ def _finalist_discrepancy_rows_for_table(
             [
                 jira_key,
                 ellipsize_text(description_text, max_chars=150),
-                ellipsize_text(
-                    str(issue.jira_assignee or "").strip() or "(sin asignar)",
-                    max_chars=65,
-                ),
+                _assignee_with_po_text(issue.jira_assignee, issue.po_team_leader),
                 (
                     f"JIRA: {ellipsize_text(str(issue.jira_status or ''), max_chars=22)}\n"
                     f"Helix: {ellipsize_text(str(issue.helix_status or ''), max_chars=22)}"
@@ -4143,12 +4195,6 @@ def generate_country_period_followup_ppt(
     reference_day: pd.Timestamp | str | None = None,
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
-    if len(clean_source_ids) < 2:
-        raise ValueError(
-            "El informe de seguimiento requiere dos orígenes configurados para el país seleccionado."
-        )
-    clean_source_ids = clean_source_ids[:2]
-
     country_txt = str(country or "").strip()
     dff, open_df = _load_or_scope_data(
         settings,
@@ -4178,65 +4224,89 @@ def generate_country_period_followup_ppt(
     _normalize_period_template(prs)
 
     aggregate = quincenal.aggregate
-    source_a_id, source_b_id = clean_source_ids[0], clean_source_ids[1]
-    source_a = quincenal.by_source[source_a_id]
-    source_b = quincenal.by_source[source_b_id]
-    source_a_label = labels.get(source_a_id, source_a_id)
-    source_b_label = labels.get(source_b_id, source_b_id)
 
     _update_followup_cover(
         prs.slides[0], period_label=format_window_label(aggregate.summary.window)
     )
-    _populate_summary_slide(
-        prs.slides[2],
-        title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)",
-        scope_result=aggregate,
-    )
-    _populate_summary_slide(
-        prs.slides[3],
-        title=f"Seguimiento de incidencias - {source_a_label.split('·')[0].strip().upper()}",
-        scope_result=source_a,
-    )
-    _populate_summary_slide(
-        prs.slides[4],
-        title=f"Seguimiento de incidencias - {source_b_label.split('·')[0].strip().upper()}",
-        scope_result=source_b,
-    )
 
-    _overlay_picture(
-        prs.slides[2],
-        anchor_shape=_resolve_summary_chart_anchor(prs.slides[2]),
-        payload=_chart_png(
-            settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="timeseries"
-        ),
-        replace_anchor=True,
-    )
-    _overlay_picture(
-        prs.slides[3],
-        anchor_shape=_resolve_summary_chart_anchor(prs.slides[3]),
-        payload=_chart_png(
-            settings, dff=source_a.dff, open_df=source_a.open_df, chart_id="timeseries"
-        ),
-        replace_anchor=True,
-    )
-    _overlay_picture(
-        prs.slides[4],
-        anchor_shape=_resolve_summary_chart_anchor(prs.slides[4]),
-        payload=_chart_png(
-            settings, dff=source_b.dff, open_df=source_b.open_df, chart_id="timeseries"
-        ),
-        replace_anchor=True,
-    )
+    if clean_source_ids:
+        insert_index = 5
+        for _ in range(max(len(clean_source_ids) - 2, 0)):
+            source_template = prs.slides[4] if len(prs.slides) > 4 else prs.slides[3]
+            _append_slide_clone_from_source(prs, source_slide=source_template)
+            _move_slide(prs, from_index=len(prs.slides) - 1, to_index=insert_index)
+            insert_index += 1
+
+        _populate_summary_slide(
+            prs.slides[2],
+            title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)",
+            scope_result=aggregate,
+        )
+        _overlay_picture(
+            prs.slides[2],
+            anchor_shape=_resolve_summary_chart_anchor(prs.slides[2]),
+            payload=_chart_png(
+                settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="timeseries"
+            ),
+            replace_anchor=True,
+        )
+
+        for offset, source_id in enumerate(clean_source_ids):
+            slide_index = 3 + offset
+            source_scope = quincenal.by_source.get(source_id)
+            if source_scope is None:
+                continue
+            source_label = labels.get(source_id, source_id).split("·")[0].strip().upper()
+            _populate_summary_slide(
+                prs.slides[slide_index],
+                title=f"Seguimiento de incidencias - {source_label}",
+                scope_result=source_scope,
+            )
+            _overlay_picture(
+                prs.slides[slide_index],
+                anchor_shape=_resolve_summary_chart_anchor(prs.slides[slide_index]),
+                payload=_chart_png(
+                    settings,
+                    dff=source_scope.dff,
+                    open_df=source_scope.open_df,
+                    chart_id="timeseries",
+                ),
+                replace_anchor=True,
+            )
+
+        extra_template_source_count = 2
+        if len(clean_source_ids) < extra_template_source_count:
+            for remove_idx in range(4, 3 + len(clean_source_ids), -1):
+                if remove_idx < len(prs.slides):
+                    _remove_slide(prs, remove_idx)
+    else:
+        LOGGER.info(
+            "period_followup_no_rollups",
+            extra={
+                "run_id": uuid4().hex[:12],
+                "country": country_txt,
+                "message": (
+                    "Sin orígenes agregados configurados; se omiten slides de vista agregada "
+                    "y detalle por fuente."
+                ),
+            },
+        )
+        for remove_idx in (4, 3, 2):
+            if remove_idx < len(prs.slides):
+                _remove_slide(prs, remove_idx)
+
+    aging_slide_index = 4 + len(clean_source_ids) if clean_source_ids else 3
+    priority_slide_index = 5 + len(clean_source_ids) if clean_source_ids else 4
 
     _populate_open_aging_executive_slide(
-        prs.slides[6],
+        prs.slides[aging_slide_index],
         settings=settings,
         scope_result=aggregate,
         slide_width=slide_width_emu,
         slide_height=slide_height_emu,
     )
     _populate_open_priority_executive_slide(
-        prs.slides[7],
+        prs.slides[priority_slide_index],
         settings=settings,
         scope_result=aggregate,
         slide_width=slide_width_emu,
@@ -4244,7 +4314,7 @@ def generate_country_period_followup_ppt(
     )
 
     risk_lists = build_period_risk_issue_lists(
-        aggregate.dff,
+        _enrich_po_team_leader_from_sources(aggregate.dff, settings),
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
@@ -4297,7 +4367,8 @@ def generate_country_period_followup_ppt(
     content = buff.getvalue()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = (
-        f"seguimiento-{_slug(country_txt)}-{_slug(source_a_id)}-{_slug(source_b_id)}-{stamp}.pptx"
+        f"seguimiento-{_slug(country_txt)}-"
+        f"{_slug('rollups' if clean_source_ids else 'sin-agregados')}-{stamp}.pptx"
     )
     total_issues = int(len(aggregate.dff))
     open_issues = int(len(aggregate.open_df))

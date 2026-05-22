@@ -24,6 +24,7 @@ class FinalistDiscrepancyIssueRow:
     helix_status: str
     helix_url: str
     source_alias: str = ""
+    po_team_leader: str = ""
 
     @property
     def helix_text(self) -> str:
@@ -91,6 +92,7 @@ def build_finalist_discrepancy_issue_list(
                 jira_status=_text(row, "jira_status"),
                 jira_priority=_text(row, "jira_priority"),
                 jira_assignee=_text(row, "jira_assignee") or "(sin asignar)",
+                po_team_leader=_text(row, "po_team_leader"),
                 jira_open_days=int(round(float(row.get("__open_days", 0.0) or 0.0))),
                 jira_url=_text(row, "jira_url"),
                 helix_id=helix_id,

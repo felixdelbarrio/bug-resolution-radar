@@ -4,6 +4,7 @@ export type WorkspaceSource = {
   country: string;
   alias: string;
   jql?: string;
+  po_team_leader?: string;
   service_origin_buug?: string;
   service_origin_n1?: string;
   service_origin_n2?: string;
