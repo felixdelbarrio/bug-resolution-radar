@@ -4349,10 +4349,7 @@ def generate_country_period_followup_ppt(
         default=False,
     ):
         _append_functionality_zoom_slides(prs, summary=functionality_followup)
-    if _parse_bool_flag(
-        getattr(settings, "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED", "false"),
-        default=False,
-    ):
+    if finalist_discrepancy_rows:
         _append_finalist_discrepancy_section(
             prs,
             period_label=functionality_followup.period_label,

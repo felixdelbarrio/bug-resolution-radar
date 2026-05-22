@@ -241,7 +241,9 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
     assert out.content
 
 
-def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Path) -> None:
+def test_period_followup_ppt_finalist_discrepancies_section_is_always_included(
+    tmp_path: Path,
+) -> None:
     template = tmp_path / "template.pptx"
     _build_minimal_template(template)
     now = pd.Timestamp("2026-05-15T00:00:00+00:00")
@@ -326,7 +328,7 @@ def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Pat
         ]
     )
 
-    off = generate_country_period_followup_ppt(
+    result = generate_country_period_followup_ppt(
         Settings(PERIOD_PPT_TEMPLATE_PATH=str(template)),
         country="México",
         source_ids=["jira:mexico:senda", "jira:mexico:gema"],
@@ -334,29 +336,13 @@ def test_period_followup_ppt_finalist_discrepancies_section_toggle(tmp_path: Pat
         finalist_discrepancies_override=discrepancies,
         reference_day=now,
     )
-    off_text = " ".join(
-        _slide_all_text(slide) for slide in Presentation(BytesIO(off.content)).slides
-    )
-    assert "Incidencias con discrepancias en estado finalista" not in off_text
+    prs = Presentation(BytesIO(result.content))
+    text = " ".join(_slide_all_text(slide) for slide in prs.slides)
 
-    on = generate_country_period_followup_ppt(
-        Settings(
-            PERIOD_PPT_TEMPLATE_PATH=str(template),
-            PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED="true",
-        ),
-        country="México",
-        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
-        dff_override=dff,
-        finalist_discrepancies_override=discrepancies,
-        reference_day=now,
-    )
-    prs = Presentation(BytesIO(on.content))
-    on_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
-
-    assert "Incidencias con discrepancias en estado finalista" in on_text
-    assert "JIRA: To Rework" in on_text
-    assert "Helix: Closed" in on_text
-    assert "EAM-93998" in on_text
+    assert "Incidencias con discrepancias en estado finalista" in text
+    assert "JIRA: To Rework" in text
+    assert "Helix: Closed" in text
+    assert "EAM-93998" in text
     assert any(
         "Incidencias abiertas por criticidad alta" in _slide_all_text(slide)
         and "EAM-93998" in _slide_all_text(slide)

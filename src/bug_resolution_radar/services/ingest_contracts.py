@@ -123,6 +123,14 @@ def ingest_overview_payload(settings: Settings) -> dict[str, Any]:
             ),
             "lastIngest": _helix_last_ingest_payload(helix_meta, helix_path=helix_path),
         },
+        "finalist_lookup": {
+            "configuredCount": len(jira_cfg),
+            "selectedSourceIds": _selected_source_ids(
+                configured_source_ids=jira_source_ids,
+                disabled_source_ids=jira_disabled,
+            ),
+            "lastIngest": _helix_last_ingest_payload(helix_meta, helix_path=helix_path),
+        },
     }
 
 

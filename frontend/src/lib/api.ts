@@ -367,6 +367,7 @@ export type IngestConnectorOverview = {
 export type IngestOverviewPayload = {
   jira: IngestConnectorOverview;
   helix: IngestConnectorOverview;
+  finalist_lookup: IngestConnectorOverview;
 };
 
 export type CacheInventoryRow = {
@@ -385,9 +386,9 @@ export type IngestResult = {
 };
 
 export type IngestProgressPayload = {
-  connector: "jira" | "helix";
+  connector: "jira" | "helix" | "finalist_lookup";
   runId: number;
-  state: "idle" | "running" | "success" | "partial" | "error";
+  state: "idle" | "running" | "success" | "partial" | "error" | "skipped_no_inc" | "skipped_cached";
   active: boolean;
   startedAt: string;
   finishedAt: string;

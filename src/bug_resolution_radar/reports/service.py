@@ -9,9 +9,8 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.finalist_discrepancies import (
-    apply_effective_finalist_country_mode,
+    apply_effective_finalist_lookup_state,
     build_finalist_status_discrepancies,
-    is_country_finalist_status_mode,
 )
 from bug_resolution_radar.analytics.issues import normalize_text_col
 from bug_resolution_radar.analytics.quincenal_scope import (
@@ -250,8 +249,8 @@ def _build_context_for_scope(
         source_ids=clean_source_ids,
         reference_day=reference_day,
     )
-    if is_country_finalist_status_mode(settings) and not finalist_discrepancies.empty:
-        scoped_df = apply_effective_finalist_country_mode(
+    if not finalist_discrepancies.empty:
+        scoped_df = apply_effective_finalist_lookup_state(
             scoped_df,
             discrepancies=finalist_discrepancies,
             reference_window=reference_day,
