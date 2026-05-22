@@ -1965,31 +1965,6 @@ def render(settings: Settings) -> None:
                     f"{'mes' if int(analysis_selected_months) == 1 else 'meses'}."
                 )
 
-            with st.container(border=True, key="cfg_prefs_card_finalist_mode"):
-                st.markdown("#### Modalidad del análisis")
-                finalist_mode_options = [
-                    "selected_sources",
-                    "country_finalist_status",
-                    "country_finalist_status_lookup",
-                ]
-                finalist_mode_labels = {
-                    "selected_sources": "Considerar sólo orígenes seleccionados",
-                    "country_finalist_status": "Cruzar con estados finalistas ingestados del país",
-                    "country_finalist_status_lookup": "Buscar estados finalistas del país",
-                }
-                finalist_mode_default = str(
-                    getattr(settings, "FINALIST_STATUS_ANALYSIS_MODE", "selected_sources") or ""
-                ).strip()
-                if finalist_mode_default not in finalist_mode_options:
-                    finalist_mode_default = "selected_sources"
-                finalist_status_analysis_mode = st.radio(
-                    "Análisis de estados finalistas",
-                    options=finalist_mode_options,
-                    index=finalist_mode_options.index(finalist_mode_default),
-                    format_func=lambda mode: finalist_mode_labels.get(str(mode), str(mode)),
-                    key="cfg_finalist_status_analysis_mode",
-                )
-
             with st.container(border=True, key="cfg_prefs_card_quincena"):
                 st.markdown("#### Alcance quincenal")
                 quincena_last_finished_default = _boolish(
@@ -2048,19 +2023,6 @@ def render(settings: Settings) -> None:
                         "del dashboard funcional."
                     ),
                 )
-                finalist_discrepancies_default = _boolish(
-                    getattr(settings, "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED", "false"),
-                    default=False,
-                )
-                st.session_state.setdefault(
-                    "cfg_period_report_finalist_discrepancies_enabled",
-                    finalist_discrepancies_default,
-                )
-                finalist_discrepancies_enabled = st.checkbox(
-                    "Incluir informe de incidencias con discrepancias en estado finalista",
-                    key="cfg_period_report_finalist_discrepancies_enabled",
-                )
-
                 st.markdown("##### Criterio de foco en abiertas")
                 open_focus_mode_default = normalize_open_issues_focus_mode(
                     getattr(
@@ -2194,10 +2156,6 @@ def render(settings: Settings) -> None:
                         "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED": (
                             "true" if bool(functionality_detail_enabled) else "false"
                         ),
-                        "PERIOD_REPORT_FINALIST_DISCREPANCIES_ENABLED": (
-                            "true" if bool(finalist_discrepancies_enabled) else "false"
-                        ),
-                        "FINALIST_STATUS_ANALYSIS_MODE": str(finalist_status_analysis_mode).strip(),
                         "OPEN_ISSUES_FOCUS_MODE": normalize_open_issues_focus_mode(
                             open_issues_focus_mode
                         ),

@@ -1886,7 +1886,9 @@ textarea::placeholder {
   background: color-mix(in srgb, var(--bbva-primary) 12%, var(--bbva-surface));
 }
 
-.ingest-state-success {
+.ingest-state-success,
+.ingest-state-skipped_no_inc,
+.ingest-state-skipped_cached {
   color: var(--bbva-success);
   background: color-mix(in srgb, var(--bbva-success) 12%, var(--bbva-surface));
   border-color: color-mix(in srgb, var(--bbva-success) 24%, var(--bbva-border-strong));

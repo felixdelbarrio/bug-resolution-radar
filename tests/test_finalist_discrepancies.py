@@ -3,10 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from bug_resolution_radar.analytics.finalist_discrepancies import (
-    ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
-    ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
     POST_JQL_LOOKUP_HELIX_KIND,
-    apply_effective_finalist_country_mode,
+    apply_effective_finalist_lookup_state,
     build_finalist_status_discrepancies,
     build_jira_helix_links,
     extract_helix_ids_from_text,
@@ -56,8 +54,9 @@ def _df() -> pd.DataFrame:
             {
                 "country": "México",
                 "source_type": "helix",
-                "source_id": "helix:mexico:smartit",
-                "source_alias": "Helix",
+                "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                "source_alias": "Lookup estados finalistas Jira",
+                "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
                 "key": "INC000104154954",
                 "summary": "Helix cerrado",
                 "description": "Detalle",
@@ -71,8 +70,9 @@ def _df() -> pd.DataFrame:
             {
                 "country": "México",
                 "source_type": "helix",
-                "source_id": "helix:mexico:smartit",
-                "source_alias": "Helix",
+                "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                "source_alias": "Lookup estados finalistas Jira",
+                "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
                 "key": "INC000104154955",
                 "summary": "Helix cerrado 2",
                 "description": "Detalle",
@@ -101,7 +101,7 @@ def test_build_jira_helix_links_crosses_by_country() -> None:
     links = build_jira_helix_links(
         _df(),
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
     )
 
     assert links["jira_key"].tolist() == ["MEX-1", "MEX-2"]
@@ -125,8 +125,9 @@ def test_build_jira_helix_links_reads_helix_id_from_jira_summary() -> None:
             {
                 "country": "México",
                 "source_type": "helix",
-                "source_id": "helix:mexico:smartit",
-                "source_alias": "Helix",
+                "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                "source_alias": "Lookup estados finalistas Jira",
+                "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
                 "key": "INC000104154954",
                 "summary": "Helix cerrado",
                 "description": "Detalle",
@@ -138,7 +139,7 @@ def test_build_jira_helix_links_reads_helix_id_from_jira_summary() -> None:
     links = build_jira_helix_links(
         df,
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
     )
 
     assert links[["helix_id", "jira_key"]].to_dict("records") == [
@@ -151,7 +152,7 @@ def test_discrepancy_when_helix_finalist_and_jira_open() -> None:
         _df(),
         settings=Settings(),
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
         reference_day=pd.Timestamp("2026-05-10"),
     )
 
@@ -167,7 +168,7 @@ def test_no_discrepancy_when_both_finalists() -> None:
         _df().loc[lambda frame: frame["key"].isin(["MEX-2", "INC000104154955"])],
         settings=Settings(),
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
         reference_day=pd.Timestamp("2026-05-10"),
     )
 
@@ -179,15 +180,15 @@ def test_no_discrepancy_when_helix_finalized_outside_window() -> None:
         _df(),
         settings=Settings(),
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
         reference_day=pd.Timestamp("2026-05-02"),
     )
 
     assert out.empty
 
 
-def test_country_finalist_mode_uses_country_helix_and_closes_jira_effectively() -> None:
-    settings = Settings(FINALIST_STATUS_ANALYSIS_MODE=ANALYSIS_MODE_COUNTRY_FINALIST_STATUS)
+def test_lookup_finalist_state_uses_ad_hoc_helix_and_closes_jira_effectively() -> None:
+    settings = Settings()
     discrepancies = build_finalist_status_discrepancies(
         _df(),
         settings=settings,
@@ -196,7 +197,7 @@ def test_country_finalist_mode_uses_country_helix_and_closes_jira_effectively() 
         reference_day=pd.Timestamp("2026-05-10"),
     )
 
-    enriched = apply_effective_finalist_country_mode(
+    enriched = apply_effective_finalist_lookup_state(
         _df().loc[lambda frame: frame["source_type"].eq("jira")],
         discrepancies=discrepancies,
         reference_window=pd.Timestamp("2026-05-10"),
@@ -207,7 +208,7 @@ def test_country_finalist_mode_uses_country_helix_and_closes_jira_effectively() 
     assert pd.to_datetime(enriched.loc[enriched["key"].eq("MEX-2"), "resolved"]).isna().all()
 
 
-def test_finalist_modes_do_not_mix_configured_and_ad_hoc_helix() -> None:
+def test_finalist_status_uses_only_ad_hoc_helix_even_when_configured_exists() -> None:
     df = pd.concat(
         [
             _df().loc[lambda frame: frame["key"].isin(["MEX-1", "INC000104154954"])],
@@ -232,25 +233,15 @@ def test_finalist_modes_do_not_mix_configured_and_ad_hoc_helix() -> None:
         ignore_index=True,
     )
 
-    configured = build_finalist_status_discrepancies(
+    out = build_finalist_status_discrepancies(
         df,
-        settings=Settings(FINALIST_STATUS_ANALYSIS_MODE=ANALYSIS_MODE_COUNTRY_FINALIST_STATUS),
-        country="México",
-        source_ids=["jira:mexico:senda"],
-        reference_day=pd.Timestamp("2026-05-10"),
-    )
-    ad_hoc = build_finalist_status_discrepancies(
-        df,
-        settings=Settings(
-            FINALIST_STATUS_ANALYSIS_MODE=ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP
-        ),
+        settings=Settings(),
         country="México",
         source_ids=["jira:mexico:senda"],
         reference_day=pd.Timestamp("2026-05-10"),
     )
 
-    assert configured["helix_source_id"].tolist() == ["helix:mexico:smartit"]
-    assert ad_hoc["helix_source_id"].tolist() == ["helix:mexico:lookup-estados-finalistas-jira"]
+    assert out["helix_source_id"].tolist() == ["helix:mexico:lookup-estados-finalistas-jira"]
 
 
 def test_helix_id_maps_to_multiple_jira_and_dedupes_by_jira_key() -> None:
@@ -323,8 +314,9 @@ def test_helix_id_maps_to_multiple_jira_and_dedupes_by_jira_key() -> None:
             {
                 "country": "México",
                 "source_type": "helix",
-                "source_id": "helix:mexico:smartit",
-                "source_alias": "Helix",
+                "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                "source_alias": "Lookup estados finalistas Jira",
+                "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
                 "key": "INC000104154954",
                 "summary": "Helix multi",
                 "description": "Cliente INC000104154954 cerrado",
@@ -336,8 +328,9 @@ def test_helix_id_maps_to_multiple_jira_and_dedupes_by_jira_key() -> None:
             {
                 "country": "México",
                 "source_type": "helix",
-                "source_id": "helix:mexico:smartit",
-                "source_alias": "Helix",
+                "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                "source_alias": "Lookup estados finalistas Jira",
+                "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
                 "key": "INC000104154955",
                 "summary": "Helix single",
                 "description": "",
@@ -352,7 +345,7 @@ def test_helix_id_maps_to_multiple_jira_and_dedupes_by_jira_key() -> None:
     links = build_jira_helix_links(
         df,
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
     )
     grouped = {
         helix_id: sorted(bucket["jira_key"].tolist())
@@ -365,7 +358,7 @@ def test_helix_id_maps_to_multiple_jira_and_dedupes_by_jira_key() -> None:
         df,
         settings=Settings(),
         country="México",
-        source_ids=["jira:mexico:senda", "helix:mexico:smartit"],
+        source_ids=["jira:mexico:senda"],
         reference_day=pd.Timestamp("2026-05-21"),
     )
     assert out["jira_key"].tolist() == ["EAM-93998", "EAM-94000", "EAM-1"]

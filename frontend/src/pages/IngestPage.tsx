@@ -19,7 +19,7 @@ import {
 } from "../lib/api";
 import { cn } from "../lib/cn";
 
-type Connector = "jira" | "helix";
+type Connector = "jira" | "helix" | "finalist_lookup";
 
 type ConnectorFeedback = {
   title: string;
@@ -37,6 +37,7 @@ const CONNECTOR_COPY: Record<
     runLabel: string;
     lastRunTitle: string;
     helpText: string;
+    canTest: boolean;
     columns: Array<{ key: keyof WorkspaceSource; label: string }>;
   }
 > = {
@@ -49,6 +50,7 @@ const CONNECTOR_COPY: Record<
     lastRunTitle: "Última ingesta (Jira)",
     helpText:
       "Por defecto todas marcadas. Este selector se guarda automáticamente en la configuración.",
+    canTest: true,
     columns: [
       { key: "country", label: "country" },
       { key: "alias", label: "alias" },
@@ -64,12 +66,29 @@ const CONNECTOR_COPY: Record<
     lastRunTitle: "Última ingesta (Helix)",
     helpText:
       "Por defecto todas marcadas. Este selector se guarda automáticamente en la configuración.",
+    canTest: true,
     columns: [
       { key: "country", label: "country" },
       { key: "alias", label: "alias" },
       { key: "service_origin_buug", label: "Servicio Origen BU/UG" },
       { key: "service_origin_n1", label: "Servicio Origen N1" },
       { key: "service_origin_n2", label: "Servicio Origen N2" }
+    ]
+  },
+  finalist_lookup: {
+    title: "Buscar estados finalistas del país",
+    selectionLabel: "Fuentes Jira usadas para extraer INC",
+    configuredLabel: "Fuentes Jira configuradas",
+    testLabel: "",
+    runLabel: "Buscar estados finalistas",
+    lastRunTitle: "Último lookup Helix ad hoc",
+    helpText:
+      "Consulta por ARSQL las INC encontradas en Jira y omite las que ya constan como Closed/Resolved en el histórico ad hoc.",
+    canTest: false,
+    columns: [
+      { key: "country", label: "country" },
+      { key: "alias", label: "alias" },
+      { key: "jql", label: "jql" }
     ]
   }
 };
@@ -143,7 +162,11 @@ function LiveProgressPanel({
     >
       <div className="ingest-live-head">
         <strong>
-          {connector === "jira" ? "Jira" : "Helix"} · ejecución #{progress.runId}
+          {connector === "jira"
+            ? "Jira"
+            : connector === "helix"
+              ? "Helix"
+              : "Buscar estados finalistas"} · ejecución #{progress.runId}
         </strong>
         <span className={cn("ingest-state-pill", `ingest-state-${progress.state}`)}>
           {progress.state}
@@ -210,9 +233,11 @@ function IngestSourceTable({
 }) {
   const copy = CONNECTOR_COPY[connector];
   const gridTemplateColumns =
-    connector === "jira"
+    connector === "helix"
+      ? "96px minmax(110px,0.7fr) minmax(180px,1fr) minmax(170px,0.9fr) minmax(220px,1.3fr) minmax(240px,1.5fr)"
+      : connector === "jira"
       ? "96px minmax(110px,0.85fr) minmax(180px,1fr) minmax(260px,1.8fr)"
-      : "96px minmax(110px,0.7fr) minmax(180px,1fr) minmax(170px,0.9fr) minmax(220px,1.3fr) minmax(240px,1.5fr)";
+      : "96px minmax(110px,0.85fr) minmax(180px,1fr) minmax(260px,1.8fr)";
   if (sources.length === 0) {
     return <p className="issue-list-empty">Sin orígenes configurados.</p>;
   }
@@ -301,6 +326,11 @@ export function IngestPage() {
     queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/helix/progress"),
     refetchInterval: 1500
   });
+  const finalistLookupProgress = useQuery({
+    queryKey: ["ingest-progress", "finalist_lookup"],
+    queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/finalist-lookup/progress"),
+    refetchInterval: 1500
+  });
 
   useEffect(() => {
     if (!overview.data) {
@@ -323,7 +353,8 @@ export function IngestPage() {
       queryClient.invalidateQueries({ queryKey: ["settings-ingest"] }),
       queryClient.invalidateQueries({ queryKey: ["ingest-overview"] }),
       queryClient.invalidateQueries({ queryKey: ["ingest-progress", "jira"] }),
-      queryClient.invalidateQueries({ queryKey: ["ingest-progress", "helix"] })
+      queryClient.invalidateQueries({ queryKey: ["ingest-progress", "helix"] }),
+      queryClient.invalidateQueries({ queryKey: ["ingest-progress", "finalist_lookup"] })
     ]);
   }
 
@@ -463,12 +494,39 @@ export function IngestPage() {
     }
   });
 
+  const finalistLookupStartMutation = useMutation({
+    mutationFn: (sourceIds: string[]) =>
+      postJson<IngestProgressPayload>("/api/ingest/finalist-lookup/start", { sourceIds }),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(["ingest-progress", "finalist_lookup"], payload);
+      if (!payload.started) {
+        setFeedback((current) => ({
+          ...current,
+          finalist_lookup: {
+            title: "Buscar estados finalistas",
+            error: "Ya existe una búsqueda de estados finalistas en curso."
+          }
+        }));
+      }
+    },
+    onError: (error) => {
+      setFeedback((current) => ({
+        ...current,
+        finalist_lookup: {
+          title: "Buscar estados finalistas",
+          error: error instanceof Error ? error.message : "Error inesperado."
+        }
+      }));
+    }
+  });
+
   useEffect(() => {
     const progressByConnector: Partial<Record<Connector, IngestProgressPayload | undefined>> = {
       jira: jiraProgress.data,
-      helix: helixProgress.data
+      helix: helixProgress.data,
+      finalist_lookup: finalistLookupProgress.data
     };
-    (["jira", "helix"] as Connector[]).forEach((connector) => {
+    (["jira", "helix", "finalist_lookup"] as Connector[]).forEach((connector) => {
       const progress = progressByConnector[connector];
       if (!progress || progress.state === "idle" || progress.state === "running") {
         return;
@@ -484,7 +542,9 @@ export function IngestPage() {
             title:
               connector === "jira"
                 ? "Resultado reingesta Jira"
-                : "Resultado reingesta Helix",
+                : connector === "helix"
+                  ? "Resultado reingesta Helix"
+                  : "Resultado búsqueda estados finalistas",
             result: progress.result
           }
         }));
@@ -497,6 +557,7 @@ export function IngestPage() {
     });
   }, [
     helixProgress.data,
+    finalistLookupProgress.data,
     jiraProgress.data,
     lastHandledRunByConnector
   ]);
@@ -532,15 +593,23 @@ export function IngestPage() {
   const connector = activeTab;
   const copy = CONNECTOR_COPY[connector];
   const sourceRows =
-    connector === "jira" ? settings.data.jiraSources : settings.data.helixSources;
-  const selectedSourceIds = connector === "jira" ? jiraSelection : helixSelection;
+    connector === "helix" ? settings.data.helixSources : settings.data.jiraSources;
+  const selectedSourceIds = connector === "helix" ? helixSelection : jiraSelection;
   const selectionMutation =
-    connector === "jira" ? jiraSelectionMutation : helixSelectionMutation;
-  const testMutation = connector === "jira" ? jiraTestMutation : helixTestMutation;
+    connector === "helix" ? helixSelectionMutation : jiraSelectionMutation;
+  const testMutation = connector === "helix" ? helixTestMutation : jiraTestMutation;
   const ingestStartMutation =
-    connector === "jira" ? jiraIngestStartMutation : helixIngestStartMutation;
+    connector === "jira"
+      ? jiraIngestStartMutation
+      : connector === "helix"
+        ? helixIngestStartMutation
+        : finalistLookupStartMutation;
   const connectorProgress =
-    connector === "jira" ? jiraProgress.data : helixProgress.data;
+    connector === "jira"
+      ? jiraProgress.data
+      : connector === "helix"
+        ? helixProgress.data
+        : finalistLookupProgress.data;
   const connectorOverview = overview.data[connector];
   const selectionCount = selectedSourceIds.length;
   const isBusy =
@@ -551,11 +620,11 @@ export function IngestPage() {
   const displayedLastIngest = connectorOverview.lastIngest;
 
   function handleToggle(sourceId: string) {
-    const current = connector === "jira" ? jiraSelection : helixSelection;
+    const current = connector === "helix" ? helixSelection : jiraSelection;
     const next = current.includes(sourceId)
       ? current.filter((item) => item !== sourceId)
       : [...current, sourceId];
-    if (connector === "jira") {
+    if (connector !== "helix") {
       setJiraSelection(next);
       jiraSelectionMutation.mutate(next);
     } else {
@@ -568,7 +637,7 @@ export function IngestPage() {
     <section className="page-stack">
       <section className="surface-panel insights-tabs-shell">
         <nav className="subtab-strip" aria-label="Conectores de ingesta">
-          {(["jira", "helix"] as Connector[]).map((item) => (
+          {(["jira", "helix", "finalist_lookup"] as Connector[]).map((item) => (
             <button
               key={item}
               type="button"
@@ -578,7 +647,11 @@ export function IngestPage() {
               )}
               onClick={() => setActiveTab(item)}
             >
-              {item === "jira" ? "Jira" : "Helix"}
+              {item === "jira"
+                ? "Jira"
+                : item === "helix"
+                  ? "Helix"
+                  : "Buscar estados finalistas"}
             </button>
           ))}
         </nav>
@@ -606,14 +679,16 @@ export function IngestPage() {
         </div>
 
         <div className="ingest-action-row">
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={isBusy || selectionCount === 0}
-            onClick={() => testMutation.mutate(selectedSourceIds)}
-          >
-            {testMutation.isPending ? `Probando ${activeTab}...` : copy.testLabel}
-          </button>
+          {copy.canTest ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={isBusy || selectionCount === 0}
+              onClick={() => testMutation.mutate(selectedSourceIds)}
+            >
+              {testMutation.isPending ? `Probando ${activeTab}...` : copy.testLabel}
+            </button>
+          ) : null}
           <button
             type="button"
             className="action-button"
@@ -621,15 +696,18 @@ export function IngestPage() {
             onClick={() => ingestStartMutation.mutate(selectedSourceIds)}
           >
             {connectorProgress?.active || ingestStartMutation.isPending
-              ? `Reingestando ${activeTab}...`
+              ? connector === "finalist_lookup"
+                ? "Buscando estados finalistas..."
+                : `Reingestando ${activeTab}...`
               : copy.runLabel}
           </button>
         </div>
 
         {connectorProgress?.active ? (
           <p className="inline-caption">
-            Ingesta en curso. Solo en esta acción puede solicitarse acceso a navegador o cookies
-            si la fuente lo requiere.
+            {connector === "finalist_lookup"
+              ? "Lookup en curso por ARSQL no interactivo; no se abrirá navegador por lote."
+              : "Ingesta en curso. Solo en esta acción puede solicitarse acceso a navegador o cookies si la fuente lo requiere."}
           </p>
         ) : null}
 

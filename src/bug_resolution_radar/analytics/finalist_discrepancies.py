@@ -4,7 +4,7 @@ This module is the single source of truth for:
 - extracting Helix incident ids from JIRA functional text,
 - linking JIRA rows with Helix rows inside the active country/scope,
 - evaluating final-state discrepancies,
-- applying the effective country finalist-state mode.
+- applying the effective finalist state recovered by the ad hoc Helix lookup.
 
 The effective finalist timestamp uses Helix ``resolved`` when available. If
 Helix is already in a finalist status but lacks ``resolved``, ``updated`` is used
@@ -31,18 +31,8 @@ from bug_resolution_radar.common.issue_links import (
 )
 from bug_resolution_radar.config import Settings, jira_sources
 
-ANALYSIS_MODE_SELECTED_SOURCES = "selected_sources"
-ANALYSIS_MODE_COUNTRY_FINALIST_STATUS = "country_finalist_status"
-ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP = "country_finalist_status_lookup"
 POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS = "Lookup estados finalistas Jira"
 POST_JQL_LOOKUP_HELIX_KIND = "post_jql_inc_lookup"
-VALID_FINALIST_STATUS_ANALYSIS_MODES: frozenset[str] = frozenset(
-    {
-        ANALYSIS_MODE_SELECTED_SOURCES,
-        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
-        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
-    }
-)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,24 +66,6 @@ _DISCREPANCY_COLUMNS: tuple[str, ...] = (
     "helix_source_alias",
     "helix_finalized_at",
 )
-
-
-def finalist_status_analysis_mode(settings: Settings | None) -> str:
-    raw = str(getattr(settings, "FINALIST_STATUS_ANALYSIS_MODE", "") or "").strip().lower()
-    if raw in VALID_FINALIST_STATUS_ANALYSIS_MODES:
-        return raw
-    return ANALYSIS_MODE_SELECTED_SOURCES
-
-
-def is_country_finalist_status_mode(settings: Settings | None) -> bool:
-    return finalist_status_analysis_mode(settings) in {
-        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
-        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
-    }
-
-
-def is_country_finalist_status_lookup_mode(settings: Settings | None) -> bool:
-    return finalist_status_analysis_mode(settings) == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP
 
 
 def is_post_jql_lookup_helix_source(
@@ -196,7 +168,6 @@ def _scope_for_links(
     *,
     country: str | None,
     source_ids: Sequence[str] | None,
-    mode: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     country_filtered = df.loc[_country_mask(df, country)].copy(deep=False)
     if country_filtered.empty:
@@ -206,38 +177,25 @@ def _scope_for_links(
     selected_mask = _source_mask(country_filtered, source_ids)
     jira_mask = stype.eq("jira")
     helix_mask = stype.eq("helix")
-    if mode in {
-        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS,
-        ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP,
-    }:
-        jira_df = country_filtered.loc[jira_mask & selected_mask].copy(deep=False)
-        if jira_df.empty and not list(source_ids or []):
-            jira_df = country_filtered.loc[jira_mask].copy(deep=False)
-        helix_source_id = _series_text(country_filtered, "source_id")
-        helix_source_alias = _series_text(country_filtered, "source_alias")
-        helix_lookup_kind = _series_text(country_filtered, "helix_lookup_kind")
-        ad_hoc_mask = pd.Series(
-            [
-                is_post_jql_lookup_helix_source(sid, alias, kind)
-                for sid, alias, kind in zip(
-                    helix_source_id.tolist(),
-                    helix_source_alias.tolist(),
-                    helix_lookup_kind.tolist(),
-                )
-            ],
-            index=country_filtered.index,
-        )
-        if mode == ANALYSIS_MODE_COUNTRY_FINALIST_STATUS_LOOKUP:
-            helix_df = country_filtered.loc[helix_mask & ad_hoc_mask].copy(deep=False)
-        else:
-            helix_df = country_filtered.loc[helix_mask & ~ad_hoc_mask].copy(deep=False)
-        return jira_df, helix_df
-    scoped = country_filtered.loc[selected_mask].copy(deep=False)
-    scoped_stype = _source_type(scoped)
-    return (
-        scoped.loc[scoped_stype.eq("jira")].copy(deep=False),
-        scoped.loc[scoped_stype.eq("helix")].copy(deep=False),
+    jira_df = country_filtered.loc[jira_mask & selected_mask].copy(deep=False)
+    if jira_df.empty and not list(source_ids or []):
+        jira_df = country_filtered.loc[jira_mask].copy(deep=False)
+    helix_source_id = _series_text(country_filtered, "source_id")
+    helix_source_alias = _series_text(country_filtered, "source_alias")
+    helix_lookup_kind = _series_text(country_filtered, "helix_lookup_kind")
+    ad_hoc_mask = pd.Series(
+        [
+            is_post_jql_lookup_helix_source(sid, alias, kind)
+            for sid, alias, kind in zip(
+                helix_source_id.tolist(),
+                helix_source_alias.tolist(),
+                helix_lookup_kind.tolist(),
+            )
+        ],
+        index=country_filtered.index,
     )
+    helix_df = country_filtered.loc[helix_mask & ad_hoc_mask].copy(deep=False)
+    return jira_df, helix_df
 
 
 def build_jira_helix_links(
@@ -245,7 +203,6 @@ def build_jira_helix_links(
     *,
     country: str | None = None,
     source_ids: Sequence[str] | None = None,
-    mode: str = ANALYSIS_MODE_SELECTED_SOURCES,
     run_id: str = "",
 ) -> pd.DataFrame:
     """Build vectorized JIRA-to-Helix links based on Helix ids in JIRA text fields."""
@@ -254,14 +211,10 @@ def build_jira_helix_links(
     if safe.empty:
         return _empty_discrepancies()
 
-    effective_mode = (
-        mode if mode in VALID_FINALIST_STATUS_ANALYSIS_MODES else ANALYSIS_MODE_SELECTED_SOURCES
-    )
     jira_df, helix_df = _scope_for_links(
         safe,
         country=country,
         source_ids=source_ids,
-        mode=effective_mode,
     )
     if jira_df.empty or helix_df.empty:
         return _empty_discrepancies()
@@ -406,12 +359,10 @@ def build_finalist_status_discrepancies(
 ) -> pd.DataFrame:
     """Return JIRA-open/Helix-finalist discrepancies for the requested scope."""
     run_id = uuid4().hex[:12]
-    mode = finalist_status_analysis_mode(settings)
     links = build_jira_helix_links(
         df,
         country=country,
         source_ids=source_ids,
-        mode=mode,
         run_id=run_id,
     )
     if links.empty:
@@ -569,13 +520,13 @@ def _window_end(reference_window: Any) -> pd.Timestamp | None:
     return _reference_end(reference_window)
 
 
-def apply_effective_finalist_country_mode(
+def apply_effective_finalist_lookup_state(
     df: pd.DataFrame,
     *,
     discrepancies: pd.DataFrame,
     reference_window: Any = None,
 ) -> pd.DataFrame:
-    """Mark linked JIRA rows as effectively resolved from Helix finalist data."""
+    """Mark linked JIRA rows as effectively resolved from ad hoc Helix finalist data."""
     safe = _safe_frame(df)
     if safe.empty or not isinstance(discrepancies, pd.DataFrame) or discrepancies.empty:
         return safe.copy(deep=False)

@@ -138,8 +138,9 @@ def test_intelligence_payload_includes_finalist_discrepancies_tab(
                 "updated": "2026-05-03T10:00:00Z",
                 "resolved": "2026-05-03T10:00:00Z",
                 "source_type": "helix",
-                "source_alias": "Helix",
-                "source_id": "helix:mexico:core",
+                "source_alias": "Lookup estados finalistas Jira",
+                "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                "helix_lookup_kind": "post_jql_inc_lookup",
                 "country": "México",
                 "url": "https://helix.local/INC000104154954",
             },
@@ -205,8 +206,9 @@ def test_country_finalist_mode_updates_open_kpis_consistently(
                         "updated": "2026-05-03T10:00:00Z",
                         "resolved": "2026-05-03T10:00:00Z",
                         "source_type": "helix",
-                        "source_alias": "Helix",
-                        "source_id": "helix:mexico:core",
+                        "source_alias": "Lookup estados finalistas Jira",
+                        "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                        "helix_lookup_kind": "post_jql_inc_lookup",
                         "country": "México",
                     }
                 ]
@@ -232,13 +234,11 @@ def test_country_finalist_mode_updates_open_kpis_consistently(
     )
     dashboard_snapshot._scope_context_cache.clear()
     country_payload = build_dashboard_snapshot(
-        Settings(
-            DATA_PATH=str(tmp_path / "issues.json"),
-            FINALIST_STATUS_ANALYSIS_MODE="country_finalist_status",
-        ),
+        Settings(DATA_PATH=str(tmp_path / "issues.json")),
         query=query,
     )
 
-    assert selected_payload["stats"]["issues_open"] == 1
+    assert selected_payload["stats"]["issues_open"] == 0
+    assert selected_payload["stats"]["issues_closed"] == 1
     assert country_payload["stats"]["issues_open"] == 0
     assert country_payload["stats"]["issues_closed"] == 1
