@@ -194,6 +194,24 @@ def _configured_rollup_source_ids_for_country(
     return [sid for sid in configured if sid in allowed]
 
 
+def _source_labels_for_country(
+    settings: Settings,
+    *,
+    country: str,
+    source_rows: List[Dict[str, str]] | None = None,
+) -> Dict[str, str]:
+    """Resolve current source labels for a country, including configured rows without data."""
+    labels: Dict[str, str] = {}
+    for src in list(all_configured_sources(settings, country=country)) + list(source_rows or []):
+        sid = str(src.get("source_id") or "").strip()
+        if not sid or sid in labels:
+            continue
+        alias = str(src.get("alias") or "").strip() or sid
+        source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
+        labels[sid] = f"{alias} · {source_type}"
+    return labels
+
+
 def _ensure_scope_state(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     """Ensure selected country/source are valid for current configuration."""
     sources_by_country = _sources_with_results_by_country(settings)
@@ -245,14 +263,9 @@ def _has_country_rollup_scope(
     if selected_country not in countries:
         selected_country = countries[0]
 
-    source_rows = scoped_sources.get(selected_country, [])
-    source_ids = [
-        str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
-    ]
     configured_rollup = _configured_rollup_source_ids_for_country(
         settings,
         country=selected_country,
-        available_source_ids=source_ids,
     )
     return bool(configured_rollup)
 
@@ -511,13 +524,11 @@ def _render_workspace_scope(
     source_ids = [
         str(src.get("source_id") or "").strip() for src in source_rows if src.get("source_id")
     ]
-    source_label_by_id: Dict[str, str] = {}
-    for src in source_rows:
-        sid = str(src.get("source_id") or "").strip()
-        alias = str(src.get("alias") or "").strip()
-        source_type = str(src.get("source_type") or "").strip().upper() or "SOURCE"
-        if sid:
-            source_label_by_id[sid] = f"{alias} · {source_type}"
+    source_label_by_id = _source_labels_for_country(
+        settings,
+        country=selected_country,
+        source_rows=source_rows,
+    )
 
     if source_ids and str(st.session_state.get("workspace_source_id") or "") not in source_ids:
         st.session_state["workspace_source_id"] = source_ids[0]
@@ -527,7 +538,6 @@ def _render_workspace_scope(
     configured_rollup = _configured_rollup_source_ids_for_country(
         settings,
         country=selected_country,
-        available_source_ids=source_ids,
     )
     has_configured_rollup = bool(configured_rollup)
 

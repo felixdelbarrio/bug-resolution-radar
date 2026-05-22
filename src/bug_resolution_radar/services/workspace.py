@@ -62,6 +62,18 @@ def inferred_sources_by_country(df_all: pd.DataFrame) -> Dict[str, List[Dict[str
     return grouped
 
 
+def configured_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
+    """Group configured sources by country preserving configuration order."""
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    for row in all_configured_sources(settings):
+        country = str(row.get("country") or "").strip()
+        source_id = str(row.get("source_id") or "").strip()
+        if not country or not source_id:
+            continue
+        grouped.setdefault(country, []).append(dict(row))
+    return grouped
+
+
 def merge_sources_by_country(
     primary: Dict[str, List[Dict[str, str]]],
     secondary: Dict[str, List[Dict[str, str]]],

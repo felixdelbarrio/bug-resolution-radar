@@ -29,7 +29,6 @@ from bug_resolution_radar.analytics.quincenal_scope import (
 from bug_resolution_radar.common.issue_links import normalize_helix_id, normalize_jira_key
 from bug_resolution_radar.config import (
     Settings,
-    all_configured_sources,
     country_rollup_sources,
     helix_sources,
     jira_sources,
@@ -104,6 +103,7 @@ from bug_resolution_radar.services.workspace import (
     WorkspaceSelection,
     apply_workspace_source_scope,
     available_sources_by_country,
+    configured_sources_by_country,
     merge_sources_by_country,
 )
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
@@ -355,31 +355,6 @@ def _empty_filter_options() -> dict[str, list[str]]:
     return {"status": [], "priority": [], "assignee": [], "quincenal": [QUINCENAL_SCOPE_ALL]}
 
 
-def _configured_sources_by_country(
-    settings: Settings,
-    *,
-    allowed_source_ids: set[str] | None = None,
-) -> dict[str, list[dict[str, str]]]:
-    grouped: dict[str, list[dict[str, str]]] = {}
-    for row in all_configured_sources(settings):
-        country_name = str(row.get("country") or "").strip()
-        source_id_value = str(row.get("source_id") or "").strip()
-        if not country_name or not source_id_value:
-            continue
-        if allowed_source_ids is not None and source_id_value not in allowed_source_ids:
-            continue
-        grouped.setdefault(country_name, []).append(dict(row))
-    for country_name, rows in list(grouped.items()):
-        grouped[country_name] = sorted(
-            rows,
-            key=lambda item: (
-                str(item.get("alias") or "").casefold(),
-                str(item.get("source_id") or "").casefold(),
-            ),
-        )
-    return grouped
-
-
 def _sources_by_country_from_index(
     index_payload: dict[str, Any],
 ) -> dict[str, list[dict[str, str]]]:
@@ -420,17 +395,9 @@ def _workspace_payload(
     except Exception:
         data_index = {}
     index_sources_by_country = _sources_by_country_from_index(data_index)
-    indexed_source_ids = {
-        str(row.get("source_id") or "").strip()
-        for rows in index_sources_by_country.values()
-        for row in list(rows or [])
-        if str(row.get("source_id") or "").strip()
-    }
+    configured_sources = configured_sources_by_country(settings)
     sources_by_country = merge_sources_by_country(
-        _configured_sources_by_country(
-            settings,
-            allowed_source_ids=indexed_source_ids or None,
-        ),
+        configured_sources,
         index_sources_by_country,
     )
     has_data = bool(data_index.get("hasData"))
@@ -441,9 +408,12 @@ def _workspace_payload(
             df_all = pd.DataFrame()
         if isinstance(df_all, pd.DataFrame) and not df_all.empty:
             has_data = True
-            sources_by_country = available_sources_by_country(settings, df_all=df_all)
+            sources_by_country = merge_sources_by_country(
+                configured_sources,
+                available_sources_by_country(settings, df_all=df_all),
+            )
     if not sources_by_country:
-        sources_by_country = _configured_sources_by_country(settings)
+        sources_by_country = configured_sources
 
     countries = list(sources_by_country.keys())
     selected_country = str(country or "").strip()

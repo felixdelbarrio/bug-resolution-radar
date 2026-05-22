@@ -666,3 +666,78 @@ def test_run_jira_ingest_lookup_runs_for_all_finalist_analysis_modes(
         "helix:mexico:lookup-estados-finalistas-jira",
         "helix:mexico:lookup-estados-finalistas-jira",
     ]
+
+
+def test_run_jira_ingest_stops_post_jql_batches_when_session_unavailable(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    data_path = tmp_path / "issues.json"
+    helix_path = tmp_path / "helix.json"
+    settings = Settings(
+        DATA_PATH=str(data_path),
+        HELIX_DATA_PATH=str(helix_path),
+        HELIX_INC_LOOKUP_BATCH_SIZE=1,
+    )
+    calls = 0
+
+    def _fake_jira(**_: Any) -> tuple[bool, str, IssuesDocument]:
+        return (
+            True,
+            "Jira OK",
+            IssuesDocument(
+                issues=[
+                    NormalizedIssue(
+                        key="MEX-1",
+                        summary="Cruce INC000104216018 INC000104216019 INC000104216020",
+                        status="Open",
+                        type="Bug",
+                        priority="High",
+                        country="México",
+                        source_type="jira",
+                        source_id="jira:mexico:core",
+                        source_alias="Core",
+                    )
+                ]
+            ),
+        )
+
+    def _fake_lookup(*_: Any, **__: Any) -> tuple[bool, str, None]:
+        nonlocal calls
+        calls += 1
+        return (
+            False,
+            "México · Lookup estados finalistas Jira: "
+            "Helix session unavailable for non-interactive ARSQL lookup.",
+            None,
+        )
+
+    monkeypatch.setattr(ingest_runner, "ingest_jira", _fake_jira)
+    monkeypatch.setattr(ingest_runner, "lookup_helix_incidents_by_arsql", _fake_lookup)
+
+    result = run_jira_ingest(
+        settings,
+        selected_sources=[
+            {
+                "source_id": "jira:mexico:core",
+                "country": "México",
+                "alias": "Core",
+                "jql": "project = CORE",
+            }
+        ],
+    )
+
+    assert calls == 1
+    assert result["post_jql_lookup"]["state"] == "error"
+    assert result["post_jql_lookup"]["missing_count"] == 3
+    assert result["post_jql_lookup"]["error_count"] == 1
+    assert any(
+        "detenido tras error de sesión" in str(message.get("message") or "")
+        for message in result["post_jql_lookup"]["messages"]
+    )
+    persisted = HelixRepo(helix_path).load()
+    assert persisted is not None
+    assert {item.id for item in persisted.items if item.lookup_status == "error"} == {
+        "INC000104216018",
+        "INC000104216019",
+        "INC000104216020",
+    }
