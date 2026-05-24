@@ -13,6 +13,7 @@ from bug_resolution_radar.config import (
     helix_sources,
     jira_sources,
     load_settings,
+    normalize_country_name,
     save_settings,
     supported_countries,
     to_env_json,
@@ -21,6 +22,7 @@ from bug_resolution_radar.repositories.issues_store import load_issues_workspace
 from bug_resolution_radar.services.workspace import (
     configured_sources_by_country,
     merge_sources_by_country,
+    sources_by_country_from_index,
 )
 
 
@@ -129,38 +131,16 @@ def _normalize_country_rollup_sources(
     return rows
 
 
-def _sources_by_country_from_index(
-    index_payload: Dict[str, Any],
-) -> Dict[str, List[Dict[str, str]]]:
-    raw = dict(index_payload.get("sourcesByCountry") or {})
-    grouped: Dict[str, List[Dict[str, str]]] = {}
-    for country, rows in raw.items():
-        bucket: List[Dict[str, str]] = []
-        for row in list(rows or []):
-            source_id = str(row.get("source_id") or "").strip()
-            country_name = str(row.get("country") or country or "").strip()
-            if not source_id or not country_name:
-                continue
-            bucket.append(
-                {
-                    "source_id": source_id,
-                    "country": country_name,
-                    "alias": str(row.get("alias") or source_id).strip() or source_id,
-                    "source_type": str(row.get("source_type") or "").strip().lower() or "jira",
-                }
-            )
-        if bucket:
-            grouped[str(country)] = bucket
-    return grouped
-
-
 def _rollup_eligible_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     configured = configured_sources_by_country(settings)
     try:
         index_payload = load_issues_workspace_index(settings.DATA_PATH)
     except Exception:
         index_payload = {}
-    return merge_sources_by_country(configured, _sources_by_country_from_index(index_payload))
+    return merge_sources_by_country(
+        configured,
+        sources_by_country_from_index(index_payload, settings=settings),
+    )
 
 
 def load_settings_payload() -> Dict[str, Any]:
@@ -187,13 +167,12 @@ def save_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     incoming_values = dict(payload.get("values") or {})
 
     merged_values = {**current_values, **incoming_values}
-    merged_values["SUPPORTED_COUNTRIES"] = ",".join(
-        [
-            str(item).strip()
-            for item in list(payload.get("supportedCountries") or [])
-            if str(item).strip()
-        ]
-    )
+    normalized_countries: List[str] = []
+    for item in list(payload.get("supportedCountries") or []):
+        country = normalize_country_name(item) or str(item or "").strip()
+        if country and country not in normalized_countries:
+            normalized_countries.append(country)
+    merged_values["SUPPORTED_COUNTRIES"] = ",".join(normalized_countries)
     merged_values["JIRA_SOURCES_JSON"] = to_env_json(
         _normalize_source_rows(list(payload.get("jiraSources") or []), source_type="jira")
     )

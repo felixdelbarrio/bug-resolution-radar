@@ -1835,11 +1835,13 @@ def ingest_helix(
         include_outside_window=True,
     )
     explicit_incident_ids = _dedupe_incident_ids(incident_ids)
-    if explicit_incident_ids:
+    exact_incident_lookup = bool(incident_ids_only and explicit_incident_ids)
+    if exact_incident_lookup:
+        arsql_pending_incident_ids = list(explicit_incident_ids)
+    elif explicit_incident_ids:
         arsql_pending_incident_ids = _dedupe_incident_ids(
             list(arsql_pending_incident_ids) + explicit_incident_ids
         )
-    exact_incident_lookup = bool(incident_ids_only and explicit_incident_ids)
     create_window_rule = (
         f"{create_window_rule}; {cache_window_rule}; pending_ids={len(arsql_pending_incident_ids)}"
     )

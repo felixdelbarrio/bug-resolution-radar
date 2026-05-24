@@ -68,6 +68,7 @@ class ReportFilters:
 
 @dataclass(frozen=True)
 class PreparedReportContext:
+    all_df: pd.DataFrame
     scoped_df: pd.DataFrame
     dff: pd.DataFrame
     open_df: pd.DataFrame
@@ -266,6 +267,7 @@ def _build_context_for_scope(
     closed_mask = effective_closed_mask(dff) if not dff.empty else pd.Series(dtype=bool)
     open_df = dff.loc[~closed_mask].copy(deep=False) if not dff.empty else pd.DataFrame()
     return PreparedReportContext(
+        all_df=base_df,
         scoped_df=scoped_df,
         dff=dff,
         open_df=open_df,
@@ -334,6 +336,7 @@ def generate_period_followup_report_artifact(
         source_ids=source_ids,
         dff_override=context.dff,
         open_df_override=context.open_df,
+        all_df_override=context.all_df,
         finalist_discrepancies_override=context.finalist_discrepancies,
         applied_filter_summary=applied_filter_summary,
         functionality_status_filters=functionality_status_filters,

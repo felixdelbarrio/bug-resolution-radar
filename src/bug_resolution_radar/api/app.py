@@ -109,6 +109,7 @@ from bug_resolution_radar.services.workspace import (
     available_sources_by_country,
     configured_sources_by_country,
     merge_sources_by_country,
+    sources_by_country_from_index,
 )
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
 from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
@@ -359,31 +360,6 @@ def _empty_filter_options() -> dict[str, list[str]]:
     return {"status": [], "priority": [], "assignee": [], "quincenal": [QUINCENAL_SCOPE_ALL]}
 
 
-def _sources_by_country_from_index(
-    index_payload: dict[str, Any],
-) -> dict[str, list[dict[str, str]]]:
-    raw = dict(index_payload.get("sourcesByCountry") or {})
-    out: dict[str, list[dict[str, str]]] = {}
-    for country_name, rows in raw.items():
-        bucket: list[dict[str, str]] = []
-        for row in list(rows or []):
-            source_id_value = str(row.get("source_id") or "").strip()
-            source_country = str(row.get("country") or country_name or "").strip()
-            if not source_id_value or not source_country:
-                continue
-            bucket.append(
-                {
-                    "source_id": source_id_value,
-                    "country": source_country,
-                    "alias": str(row.get("alias") or source_id_value).strip() or source_id_value,
-                    "source_type": str(row.get("source_type") or "").strip().lower() or "jira",
-                }
-            )
-        if bucket:
-            out[str(country_name)] = bucket
-    return out
-
-
 def _workspace_payload(
     settings: Settings,
     *,
@@ -398,7 +374,7 @@ def _workspace_payload(
         data_index = load_issues_workspace_index(settings.DATA_PATH)
     except Exception:
         data_index = {}
-    index_sources_by_country = _sources_by_country_from_index(data_index)
+    index_sources_by_country = sources_by_country_from_index(data_index, settings=settings)
     configured_sources = configured_sources_by_country(settings)
     sources_by_country = merge_sources_by_country(
         configured_sources,

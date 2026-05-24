@@ -22,12 +22,13 @@ Targets públicos disponibles:
 
 Detalle de la cadena `make CI`:
 - `ruff format --check .`
-- `black --check .`
-- `ruff check .`
 - `mypy src`
+- `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
+- `python -m pip check`
+- `npm --prefix frontend run build`
 - `python scripts/check_dead_private_helpers.py`
 - `python scripts/check_docs_references.py`
-- `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
+- regresiones rápidas de API, desktop y render PPT crítico
 
 Comando operativo adicional (observabilidad de ingesta):
 - `python scripts/ingest_profile_report.py --connector jira`
@@ -41,12 +42,14 @@ Workflow principal:
 Valida:
 1. instalación de dependencias y `pip check`
 2. `ruff format --check .`
-3. `black --check .`
-4. `ruff check .`
-5. `mypy src`
+3. `mypy src`
+4. `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
+5. `npm --prefix frontend run build`
 6. `python scripts/check_dead_private_helpers.py`
 7. `python scripts/check_docs_references.py`
-8. `pytest -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml`
+8. regresiones rápidas de API, desktop y render PPT crítico
+
+`make lint` queda como target explícito para `ruff check .` y `mypy src`.
 
 ## Dead Code Policy
 

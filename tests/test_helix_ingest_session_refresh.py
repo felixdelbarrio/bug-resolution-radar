@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from bug_resolution_radar.ingest import helix_ingest as helix_mod
+from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 
 
 class _FakeResponse:
@@ -198,6 +199,60 @@ def test_ingest_helix_exact_incident_lookup_uses_minimal_filters(monkeypatch: An
     assert "Service Type" not in sql
     assert "BBVA_Environment" not in sql
     assert "Submit Date` BETWEEN" not in sql
+
+
+def test_ingest_helix_exact_incident_lookup_ignores_cached_pending_ids(
+    monkeypatch: Any,
+) -> None:
+    captured_sql: list[str] = []
+
+    def fake_request(*args: Any, **kwargs: Any) -> _FakeResponse:
+        _ = args
+        body = kwargs.get("json") or {}
+        captured_sql.append(str(body.get("sql") or ""))
+        return _FakeResponse(
+            200, payload={"columns": list(helix_mod._ARSQL_SELECT_ALIASES), "rows": []}
+        )
+
+    def fake_get(self: requests.Session, url: str, timeout: Any) -> _FakeResponse:
+        return _FakeResponse(200, text="ok", payload={"ok": True}, url=url)
+
+    monkeypatch.setattr(helix_mod, "_request", fake_request)
+    monkeypatch.setattr(
+        helix_mod,
+        "get_helix_session_cookie",
+        lambda browser, host: "JSESSIONID=abc; XSRF-TOKEN=xyz; loginId=test-user",
+    )
+    monkeypatch.setattr(requests.Session, "get", fake_get, raising=True)
+
+    ok, msg, _ = helix_mod.ingest_helix(
+        browser="chrome",
+        country="México",
+        source_alias="Lookup estados finalistas Jira",
+        source_id="helix:mexico:lookup-estados-finalistas-jira",
+        service_origin_buug="BBVA México",
+        incident_ids=["INC000104216018"],
+        incident_ids_only=True,
+        allow_interactive_bootstrap=False,
+        cache_doc=HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC000104999999",
+                    status="Analysing",
+                    country="México",
+                    source_id="helix:mexico:lookup-estados-finalistas-jira",
+                    source_alias="Lookup estados finalistas Jira",
+                )
+            ]
+        ),
+    )
+
+    assert ok is True
+    assert "ingesta Helix OK" in msg
+    assert captured_sql
+    sql = captured_sql[0]
+    assert "INC000104216018" in sql
+    assert "INC000104999999" not in sql
 
 
 def test_ingest_helix_rewinds_window_for_non_final_cache_and_adds_outside_pending_ids(
