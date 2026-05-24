@@ -9,8 +9,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.finalist_discrepancies import (
-    apply_effective_finalist_lookup_state,
-    build_finalist_status_discrepancies,
+    apply_effective_finalist_lookup_state_for_scope,
 )
 from bug_resolution_radar.analytics.issues import normalize_text_col
 from bug_resolution_radar.analytics.quincenal_scope import (
@@ -239,23 +238,17 @@ def _build_context_for_scope(
         scoped_df = _scope_country_sources(base_df, country=country, source_ids=clean_source_ids)
 
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
-    country_df = apply_analysis_depth_filter(
-        _scope_country_df(base_df, country=country), settings=settings
-    )
+    country_history_df = _scope_country_df(base_df, country=country)
+    country_df = apply_analysis_depth_filter(country_history_df, settings=settings)
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
-    finalist_discrepancies = build_finalist_status_discrepancies(
-        country_df if not country_df.empty else scoped_df,
+    scoped_df, finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
+        scoped_df,
+        history_df=country_history_df if not country_history_df.empty else country_df,
         settings=settings,
         country=country,
         source_ids=clean_source_ids,
         reference_day=reference_day,
     )
-    if not finalist_discrepancies.empty:
-        scoped_df = apply_effective_finalist_lookup_state(
-            scoped_df,
-            discrepancies=finalist_discrepancies,
-            reference_window=reference_day,
-        )
     dff = _apply_explicit_filters(scoped_df, filters)
     dff = _apply_quincenal_scope(
         dff,

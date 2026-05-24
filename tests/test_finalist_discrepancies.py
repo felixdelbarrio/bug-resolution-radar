@@ -5,6 +5,7 @@ import pandas as pd
 from bug_resolution_radar.analytics.finalist_discrepancies import (
     POST_JQL_LOOKUP_HELIX_KIND,
     apply_effective_finalist_lookup_state,
+    apply_effective_finalist_lookup_state_for_scope,
     build_finalist_status_discrepancies,
     build_jira_helix_links,
     extract_helix_ids_from_text,
@@ -206,6 +207,63 @@ def test_lookup_finalist_state_uses_ad_hoc_helix_and_closes_jira_effectively() -
     assert discrepancies["jira_key"].tolist() == ["MEX-1"]
     assert pd.to_datetime(enriched.loc[enriched["key"].eq("MEX-1"), "resolved"]).notna().all()
     assert pd.to_datetime(enriched.loc[enriched["key"].eq("MEX-2"), "resolved"]).isna().all()
+
+
+def test_effective_finalist_scope_uses_historical_helix_outside_visible_window() -> None:
+    visible = pd.DataFrame(
+        [
+            {
+                "country": "México",
+                "source_type": "jira",
+                "source_id": "jira:mexico:senda",
+                "key": "MEX-OLD-HELIX",
+                "summary": "INC000102885426 seguimiento pendiente",
+                "description": "",
+                "status": "En progreso",
+                "created": "2026-05-01T00:00:00Z",
+                "updated": "2026-05-20T00:00:00Z",
+                "resolved": None,
+            }
+        ]
+    )
+    history = pd.concat(
+        [
+            visible,
+            pd.DataFrame(
+                [
+                    {
+                        "country": "México",
+                        "source_type": "helix",
+                        "source_id": "helix:mexico:lookup-estados-finalistas-jira",
+                        "source_alias": "Lookup estados finalistas Jira",
+                        "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
+                        "key": "INC000102885426",
+                        "summary": "BBVA Net Cash",
+                        "description": "",
+                        "status": "Closed",
+                        "created": "2025-03-19T00:00:00Z",
+                        "updated": "2025-04-25T23:08:13Z",
+                        "resolved": "2025-04-25T23:08:09Z",
+                        "url": "https://helix.example/incident/IDG102885426",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    enriched, discrepancies = apply_effective_finalist_lookup_state_for_scope(
+        visible,
+        history_df=history,
+        settings=Settings(),
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        reference_day=pd.Timestamp("2026-05-24"),
+    )
+
+    assert discrepancies["jira_key"].tolist() == ["MEX-OLD-HELIX"]
+    assert pd.to_datetime(enriched["resolved"], errors="coerce").notna().all()
+    assert enriched["__effective_helix_id"].tolist() == ["INC000102885426"]
 
 
 def test_finalist_status_uses_only_ad_hoc_helix_even_when_configured_exists() -> None:
