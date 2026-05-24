@@ -5,24 +5,19 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import streamlit as st
 
 from bug_resolution_radar import config as cfg
+from bug_resolution_radar.analytics.issues import open_issues_only
+from bug_resolution_radar.analytics.trend_constants import canonical_status_order
 from bug_resolution_radar.common.security import mask_secret, safe_log_text
 from bug_resolution_radar.common.utils import now_iso, parse_age_buckets, parse_int_list
 from bug_resolution_radar.services.notes import NotesStore
-from bug_resolution_radar.ui.common import (
-    chip_style_from_color,
+from bug_resolution_radar.theme.semantic_colors import (
     flow_signal_color_map,
-    open_issues_only,
     priority_color,
     priority_color_map,
-    semantic_popover_css_rules,
     status_color,
 )
-from bug_resolution_radar.ui.dashboard import layout as dashboard_layout
-from bug_resolution_radar.ui.dashboard.constants import canonical_status_order
-from bug_resolution_radar.ui.style import inject_bbva_css
 
 
 def test_now_iso_is_valid_utc_timestamp() -> None:
@@ -305,122 +300,6 @@ def test_semantic_color_maps_include_flow_signals() -> None:
     assert smap["open"] == "#FBBF24"
     assert smap["closed"] == "#22A447"
     assert smap["deployed"] == "#5B3FD0"
-
-
-def test_goal_state_chip_uses_stronger_fill() -> None:
-    deployed_style = chip_style_from_color(status_color("Deployed"))
-    accepted_style = chip_style_from_color(status_color("Accepted"))
-    ready_deploy_style = chip_style_from_color(status_color("Ready to Deploy"))
-    assert "background:#ECE6FF" in deployed_style
-    assert "color:#5B3FD0" in deployed_style
-    assert "rgba(76,175,80,0.160)" in accepted_style
-    assert accepted_style == ready_deploy_style
-
-
-def test_semantic_popover_rules_are_built_from_shared_color_tokens() -> None:
-    css = semantic_popover_css_rules()
-    assert '[aria-label*="new" i]' in css
-    assert '[aria-label*="analysing" i]' in css
-    assert '[aria-label*="blocked" i]' in css
-    assert "--bbva-opt-dot: #E85D63;" in css
-    assert '[aria-label*="to rework" i]' in css
-    assert '[aria-label*="test" i]' in css
-    assert '[aria-label*="ready to verify" i]' in css
-    assert "--bbva-opt-dot: #F59E0B;" in css
-    assert '[aria-label*="accepted" i]' in css
-    assert '[aria-label*="ready to deploy" i]' in css
-    assert "--bbva-opt-dot: #4CAF50;" in css
-
-
-def _captured_injected_css(*, dark_mode: bool) -> str:
-    captured: list[str] = []
-    original = st.markdown
-
-    def _fake_markdown(body: str, *args: Any, **kwargs: Any) -> None:
-        del args, kwargs
-        captured.append(str(body))
-
-    st.markdown = _fake_markdown  # type: ignore[assignment]
-    try:
-        inject_bbva_css(dark_mode=dark_mode)
-    finally:
-        st.markdown = original  # type: ignore[assignment]
-    return "\n".join(captured)
-
-
-def test_nba_banner_base_uses_alert_tokens_by_theme() -> None:
-    css_dark = _captured_injected_css(dark_mode=True)
-    css_light = _captured_injected_css(dark_mode=False)
-    assert (
-        "--bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-signal-orange) 20%, "
-        "var(--bbva-surface-elevated) 80%);" in css_dark
-    )
-    assert (
-        "--bbva-nba-banner-border: color-mix(in srgb, var(--bbva-signal-orange) 70%, "
-        "var(--bbva-border) 30%);" in css_dark
-    )
-    assert (
-        "--bbva-nba-banner-bg: color-mix(in srgb, var(--bbva-signal-yellow) 22%, "
-        "var(--bbva-surface-elevated) 78%);" in css_light
-    )
-    assert (
-        "--bbva-nba-banner-border: color-mix(in srgb, var(--bbva-signal-orange) 58%, "
-        "var(--bbva-border) 42%);" in css_light
-    )
-    for css in [css_dark, css_light]:
-        assert "--bbva-signal-yellow: #FBBF24;" in css
-        assert "--bbva-nba-ink-primary: var(--bbva-text);" in css
-
-
-def test_select_popover_rows_keep_compact_single_line_layout() -> None:
-    css = _captured_injected_css(dark_mode=False)
-    assert 'div[data-baseweb="popover"] {' in css
-    assert 'div[data-baseweb="popover"] [role="option"],' in css
-    assert 'div[data-baseweb="popover"] li[role="option"]' in css
-    assert 'div[data-baseweb="popover"] [role="listbox"],' in css
-    assert 'div[data-baseweb="popover"] [role="listbox"] > *,' in css
-    assert 'div[data-baseweb="popover"] ul > li,' in css
-    assert 'div[data-baseweb="popover"] [role="listbox"] > div > *,' in css
-    assert "max-height: min(21rem, 62vh) !important;" in css
-    assert "max-height: min(19.25rem, 56vh) !important;" in css
-    assert "overflow-y: auto !important;" in css
-    assert "min-height: 1.92rem !important;" in css
-    assert "height: 1.92rem !important;" in css
-    assert "display: flex !important;" in css
-    assert "height: auto !important;" in css
-    assert "padding: 0.34rem 0.72rem !important;" in css
-    assert "overflow: hidden !important;" in css
-    assert "text-overflow: ellipsis !important;" in css
-    assert '[role="option"]:is([aria-label*="new" i], [title*="new" i])' in css
-    assert "border-left: 2px solid color-mix(in srgb, #E85D63 72%, transparent);" in css
-    assert (
-        '[role="option"][data-bbva-semantic="1"] {\n            position: relative !important;'
-        not in css
-    )
-    assert "background-image: radial-gradient(" in css
-    assert "background-position: 0.80rem 50% !important;" in css
-    assert 'div[data-baseweb="popover"] [role="option"] p,' in css
-
-
-def test_global_css_avoids_expensive_layout_selectors() -> None:
-    css = _captured_injected_css(dark_mode=False)
-    assert ":has(" not in css
-    assert '[data-testid="stDataFrame"] *,' not in css
-
-
-def test_dashboard_layout_css_avoids_backdrop_filter(monkeypatch: Any) -> None:
-    captured: list[str] = []
-
-    def _fake_markdown(body: str, *args: Any, **kwargs: Any) -> None:
-        del args, kwargs
-        captured.append(str(body))
-
-    monkeypatch.setattr(dashboard_layout.st, "set_page_config", lambda *args, **kwargs: None)
-    monkeypatch.setattr(dashboard_layout.st, "markdown", _fake_markdown)
-    dashboard_layout.apply_dashboard_layout()
-
-    css = "\n".join(captured)
-    assert "backdrop-filter:" not in css
 
 
 def test_open_issues_only_treats_accepted_without_resolved_as_closed() -> None:

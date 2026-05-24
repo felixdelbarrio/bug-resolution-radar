@@ -10,7 +10,7 @@ from bug_resolution_radar.ingest.helix_mapper import (
     map_helix_values_to_item,
 )
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
-from bug_resolution_radar.ui.pages.ingest_page import _helix_item_to_issue
+from bug_resolution_radar.services.ingest_merge import helix_item_to_issue
 
 
 @pytest.mark.parametrize(
@@ -212,7 +212,7 @@ def test_map_helix_values_to_item_uses_configured_dashboard_url() -> None:
 
 
 def test_helix_item_to_issue_maps_labels_and_components_as_requested() -> None:
-    issue = _helix_item_to_issue(
+    issue = helix_item_to_issue(
         HelixWorkItem(
             id="INC0009",
             summary="test",

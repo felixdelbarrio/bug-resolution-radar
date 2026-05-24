@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "bug_resolution_radar"
+REPO_ROOT = SRC_ROOT.parents[1]
 
 
 def _python_files() -> list[Path]:
@@ -12,6 +13,18 @@ def _python_files() -> list[Path]:
 
 def _is_ui_path(path: Path) -> bool:
     return "ui" in path.relative_to(SRC_ROOT).parts
+
+
+def test_legacy_streamlit_package_is_removed() -> None:
+    assert not (SRC_ROOT / "ui").exists()
+
+
+def test_runtime_dependencies_do_not_include_streamlit() -> None:
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
+    requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+
+    assert '"streamlit' not in pyproject
+    assert "streamlit>=" not in requirements
 
 
 def test_backend_modules_do_not_import_ui_or_streamlit() -> None:

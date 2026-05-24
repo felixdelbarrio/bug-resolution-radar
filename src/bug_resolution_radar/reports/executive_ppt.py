@@ -1240,7 +1240,7 @@ def _call_in_subprocess_with_timeout(
     """
     Execute a callable in an isolated process and apply a hard timeout.
 
-    This protects the Streamlit app from native/browser hangs (e.g. Chromium startup
+    This protects the desktop/API caller from native/browser hangs (e.g. Chromium startup
     inside Kaleido) that can block forever before library-level timeouts fire.
     """
 

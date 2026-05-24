@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-
 import pandas as pd
 
-from bug_resolution_radar.config import Settings, build_source_id
-from bug_resolution_radar.ui import app
+from bug_resolution_radar.config import Settings, build_source_id, rollup_source_ids
+from bug_resolution_radar.services.workspace import sources_with_results_by_country
 
 
 def _settings_with_jira_sources() -> Settings:
@@ -20,88 +17,43 @@ def _settings_with_jira_sources() -> Settings:
     )
 
 
-def test_scope_sources_only_include_source_ids_with_results(monkeypatch: Any) -> None:
+def test_scope_sources_only_include_source_ids_with_results() -> None:
     settings = _settings_with_jira_sources()
     mx_core_id = build_source_id("jira", "México", "MX Core")
     es_core_id = build_source_id("jira", "España", "ES Core")
 
-    monkeypatch.setattr(
-        app,
-        "load_issues_df",
-        lambda _path: pd.DataFrame(
+    grouped = sources_with_results_by_country(
+        settings,
+        df_all=pd.DataFrame(
             [
                 {"country": "México", "source_id": mx_core_id},
                 {"country": "España", "source_id": es_core_id},
             ]
         ),
     )
-
-    grouped = app._sources_with_results_by_country(settings)
     assert set(grouped.keys()) == {"México", "España"}
     assert [row["source_id"] for row in grouped["México"]] == [mx_core_id]
     assert [row["source_id"] for row in grouped["España"]] == [es_core_id]
 
 
-def test_scope_sources_requires_source_id_metadata(monkeypatch: Any) -> None:
+def test_scope_sources_requires_source_id_metadata() -> None:
     settings = _settings_with_jira_sources()
 
-    monkeypatch.setattr(
-        app,
-        "load_issues_df",
-        lambda _path: pd.DataFrame(
+    grouped = sources_with_results_by_country(
+        settings,
+        df_all=pd.DataFrame(
             [
                 {"country": "México"},
                 {"country": "México"},
             ]
         ),
     )
-
-    grouped = app._sources_with_results_by_country(settings)
     assert grouped == {}
 
 
-def test_scope_sources_empty_when_there_are_no_results(monkeypatch: Any) -> None:
+def test_scope_sources_empty_when_there_are_no_results() -> None:
     settings = _settings_with_jira_sources()
-    monkeypatch.setattr(app, "load_issues_df", lambda _path: pd.DataFrame())
-    assert app._sources_with_results_by_country(settings) == {}
-
-
-def test_reset_scope_filters_clears_canonical_and_ui_keys(monkeypatch: Any) -> None:
-    fake_state = {
-        "filter_status": ["Open"],
-        "filter_priority": ["High"],
-        "filter_assignee": ["Ana"],
-        "__filters_action_context": {"label": "test"},
-        "dashboard::filter_status_ui": ["Open"],
-        "dashboard::filter_priority_ui": ["High"],
-        "dashboard::filter_assignee_ui": ["Ana"],
-        "filter_status_ui": ["Open"],
-        "filter_priority_ui": ["High"],
-        "filter_assignee_ui": ["Ana"],
-        "other_key": "keep",
-    }
-
-    def _fake_clear_all_filters() -> None:
-        fake_state["filter_status"] = []
-        fake_state["filter_priority"] = []
-        fake_state["filter_assignee"] = []
-
-    monkeypatch.setattr(app, "st", SimpleNamespace(session_state=fake_state))
-    monkeypatch.setattr(app, "clear_all_filters", _fake_clear_all_filters)
-
-    app._reset_scope_filters()
-
-    assert fake_state["filter_status"] == []
-    assert fake_state["filter_priority"] == []
-    assert fake_state["filter_assignee"] == []
-    assert "__filters_action_context" not in fake_state
-    assert "dashboard::filter_status_ui" not in fake_state
-    assert "dashboard::filter_priority_ui" not in fake_state
-    assert "dashboard::filter_assignee_ui" not in fake_state
-    assert "filter_status_ui" not in fake_state
-    assert "filter_priority_ui" not in fake_state
-    assert "filter_assignee_ui" not in fake_state
-    assert fake_state["other_key"] == "keep"
+    assert sources_with_results_by_country(settings, df_all=pd.DataFrame()) == {}
 
 
 def test_configured_rollup_source_ids_for_country_filters_by_available_source_ids() -> None:
@@ -118,7 +70,7 @@ def test_configured_rollup_source_ids_for_country_filters_by_available_source_id
         ),
     )
 
-    selected = app._configured_rollup_source_ids_for_country(
+    selected = rollup_source_ids(
         settings,
         country="México",
         available_source_ids=[mx_core_id],
@@ -127,56 +79,62 @@ def test_configured_rollup_source_ids_for_country_filters_by_available_source_id
     assert selected == [mx_core_id]
 
 
-def test_configured_rollup_source_ids_for_country_returns_empty_when_not_configured() -> None:
+def test_rollup_source_ids_for_country_falls_back_to_available_sources() -> None:
     settings = _settings_with_jira_sources()
     mx_core_id = build_source_id("jira", "México", "MX Core")
 
-    selected = app._configured_rollup_source_ids_for_country(
+    selected = rollup_source_ids(
         settings,
         country="México",
         available_source_ids=[mx_core_id],
     )
 
-    assert selected == []
+    assert selected == [mx_core_id]
 
 
-def test_has_country_rollup_scope_true_when_country_has_configured_rollup(monkeypatch: Any) -> None:
+def test_country_rollup_scope_true_when_country_has_configured_rollup() -> None:
     mx_core_id = build_source_id("jira", "México", "MX Core")
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         JIRA_SOURCES_JSON='[{"country":"México","alias":"MX Core","jql":"project = 1"}]',
         COUNTRY_ROLLUP_SOURCES_JSON=(f'[{{"country":"México","source_ids":["{mx_core_id}"]}}]'),
     )
-    fake_state = {"workspace_country": "México"}
-    monkeypatch.setattr(app, "st", SimpleNamespace(session_state=fake_state))
-
-    has_rollup = app._has_country_rollup_scope(
-        settings,
-        sources_by_country={
-            "México": [{"source_id": mx_core_id, "country": "México", "alias": "MX Core"}]
-        },
+    has_rollup = bool(
+        rollup_source_ids(
+            settings,
+            country="México",
+            available_source_ids=[
+                source["source_id"]
+                for source in sources_with_results_by_country(
+                    settings,
+                    df_all=pd.DataFrame([{"country": "México", "source_id": mx_core_id}]),
+                ).get("México", [])
+            ],
+        )
     )
 
     assert has_rollup is True
 
 
-def test_has_country_rollup_scope_false_when_country_has_no_configured_rollup(
-    monkeypatch: Any,
-) -> None:
+def test_country_rollup_scope_uses_available_sources_when_no_explicit_rollup() -> None:
     mx_core_id = build_source_id("jira", "México", "MX Core")
     settings = Settings(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         JIRA_SOURCES_JSON='[{"country":"México","alias":"MX Core","jql":"project = 1"}]',
         COUNTRY_ROLLUP_SOURCES_JSON="[]",
     )
-    fake_state = {"workspace_country": "México"}
-    monkeypatch.setattr(app, "st", SimpleNamespace(session_state=fake_state))
-
-    has_rollup = app._has_country_rollup_scope(
-        settings,
-        sources_by_country={
-            "México": [{"source_id": mx_core_id, "country": "México", "alias": "MX Core"}]
-        },
+    has_rollup = bool(
+        rollup_source_ids(
+            settings,
+            country="México",
+            available_source_ids=[
+                source["source_id"]
+                for source in sources_with_results_by_country(
+                    settings,
+                    df_all=pd.DataFrame([{"country": "México", "source_id": mx_core_id}]),
+                ).get("México", [])
+            ],
+        )
     )
 
-    assert has_rollup is False
+    assert has_rollup is True

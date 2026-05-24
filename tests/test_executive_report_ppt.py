@@ -10,6 +10,8 @@ import plotly.graph_objects as go
 import pytest
 from pptx import Presentation
 
+from bug_resolution_radar.analytics.trend_charts import ChartContext, _render_open_priority_pie
+from bug_resolution_radar.analytics.trend_insights import ActionInsight, TrendInsightPack
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.reports import executive_ppt as executive_ppt_module
@@ -32,9 +34,7 @@ from bug_resolution_radar.reports.executive_ppt import (
     _soften_insight_tone,
     _urgency_from_score,
 )
-from bug_resolution_radar.ui.common import save_issues_doc
-from bug_resolution_radar.ui.dashboard.registry import ChartContext, _render_open_priority_pie
-from bug_resolution_radar.ui.insights.engine import ActionInsight, TrendInsightPack
+from bug_resolution_radar.repositories.issues_store import save_issues_doc
 
 
 def _seed_issues(path: Path) -> None:

@@ -45,9 +45,9 @@ Resumen de capas:
 - `src/bug_resolution_radar/api/app.py`: contratos FastAPI, descargas y serving de la SPA.
 - `src/bug_resolution_radar/ingest/`: conectores Jira/Helix y runtime de navegador.
 - `src/bug_resolution_radar/analytics/`: KPIs, semántica de estado y ventana de análisis.
-- `src/bug_resolution_radar/ui/`: módulos legacy de Streamlit aún presentes como referencia de migración y utilidades de exportación históricas; el runtime activo ya no depende de esta shell.
 - `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
-- `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, exportes e ingesta asíncrona.
+- `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, merge/mapeo de ingesta, exportes e ingesta asíncrona.
+- El runtime de presentación es 100% React/FastAPI; no queda shell Python legacy ni dependencia de UI obsoleta en el paquete.
 
 Flujo clave de estados finalistas:
 - El lookup ARSQL solo toma referencias `INC...` desde la descripción de Jira y descarta Jira ya finalistas (`Accepted`, `Ready to deploy`, `Deployed`/`Acepted`) antes de deduplicar por país/`Servicio Origen BU/UG`.
