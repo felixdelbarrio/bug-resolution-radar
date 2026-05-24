@@ -40,7 +40,7 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
   - Circuit breaker persistente por fuente con ventana de fallos y cooldown.
 
 - `src/bug_resolution_radar/services/ingest_runner.py`
-  - Orquestación síncrona de ingesta Jira/Helix y lookup finalista por país/BU-UG.
+  - Orquestación síncrona de ingesta Jira/Helix y lookup finalista por país/BU-UG, incluyendo el filtro central de candidatos ARSQL desde descripciones Jira no finalistas.
 
 - `src/bug_resolution_radar/analytics/analysis_window.py`
   - Ventana global de análisis por meses.

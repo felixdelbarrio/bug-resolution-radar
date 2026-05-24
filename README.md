@@ -50,7 +50,7 @@ Resumen de capas:
 - `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, exportes e ingesta asíncrona.
 
 Flujo clave de estados finalistas:
-- Las referencias `INC...` se extraen de todas las fuentes Jira seleccionadas y se deduplican por país/`Servicio Origen BU/UG` antes de llamar a Helix.
+- El lookup ARSQL solo toma referencias `INC...` desde la descripción de Jira y descarta Jira ya finalistas (`Accepted`, `Ready to deploy`, `Deployed`/`Acepted`) antes de deduplicar por país/`Servicio Origen BU/UG`.
 - Antes de lanzar ARSQL, el conjunto se cruza con el histórico Helix local. Los INC ya finalistas se reutilizan y se persisten bajo el origen canónico `Lookup estados finalistas Jira`.
 - El cruce finalista usa el histórico Helix completo del país aunque la vista del reporte esté recortada por `ANALYSIS_LOOKBACK_MONTHS`; las filas Jira con Helix finalista quedan fuera de listas abiertas.
 - Los PPT de seguimiento enlazan cualquier `INC...` visible en tablas cuando existe URL Helix en el dataset normalizado o en discrepancias finalistas, y las secciones `>30 días` usan días completos para evitar filas visibles como `30 días`.
