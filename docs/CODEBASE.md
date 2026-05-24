@@ -12,6 +12,9 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/common/security.py`
   - Sanitización de secretos y validación de URLs.
 
+- `src/bug_resolution_radar/common/issue_links.py`
+  - Normalización de claves Jira/Helix y mapas de URLs para UI y PPT.
+
 - `src/bug_resolution_radar/common/utils.py`
   - Utilidades transversales de fechas/parsing.
 
@@ -36,6 +39,9 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/services/ingest_circuit_breaker.py`
   - Circuit breaker persistente por fuente con ventana de fallos y cooldown.
 
+- `src/bug_resolution_radar/services/ingest_runner.py`
+  - Orquestación síncrona de ingesta Jira/Helix y lookup finalista por país/BU-UG.
+
 - `src/bug_resolution_radar/analytics/analysis_window.py`
   - Ventana global de análisis por meses.
 
@@ -44,6 +50,12 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 
 - `src/bug_resolution_radar/analytics/status_semantics.py`
   - Semántica canónica de estados finales/no finales.
+
+- `src/bug_resolution_radar/analytics/finalist_discrepancies.py`
+  - Fuente única para extraer `INC...`, cruzar Jira con Helix histórico, calcular discrepancias finalistas y aplicar estado efectivo al scope visible.
+
+- `src/bug_resolution_radar/analytics/period_risk_issue_lists.py`
+  - Listas de riesgo del seguimiento; las antigüedades se filtran y muestran con días completos.
 
 - `src/bug_resolution_radar/analytics/insights.py`
   - Utilidades analíticas para clustering/similaridad.
@@ -69,7 +81,7 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
   - Mapeo de columnas ARSQL a modelo normalizado.
 
 - `src/bug_resolution_radar/ingest/helix_ingest.py`
-  - Pipeline Helix ARSQL (preflight, extracción, normalización).
+  - Pipeline Helix ARSQL (preflight, extracción, normalización y lookup exacto de INC).
 
 ## UI Package Map
 
@@ -125,6 +137,9 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 
 - `src/bug_resolution_radar/reports/executive_ppt.py`
   - Construcción de slides, cache y export binario PPT.
+
+- `src/bug_resolution_radar/reports/period_followup_ppt.py`
+  - Reporte de seguimiento quincenal con rollups, secciones de riesgo, estado efectivo finalista y enlaces Jira/Helix.
 
 - `src/bug_resolution_radar/theme/design_tokens.py`
   - Tokens visuales y resolución de tipografías.

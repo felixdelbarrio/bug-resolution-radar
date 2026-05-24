@@ -159,6 +159,9 @@ def _prepare_open_issue_frame(
         work["__open_days"] = pd.to_numeric(age_days, errors="coerce").fillna(0.0)
     else:
         work["__open_days"] = 0.0
+    work["__open_days_full"] = (
+        pd.to_numeric(work["__open_days"], errors="coerce").fillna(0.0).clip(lower=0.0).floordiv(1)
+    )
     if "priority" in work.columns:
         work["__priority_rank"] = work["priority"].map(_risk_priority_rank)
         work["__is_high_priority"] = work["priority"].map(_is_high_priority)
@@ -205,7 +208,7 @@ def _rows_from_prepared(df: pd.DataFrame) -> tuple[PeriodRiskIssueRow, ...]:
                 po_team_leader=str(row.get("__po_team_leader", "") or "").strip(),
                 status=str(row.get("status", "") or "").strip(),
                 priority=str(row.get("priority", "") or "").strip(),
-                open_days=int(round(float(row.get("__open_days", 0.0) or 0.0))),
+                open_days=int(float(row.get("__open_days_full", 0.0) or 0.0)),
                 url=str(row.get("url", "") or "").strip(),
             )
         )
@@ -235,10 +238,9 @@ def _build_aged_from_prepared(
     safe = _safe_df(df)
     if safe.empty:
         return ()
-    aged = safe.loc[
-        pd.to_numeric(safe["__open_days"], errors="coerce").fillna(0.0).gt(min_open_days)
-    ]
-    aged = aged.copy(deep=False)
+    open_days_full = pd.to_numeric(safe["__open_days_full"], errors="coerce").fillna(0.0)
+    aged = safe.loc[open_days_full.gt(min_open_days)].copy(deep=False)
+    aged["__open_days_full"] = open_days_full.loc[aged.index]
     if aged.empty:
         return ()
     aged = aged.sort_values(

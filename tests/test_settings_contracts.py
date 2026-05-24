@@ -83,6 +83,23 @@ def test_rollup_eligible_sources_fall_back_to_inferred_dataset_sources(tmp_path:
     ]
 
 
+def test_rollup_eligible_sources_canonicalize_peru_from_dataset(tmp_path: Path) -> None:
+    data_path = (tmp_path / "issues.json").resolve()
+    source_id = _seed_issue(data_path, country="Peru", alias="Retail", source_type="jira")
+    settings = Settings(
+        DATA_PATH=str(data_path),
+        SUPPORTED_COUNTRIES="México,España,Perú,Peru,Colombia,Argentina",
+        JIRA_SOURCES_JSON="[]",
+        HELIX_SOURCES_JSON="[]",
+    )
+
+    out = _rollup_eligible_sources_by_country(settings)
+
+    assert "Peru" not in out
+    assert out["Perú"][0]["country"] == "Perú"
+    assert out["Perú"][0]["source_id"] == source_id
+
+
 def test_period_functionality_detail_setting_defaults_off() -> None:
     settings = Settings()
 
@@ -121,3 +138,29 @@ def test_save_settings_payload_persists_period_report_preferences(
     persisted = env_path.read_text(encoding="utf-8")
     assert "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED=true" in persisted
     assert "OPEN_ISSUES_FOCUS_MODE=maestras" in persisted
+
+
+def test_save_settings_payload_canonicalizes_supported_country_accents(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import bug_resolution_radar.config as cfg
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    saved = save_settings_payload(
+        {
+            "values": Settings().model_dump(),
+            "supportedCountries": ["México", "Peru", "Perú"],
+            "jiraSources": [],
+            "helixSources": [],
+            "countryRollupSources": {},
+            "jiraDisabledSourceIds": [],
+            "helixDisabledSourceIds": [],
+        }
+    )
+
+    assert saved["supportedCountries"] == ["México", "Perú"]
+    assert "SUPPORTED_COUNTRIES=México,Perú" in env_path.read_text(encoding="utf-8")

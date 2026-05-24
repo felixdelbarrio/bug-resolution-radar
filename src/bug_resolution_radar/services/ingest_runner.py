@@ -16,11 +16,13 @@ from bug_resolution_radar.analytics.finalist_discrepancies import (
     extract_helix_ids_from_text,
     is_post_jql_lookup_helix_source,
 )
+from bug_resolution_radar.analytics.status_semantics import is_finalist_status
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
     helix_service_origin_buug_for_country,
+    normalize_country_name,
 )
 from bug_resolution_radar.ingest.helix_ingest import (
     _build_arsql_endpoint,
@@ -92,43 +94,70 @@ def _merge_helix_items(doc: HelixDocument, incoming: List[HelixWorkItem]) -> Hel
     return doc
 
 
-def _ad_hoc_lookup_items_by_incident(
+def _lookup_sort_dt(item: HelixWorkItem) -> datetime:
+    return (
+        _parse_lookup_dt(item.lookup_at)
+        or _parse_lookup_dt(item.last_modified)
+        or _parse_lookup_dt(item.closed_date)
+        or _parse_lookup_dt(item.start_datetime)
+        or _parse_lookup_dt(item.target_date)
+        or datetime.min.replace(tzinfo=timezone.utc)
+    )
+
+
+def _is_better_historical_lookup_item(
+    candidate: HelixWorkItem,
+    current: HelixWorkItem | None,
+) -> bool:
+    if current is None:
+        return True
+    candidate_rank = (
+        _lookup_sort_dt(candidate),
+        not _lookup_item_requires_refresh(candidate),
+        is_post_jql_lookup_helix_source(
+            str(candidate.source_id or "").strip(),
+            str(candidate.source_alias or "").strip(),
+            str(candidate.helix_lookup_kind or "").strip(),
+        ),
+        bool(str(candidate.url or "").strip()),
+    )
+    current_rank = (
+        _lookup_sort_dt(current),
+        not _lookup_item_requires_refresh(current),
+        is_post_jql_lookup_helix_source(
+            str(current.source_id or "").strip(),
+            str(current.source_alias or "").strip(),
+            str(current.helix_lookup_kind or "").strip(),
+        ),
+        bool(str(current.url or "").strip()),
+    )
+    return candidate_rank >= current_rank
+
+
+def _historical_lookup_items_by_incident(
     doc: HelixDocument,
     *,
     country: str,
+    service_origin_buug: str,
 ) -> Dict[str, HelixWorkItem]:
-    country_txt = str(country or "").strip()
-    source_id = _finalist_lookup_source_id(country_txt)
+    country_txt = normalize_country_name(country) or str(country or "").strip()
+    service_origin_buug_txt = str(service_origin_buug or "").strip()
     out: Dict[str, HelixWorkItem] = {}
     for item in list(getattr(doc, "items", []) or []):
-        if country_txt and str(item.country or "").strip() != country_txt:
+        item_country = normalize_country_name(item.country) or str(item.country or "").strip()
+        if country_txt and item_country != country_txt:
             continue
-        if not is_post_jql_lookup_helix_source(
-            str(item.source_id or "").strip(),
-            str(item.source_alias or "").strip(),
-            str(item.helix_lookup_kind or "").strip(),
+        item_buug = str(item.service_origin_buug or "").strip()
+        if (
+            service_origin_buug_txt
+            and item_buug
+            and item_buug.casefold() != service_origin_buug_txt.casefold()
         ):
-            continue
-        if str(item.source_id or "").strip() and str(item.source_id or "").strip() != source_id:
             continue
         inc_id = str(item.id or "").strip().upper()
         if not inc_id:
             continue
-        current = out.get(inc_id)
-        if current is None:
-            out[inc_id] = item
-            continue
-        current_dt = (
-            _parse_lookup_dt(current.lookup_at)
-            or _parse_lookup_dt(current.last_modified)
-            or datetime.min.replace(tzinfo=timezone.utc)
-        )
-        candidate_dt = (
-            _parse_lookup_dt(item.lookup_at)
-            or _parse_lookup_dt(item.last_modified)
-            or datetime.min.replace(tzinfo=timezone.utc)
-        )
-        if candidate_dt >= current_dt:
+        if _is_better_historical_lookup_item(item, out.get(inc_id)):
             out[inc_id] = item
     return out
 
@@ -158,7 +187,7 @@ def _jira_incidents_by_country(
         source_id = str(issue.source_id or "").strip()
         if selected_source_ids and source_id not in selected_source_ids:
             continue
-        country = str(issue.country or "").strip()
+        country = normalize_country_name(issue.country) or str(issue.country or "").strip()
         jira_key = str(issue.key or "").strip().upper()
         if not country or not jira_key:
             continue
@@ -231,7 +260,45 @@ def _is_closed_status(value: str) -> bool:
 
 
 def _is_lookup_terminal_status(value: str) -> bool:
-    return str(value or "").strip().lower() in {"closed", "resolved"}
+    return bool(is_finalist_status(value))
+
+
+def _historical_item_to_finalist_lookup_item(
+    item: HelixWorkItem,
+    *,
+    country: str,
+    service_origin_buug: str,
+    source_id: str,
+    source_alias: str,
+    matched_jira_keys: List[str],
+    run_id: str,
+    lookup_at: str,
+) -> HelixWorkItem:
+    matched_keys = sorted(
+        {
+            str(key or "").strip().upper()
+            for key in list(matched_jira_keys or [])
+            if str(key or "").strip()
+        }
+    )
+    status = str(item.status or item.status_raw or "").strip()
+    return item.model_copy(
+        update={
+            "status": status,
+            "country": str(country or "").strip(),
+            "service_origin_buug": str(
+                service_origin_buug or item.service_origin_buug or ""
+            ).strip(),
+            "source_id": str(source_id or "").strip(),
+            "source_alias": str(source_alias or "").strip(),
+            "helix_lookup_kind": POST_JQL_LOOKUP_HELIX_KIND,
+            "matched_jira_keys": matched_keys,
+            "lookup_run_id": str(item.lookup_run_id or run_id or "").strip(),
+            "lookup_at": str(item.lookup_at or lookup_at or "").strip(),
+            "lookup_status": str(item.lookup_status or "cached_finalist").strip(),
+            "lookup_error": str(item.lookup_error or "").strip(),
+        }
+    )
 
 
 def _helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
@@ -354,26 +421,62 @@ def _run_finalist_status_lookup(
     batch_success_count = 0
     total_batches = 0
     completed_batches = 0
+    cached_final_items: list[HelixWorkItem] = []
+    cached_final_count = 0
 
     pending_by_country: Dict[str, Dict[str, List[str]]] = {}
     for country, inc_map in inc_by_country.items():
-        ad_hoc_items = _ad_hoc_lookup_items_by_incident(merged_helix, country=country)
-        pending = {
-            inc_id: jira_keys
-            for inc_id, jira_keys in inc_map.items()
-            if _lookup_item_requires_refresh(ad_hoc_items.get(str(inc_id).strip().upper()))
-        }
+        country_txt = normalize_country_name(country) or str(country or "").strip()
+        service_origin_buug = helix_service_origin_buug_for_country(country_txt)
+        source_alias = POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS
+        source_id = _finalist_lookup_source_id(country_txt)
+        historical_items = _historical_lookup_items_by_incident(
+            merged_helix,
+            country=country_txt,
+            service_origin_buug=service_origin_buug,
+        )
+        pending: Dict[str, List[str]] = {}
+        for inc_id, jira_keys in inc_map.items():
+            normalized_inc_id = str(inc_id or "").strip().upper()
+            historical_item = historical_items.get(normalized_inc_id)
+            if historical_item is not None and not _lookup_item_requires_refresh(historical_item):
+                cached_final_items.append(
+                    _historical_item_to_finalist_lookup_item(
+                        historical_item,
+                        country=country_txt,
+                        service_origin_buug=service_origin_buug,
+                        source_id=source_id,
+                        source_alias=source_alias,
+                        matched_jira_keys=jira_keys,
+                        run_id=run_id,
+                        lookup_at=lookup_at,
+                    )
+                )
+                continue
+            pending[normalized_inc_id] = jira_keys
         if pending:
-            pending_by_country[country] = pending
+            pending_by_country[country_txt] = pending
             total_batches += len(_chunked(list(pending.keys()), size=batch_size))
+
+    if cached_final_items:
+        before_cached = {str(item.id or "").strip().upper() for item in cached_final_items}
+        cached_final_count = len({item_id for item_id in before_cached if item_id})
+        merged_helix = _merge_helix_items(merged_helix, cached_final_items)
+        issues_doc = _merge_issues(
+            issues_doc, [_helix_item_to_issue(item) for item in cached_final_items]
+        )
 
     if not pending_by_country:
         message = (
             "Lookup Helix omitido: todos los INC encontrados ya están localizados "
-            "en histórico ad hoc con estado Closed/Resolved."
+            "en histórico Helix con estado finalista."
         )
         if on_message is not None:
             on_message(True, message)
+        if cached_final_items:
+            issues_doc.ingested_at = now_iso()
+            helix_repo.save(merged_helix)
+            save_issues_doc(settings.DATA_PATH, issues_doc)
         return issues_doc, {
             "state": "skipped_cached",
             "summary": message,
@@ -383,6 +486,7 @@ def _run_finalist_status_lookup(
             "success_count": 0,
             "total_sources": 0,
             "found_count": 0,
+            "cached_final_count": int(cached_final_count),
             "missing_count": 0,
             "error_count": 0,
             "messages": [{"ok": True, "message": message}],
@@ -568,7 +672,8 @@ def _run_finalist_status_lookup(
     state = "success" if error_count == 0 else ("partial" if found_total > 0 else "error")
     summary = (
         "Lookup Helix finalizado: "
-        f"{found_total} INC recuperados, {missing_total} sin resultado, {error_count} lotes con error."
+        f"{found_total} INC recuperados, {cached_final_count} reutilizados de histórico finalista, "
+        f"{missing_total} sin resultado, {error_count} lotes con error."
     )
     return issues_doc, {
         "state": state,
@@ -579,6 +684,7 @@ def _run_finalist_status_lookup(
         "success_count": int(batch_success_count),
         "total_sources": int(total_batches),
         "found_count": int(found_total),
+        "cached_final_count": int(cached_final_count),
         "missing_count": int(missing_total),
         "error_count": int(error_count),
         "messages": messages,

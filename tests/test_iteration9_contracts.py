@@ -580,6 +580,76 @@ def test_lookup_does_not_query_ad_hoc_incidents_already_closed_or_resolved(
     assert called is False
 
 
+def test_lookup_reuses_historical_finalist_helix_items_without_arsql(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    data_path = tmp_path / "issues.json"
+    helix_path = tmp_path / "helix.json"
+    HelixRepo(helix_path).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC000102885426",
+                    status="Closed",
+                    country="México",
+                    service_origin_buug="BBVA México",
+                    source_id="helix:mexico:mx-smartit",
+                    source_alias="MX SmartIT",
+                    lookup_at="2026-05-20T00:00:00+00:00",
+                    url="https://helix.example/smartit/app/#/incidentPV/IDG102885426",
+                )
+            ]
+        )
+    )
+    save_issues_doc(
+        str(data_path),
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="SKSEMEX-84900",
+                    summary="INC000102885426 - liquidez",
+                    status="En progreso",
+                    type="Historia",
+                    priority="Medium",
+                    country="México",
+                    source_type="jira",
+                    source_id="jira:mexico:core",
+                    source_alias="Core",
+                )
+            ]
+        ),
+    )
+    called = False
+
+    def _fail_if_called(**_: Any) -> tuple[bool, str, HelixDocument]:
+        nonlocal called
+        called = True
+        return True, "unexpected", HelixDocument.empty()
+
+    monkeypatch.setattr(ingest_runner, "lookup_helix_incidents_by_arsql", _fail_if_called)
+
+    result = run_finalist_lookup_ingest(
+        Settings(DATA_PATH=str(data_path), HELIX_DATA_PATH=str(helix_path)),
+        selected_sources=[
+            {
+                "source_id": "jira:mexico:core",
+                "country": "México",
+                "alias": "Core",
+                "jql": "project = CORE",
+            }
+        ],
+    )
+
+    assert result["state"] == "skipped_cached"
+    assert result["cached_final_count"] == 1
+    assert called is False
+    stored_issues = load_issues_doc(str(data_path)).issues
+    cached = next(issue for issue in stored_issues if issue.key == "INC000102885426")
+    assert cached.source_id == "helix:mexico:lookup-estados-finalistas-jira"
+    assert cached.helix_lookup_kind == POST_JQL_LOOKUP_HELIX_KIND
+    assert cached.url == "https://helix.example/smartit/app/#/incidentPV/IDG102885426"
+
+
 def test_run_jira_ingest_does_not_trigger_finalist_lookup(monkeypatch: Any, tmp_path: Path) -> None:
     calls: list[str] = []
 

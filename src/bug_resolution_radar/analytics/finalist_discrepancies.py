@@ -566,6 +566,18 @@ def apply_effective_finalist_lookup_state(
         }
     )
     work = safe.copy(deep=False)
+    stale_helper_cols = [
+        column
+        for column in (
+            "__helix_finalized_at",
+            "__effective_helix_id",
+            "__effective_helix_status",
+            "__effective_finalist_by_helix",
+        )
+        if column in work.columns
+    ]
+    if stale_helper_cols:
+        work = work.drop(columns=stale_helper_cols)
     work["__jira_key"] = _series_text(work, "key").str.strip()
     work["__source_id"] = _series_text(work, "source_id").str.strip()
     work = work.merge(helper, on=["__source_id", "__jira_key"], how="left", sort=False)
@@ -580,3 +592,35 @@ def apply_effective_finalist_lookup_state(
     work["__effective_finalist_by_helix"] = has_effective
     cleanup = [col for col in ("__source_id", "__jira_key") if col in work.columns]
     return work.drop(columns=cleanup).copy(deep=False)
+
+
+def apply_effective_finalist_lookup_state_for_scope(
+    scoped_df: pd.DataFrame,
+    *,
+    history_df: pd.DataFrame,
+    settings: Settings,
+    country: str,
+    source_ids: Sequence[str],
+    reference_day: pd.Timestamp | str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Apply historical Helix finalist state to the active, already-filtered scope."""
+    safe_scope = _safe_frame(scoped_df)
+    history = _safe_frame(history_df)
+    lookup_df = history if not history.empty else safe_scope
+    discrepancies = build_finalist_status_discrepancies(
+        lookup_df,
+        settings=settings,
+        country=country,
+        source_ids=source_ids,
+        reference_day=reference_day,
+    )
+    if discrepancies.empty:
+        return safe_scope.copy(deep=False), discrepancies
+    return (
+        apply_effective_finalist_lookup_state(
+            safe_scope,
+            discrepancies=discrepancies,
+            reference_window=reference_day,
+        ),
+        discrepancies,
+    )

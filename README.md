@@ -35,7 +35,7 @@ make run
 ```
 
 `make run` abre el contenedor desktop local.
-`make CI` valida formato, lint, tipado, guardias de documentación/código muerto y tests con cobertura.
+`make CI` valida formato, tipado, cobertura, build frontend, `pip check` y guardias de documentación/código muerto.
 
 ## Architecture
 
@@ -48,6 +48,12 @@ Resumen de capas:
 - `src/bug_resolution_radar/ui/`: módulos legacy de Streamlit aún presentes como referencia de migración y utilidades de exportación históricas; el runtime activo ya no depende de esta shell.
 - `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
 - `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, exportes e ingesta asíncrona.
+
+Flujo clave de estados finalistas:
+- Las referencias `INC...` se extraen de todas las fuentes Jira seleccionadas y se deduplican por país/`Servicio Origen BU/UG` antes de llamar a Helix.
+- Antes de lanzar ARSQL, el conjunto se cruza con el histórico Helix local. Los INC ya finalistas se reutilizan y se persisten bajo el origen canónico `Lookup estados finalistas Jira`.
+- El cruce finalista usa el histórico Helix completo del país aunque la vista del reporte esté recortada por `ANALYSIS_LOOKBACK_MONTHS`; las filas Jira con Helix finalista quedan fuera de listas abiertas.
+- Los PPT de seguimiento enlazan cualquier `INC...` visible en tablas cuando existe URL Helix en el dataset normalizado o en discrepancias finalistas, y las secciones `>30 días` usan días completos para evitar filas visibles como `30 días`.
 
 ## Documentation
 
@@ -70,7 +76,7 @@ El proyecto usa `.env` (puedes partir de `.env.example`).
 
 Variables clave:
 - App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`, `LOG_LEVEL`.
-- Jira: `JIRA_BASE_URL`, `JIRA_SOURCES_JSON`, `JIRA_INGEST_DISABLED_SOURCES_JSON`, `JIRA_BROWSER`, `JIRA_BROWSER_LOGIN_URL`.
+- Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_INGEST_DISABLED_SOURCES_JSON`, `JIRA_BROWSER`, `JIRA_BROWSER_LOGIN_URL`.
 - Helix: `HELIX_SOURCES_JSON`, `HELIX_INGEST_DISABLED_SOURCES_JSON`, `HELIX_DATA_PATH`, `HELIX_BROWSER`, `HELIX_DASHBOARD_URL`, `HELIX_PROXY`, `HELIX_SSL_VERIFY`.
 - ARSQL: `HELIX_ARSQL_BASE_URL`, `HELIX_ARSQL_DATASOURCE_UID`, `HELIX_ARSQL_SOURCE_SERVICE_N1`, `HELIX_ARSQL_LIMIT`, `HELIX_ARSQL_DASHBOARD_URL`, `HELIX_ARSQL_GRAFANA_ORG_ID`.
 - Ventana de análisis: `ANALYSIS_LOOKBACK_MONTHS` (recomendado: `12`).
@@ -78,6 +84,8 @@ Variables clave:
   - `INGEST_PROFILE_ENABLED`, `INGEST_PROFILE_JSONL_PATH`
   - `INGEST_CIRCUIT_ENABLED`, `INGEST_CIRCUIT_STATE_PATH`
   - `INGEST_CIRCUIT_FAILURE_THRESHOLD`, `INGEST_CIRCUIT_WINDOW_SECONDS`, `INGEST_CIRCUIT_COOLDOWN_SECONDS`
+
+`SUPPORTED_COUNTRIES` se normaliza con acentos canónicos; por ejemplo `Peru` y `Perú` se consolidan como `Perú`.
 
 ## Quality
 
@@ -90,8 +98,10 @@ make test
 ```
 
 `make CI` valida:
-- `ruff format --check`, `black --check`, `ruff check`
+- `ruff format --check`
 - `mypy src`
+- `pip check`
+- build frontend
 - `scripts/check_dead_private_helpers.py`
 - `scripts/check_docs_references.py`
 - `pytest --cov`

@@ -23,6 +23,10 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.finalist_discrepancies import (
+    apply_effective_finalist_lookup_state,
+    apply_effective_finalist_lookup_state_for_scope,
+)
 from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
     FinalistDiscrepancyIssueRow,
     build_finalist_discrepancy_issue_list,
@@ -62,7 +66,11 @@ from bug_resolution_radar.analytics.status_semantics import effective_closed_mas
 from bug_resolution_radar.analytics.time_windows import TimeWindowService
 from bug_resolution_radar.analytics.trend_charts import ChartContext, build_trends_registry
 from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
-from bug_resolution_radar.common.issue_links import linkify_issue_references
+from bug_resolution_radar.common.issue_links import (
+    HELIX_ID_RE,
+    build_issue_url_maps,
+    linkify_issue_references,
+)
 from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
@@ -3676,6 +3684,153 @@ def _linkify_finalist_description_cells(
         )
 
 
+def _frame_records(df: pd.DataFrame | None) -> list[Mapping[str, object]]:
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    return cast(list[Mapping[str, object]], df.to_dict(orient="records"))
+
+
+def _build_report_issue_url_maps(
+    *,
+    all_df: pd.DataFrame,
+    finalist_discrepancies: pd.DataFrame | None,
+    settings: Settings,
+) -> tuple[dict[str, str], dict[str, str]]:
+    rows: list[Mapping[str, object]] = []
+    rows.extend(_frame_records(all_df))
+    rows.extend(_frame_records(finalist_discrepancies))
+    return build_issue_url_maps(
+        rows,
+        jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
+        helix_base_url=str(
+            getattr(settings, "HELIX_ARSQL_DASHBOARD_URL", "")
+            or getattr(settings, "HELIX_DASHBOARD_URL", "")
+            or ""
+        ).strip(),
+    )
+
+
+def _text_frame_link_targets(tf: Any) -> set[str]:
+    out: set[str] = set()
+    for paragraph in list(getattr(tf, "paragraphs", []) or []):
+        for run in list(getattr(paragraph, "runs", []) or []):
+            try:
+                url = str(run.hyperlink.address or "").strip()
+            except Exception:
+                url = ""
+            if url:
+                out.add(url)
+    return out
+
+
+def _write_linkified_issue_reference_cell(
+    cell: Any,
+    text: str,
+    *,
+    jira_urls: Mapping[str, str],
+    helix_urls: Mapping[str, str],
+) -> None:
+    tf = getattr(cell, "text_frame", None)
+    if tf is None:
+        return
+    try:
+        tf.clear()
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.word_wrap = True
+        tf.margin_left = Inches(0.04)
+        tf.margin_right = Inches(0.04)
+        tf.margin_top = Inches(0.02)
+        tf.margin_bottom = Inches(0.02)
+    except Exception:
+        pass
+    try:
+        cell.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+
+    body_rgb = RGBColor(*_TABLE_BODY_FG_RGB)
+    lines = str(text or "").splitlines() or [""]
+    for line_idx, line in enumerate(lines):
+        paragraph = tf.paragraphs[0] if line_idx == 0 else tf.add_paragraph()
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.space_before = Pt(0)
+        paragraph.space_after = Pt(0)
+        segments = linkify_issue_references(
+            line,
+            jira_urls=dict(jira_urls),
+            helix_urls=dict(helix_urls),
+        )
+        if not segments:
+            run = paragraph.add_run()
+            run.text = ""
+            run.font.size = Pt(_ISSUE_TABLE_BODY_FONT_SIZE_PT)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            continue
+        for segment in segments:
+            run = paragraph.add_run()
+            run.text = segment.text
+            run.font.size = Pt(_ISSUE_TABLE_BODY_FONT_SIZE_PT)
+            run.font.name = _ISSUE_TABLE_FONT_NAME
+            try:
+                run.font.color.rgb = body_rgb
+            except Exception:
+                pass
+            if segment.url:
+                try:
+                    run.hyperlink.address = segment.url
+                    run.font.underline = True
+                except Exception:
+                    pass
+
+
+def _linkify_helix_references_in_tables(
+    prs: Any,
+    *,
+    jira_urls: Mapping[str, str],
+    helix_urls: Mapping[str, str],
+) -> None:
+    if not helix_urls:
+        return
+    normalized_helix_urls = {
+        str(key or "").strip().upper(): str(value or "").strip()
+        for key, value in dict(helix_urls).items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    if not normalized_helix_urls:
+        return
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not getattr(shape, "has_table", False):
+                continue
+            table = shape.table
+            for row in table.rows:
+                for cell in row.cells:
+                    text = str(cell.text or "")
+                    if not text or not HELIX_ID_RE.search(text):
+                        continue
+                    ids_in_cell = {
+                        str(match.group(0) or "").strip().upper()
+                        for match in HELIX_ID_RE.finditer(text)
+                    }
+                    cell_helix_urls = {
+                        inc_id: normalized_helix_urls[inc_id]
+                        for inc_id in ids_in_cell
+                        if inc_id in normalized_helix_urls
+                    }
+                    if not cell_helix_urls:
+                        continue
+                    tf = getattr(cell, "text_frame", None)
+                    linked_targets = _text_frame_link_targets(tf)
+                    if set(cell_helix_urls.values()).issubset(linked_targets):
+                        continue
+                    _write_linkified_issue_reference_cell(
+                        cell,
+                        text,
+                        jira_urls=jira_urls,
+                        helix_urls=cell_helix_urls,
+                    )
+
+
 def _style_finalist_status_cells(table_shape: Any, issues_count: int) -> None:
     if table_shape is None or not getattr(table_shape, "has_table", False):
         return
@@ -4163,11 +4318,18 @@ def _load_or_scope_data(
     source_ids: Sequence[str],
     dff_override: pd.DataFrame | None,
     open_df_override: pd.DataFrame | None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    all_df_override: pd.DataFrame | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if dff_override is not None:
         dff = dff_override.copy(deep=False)
+        all_df = (
+            all_df_override.copy(deep=False)
+            if isinstance(all_df_override, pd.DataFrame) and not all_df_override.empty
+            else dff
+        )
     else:
         base_df = load_issues_df(settings.DATA_PATH)
+        all_df = base_df
         scoped = scope_country_sources(base_df, country=country, source_ids=source_ids)
         dff = apply_analysis_depth_filter(scoped, settings=settings)
 
@@ -4176,7 +4338,7 @@ def _load_or_scope_data(
     else:
         closed_mask = effective_closed_mask(dff)
         open_df = dff.loc[~closed_mask].copy(deep=False)
-    return dff, open_df
+    return dff, open_df, all_df
 
 
 def generate_country_period_followup_ppt(
@@ -4186,6 +4348,7 @@ def generate_country_period_followup_ppt(
     source_ids: Sequence[str],
     dff_override: pd.DataFrame | None = None,
     open_df_override: pd.DataFrame | None = None,
+    all_df_override: pd.DataFrame | None = None,
     finalist_discrepancies_override: pd.DataFrame | None = None,
     template_path: str | None = None,
     applied_filter_summary: str = "",
@@ -4196,13 +4359,34 @@ def generate_country_period_followup_ppt(
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     country_txt = str(country or "").strip()
-    dff, open_df = _load_or_scope_data(
+    dff, _open_df, all_df = _load_or_scope_data(
         settings,
         country=country_txt,
         source_ids=clean_source_ids,
         dff_override=dff_override,
         open_df_override=open_df_override,
+        all_df_override=all_df_override,
     )
+    effective_finalist_discrepancies = (
+        finalist_discrepancies_override
+        if isinstance(finalist_discrepancies_override, pd.DataFrame)
+        else pd.DataFrame()
+    )
+    if not effective_finalist_discrepancies.empty:
+        dff = apply_effective_finalist_lookup_state(
+            dff,
+            discrepancies=effective_finalist_discrepancies,
+            reference_window=reference_day,
+        )
+    elif isinstance(all_df, pd.DataFrame) and not all_df.empty:
+        dff, effective_finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
+            dff,
+            history_df=all_df,
+            settings=settings,
+            country=country_txt,
+            source_ids=clean_source_ids,
+            reference_day=reference_day,
+        )
     if dff.empty:
         raise ValueError("No hay incidencias para generar el informe de seguimiento.")
 
@@ -4318,7 +4502,7 @@ def generate_country_period_followup_ppt(
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
-        finalist_discrepancies_override
+        effective_finalist_discrepancies
     )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
@@ -4355,6 +4539,17 @@ def generate_country_period_followup_ppt(
             period_label=functionality_followup.period_label,
             issues=finalist_discrepancy_rows,
         )
+
+    jira_url_map, helix_url_map = _build_report_issue_url_maps(
+        all_df=all_df,
+        finalist_discrepancies=effective_finalist_discrepancies,
+        settings=settings,
+    )
+    _linkify_helix_references_in_tables(
+        prs,
+        jira_urls=jira_url_map,
+        helix_urls=helix_url_map,
+    )
 
     _remove_slide_number_artifacts(prs)
     validate_shapes_inside_slide(prs)

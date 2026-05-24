@@ -9,8 +9,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.finalist_discrepancies import (
-    apply_effective_finalist_lookup_state,
-    build_finalist_status_discrepancies,
+    apply_effective_finalist_lookup_state_for_scope,
 )
 from bug_resolution_radar.analytics.issues import normalize_text_col
 from bug_resolution_radar.analytics.quincenal_scope import (
@@ -68,6 +67,7 @@ class ReportFilters:
 
 @dataclass(frozen=True)
 class PreparedReportContext:
+    all_df: pd.DataFrame
     scoped_df: pd.DataFrame
     dff: pd.DataFrame
     open_df: pd.DataFrame
@@ -238,23 +238,17 @@ def _build_context_for_scope(
         scoped_df = _scope_country_sources(base_df, country=country, source_ids=clean_source_ids)
 
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
-    country_df = apply_analysis_depth_filter(
-        _scope_country_df(base_df, country=country), settings=settings
-    )
+    country_history_df = _scope_country_df(base_df, country=country)
+    country_df = apply_analysis_depth_filter(country_history_df, settings=settings)
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
-    finalist_discrepancies = build_finalist_status_discrepancies(
-        country_df if not country_df.empty else scoped_df,
+    scoped_df, finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
+        scoped_df,
+        history_df=country_history_df if not country_history_df.empty else country_df,
         settings=settings,
         country=country,
         source_ids=clean_source_ids,
         reference_day=reference_day,
     )
-    if not finalist_discrepancies.empty:
-        scoped_df = apply_effective_finalist_lookup_state(
-            scoped_df,
-            discrepancies=finalist_discrepancies,
-            reference_window=reference_day,
-        )
     dff = _apply_explicit_filters(scoped_df, filters)
     dff = _apply_quincenal_scope(
         dff,
@@ -266,6 +260,7 @@ def _build_context_for_scope(
     closed_mask = effective_closed_mask(dff) if not dff.empty else pd.Series(dtype=bool)
     open_df = dff.loc[~closed_mask].copy(deep=False) if not dff.empty else pd.DataFrame()
     return PreparedReportContext(
+        all_df=base_df,
         scoped_df=scoped_df,
         dff=dff,
         open_df=open_df,
@@ -334,6 +329,7 @@ def generate_period_followup_report_artifact(
         source_ids=source_ids,
         dff_override=context.dff,
         open_df_override=context.open_df,
+        all_df_override=context.all_df,
         finalist_discrepancies_override=context.finalist_discrepancies,
         applied_filter_summary=applied_filter_summary,
         functionality_status_filters=functionality_status_filters,
