@@ -491,7 +491,7 @@ def test_trend_detail_and_issue_keys_endpoints_return_filtered_contracts(
     assert keys_response.json() == {"total": 1, "keys": ["RAD-1"]}
 
 
-def test_intelligence_endpoint_returns_streamlit_aligned_payload(
+def test_intelligence_endpoint_returns_react_aligned_payload(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -611,7 +611,7 @@ def test_browser_open_endpoint_allows_fallback_only_on_explicit_click(
     assert captured["allow_system_default_fallback"] is True
 
 
-def test_ingest_overview_endpoint_exposes_streamlit_aligned_contract(
+def test_ingest_overview_endpoint_exposes_react_aligned_contract(
     monkeypatch,
     tmp_path: Path,
 ) -> None:

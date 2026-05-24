@@ -39,7 +39,7 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
 
 - Servicios backend
   - `src/bug_resolution_radar/services`
-  - Responsabilidad: snapshots, orquestación de ingesta, lookup finalista, settings, notas, exportes y mantenimiento.
+  - Responsabilidad: snapshots, orquestación de ingesta, lookup finalista, settings, notas, exportes y mantenimiento. El merge y mapeo de snapshots de ingesta vive centralizado en `services/ingest_merge.py`.
 
 - Analítica
   - `src/bug_resolution_radar/analytics`

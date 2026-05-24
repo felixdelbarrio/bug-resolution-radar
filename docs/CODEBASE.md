@@ -42,6 +42,9 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/services/ingest_runner.py`
   - Orquestación síncrona de ingesta Jira/Helix y lookup finalista por país/BU-UG, incluyendo el filtro central de candidatos ARSQL desde descripciones Jira no finalistas.
 
+- `src/bug_resolution_radar/services/ingest_merge.py`
+  - Merge y mapeo compartido de snapshots Jira/Helix para evitar lógica duplicada entre runner backend y contratos de presentación.
+
 - `src/bug_resolution_radar/analytics/analysis_window.py`
   - Ventana global de análisis por meses.
 
@@ -83,55 +86,28 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/ingest/helix_ingest.py`
   - Pipeline Helix ARSQL (preflight, extracción, normalización y lookup exacto de INC).
 
-## UI Package Map
+## Frontend Package Map
 
-- `src/bug_resolution_radar/ui/app.py`
-  - Shell principal de navegación, tema y scope.
+- `frontend/src/app/router.tsx`
+  - Router React y composición de páginas dentro de la shell.
 
-- `src/bug_resolution_radar/ui/pages/ingest_page.py`
-  - Orquestación de tests de conexión e ingestas por fuente.
+- `frontend/src/components/AppShell.tsx`
+  - Layout principal, navegación y estado global de interfaz.
 
-- `src/bug_resolution_radar/ui/pages/dashboard_page.py`
-  - Router de secciones del dashboard y construcción del contexto.
+- `frontend/src/pages/`
+  - Pantallas de dashboard, issues, ingesta, settings y reportes consumiendo contratos HTTP.
 
-- `src/bug_resolution_radar/ui/pages/insights_page.py`
-  - Entry point de vistas analíticas especializadas.
+- `frontend/src/components/`
+  - Componentes reutilizables de tabla, filtros, paneles, gráficos e insights.
 
-- `src/bug_resolution_radar/ui/pages/report_page.py`
-  - Generación de reporte ejecutivo PPT desde scope activo.
+- `frontend/src/lib/api.ts`
+  - Cliente HTTP tipado para FastAPI.
 
-- `src/bug_resolution_radar/ui/pages/config_page.py`
-  - Gestión de settings, fuentes y perfil corporativo.
+- `frontend/src/lib/semanticColors.ts`
+  - Contrato de colores semánticos compartido con backend.
 
-- `src/bug_resolution_radar/ui/cache.py`
-  - Caché de agregaciones por firma de dataframe.
-
-- `src/bug_resolution_radar/ui/common.py`
-  - Carga/guardado de issues y helpers de color/normalización.
-
-- `src/bug_resolution_radar/ui/components/filters.py`
-  - Filtros canónicos y sincronización de estado.
-
-- `src/bug_resolution_radar/ui/components/issues.py`
-  - Tabla/cards de issues filtradas.
-
-- `src/bug_resolution_radar/ui/dashboard/data_context.py`
-  - Contexto compartido (`dff`, `open_df`, `kpis`) por rerun.
-
-- `src/bug_resolution_radar/ui/dashboard/registry.py`
-  - Registro de gráficos y render functions de tendencias.
-
-- `src/bug_resolution_radar/ui/dashboard/tabs`
-  - Render específico de Overview/Issues/Kanban/Trends/Notes.
-
-- `src/bug_resolution_radar/ui/insights/engine.py`
-  - Motor de insights y scoring contextual.
-
-- `src/bug_resolution_radar/ui/insights/learning_store.py`
-  - Memoria cross-session por scope.
-
-- `src/bug_resolution_radar/ui/insights/copilot.py`
-  - Resumen operativo y Q&A guiado por evidencia.
+- `frontend/src/styles/app.css`
+  - Tema visual, layout responsive y reglas CSS de la SPA.
 
 ## Reporting and Theme
 
@@ -144,8 +120,8 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/theme/design_tokens.py`
   - Tokens visuales y resolución de tipografías.
 
-- `src/bug_resolution_radar/ui/style.py`
-  - CSS global y adaptación de tema para Plotly/Streamlit.
+- `src/bug_resolution_radar/theme/plotly_style.py`
+  - Adaptación de tema para figuras Plotly usadas por API y reportes.
 
 ## Test Map
 

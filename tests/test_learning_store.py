@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.ui.insights.learning_store import (
+from bug_resolution_radar.services.insights_learning_store import (
     InsightsLearningStore,
     default_learning_path,
     learning_scope_key,

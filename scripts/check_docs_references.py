@@ -22,24 +22,25 @@ REQUIRED_HEADINGS: Dict[str, Tuple[str, ...]] = {
     "docs/INSIGHTS_ENGINE.md": ("## Pipeline", "## Extension Points"),
     "docs/THEMING.md": ("## Theme Tokens", "## Plotly Rules"),
     "docs/QUALITY.md": ("## Local Commands", "## CI Pipeline"),
-    "docs/CODEBASE.md": ("## Core Package Map", "## UI Package Map"),
+    "docs/CODEBASE.md": ("## Core Package Map", "## Frontend Package Map"),
 }
 
 STALE_DOC_TOKENS: Tuple[str, ...] = (
     "src/bug_resolution_radar/kpis.py",
     "src/bug_resolution_radar/insights.py",
     "src/bug_resolution_radar/security.py",
-    "src/bug_resolution_radar/ui/dashboard/overview.py",
-    "src/bug_resolution_radar/ui/dashboard/trends.py",
+    "src/bug_resolution_radar/ui",
+    "streamlit",
+    "Streamlit",
     "JIRA_JQL",
     "ANALYSIS_LOOKBACK_DAYS",
 )
 
 CODE_BLOCK_PATH_RE = re.compile(
-    r"`((?:src|tests|scripts|docs|\.github/workflows|assets)/[^`]+|README\.md|Makefile|pyproject\.toml|run_api\.py|run_desktop\.py|app\.py)`"
+    r"`((?:src|frontend|tests|scripts|docs|\.github/workflows|assets)/[^`]+|README\.md|Makefile|pyproject\.toml|run_api\.py|run_desktop\.py|app\.py)`"
 )
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-LOCAL_FILE_RE = re.compile(r"^(?:src|tests|scripts|docs|\.github/workflows|assets)/")
+LOCAL_FILE_RE = re.compile(r"^(?:src|frontend|tests|scripts|docs|\.github/workflows|assets)/")
 
 
 def _normalize_local_path(token: str) -> str:

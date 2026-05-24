@@ -7,6 +7,8 @@ from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
+from bug_resolution_radar.repositories.issues_store import save_issues_doc
+from bug_resolution_radar.services.insights_learning_store import InsightsLearningStore
 from bug_resolution_radar.services.source_maintenance import (
     cache_inventory,
     purge_source_cache,
@@ -15,8 +17,6 @@ from bug_resolution_radar.services.source_maintenance import (
     reset_cache_store,
     source_cache_impact,
 )
-from bug_resolution_radar.ui.common import save_issues_doc
-from bug_resolution_radar.ui.insights.learning_store import InsightsLearningStore
 
 
 def test_remove_jira_source_from_settings_updates_sources_json() -> None:
