@@ -16,7 +16,10 @@ from bug_resolution_radar.analytics.finalist_discrepancies import (
     extract_helix_ids_from_text,
     is_post_jql_lookup_helix_source,
 )
-from bug_resolution_radar.analytics.status_semantics import is_finalist_status
+from bug_resolution_radar.analytics.status_semantics import (
+    is_finalist_status,
+    is_jira_finalist_lookup_status,
+)
 from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
@@ -175,6 +178,7 @@ def _jira_incidents_by_country(
     *,
     selected_sources: List[Dict[str, str]],
 ) -> Dict[str, Dict[str, List[str]]]:
+    """Return ARSQL lookup candidates from non-finalist JIRA descriptions only."""
     selected_source_ids = {
         str(source.get("source_id") or "").strip()
         for source in list(selected_sources or [])
@@ -191,14 +195,12 @@ def _jira_incidents_by_country(
         jira_key = str(issue.key or "").strip().upper()
         if not country or not jira_key:
             continue
-        text_parts = [
-            str(issue.summary or ""),
-            str(issue.description or ""),
-            str(issue.resolution or ""),
-            " ".join(str(label or "") for label in list(issue.labels or [])),
-            " ".join(str(component or "") for component in list(issue.components or [])),
-        ]
-        for inc_id in extract_helix_ids_from_text("\n".join(text_parts)):
+        if is_jira_finalist_lookup_status(issue.status):
+            continue
+        description = str(issue.description or "")
+        if not description:
+            continue
+        for inc_id in extract_helix_ids_from_text(description):
             bucket = out.setdefault(country, {}).setdefault(inc_id, [])
             if jira_key not in bucket:
                 bucket.append(jira_key)
@@ -397,7 +399,10 @@ def _run_finalist_status_lookup(
     arsql_endpoint = _arsql_endpoint_for_logs(settings)
 
     if not inc_by_country:
-        message = "Lookup Helix omitido: no se encontraron referencias INC en Jira."
+        message = (
+            "Lookup Helix omitido: no se encontraron referencias INC en descripciones "
+            "de Jira no finalistas."
+        )
         if on_message is not None:
             on_message(True, message)
         return issues_doc, {

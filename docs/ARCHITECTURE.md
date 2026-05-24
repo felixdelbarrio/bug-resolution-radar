@@ -19,7 +19,7 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
 
 ## Finalist Lookup Flow
 
-1. Jira es la fuente de referencias funcionales: el lookup finalista extrae `INC...` desde resumen, descripción, resolución, etiquetas y componentes.
+1. Jira es la fuente de referencias funcionales: el lookup finalista que consulta ARSQL extrae `INC...` solo desde la descripción y excluye Jira con estado `Accepted`, `Ready to deploy`, `Deployed` o el legado `Acepted`.
 2. La colección se deduplica por país y `Servicio Origen BU/UG`; no se particiona por origen Jira porque las mismas INC pueden aparecer en varios orígenes del país.
 3. Antes de llamar a ARSQL, el backend cruza las INC contra el histórico Helix local. Si la incidencia ya está en estado finalista, se reutiliza, se normaliza al origen canónico `Lookup estados finalistas Jira` y se evita la llamada.
 4. Solo las INC pendientes o no finalistas se envían a ARSQL en lotes explícitos. El lookup exacto no hereda IDs pendientes de cache ni filtros amplios de ingesta regular.
