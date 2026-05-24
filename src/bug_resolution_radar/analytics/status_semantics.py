@@ -24,6 +24,13 @@ CORE_FINAL_STATUS_TOKENS: Final[tuple[str, ...]] = (
     "deployed",
 )
 
+JIRA_FINALIST_LOOKUP_STATUS_TOKENS: Final[tuple[str, ...]] = (
+    "accepted",
+    "acepted",
+    "ready to deploy",
+    "deployed",
+)
+
 
 def _normalize_status_token(value: object) -> str:
     token = str(value or "").strip().lower()
@@ -51,6 +58,14 @@ def is_core_final_status(value: object) -> bool:
     if not token:
         return False
     return any(part in token for part in CORE_FINAL_STATUS_TOKENS)
+
+
+def is_jira_finalist_lookup_status(value: object) -> bool:
+    """Return True when a JIRA row should not drive the post-JQL ARSQL lookup."""
+    token = _normalize_status_token(value)
+    if not token:
+        return False
+    return token in JIRA_FINALIST_LOOKUP_STATUS_TOKENS
 
 
 def _to_dt_naive_utc(value: pd.Series) -> pd.Series:

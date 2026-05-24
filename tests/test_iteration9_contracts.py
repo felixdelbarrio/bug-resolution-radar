@@ -293,7 +293,7 @@ def test_jira_issue_normalization_sets_po_team_leader() -> None:
     assert issue.po_team_leader == "Víctor Expósito"
 
 
-def test_jira_inc_lookup_extracts_incidents_from_summary_and_description() -> None:
+def test_jira_inc_lookup_extracts_only_non_finalist_description_incidents() -> None:
     doc = IssuesDocument(
         issues=[
             NormalizedIssue(
@@ -313,6 +313,66 @@ def test_jira_inc_lookup_extracts_incidents_from_summary_and_description() -> No
                 summary="Sin resumen Helix",
                 description="Cruce INC000104216019",
                 status="Open",
+                type="Bug",
+                priority="High",
+                country="México",
+                source_type="jira",
+                source_id="jira:mexico:core",
+                source_alias="Core",
+            ),
+            NormalizedIssue(
+                key="MEX-3",
+                summary="Solo resumen INC000104216020",
+                description="Plantilla sin incidente Helix",
+                status="Open",
+                type="Bug",
+                priority="High",
+                country="México",
+                source_type="jira",
+                source_id="jira:mexico:core",
+                source_alias="Core",
+            ),
+            NormalizedIssue(
+                key="MEX-4",
+                summary="Finalista",
+                description="Cruce INC000104216021",
+                status="Accepted",
+                type="Bug",
+                priority="High",
+                country="México",
+                source_type="jira",
+                source_id="jira:mexico:core",
+                source_alias="Core",
+            ),
+            NormalizedIssue(
+                key="MEX-5",
+                summary="Finalista",
+                description="Cruce INC000104216022",
+                status="Ready to deploy",
+                type="Bug",
+                priority="High",
+                country="México",
+                source_type="jira",
+                source_id="jira:mexico:core",
+                source_alias="Core",
+            ),
+            NormalizedIssue(
+                key="MEX-6",
+                summary="Finalista",
+                description="Cruce INC000104216023",
+                status="Deployed",
+                type="Bug",
+                priority="High",
+                country="México",
+                source_type="jira",
+                source_id="jira:mexico:core",
+                source_alias="Core",
+            ),
+            NormalizedIssue(
+                key="MEX-7",
+                summary="Finalista typo legacy",
+                description="Cruce INC000104216024",
+                status="Acepted",
                 type="Bug",
                 priority="High",
                 country="México",
@@ -382,7 +442,7 @@ def test_finalist_lookup_ingest_persists_helix_internal_id_and_partial_progress(
             NormalizedIssue(
                 key="MEX-1",
                 summary="[Incidentes] INC000104216018",
-                description="",
+                description="Cruce operativo INC000104216018",
                 status="To Rework",
                 type="Bug",
                 priority="High",
@@ -397,7 +457,7 @@ def test_finalist_lookup_ingest_persists_helix_internal_id_and_partial_progress(
             NormalizedIssue(
                 key="MEX-2",
                 summary="Cruce INC000104216019",
-                description="",
+                description="Cruce operativo INC000104216019",
                 status="To Rework",
                 type="Bug",
                 priority="High",
@@ -544,6 +604,7 @@ def test_lookup_does_not_query_ad_hoc_incidents_already_closed_or_resolved(
             NormalizedIssue(
                 key="MEX-1",
                 summary="Cruce INC000104216018",
+                description="Cruce operativo INC000104216018",
                 status="Open",
                 type="Bug",
                 priority="High",
@@ -608,6 +669,7 @@ def test_lookup_reuses_historical_finalist_helix_items_without_arsql(
                 NormalizedIssue(
                     key="SKSEMEX-84900",
                     summary="INC000102885426 - liquidez",
+                    description="Cruce operativo INC000102885426",
                     status="En progreso",
                     type="Historia",
                     priority="Medium",
@@ -662,6 +724,7 @@ def test_run_jira_ingest_does_not_trigger_finalist_lookup(monkeypatch: Any, tmp_
                     NormalizedIssue(
                         key="MEX-1",
                         summary="Cruce INC000104216018",
+                        description="Cruce operativo INC000104216018",
                         status="Open",
                         type="Bug",
                         priority="High",
@@ -712,6 +775,7 @@ def test_finalist_lookup_ingest_runs_independently_from_saved_jira_data(
                 NormalizedIssue(
                     key="MEX-1",
                     summary="Cruce INC000104216018",
+                    description="Cruce operativo INC000104216018",
                     status="Open",
                     type="Bug",
                     priority="High",
@@ -769,6 +833,7 @@ def test_finalist_lookup_stops_batches_when_session_unavailable(
                 NormalizedIssue(
                     key="MEX-1",
                     summary="Cruce INC000104216018 INC000104216019 INC000104216020",
+                    description="Cruce operativo INC000104216018 INC000104216019 INC000104216020",
                     status="Open",
                     type="Bug",
                     priority="High",
