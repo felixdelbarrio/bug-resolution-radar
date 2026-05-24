@@ -28,7 +28,9 @@ from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkIte
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.repositories.issues_store import load_issues_doc, save_issues_doc
 from bug_resolution_radar.services import ingest_runner
+from bug_resolution_radar.services.ingest_merge import helix_item_to_issue
 from bug_resolution_radar.services.ingest_runner import (
+    _chunk_count,
     _chunked,
     _jira_incidents_by_country,
     run_finalist_lookup_ingest,
@@ -240,19 +242,12 @@ def test_save_settings_payload_persists_validated_rollups(monkeypatch: Any, tmp_
     assert "FINALIST_STATUS_ANALYSIS_MODE" not in persisted
 
 
-def test_streamlit_and_frontend_do_not_expose_editable_helix_buug_or_two_limit() -> None:
+def test_frontend_does_not_expose_legacy_helix_buug_or_two_limit() -> None:
     root = Path(__file__).resolve().parents[1]
-    streamlit_source = (root / "src/bug_resolution_radar/ui/pages/config_page.py").read_text(
-        encoding="utf-8"
-    )
     settings_source = (root / "frontend/src/pages/SettingsPage.tsx").read_text(encoding="utf-8")
     ingest_source = (root / "frontend/src/pages/IngestPage.tsx").read_text(encoding="utf-8")
     reports_source = (root / "frontend/src/pages/ReportsPage.tsx").read_text(encoding="utf-8")
-    streamlit_app_source = (root / "src/bug_resolution_radar/ui/app.py").read_text(encoding="utf-8")
 
-    assert 'disabled=["service_origin_buug"]' in streamlit_source
-    assert "max_selections=2" not in streamlit_source
-    assert "[:2]" not in streamlit_source
     assert "readOnly" in settings_source
     assert "PO / Team Leader" in settings_source
     assert "Modalidad del análisis" not in settings_source
@@ -267,7 +262,6 @@ def test_streamlit_and_frontend_do_not_expose_editable_helix_buug_or_two_limit()
     assert "Considerar solo estados finalistas del país" not in settings_source
     assert "periodSourceIds.length < 2" not in reports_source
     assert "sin agregados configurados; se omiten slides agregadas" in reports_source
-    assert "configured_rollup[:2]" not in streamlit_app_source
 
 
 def test_jira_issue_normalization_sets_po_team_leader() -> None:
@@ -399,6 +393,7 @@ def test_jira_inc_lookup_extracts_only_non_finalist_description_incidents() -> N
 def test_helix_lookup_batches_are_configurable_and_arsql_filters_buug() -> None:
     inc_ids = [f"INC{idx:012d}" for idx in range(100)]
     assert [len(batch) for batch in _chunked(inc_ids, size=25)] == [25, 25, 25, 25]
+    assert _chunk_count(len(inc_ids), size=25) == 4
 
     sql = _build_arsql_sql(
         create_start_ms=0,
@@ -418,6 +413,27 @@ def test_helix_lookup_batches_are_configurable_and_arsql_filters_buug() -> None:
     assert "INC000104216019" in sql
     assert "BBVA Perú" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA Perú')" in sql
+
+
+def test_shared_helix_item_mapping_preserves_lookup_metadata() -> None:
+    item = HelixWorkItem(
+        id="INC000104216018",
+        summary="Cerrado",
+        description="Detalle recuperado",
+        status="Closed",
+        closed_date="2026-05-21T00:00:00+00:00",
+        last_modified="2026-05-22T00:00:00+00:00",
+        country="México",
+        source_id="helix:mexico:lookup-estados-finalistas-jira",
+        source_alias="Lookup estados finalistas Jira",
+        helix_lookup_kind=POST_JQL_LOOKUP_HELIX_KIND,
+    )
+
+    issue = helix_item_to_issue(item)
+
+    assert issue.description == "Detalle recuperado"
+    assert issue.resolved == "2026-05-21T00:00:00+00:00"
+    assert issue.helix_lookup_kind == POST_JQL_LOOKUP_HELIX_KIND
 
 
 def test_finalist_lookup_ingest_persists_helix_internal_id_and_partial_progress(

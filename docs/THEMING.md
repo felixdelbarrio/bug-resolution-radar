@@ -8,7 +8,9 @@ Mantener una identidad visual consistente entre modo claro/oscuro sin estilos di
 
 Origen de tokens:
 - `src/bug_resolution_radar/theme/design_tokens.py`
-- `src/bug_resolution_radar/ui/style.py`
+- `src/bug_resolution_radar/theme/semantic_colors.py`
+- `frontend/src/styles/app.css`
+- `frontend/src/lib/semanticColors.ts`
 
 Tokens de referencia:
 - Superficies: `--bbva-surface`, `--bbva-surface-elevated`, `--bbva-surface-2`
@@ -24,29 +26,29 @@ Reglas:
 ## Plotly Rules
 
 Aplicación de tema:
-- `apply_plotly_bbva(...)` en `src/bug_resolution_radar/ui/style.py`
+- `apply_plotly_bbva(...)` en `src/bug_resolution_radar/theme/plotly_style.py`
 
 Criterios:
 - Títulos y leyendas sin ruido visual.
 - Colores semánticos estables (estado/prioridad).
-- Margen y tipografía homogéneos para export (UI + PPT).
+- Margen y tipografía homogéneos para API, frontend y PPT.
 
-## Streamlit Integration
+## React Integration
 
-- La preferencia se gestiona en `workspace_dark_mode`.
-- `ui/app.py` sincroniza la preferencia en estado y runtime.
-- `config_page.py` persiste el modo visual en `.env`.
+- La preferencia visual vive en la SPA y se persiste a través de contratos de settings.
+- `frontend/src/styles/app.css` define tokens claros/oscuros y superficies base.
+- `frontend/src/lib/semanticColors.ts` concentra estilos de chips/botones por estado y prioridad.
 
 ## Select/Popover Rules
 
-- Los dropdowns de `selectbox` y `multiselect` de BaseWeb se estilizan en:
-  - `src/bug_resolution_radar/ui/style.py`
+- Los controles de selección se estilizan en:
+  - `frontend/src/styles/app.css`
 - Reglas operativas:
-  - altura de opción compacta y consistente (`1.92rem`)
   - truncado de texto en una sola línea (`overflow + ellipsis`)
   - popover con altura acotada y scroll (`max-height` + `overflow-y:auto`) para evitar paneles gigantes con hueco vacío
 - Cualquier cambio de selectors en popovers debe validar:
-  - `tests/test_core_modules.py` (test `test_select_popover_rows_keep_compact_single_line_layout`)
+  - `npm --prefix frontend run build`
+  - `make CI`
 
 ## Safe Customization Checklist
 
