@@ -7,7 +7,12 @@ from typing import Dict, List
 
 import pandas as pd
 
-from bug_resolution_radar.config import Settings, all_configured_sources, rollup_source_ids
+from bug_resolution_radar.config import (
+    Settings,
+    all_configured_sources,
+    normalize_country_name,
+    rollup_source_ids,
+)
 
 
 @dataclass(frozen=True)
@@ -27,7 +32,16 @@ def _infer_source_type_from_source_id(source_id: str) -> str:
     return token or "jira"
 
 
-def inferred_sources_by_country(df_all: pd.DataFrame) -> Dict[str, List[Dict[str, str]]]:
+def _canonical_country(value: object, *, settings: Settings) -> str:
+    raw = str(value or "").strip()
+    return normalize_country_name(raw, settings=settings) or raw
+
+
+def inferred_sources_by_country(
+    df_all: pd.DataFrame,
+    *,
+    settings: Settings,
+) -> Dict[str, List[Dict[str, str]]]:
     """Infer source metadata directly from ingested data preserving first-seen order."""
     if not isinstance(df_all, pd.DataFrame) or df_all.empty or "source_id" not in df_all.columns:
         return {}
@@ -36,7 +50,7 @@ def inferred_sources_by_country(df_all: pd.DataFrame) -> Dict[str, List[Dict[str
     seen: set[tuple[str, str]] = set()
     for row in df_all.to_dict(orient="records"):
         source_id = str(row.get("source_id") or "").strip()
-        country = str(row.get("country") or "").strip()
+        country = _canonical_country(row.get("country"), settings=settings)
         if not source_id or not country:
             continue
         key = (country, source_id)
@@ -71,6 +85,47 @@ def configured_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str
         if not country or not source_id:
             continue
         grouped.setdefault(country, []).append(dict(row))
+    return grouped
+
+
+def sources_by_country_from_index(
+    index_payload: Dict[str, object],
+    *,
+    settings: Settings,
+) -> Dict[str, List[Dict[str, str]]]:
+    """Normalize workspace-index source metadata by canonical country."""
+    grouped: Dict[str, List[Dict[str, str]]] = {}
+    seen: set[tuple[str, str]] = set()
+    raw_sources = index_payload.get("sourcesByCountry")
+    if not isinstance(raw_sources, dict):
+        return grouped
+    for raw_country, rows in raw_sources.items():
+        bucket_country = _canonical_country(raw_country, settings=settings)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            source_id = str(row.get("source_id") or "").strip()
+            raw_row_country = row.get("country") or bucket_country
+            country = _canonical_country(raw_row_country, settings=settings)
+            if not source_id or not country:
+                continue
+            key = (country, source_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            grouped.setdefault(country, []).append(
+                {
+                    "source_id": source_id,
+                    "country": country,
+                    "alias": str(row.get("alias") or source_id).strip(),
+                    "source_type": (
+                        str(row.get("source_type") or "").strip().lower()
+                        or _infer_source_type_from_source_id(source_id)
+                    ),
+                }
+            )
     return grouped
 
 
@@ -150,7 +205,11 @@ def available_sources_by_country(
         if isinstance(df_all, pd.DataFrame) and not df_all.empty
         else {}
     )
-    inferred = inferred_sources_by_country(df_all) if isinstance(df_all, pd.DataFrame) else {}
+    inferred = (
+        inferred_sources_by_country(df_all, settings=settings)
+        if isinstance(df_all, pd.DataFrame)
+        else {}
+    )
     return merge_sources_by_country(configured, inferred)
 
 
@@ -164,7 +223,7 @@ def apply_workspace_source_scope(
     if df is None or df.empty:
         return pd.DataFrame()
 
-    selected_country = str(selection.country or "").strip()
+    selected_country = _canonical_country(selection.country, settings=settings)
     selected_source_id = str(selection.source_id or "").strip()
     scope_mode = normalize_workspace_mode(selection.scope_mode)
     if not selected_country and not selected_source_id:
@@ -173,7 +232,12 @@ def apply_workspace_source_scope(
     mask = pd.Series(True, index=df.index)
     country_values: pd.Series | None = None
     if selected_country and "country" in df.columns:
-        country_values = df["country"].fillna("").astype(str)
+        country_values = (
+            df["country"]
+            .fillna("")
+            .astype(str)
+            .map(lambda value: _canonical_country(value, settings=settings))
+        )
         mask &= country_values.eq(selected_country)
     if "source_id" in df.columns:
         source_values = df["source_id"].fillna("").astype(str)

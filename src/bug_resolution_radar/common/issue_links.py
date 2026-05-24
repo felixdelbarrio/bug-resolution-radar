@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Iterable, Mapping
 from urllib.parse import quote, urlparse
 
 JIRA_KEY_PATTERN = r"\b[A-Z][A-Z0-9]+-\d+(?:[A-Z0-9-]*)?\b"
@@ -92,6 +93,59 @@ def build_helix_issue_url(
     if "{id}" in base:
         return base.replace("{id}", quote(incident_id))
     return base
+
+
+def _build_helix_map_url(
+    helix_id: object,
+    *,
+    base_url: str = "",
+    existing_url: str = "",
+) -> str:
+    existing = _http_url(existing_url)
+    if existing:
+        return existing
+    base = _http_url(base_url)
+    if "{helix_id}" not in base and "{id}" not in base:
+        return ""
+    return build_helix_issue_url(helix_id, base_url=base, existing_url="")
+
+
+def build_issue_url_maps(
+    rows: Iterable[Mapping[str, object]],
+    *,
+    jira_base_url: str = "",
+    helix_base_url: str = "",
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build normalized Jira and Helix URL maps from heterogeneous issue rows."""
+    jira_urls: dict[str, str] = {}
+    helix_urls: dict[str, str] = {}
+    for row in rows:
+        source_type = str(row.get("source_type") or "").strip().lower()
+
+        jira_key = normalize_jira_key(row.get("jira_key") or row.get("key") or "")
+        jira_existing_url = str(row.get("jira_url") or "").strip()
+        if source_type != "helix" and not jira_existing_url:
+            jira_existing_url = str(row.get("url") or "").strip()
+        jira_url = build_jira_issue_url(
+            jira_key,
+            base_url=jira_base_url,
+            existing_url=jira_existing_url,
+        )
+        if jira_key and jira_url:
+            jira_urls.setdefault(jira_key, jira_url)
+
+        helix_id = normalize_helix_id(row.get("helix_id") or row.get("id") or row.get("key") or "")
+        helix_existing_url = str(row.get("helix_url") or "").strip()
+        if source_type == "helix" and not helix_existing_url:
+            helix_existing_url = str(row.get("url") or "").strip()
+        helix_url = _build_helix_map_url(
+            helix_id,
+            base_url=helix_base_url,
+            existing_url=helix_existing_url,
+        )
+        if helix_id and helix_url:
+            helix_urls.setdefault(helix_id, helix_url)
+    return jira_urls, helix_urls
 
 
 def linkify_issue_references(

@@ -487,6 +487,7 @@ def save_settings(settings: Settings, *, drop_keys: Set[str] | List[str] | None 
     existing = {k: v for k, v in dotenv_values(ENV_PATH).items() if k}
     normalized_settings = settings.model_copy(
         update={
+            "SUPPORTED_COUNTRIES": ",".join(supported_countries(settings)),
             "HELIX_SOURCES_JSON": to_env_json(_normalized_helix_source_rows_for_storage(settings)),
         }
     )
@@ -534,6 +535,22 @@ def supported_countries(settings: Settings) -> List[str]:
         if country and country not in out:
             out.append(country)
     return out or list(DEFAULT_SUPPORTED_COUNTRIES)
+
+
+def normalize_country_name(
+    value: Any,
+    *,
+    settings: Settings | None = None,
+    supported: List[str] | None = None,
+) -> str:
+    """Return the canonical configured country name for display and filtering."""
+    if supported is not None:
+        candidates = list(supported)
+    elif settings is not None:
+        candidates = supported_countries(settings)
+    else:
+        candidates = list(DEFAULT_SUPPORTED_COUNTRIES)
+    return _normalize_country(_coerce_str(value), supported=candidates)
 
 
 def jira_sources(settings: Settings) -> List[Dict[str, str]]:

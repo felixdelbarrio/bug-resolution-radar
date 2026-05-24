@@ -15,9 +15,11 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
+from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
 from bug_resolution_radar.reports import period_followup_ppt as period_ppt_mod
 from bug_resolution_radar.reports.period_followup_layout import metric_card_typography
+from bug_resolution_radar.repositories.issues_store import save_issues_doc
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_REPORT_AMBER_BG,
     BBVA_REPORT_RED_BG,
@@ -374,6 +376,81 @@ def test_period_followup_ppt_finalist_discrepancies_section_is_always_included(
     assert any(
         "INC000104154954" in str(run.text or "")
         and str(run.hyperlink.address or "").startswith("https://helix.example.com")
+        for run in description_runs
+    )
+
+
+def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
+    tmp_path: Path,
+) -> None:
+    template = tmp_path / "template.pptx"
+    data_path = tmp_path / "issues.json"
+    _build_minimal_template(template)
+    save_issues_doc(
+        str(data_path),
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="MEX-AGED-1",
+                    summary=(
+                        "INC000102885426 - liquidez / bbva net cash / cuenta control / "
+                        "caso con mas de 30 dias"
+                    ),
+                    description="",
+                    status="En progreso",
+                    type="Historia",
+                    priority="Medium",
+                    assignee="Ana",
+                    created="2026-03-01T00:00:00Z",
+                    updated="2026-05-20T00:00:00Z",
+                    country="México",
+                    source_type="jira",
+                    source_id="jira:mexico:core",
+                    source_alias="Core",
+                    url="https://jira.example.com/browse/MEX-AGED-1",
+                ),
+                NormalizedIssue(
+                    key="INC000102885426",
+                    summary="Cerrado en Helix",
+                    description="",
+                    status="Closed",
+                    type="Helix",
+                    priority="Medium",
+                    created="2026-03-01T00:00:00Z",
+                    updated="2026-05-20T00:00:00Z",
+                    resolved="2026-05-20T00:00:00Z",
+                    country="México",
+                    source_type="helix",
+                    source_id="helix:mexico:mx-smartit",
+                    source_alias="MX SmartIT",
+                    url="https://helix.example.com/smartit/app/#/incidentPV/IDG102885426",
+                ),
+            ]
+        ),
+    )
+
+    result = generate_country_period_followup_ppt(
+        Settings(DATA_PATH=str(data_path), PERIOD_PPT_TEMPLATE_PATH=str(template)),
+        country="México",
+        source_ids=["jira:mexico:core"],
+        reference_day=pd.Timestamp("2026-05-24T00:00:00Z"),
+    )
+    prs = Presentation(BytesIO(result.content))
+    aged_slide = next(
+        slide
+        for slide in prs.slides
+        if "Incidencias abiertas con más de 30 días" in _slide_all_text(slide)
+        and "MEX-AGED-1" in _slide_all_text(slide)
+    )
+    table = _native_tables(aged_slide)[0].table
+    description_runs = [
+        run for paragraph in table.cell(1, 1).text_frame.paragraphs for run in paragraph.runs
+    ]
+
+    assert any(
+        "INC000102885426" in str(run.text or "")
+        and str(run.hyperlink.address or "")
+        == "https://helix.example.com/smartit/app/#/incidentPV/IDG102885426"
         for run in description_runs
     )
 
