@@ -51,6 +51,12 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/analytics/status_semantics.py`
   - Semántica canónica de estados finales/no finales.
 
+- `src/bug_resolution_radar/analytics/finalist_discrepancies.py`
+  - Fuente única para extraer `INC...`, cruzar Jira con Helix histórico, calcular discrepancias finalistas y aplicar estado efectivo al scope visible.
+
+- `src/bug_resolution_radar/analytics/period_risk_issue_lists.py`
+  - Listas de riesgo del seguimiento; las antigüedades se filtran y muestran con días completos.
+
 - `src/bug_resolution_radar/analytics/insights.py`
   - Utilidades analíticas para clustering/similaridad.
 
@@ -133,7 +139,7 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
   - Construcción de slides, cache y export binario PPT.
 
 - `src/bug_resolution_radar/reports/period_followup_ppt.py`
-  - Reporte de seguimiento quincenal con rollups, secciones de riesgo y enlaces Jira/Helix.
+  - Reporte de seguimiento quincenal con rollups, secciones de riesgo, estado efectivo finalista y enlaces Jira/Helix.
 
 - `src/bug_resolution_radar/theme/design_tokens.py`
   - Tokens visuales y resolución de tipografías.

@@ -391,7 +391,7 @@ def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
         IssuesDocument(
             issues=[
                 NormalizedIssue(
-                    key="MEX-AGED-1",
+                    key="MEX-AGED-CLOSED",
                     summary=(
                         "INC000102885426 - liquidez / bbva net cash / cuenta control / "
                         "caso con mas de 30 dias"
@@ -407,7 +407,7 @@ def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
                     source_type="jira",
                     source_id="jira:mexico:core",
                     source_alias="Core",
-                    url="https://jira.example.com/browse/MEX-AGED-1",
+                    url="https://jira.example.com/browse/MEX-AGED-CLOSED",
                 ),
                 NormalizedIssue(
                     key="INC000102885426",
@@ -421,9 +421,42 @@ def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
                     resolved="2026-05-20T00:00:00Z",
                     country="México",
                     source_type="helix",
-                    source_id="helix:mexico:mx-smartit",
-                    source_alias="MX SmartIT",
+                    source_id="helix:mexico:lookup-estados-finalistas-jira",
+                    source_alias="Lookup estados finalistas Jira",
+                    helix_lookup_kind="post_jql_inc_lookup",
                     url="https://helix.example.com/smartit/app/#/incidentPV/IDG102885426",
+                ),
+                NormalizedIssue(
+                    key="MEX-AGED-OPEN",
+                    summary="INC000104451980 - caso Helix localizado y aun abierto",
+                    description="",
+                    status="En progreso",
+                    type="Historia",
+                    priority="Medium",
+                    assignee="Ana",
+                    created="2026-03-01T00:00:00Z",
+                    updated="2026-05-20T00:00:00Z",
+                    country="México",
+                    source_type="jira",
+                    source_id="jira:mexico:core",
+                    source_alias="Core",
+                    url="https://jira.example.com/browse/MEX-AGED-OPEN",
+                ),
+                NormalizedIssue(
+                    key="INC000104451980",
+                    summary="En curso en Helix",
+                    description="",
+                    status="Assigned",
+                    type="Helix",
+                    priority="Medium",
+                    created="2026-03-01T00:00:00Z",
+                    updated="2026-05-20T00:00:00Z",
+                    country="México",
+                    source_type="helix",
+                    source_id="helix:mexico:lookup-estados-finalistas-jira",
+                    source_alias="Lookup estados finalistas Jira",
+                    helix_lookup_kind="post_jql_inc_lookup",
+                    url="https://helix.example.com/smartit/app/#/incident/IDG104451980",
                 ),
             ]
         ),
@@ -436,11 +469,17 @@ def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
         reference_day=pd.Timestamp("2026-05-24T00:00:00Z"),
     )
     prs = Presentation(BytesIO(result.content))
+    aged_detail_text = "\n".join(
+        _slide_all_text(slide)
+        for slide in prs.slides
+        if "Incidencias abiertas con más de 30 días (" in _slide_all_text(slide)
+    )
+    assert "MEX-AGED-CLOSED" not in aged_detail_text
     aged_slide = next(
         slide
         for slide in prs.slides
         if "Incidencias abiertas con más de 30 días" in _slide_all_text(slide)
-        and "MEX-AGED-1" in _slide_all_text(slide)
+        and "MEX-AGED-OPEN" in _slide_all_text(slide)
     )
     table = _native_tables(aged_slide)[0].table
     description_runs = [
@@ -448,9 +487,9 @@ def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
     ]
 
     assert any(
-        "INC000102885426" in str(run.text or "")
+        "INC000104451980" in str(run.text or "")
         and str(run.hyperlink.address or "")
-        == "https://helix.example.com/smartit/app/#/incidentPV/IDG102885426"
+        == "https://helix.example.com/smartit/app/#/incident/IDG104451980"
         for run in description_runs
     )
 

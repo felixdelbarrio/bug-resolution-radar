@@ -24,8 +24,7 @@ from bug_resolution_radar.analytics.filtering import (
     open_only,
 )
 from bug_resolution_radar.analytics.finalist_discrepancies import (
-    apply_effective_finalist_lookup_state,
-    build_finalist_status_discrepancies,
+    apply_effective_finalist_lookup_state_for_scope,
 )
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
@@ -826,6 +825,16 @@ def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
     return apply_analysis_depth_filter(df, settings=settings)
 
 
+def load_country_history_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
+    df = load_issues_df(settings.DATA_PATH)
+    if df.empty:
+        return df
+    country_txt = str(country or "").strip()
+    if country_txt and "country" in df.columns:
+        return df.loc[df["country"].fillna("").astype(str).eq(country_txt)].copy(deep=False)
+    return df.copy(deep=False)
+
+
 def _data_revision_key(settings: Settings) -> tuple[str, int, int]:
     resolved = Path(str(settings.DATA_PATH)).expanduser()
     try:
@@ -868,20 +877,16 @@ def _build_scope_context(
     scoped_df = load_workspace_dataframe(settings, query=query)
     source_ids = tuple(_active_source_ids(scoped_df, query=query))
     country_df = load_country_dataframe(settings, country=query.workspace.country)
+    country_history_df = load_country_history_dataframe(settings, country=query.workspace.country)
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
-    finalist_discrepancies = build_finalist_status_discrepancies(
-        country_df if not country_df.empty else scoped_df,
+    scoped_df, finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
+        scoped_df,
+        history_df=country_history_df if not country_history_df.empty else country_df,
         settings=settings,
         country=str(query.workspace.country or "").strip(),
         source_ids=source_ids,
         reference_day=reference_day,
     )
-    if not finalist_discrepancies.empty:
-        scoped_df = apply_effective_finalist_lookup_state(
-            scoped_df,
-            discrepancies=finalist_discrepancies,
-            reference_window=reference_day,
-        )
     dff = apply_filters(scoped_df, query.filters)
     dff = apply_dashboard_issue_scope(
         dff,

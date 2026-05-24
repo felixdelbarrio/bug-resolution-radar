@@ -107,3 +107,30 @@ def test_aged_open_issue_list_orders_by_age_criticality_status() -> None:
     assert [row.key for row in bundled.aged] == ["MEDIUM-OLDER", "HIGH-OLD", "VERY-HIGH"]
     assert [row.assignee for row in rows] == ["(sin asignar)", "Luis", "Ana"]
     assert rows[1].functionality
+
+
+def test_aged_open_issue_list_uses_complete_days_for_threshold_and_display() -> None:
+    analysis_day = pd.Timestamp("2026-04-29")
+    df = pd.DataFrame(
+        [
+            {
+                "key": "THIRTY-POINT-FOUR",
+                "summary": "Aun no son 31 dias completos",
+                "status": "New",
+                "priority": "Medium",
+                "created": "2026-03-29T14:00:00+00:00",
+            },
+            {
+                "key": "THIRTY-ONE",
+                "summary": "Ya supera 30 dias completos",
+                "status": "New",
+                "priority": "Medium",
+                "created": "2026-03-28T23:00:00+00:00",
+            },
+        ]
+    )
+
+    rows = build_aged_open_issue_list(df, analysis_day=analysis_day)
+
+    assert [row.key for row in rows] == ["THIRTY-ONE"]
+    assert rows[0].open_days == 31

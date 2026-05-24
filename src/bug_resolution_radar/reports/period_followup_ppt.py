@@ -23,6 +23,10 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.finalist_discrepancies import (
+    apply_effective_finalist_lookup_state,
+    apply_effective_finalist_lookup_state_for_scope,
+)
 from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
     FinalistDiscrepancyIssueRow,
     build_finalist_discrepancy_issue_list,
@@ -4355,7 +4359,7 @@ def generate_country_period_followup_ppt(
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     country_txt = str(country or "").strip()
-    dff, open_df, all_df = _load_or_scope_data(
+    dff, _open_df, all_df = _load_or_scope_data(
         settings,
         country=country_txt,
         source_ids=clean_source_ids,
@@ -4363,6 +4367,26 @@ def generate_country_period_followup_ppt(
         open_df_override=open_df_override,
         all_df_override=all_df_override,
     )
+    effective_finalist_discrepancies = (
+        finalist_discrepancies_override
+        if isinstance(finalist_discrepancies_override, pd.DataFrame)
+        else pd.DataFrame()
+    )
+    if not effective_finalist_discrepancies.empty:
+        dff = apply_effective_finalist_lookup_state(
+            dff,
+            discrepancies=effective_finalist_discrepancies,
+            reference_window=reference_day,
+        )
+    elif isinstance(all_df, pd.DataFrame) and not all_df.empty:
+        dff, effective_finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
+            dff,
+            history_df=all_df,
+            settings=settings,
+            country=country_txt,
+            source_ids=clean_source_ids,
+            reference_day=reference_day,
+        )
     if dff.empty:
         raise ValueError("No hay incidencias para generar el informe de seguimiento.")
 
@@ -4478,7 +4502,7 @@ def generate_country_period_followup_ppt(
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
-        finalist_discrepancies_override
+        effective_finalist_discrepancies
     )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
@@ -4518,7 +4542,7 @@ def generate_country_period_followup_ppt(
 
     jira_url_map, helix_url_map = _build_report_issue_url_maps(
         all_df=all_df,
-        finalist_discrepancies=finalist_discrepancies_override,
+        finalist_discrepancies=effective_finalist_discrepancies,
         settings=settings,
     )
     _linkify_helix_references_in_tables(
