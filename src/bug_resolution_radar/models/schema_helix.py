@@ -15,6 +15,7 @@ class HelixWorkItem(BaseModel):
     internal_id: str = ""
     summary: str = ""
     description: str = ""
+    executive_description: str = ""
     status: str = ""
     status_raw: str = ""
     status_reason: str = ""

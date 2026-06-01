@@ -21,6 +21,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.filtering import FilterState, normalize_filter_tokens
+from bug_resolution_radar.analytics.issue_functionality import (
+    FUNCTIONALITY_COL,
+    ensure_issue_functionality_columns,
+)
 from bug_resolution_radar.analytics.issues import normalize_text_col
 from bug_resolution_radar.analytics.quincenal_scope import (
     QUINCENAL_SCOPE_ALL,
@@ -79,6 +83,7 @@ from bug_resolution_radar.services.ingest_runner import (
     run_helix_ingest,
     run_jira_ingest,
 )
+from bug_resolution_radar.services.issue_enrichment import enrich_issue_dataframe_with_helix
 from bug_resolution_radar.services.issue_workbook_export import (
     build_finalist_discrepancies_workbook_export,
     build_issue_export_frame,
@@ -251,6 +256,7 @@ def _dashboard_query(
     status: str = "",
     priority: str = "",
     assignee: str = "",
+    functionality: str = "",
     quincenal_scope: str = QUINCENAL_SCOPE_ALL,
     issue_keys: str = "",
     issue_sort_col: str = "",
@@ -268,6 +274,7 @@ def _dashboard_query(
             status=normalize_filter_tokens(_split_csv_param(status)),
             priority=normalize_filter_tokens(_split_csv_param(priority)),
             assignee=normalize_filter_tokens(_split_csv_param(assignee)),
+            functionality=normalize_filter_tokens(_split_csv_param(functionality)),
         ),
         quincenal_scope=str(quincenal_scope or QUINCENAL_SCOPE_ALL).strip() or QUINCENAL_SCOPE_ALL,
         issue_scope_keys=tuple(_split_csv_param(issue_keys)),
@@ -325,6 +332,7 @@ def _scoped_dataframe_for_options(
         df_all = load_issues_df(settings.DATA_PATH)
     except Exception:
         return pd.DataFrame()
+    df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
     if df_all.empty:
         return df_all
     scoped = apply_workspace_source_scope(df_all, settings=settings, selection=workspace)
@@ -339,8 +347,10 @@ def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
         "status": [],
         "priority": [],
         "assignee": [],
+        "functionality": [],
         "quincenal": [QUINCENAL_SCOPE_ALL],
     }
+    df = ensure_issue_functionality_columns(df)
     if "status" in df.columns:
         out["status"] = sorted(
             set(normalize_text_col(df["status"], "(sin estado)").astype(str).tolist())
@@ -353,11 +363,25 @@ def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
         out["assignee"] = sorted(
             set(normalize_text_col(df["assignee"], "(sin asignar)").astype(str).tolist())
         )
+    if FUNCTIONALITY_COL in df.columns:
+        out["functionality"] = sorted(
+            set(
+                normalize_text_col(df[FUNCTIONALITY_COL], "(sin funcionalidad)")
+                .astype(str)
+                .tolist()
+            )
+        )
     return out
 
 
 def _empty_filter_options() -> dict[str, list[str]]:
-    return {"status": [], "priority": [], "assignee": [], "quincenal": [QUINCENAL_SCOPE_ALL]}
+    return {
+        "status": [],
+        "priority": [],
+        "assignee": [],
+        "functionality": [],
+        "quincenal": [QUINCENAL_SCOPE_ALL],
+    }
 
 
 def _workspace_payload(
@@ -386,6 +410,7 @@ def _workspace_payload(
             df_all = load_issues_df(settings.DATA_PATH)
         except Exception:
             df_all = pd.DataFrame()
+        df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
         if isinstance(df_all, pd.DataFrame) and not df_all.empty:
             has_data = True
             sources_by_country = merge_sources_by_country(
@@ -615,6 +640,7 @@ class DashboardExportSaveRequest(BaseModel):
     status: list[str] = Field(default_factory=list)
     priority: list[str] = Field(default_factory=list)
     assignee: list[str] = Field(default_factory=list)
+    functionality: list[str] = Field(default_factory=list)
     quincenalScope: str = QUINCENAL_SCOPE_ALL
     issueKeys: list[str] = Field(default_factory=list)
     issueSortCol: str = ""
@@ -725,7 +751,6 @@ def create_app() -> FastAPI:
                 country=country,
                 source_id=sourceId,
                 scope_mode=scopeMode,
-                include_filter_options=False,
             ),
             "chartsCatalog": [
                 {"id": "timeseries", "label": "Evolución"},
@@ -770,6 +795,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -785,6 +811,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -810,6 +837,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -829,6 +857,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -854,6 +883,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -868,6 +898,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -884,6 +915,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -901,6 +933,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -923,6 +956,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -936,6 +970,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -952,6 +987,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -965,6 +1001,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -994,6 +1031,7 @@ def create_app() -> FastAPI:
             status=_csv_join(payload.status),
             priority=_csv_join(payload.priority),
             assignee=_csv_join(payload.assignee),
+            functionality=_csv_join(payload.functionality),
             quincenal_scope=payload.quincenalScope,
             issue_keys=_csv_join(payload.issueKeys),
             issue_sort_col=payload.issueSortCol,
@@ -1017,6 +1055,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -1030,6 +1069,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -1053,6 +1093,7 @@ def create_app() -> FastAPI:
             status=_csv_join(payload.status),
             priority=_csv_join(payload.priority),
             assignee=_csv_join(payload.assignee),
+            functionality=_csv_join(payload.functionality),
             quincenal_scope=payload.quincenalScope,
             issue_keys=_csv_join(payload.issueKeys),
             issue_sort_col=payload.issueSortCol,
@@ -1071,6 +1112,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -1084,6 +1126,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -1109,6 +1152,7 @@ def create_app() -> FastAPI:
             status=_csv_join(payload.status),
             priority=_csv_join(payload.priority),
             assignee=_csv_join(payload.assignee),
+            functionality=_csv_join(payload.functionality),
             quincenal_scope=payload.quincenalScope,
             issue_keys=_csv_join(payload.issueKeys),
             issue_sort_col=payload.issueSortCol,
@@ -1127,6 +1171,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -1140,6 +1185,7 @@ def create_app() -> FastAPI:
             status=status,
             priority=priority,
             assignee=assignee,
+            functionality=functionality,
             quincenal_scope=quincenalScope,
             issue_keys=issueKeys,
             issue_sort_col=issueSortCol,
@@ -1155,6 +1201,7 @@ def create_app() -> FastAPI:
         status: str = "",
         priority: str = "",
         assignee: str = "",
+        functionality: str = "",
         quincenalScope: str = QUINCENAL_SCOPE_ALL,
         issueKeys: str = "",
         issueSortCol: str = "",
@@ -1170,6 +1217,7 @@ def create_app() -> FastAPI:
                 status=status,
                 priority=priority,
                 assignee=assignee,
+                functionality=functionality,
                 quincenal_scope=quincenalScope,
                 issue_keys=issueKeys,
                 issue_sort_col=issueSortCol,

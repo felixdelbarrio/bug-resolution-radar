@@ -17,6 +17,7 @@ class NormalizedIssue(BaseModel):
     key: str
     summary: str
     description: str = ""
+    helix_executive_description: str = ""
     status: str
     type: str
     priority: str

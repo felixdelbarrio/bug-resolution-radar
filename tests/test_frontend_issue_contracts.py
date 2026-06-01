@@ -60,6 +60,21 @@ def test_issue_links_frontend_contract_uses_external_anchor_security() -> None:
     assert "[A-Z][A-Z0-9]+-\\d+" in source
 
 
+def test_issues_panel_exposes_functionality_and_helix_executive_description() -> None:
+    source = _frontend_file("components/IssuesPanel.tsx")
+    filters = _frontend_file("components/DashboardFilters.tsx")
+    styles = _frontend_file("styles/app.css")
+
+    assert '["functionality", "Funcionalidad"]' in source
+    assert "row.functionality" in source
+    assert "helix_executive_description" in source
+    assert "BBVA_ExecutiveDescription" in source
+    assert "issue-card-executive-description" in source
+    assert "Funcionalidad" in filters
+    assert "filterOptions?.functionality" in filters
+    assert "issue-table-executive-description" in styles
+
+
 def test_notes_editor_allows_free_issue_edit_and_validates_before_save() -> None:
     source = _frontend_file("components/NotesEditor.tsx")
     issue_on_change = source[

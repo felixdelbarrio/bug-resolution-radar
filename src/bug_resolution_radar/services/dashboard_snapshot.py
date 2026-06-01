@@ -42,6 +42,11 @@ from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_OPTIONS,
     build_insights_combo_context,
 )
+from bug_resolution_radar.analytics.issue_functionality import (
+    FUNCTIONALITY_COL,
+    HELIX_EXECUTIVE_DESCRIPTION_COL,
+    ensure_issue_functionality_columns,
+)
 from bug_resolution_radar.analytics.issues import (
     normalize_text_col,
     priority_rank,
@@ -88,6 +93,10 @@ from bug_resolution_radar.services.insights_learning_store import (
     InsightsLearningStore,
     default_learning_path,
     learning_scope_key,
+)
+from bug_resolution_radar.services.issue_enrichment import (
+    enrich_issue_dataframe_with_helix,
+    helix_revision_token,
 )
 from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.services.workspace import WorkspaceSelection, apply_workspace_source_scope
@@ -810,13 +819,13 @@ class DashboardScopeContext:
 
 
 def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
-    df = load_issues_df(settings.DATA_PATH)
+    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     scoped_df = apply_workspace_source_scope(df, settings=settings, selection=query.workspace)
     return apply_analysis_depth_filter(scoped_df, settings=settings)
 
 
 def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
-    df = load_issues_df(settings.DATA_PATH)
+    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     if df.empty:
         return df
     country_txt = str(country or "").strip()
@@ -826,7 +835,7 @@ def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
 
 
 def load_country_history_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
-    df = load_issues_df(settings.DATA_PATH)
+    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     if df.empty:
         return df
     country_txt = str(country or "").strip()
@@ -850,16 +859,21 @@ def _scope_context_cache_key(
     query: DashboardQuery,
 ) -> tuple[Any, ...]:
     data_path, mtime_ns, size = _data_revision_key(settings)
+    helix_path, helix_mtime_ns, helix_size = helix_revision_token(settings)
     return (
         data_path,
         mtime_ns,
         size,
+        helix_path,
+        helix_mtime_ns,
+        helix_size,
         str(query.workspace.country or "").strip(),
         str(query.workspace.source_id or "").strip(),
         str(query.workspace.scope_mode or "").strip(),
         tuple(str(item or "").strip() for item in list(query.filters.status or [])),
         tuple(str(item or "").strip() for item in list(query.filters.priority or [])),
         tuple(str(item or "").strip() for item in list(query.filters.assignee or [])),
+        tuple(str(item or "").strip() for item in list(query.filters.functionality or [])),
         str(query.quincenal_scope or "").strip(),
         tuple(str(item or "").strip() for item in list(query.issue_scope_keys or [])),
         str(query.issue_sort_col or "").strip(),
@@ -887,7 +901,7 @@ def _build_scope_context(
         source_ids=source_ids,
         reference_day=reference_day,
     )
-    dff = apply_filters(scoped_df, query.filters)
+    dff = ensure_issue_functionality_columns(apply_filters(scoped_df, query.filters))
     dff = apply_dashboard_issue_scope(
         dff,
         settings=settings,
@@ -1107,6 +1121,8 @@ def build_issue_rows(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "type",
         "priority",
@@ -1143,6 +1159,8 @@ def build_issue_rows(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "type",
         "priority",
@@ -1505,6 +1523,8 @@ def _issue_records_from_df(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "priority",
         "assignee",
@@ -1536,6 +1556,8 @@ def _issue_records_from_df(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "priority",
         "assignee",
@@ -1556,6 +1578,8 @@ def _issue_records_from_df(
                 "key",
                 "summary",
                 "description",
+                HELIX_EXECUTIVE_DESCRIPTION_COL,
+                FUNCTIONALITY_COL,
                 "status",
                 "priority",
                 "assignee",

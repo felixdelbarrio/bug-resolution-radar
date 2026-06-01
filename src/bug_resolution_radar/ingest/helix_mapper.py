@@ -232,6 +232,31 @@ def _extract_business_incident_type(values: Dict[str, Any]) -> str:
     return ""
 
 
+def _extract_helix_executive_description(values: Dict[str, Any]) -> str:
+    candidates = (
+        "BBVA_ExecutiveDescription",
+        "bbva_executivedescription",
+        "ExecutiveDescription",
+        "Executive Description",
+    )
+    for candidate in candidates:
+        direct = values.get(candidate)
+        if direct not in (None, ""):
+            txt = _extract_text(direct)
+            if txt:
+                return txt
+        custom = _extract_custom_attr(values, candidate)
+        if custom:
+            return custom
+
+    for key, val in values.items():
+        if _normalize_token(key) == "bbva executive description":
+            txt = _extract_text(val)
+            if txt:
+                return txt
+    return ""
+
+
 def map_helix_incident_type(raw_incident_type: Any, values: Optional[Dict[str, Any]] = None) -> str:
     """Normalize business incident type to 'Incidencia' / 'Consulta' when detectable."""
     business_raw = _extract_business_incident_type(values or {})
@@ -457,6 +482,7 @@ def map_helix_values_to_item(
         internal_id=smartit_id,
         summary=summary,
         description=description if description != summary else "",
+        executive_description=_extract_helix_executive_description(values),
         status=map_helix_status(raw_status),
         status_raw=raw_status,
         status_reason=_extract_text(

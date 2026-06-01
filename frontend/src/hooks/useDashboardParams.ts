@@ -9,6 +9,7 @@ type DashboardParams = {
   status: string[];
   priority: string[];
   assignee: string[];
+  functionality: string[];
   quincenalScope: string;
   issueLikeQuery: string;
   issueSortCol: string;
@@ -44,6 +45,7 @@ export function useDashboardParams(defaultPanel = "overview") {
     status: splitValue(searchParams.get("status")),
     priority: splitValue(searchParams.get("priority")),
     assignee: splitValue(searchParams.get("assignee")),
+    functionality: splitValue(searchParams.get("functionality")),
     quincenalScope: searchParams.get("quincenalScope") ?? "Todas",
     issueLikeQuery: searchParams.get("issueLikeQuery") ?? "",
     issueSortCol: searchParams.get("issueSortCol") ?? "updated",
