@@ -83,6 +83,7 @@ from bug_resolution_radar.services.ingest_runner import (
     run_helix_ingest,
     run_jira_ingest,
 )
+from bug_resolution_radar.services.issue_enrichment import enrich_issue_dataframe_with_helix
 from bug_resolution_radar.services.issue_workbook_export import (
     build_finalist_discrepancies_workbook_export,
     build_issue_export_frame,
@@ -331,6 +332,7 @@ def _scoped_dataframe_for_options(
         df_all = load_issues_df(settings.DATA_PATH)
     except Exception:
         return pd.DataFrame()
+    df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
     if df_all.empty:
         return df_all
     scoped = apply_workspace_source_scope(df_all, settings=settings, selection=workspace)
@@ -408,6 +410,7 @@ def _workspace_payload(
             df_all = load_issues_df(settings.DATA_PATH)
         except Exception:
             df_all = pd.DataFrame()
+        df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
         if isinstance(df_all, pd.DataFrame) and not df_all.empty:
             has_data = True
             sources_by_country = merge_sources_by_country(

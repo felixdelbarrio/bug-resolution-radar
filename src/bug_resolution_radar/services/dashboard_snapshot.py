@@ -94,6 +94,10 @@ from bug_resolution_radar.services.insights_learning_store import (
     default_learning_path,
     learning_scope_key,
 )
+from bug_resolution_radar.services.issue_enrichment import (
+    enrich_issue_dataframe_with_helix,
+    helix_revision_token,
+)
 from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.services.workspace import WorkspaceSelection, apply_workspace_source_scope
 from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT
@@ -815,13 +819,13 @@ class DashboardScopeContext:
 
 
 def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
-    df = load_issues_df(settings.DATA_PATH)
+    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     scoped_df = apply_workspace_source_scope(df, settings=settings, selection=query.workspace)
     return apply_analysis_depth_filter(scoped_df, settings=settings)
 
 
 def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
-    df = load_issues_df(settings.DATA_PATH)
+    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     if df.empty:
         return df
     country_txt = str(country or "").strip()
@@ -831,7 +835,7 @@ def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
 
 
 def load_country_history_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
-    df = load_issues_df(settings.DATA_PATH)
+    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     if df.empty:
         return df
     country_txt = str(country or "").strip()
@@ -855,10 +859,14 @@ def _scope_context_cache_key(
     query: DashboardQuery,
 ) -> tuple[Any, ...]:
     data_path, mtime_ns, size = _data_revision_key(settings)
+    helix_path, helix_mtime_ns, helix_size = helix_revision_token(settings)
     return (
         data_path,
         mtime_ns,
         size,
+        helix_path,
+        helix_mtime_ns,
+        helix_size,
         str(query.workspace.country or "").strip(),
         str(query.workspace.source_id or "").strip(),
         str(query.workspace.scope_mode or "").strip(),

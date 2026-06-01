@@ -68,6 +68,7 @@ def test_issues_panel_exposes_functionality_and_helix_executive_description() ->
     assert '["functionality", "Funcionalidad"]' in source
     assert "row.functionality" in source
     assert "helix_executive_description" in source
+    assert "BBVA_ExecutiveDescription" in source
     assert "issue-card-executive-description" in source
     assert "Funcionalidad" in filters
     assert "filterOptions?.functionality" in filters

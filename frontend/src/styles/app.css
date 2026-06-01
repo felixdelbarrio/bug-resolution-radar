@@ -1171,6 +1171,19 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+.issue-card-executive-description span:first-child,
+.issue-table-executive-description strong {
+  color: var(--bbva-primary-strong);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.issue-card-executive-description span:last-child {
+  display: block;
+  margin-top: 0.18rem;
+}
+
 .issue-card-badges,
 .kanban-card-meta {
   display: flex;
@@ -1623,9 +1636,14 @@ textarea::placeholder {
 }
 
 .issue-table-executive-description {
-  display: -webkit-box;
+  display: grid;
+  gap: 0.2rem;
   padding-top: 0.38rem;
   border-top: 1px solid var(--bbva-border);
+}
+
+.issue-table-executive-description span {
+  display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
   overflow: hidden;

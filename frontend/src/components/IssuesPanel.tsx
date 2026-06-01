@@ -292,7 +292,10 @@ export function IssuesPanel({
                 </button>
                 {row.description ? <p className="issue-card-description">{row.description}</p> : null}
                 {isHelix && executiveDescription ? (
-                  <p className="issue-card-executive-description">{executiveDescription}</p>
+                  <p className="issue-card-executive-description">
+                    <span>BBVA_ExecutiveDescription</span>
+                    <span>{executiveDescription}</span>
+                  </p>
                 ) : null}
                 {row.note ? <p className="issue-card-note">{row.note}</p> : null}
                 <div className="issue-card-badges">
@@ -388,7 +391,8 @@ export function IssuesPanel({
                       <span>{row.description || "—"}</span>
                       {isHelix && executiveDescription ? (
                         <span className="issue-table-executive-description">
-                          {executiveDescription}
+                          <strong>BBVA_ExecutiveDescription</strong>
+                          <span>{executiveDescription}</span>
                         </span>
                       ) : null}
                     </td>

@@ -163,6 +163,7 @@ def _seed_helix_issues(settings: Settings) -> str:
                         "Status": "Analysing",
                         "Submit Date": now,
                         "Impacted Service": "Payments",
+                        "BBVA_ExecutiveDescription": "Error en pagos TPV desde Helix raw",
                     },
                 )
             ]
@@ -589,6 +590,41 @@ def test_issues_and_kanban_endpoints_serialize_rows_without_pandas_scalars(
     assert kanban_payload[0]["status"] == "Open"
     assert kanban_payload[0]["items"][0]["key"] == "RAD-1"
     assert isinstance(kanban_payload[0]["items"][0]["ageDays"], float)
+
+
+def test_helix_issue_rows_use_raw_executive_description_for_display_and_functionality(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_helix_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    dashboard_snapshot._scope_context_cache.clear()
+
+    client = TestClient(api_app.create_app())
+    params = {"country": "España", "sourceId": source_id, "scopeMode": "source"}
+    issues_response = client.get("/api/issues", params=params)
+    filtered_response = client.get(
+        "/api/issues",
+        params={**params, "functionality": "Pagos", "sortBy": "functionality"},
+    )
+    intelligence_response = client.get(
+        "/api/intelligence",
+        params={**params, "insightsViewMode": "acumulada"},
+    )
+
+    assert issues_response.status_code == 200
+    row = issues_response.json()["rows"][0]
+    assert row["helix_executive_description"] == "Error en pagos TPV desde Helix raw"
+    assert row["functionality"] == "Pagos"
+
+    assert filtered_response.status_code == 200
+    assert filtered_response.json()["total"] == 1
+    assert filtered_response.json()["rows"][0]["key"] == "INC0001"
+
+    assert intelligence_response.status_code == 200
+    topics = intelligence_response.json()["functionality"]["topics"]
+    assert [topic["topic"] for topic in topics] == ["Pagos"]
 
 
 def test_bootstrap_workspace_filter_options_include_real_functionalities(
