@@ -420,6 +420,7 @@ def test_shared_helix_item_mapping_preserves_lookup_metadata() -> None:
         id="INC000104216018",
         summary="Cerrado",
         description="Detalle recuperado",
+        executive_description="Impacto ejecutivo recuperado",
         status="Closed",
         closed_date="2026-05-21T00:00:00+00:00",
         last_modified="2026-05-22T00:00:00+00:00",
@@ -432,6 +433,7 @@ def test_shared_helix_item_mapping_preserves_lookup_metadata() -> None:
     issue = helix_item_to_issue(item)
 
     assert issue.description == "Detalle recuperado"
+    assert issue.helix_executive_description == "Impacto ejecutivo recuperado"
     assert issue.resolved == "2026-05-21T00:00:00+00:00"
     assert issue.helix_lookup_kind == POST_JQL_LOOKUP_HELIX_KIND
 

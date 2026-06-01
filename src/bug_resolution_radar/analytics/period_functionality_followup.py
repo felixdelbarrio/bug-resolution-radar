@@ -8,11 +8,12 @@ from typing import Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.insights import classify_theme, is_other_theme_label
+from bug_resolution_radar.analytics.insights import is_other_theme_label
 from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_QUINCENAL,
     build_insights_combo_context,
 )
+from bug_resolution_radar.analytics.issue_functionality import ensure_issue_functionality_columns
 from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.period_summary import QuincenalScopeResult
 from bug_resolution_radar.analytics.topic_expandable_summary import (
@@ -297,22 +298,19 @@ def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
         work["summary"] = ""
         return work
 
-    work = safe.copy(deep=False)
+    work = ensure_issue_functionality_columns(safe, theme_col="__theme")
     summary_series = work["summary"].fillna("").astype(str)
     description_series = (
         work["description"].fillna("").astype(str)
         if "description" in work.columns
         else pd.Series([""] * len(work), index=work.index, dtype=str)
     )
-    unique_summaries = pd.unique(summary_series.to_numpy(copy=False)).tolist()
-    theme_map = {text: classify_theme(text) for text in unique_summaries}
-    row_themes = summary_series.map(theme_map)
+    row_themes = work["__theme"].fillna("").astype(str)
     root_labels = build_root_cause_labels(
         summary_series.tolist(),
         descriptions=description_series.tolist(),
         theme_hints=row_themes.tolist(),
     )
-    work["__theme"] = summary_series.map(theme_map).to_numpy(copy=False)
     work["__root_cause"] = pd.Series(root_labels, index=work.index).to_numpy(copy=False)
     return work
 

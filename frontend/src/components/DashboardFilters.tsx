@@ -5,11 +5,13 @@ type DashboardFiltersProps = {
     status: string[];
     priority: string[];
     assignee: string[];
+    functionality: string[];
     quincenal: string[];
   };
   status: string[];
   priority: string[];
   assignee: string[];
+  functionality: string[];
   quincenalScope: string;
   onChange: (patch: Record<string, string | string[]>) => void;
 };
@@ -103,6 +105,7 @@ export function DashboardFilters({
   status,
   priority,
   assignee,
+  functionality,
   quincenalScope,
   onChange
 }: DashboardFiltersProps) {
@@ -123,6 +126,13 @@ export function DashboardFilters({
         kind="priority"
         emptyLabel="Todas"
         onChange={(next) => onChange({ priority: next, issuePage: "1" })}
+      />
+      <FilterCombo
+        label="Funcionalidad"
+        options={filterOptions?.functionality ?? []}
+        selected={functionality}
+        emptyLabel="Todas"
+        onChange={(next) => onChange({ functionality: next, issuePage: "1" })}
       />
       <FilterCombo
         label="Asignado"

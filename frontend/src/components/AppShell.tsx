@@ -215,7 +215,8 @@ export function AppShell() {
       ...patch,
       status: [],
       priority: [],
-      assignee: []
+      assignee: [],
+      functionality: []
     });
   }
 

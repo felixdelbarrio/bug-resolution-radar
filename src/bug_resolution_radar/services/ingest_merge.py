@@ -81,6 +81,7 @@ def helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
         key=str(item.id or "").strip(),
         summary=str(item.summary or "").strip(),
         description=str(item.description or "").strip(),
+        helix_executive_description=str(item.executive_description or "").strip(),
         status=status,
         type=str(item.incident_type or "").strip() or "Helix",
         priority=str(item.priority or "").strip(),

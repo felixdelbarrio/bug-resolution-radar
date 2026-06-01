@@ -8,7 +8,8 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.insights import build_theme_render_order, classify_theme
+from bug_resolution_radar.analytics.insights import build_theme_render_order
+from bug_resolution_radar.analytics.issue_functionality import ensure_issue_functionality_columns
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 
 INSIGHTS_VIEW_MODE_QUINCENAL = "quincenal"
@@ -224,21 +225,7 @@ def ensure_insights_theme_col(
     safe = _safe_df(df)
     if safe.empty or summary_col not in safe.columns:
         return safe
-    work = safe.copy(deep=False)
-    if (
-        theme_col in work.columns
-        and pd.to_numeric(work[theme_col].astype(str).str.len(), errors="coerce")
-        .fillna(0)
-        .gt(0)
-        .all()
-    ):
-        return work
-
-    summaries = work[summary_col].fillna("").astype(str)
-    unique_summaries = pd.unique(summaries.to_numpy(copy=False)).tolist()
-    theme_map = {txt: classify_theme(txt) for txt in unique_summaries}
-    work[theme_col] = summaries.map(theme_map).to_numpy(copy=False)
-    return work
+    return ensure_issue_functionality_columns(safe, theme_col=theme_col)
 
 
 def _functionality_options_from_df(

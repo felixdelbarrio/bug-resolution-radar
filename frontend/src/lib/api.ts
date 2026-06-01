@@ -23,6 +23,7 @@ export type WorkspaceData = {
     status: string[];
     priority: string[];
     assignee: string[];
+    functionality: string[];
     quincenal: string[];
   };
 };
@@ -127,6 +128,8 @@ export type IssueRecord = {
   url: string;
   source_alias: string;
   source_type: string;
+  functionality: string;
+  helix_executive_description: string;
   ageDays: number;
 };
 

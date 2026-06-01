@@ -25,6 +25,7 @@ const sortOptions = [
   ["status", "Status"],
   ["priority", "Priority"],
   ["assignee", "Assignee"],
+  ["functionality", "Funcionalidad"],
   ["type", "Type"],
   ["summary", "Summary"],
   ["description", "Description"],
@@ -277,6 +278,8 @@ export function IssuesPanel({
           {rows.map((row) => {
             const closed = isClosed(row);
             const ageDays = closed ? dayDiff(row.created, row.resolved) : dayDiff(row.created);
+            const isHelix = String(row.source_type ?? "").trim().toLowerCase() === "helix";
+            const executiveDescription = String(row.helix_executive_description ?? "").trim();
             return (
               <article className="issue-card" key={`${row.key}-${row.source_id}`}>
                 <button
@@ -288,8 +291,17 @@ export function IssuesPanel({
                   <strong className="issue-card-title">{row.summary || "Sin título"}</strong>
                 </button>
                 {row.description ? <p className="issue-card-description">{row.description}</p> : null}
+                {isHelix && executiveDescription ? (
+                  <p className="issue-card-executive-description">
+                    <span>BBVA_ExecutiveDescription</span>
+                    <span>{executiveDescription}</span>
+                  </p>
+                ) : null}
                 {row.note ? <p className="issue-card-note">{row.note}</p> : null}
                 <div className="issue-card-badges">
+                  <span className="issue-chip issue-chip-neutral" style={neutralChipStyle()}>
+                    Funcionalidad: {row.functionality || "—"}
+                  </span>
                   <span
                     className="issue-chip"
                     style={semanticChipStyle(row.priority || "", "priority")}
@@ -321,6 +333,7 @@ export function IssuesPanel({
                 <col className="issues-col-id" />
                 <col className="issues-col-summary" />
                 <col className="issues-col-description" />
+                <col className="issues-col-functionality" />
                 <col className="issues-col-description" />
                 <col className="issues-col-status" />
                 <col className="issues-col-type" />
@@ -335,6 +348,7 @@ export function IssuesPanel({
                   <th>ID</th>
                   <th>Summary</th>
                   <th>Description</th>
+                  <th>Funcionalidad</th>
                   <th>Nota</th>
                   <th>Status</th>
                   <th>Type</th>
@@ -346,7 +360,13 @@ export function IssuesPanel({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {rows.map((row) => {
+                  const isHelix = String(row.source_type ?? "").trim().toLowerCase() === "helix";
+                  const executiveDescription = String(row.helix_executive_description ?? "").trim();
+                  const descriptionTitle = [row.description, isHelix ? executiveDescription : ""]
+                    .filter(Boolean)
+                    .join("\n\n");
+                  return (
                   <tr key={`${row.key}-${row.source_id}`}>
                     <td className="issues-id-cell">
                       <button
@@ -367,8 +387,19 @@ export function IssuesPanel({
                         <strong className="issue-primary-link-title">{row.summary || "—"}</strong>
                       </button>
                     </td>
-                    <td className="issues-description-cell" title={row.description || ""}>
-                      {row.description || "—"}
+                    <td className="issues-description-cell" title={descriptionTitle}>
+                      <span>{row.description || "—"}</span>
+                      {isHelix && executiveDescription ? (
+                        <span className="issue-table-executive-description">
+                          <strong>BBVA_ExecutiveDescription</strong>
+                          <span>{executiveDescription}</span>
+                        </span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <span className="issue-chip issue-chip-table issue-chip-neutral" style={neutralChipStyle()}>
+                        {row.functionality || "—"}
+                      </span>
                     </td>
                     <td className="issues-description-cell" title={row.note || ""}>
                       {row.note || "—"}
@@ -397,7 +428,8 @@ export function IssuesPanel({
                     <td className="issue-table-date">{formatDate(row.resolved) || "—"}</td>
                     <td className="issue-table-assignee">{row.assignee || "—"}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
