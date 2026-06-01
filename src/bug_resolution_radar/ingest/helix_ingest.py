@@ -853,6 +853,7 @@ def _build_arsql_sql(
         f"{_select_alias('Contact Company', 'customerName')}, "
         f"{_select_alias('BBVA_MatrixServiceN1', 'bbva_matrixservicen1')}, "
         f"{_select_alias('BBVA_SourceServiceN1', 'bbva_sourceservicen1')}, "
+        f"{_select_alias('BBVA_ExecutiveDescription', 'bbva_executivedescription')}, "
         f"{_select_alias('BBVA_StartDateTime', 'bbva_startdatetime')}, "
         f"{_select_alias('Closed Date', 'bbva_closeddate')}, "
         f"{_select_alias('Last Modified Date', 'lastModifiedDate')}, "

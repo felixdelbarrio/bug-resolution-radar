@@ -42,6 +42,11 @@ from bug_resolution_radar.analytics.insights_scope import (
     INSIGHTS_VIEW_MODE_OPTIONS,
     build_insights_combo_context,
 )
+from bug_resolution_radar.analytics.issue_functionality import (
+    FUNCTIONALITY_COL,
+    HELIX_EXECUTIVE_DESCRIPTION_COL,
+    ensure_issue_functionality_columns,
+)
 from bug_resolution_radar.analytics.issues import (
     normalize_text_col,
     priority_rank,
@@ -860,6 +865,7 @@ def _scope_context_cache_key(
         tuple(str(item or "").strip() for item in list(query.filters.status or [])),
         tuple(str(item or "").strip() for item in list(query.filters.priority or [])),
         tuple(str(item or "").strip() for item in list(query.filters.assignee or [])),
+        tuple(str(item or "").strip() for item in list(query.filters.functionality or [])),
         str(query.quincenal_scope or "").strip(),
         tuple(str(item or "").strip() for item in list(query.issue_scope_keys or [])),
         str(query.issue_sort_col or "").strip(),
@@ -887,7 +893,7 @@ def _build_scope_context(
         source_ids=source_ids,
         reference_day=reference_day,
     )
-    dff = apply_filters(scoped_df, query.filters)
+    dff = ensure_issue_functionality_columns(apply_filters(scoped_df, query.filters))
     dff = apply_dashboard_issue_scope(
         dff,
         settings=settings,
@@ -1107,6 +1113,8 @@ def build_issue_rows(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "type",
         "priority",
@@ -1143,6 +1151,8 @@ def build_issue_rows(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "type",
         "priority",
@@ -1505,6 +1515,8 @@ def _issue_records_from_df(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "priority",
         "assignee",
@@ -1536,6 +1548,8 @@ def _issue_records_from_df(
         "key",
         "summary",
         "description",
+        HELIX_EXECUTIVE_DESCRIPTION_COL,
+        FUNCTIONALITY_COL,
         "status",
         "priority",
         "assignee",
@@ -1556,6 +1570,8 @@ def _issue_records_from_df(
                 "key",
                 "summary",
                 "description",
+                HELIX_EXECUTIVE_DESCRIPTION_COL,
+                FUNCTIONALITY_COL,
                 "status",
                 "priority",
                 "assignee",

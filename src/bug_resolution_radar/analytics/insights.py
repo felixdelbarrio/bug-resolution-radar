@@ -104,6 +104,7 @@ _EMPTY_THEME_DAILY_COLUMNS: tuple[str, ...] = (
     "issues_value",
 )
 _OTHER_THEME_TOKENS: tuple[str, ...] = ("otros", "other")
+_HELIX_EXECUTIVE_DESCRIPTION_COL = "helix_executive_description"
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -447,12 +448,23 @@ def classify_theme(
     return default_theme
 
 
+def _issue_theme_text(df: pd.DataFrame) -> pd.Series:
+    if "summary" in df.columns:
+        summary = df["summary"].fillna("").astype(str).str.strip()
+    else:
+        summary = pd.Series([""] * len(df), index=df.index, dtype=str)
+    if _HELIX_EXECUTIVE_DESCRIPTION_COL not in df.columns:
+        return summary
+    executive = df[_HELIX_EXECUTIVE_DESCRIPTION_COL].fillna("").astype(str).str.strip()
+    return (summary + " " + executive).str.strip()
+
+
 def theme_counts(open_df: pd.DataFrame) -> pd.Series:
     """Count open issues by classified theme, excluding blank summaries."""
     df = _safe_df(open_df)
     if df.empty or "summary" not in df.columns:
         return pd.Series(dtype="int64")
-    summaries = df["summary"].fillna("").astype(str).str.strip()
+    summaries = _issue_theme_text(df)
     summaries = summaries[summaries != ""]
     if summaries.empty:
         return pd.Series(dtype="int64")
@@ -507,7 +519,7 @@ def prepare_open_theme_payload(
         return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
 
     tmp_open["summary"] = tmp_open["summary"].fillna("").astype(str)
-    tmp_open["__theme"] = tmp_open["summary"].map(classify_theme)
+    tmp_open["__theme"] = _issue_theme_text(tmp_open).map(classify_theme)
     counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
     if counts.empty:
         return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
@@ -593,7 +605,10 @@ def build_theme_daily_trend(
     if safe.empty or "created" not in safe.columns or "summary" not in safe.columns:
         return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
 
-    work = safe.loc[:, ["created", "summary"]].copy(deep=False)
+    cols = ["created", "summary"]
+    if _HELIX_EXECUTIVE_DESCRIPTION_COL in safe.columns:
+        cols.append(_HELIX_EXECUTIVE_DESCRIPTION_COL)
+    work = safe.loc[:, cols].copy(deep=False)
     work["summary"] = work["summary"].fillna("").astype(str)
     created = _to_dt_naive(work["created"])
     valid = created.notna()
@@ -604,7 +619,7 @@ def build_theme_daily_trend(
     created = created.loc[valid]
     work["date"] = created.dt.floor("D").to_numpy(copy=False)
     work["tema"] = [
-        classify_theme(summary, theme_rules=theme_rules) for summary in work["summary"].tolist()
+        classify_theme(text, theme_rules=theme_rules) for text in _issue_theme_text(work).tolist()
     ]
 
     theme_order: list[str]
@@ -670,7 +685,10 @@ def build_theme_fortnight_trend(
     if safe.empty or "created" not in safe.columns or "summary" not in safe.columns:
         return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
 
-    work = safe.loc[:, ["created", "summary"]].copy(deep=False)
+    cols = ["created", "summary"]
+    if _HELIX_EXECUTIVE_DESCRIPTION_COL in safe.columns:
+        cols.append(_HELIX_EXECUTIVE_DESCRIPTION_COL)
+    work = safe.loc[:, cols].copy(deep=False)
     work["summary"] = work["summary"].fillna("").astype(str)
     created = _to_dt_naive(work["created"])
     valid = created.notna()
@@ -684,7 +702,7 @@ def build_theme_fortnight_trend(
     work["quincena_end"] = axis["quincena_end"].to_numpy(copy=False)
     work["quincena_label"] = axis["quincena_label"].to_numpy(copy=False)
     work["tema"] = [
-        classify_theme(summary, theme_rules=theme_rules) for summary in work["summary"].tolist()
+        classify_theme(text, theme_rules=theme_rules) for text in _issue_theme_text(work).tolist()
     ]
 
     theme_order: list[str]

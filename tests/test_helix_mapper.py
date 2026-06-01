@@ -166,6 +166,7 @@ def test_map_helix_values_to_item_reads_arsql_flat_fields_case_insensitive() -> 
             "status": "Resolved",
             "BBVA_SourceServiceN1": "ENTERPRISE WEB",
             "BBVA_MatrixServiceN1": "MATRIX",
+            "BBVA_ExecutiveDescription": "Fallo en pagos de empresas",
             "BBVA_ClosedDate": 1704153600000,
         },
         base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
@@ -177,6 +178,7 @@ def test_map_helix_values_to_item_reads_arsql_flat_fields_case_insensitive() -> 
     assert item is not None
     assert item.source_service_n1 == "ENTERPRISE WEB"
     assert item.matrix_service_n1 == "MATRIX"
+    assert item.executive_description == "Fallo en pagos de empresas"
     assert item.closed_date == "2024-01-02T00:00:00+00:00"
 
 

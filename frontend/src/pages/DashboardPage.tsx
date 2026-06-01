@@ -43,6 +43,7 @@ function queryParams(
     status: params.status,
     priority: params.priority,
     assignee: params.assignee,
+    functionality: params.functionality,
     quincenalScope: params.quincenalScope,
     issueSortCol: params.issueSortCol,
     issueLikeQuery,
@@ -684,6 +685,7 @@ export function DashboardPage() {
           status={dashboardState.params.status}
           priority={dashboardState.params.priority}
           assignee={dashboardState.params.assignee}
+          functionality={dashboardState.params.functionality}
           quincenalScope={dashboardState.params.quincenalScope}
           onChange={dashboardState.update}
         />
@@ -725,6 +727,7 @@ export function DashboardPage() {
           status={dashboardState.params.status}
           priority={dashboardState.params.priority}
           assignee={dashboardState.params.assignee}
+          functionality={dashboardState.params.functionality}
           quincenalScope={dashboardState.params.quincenalScope}
           onChange={dashboardState.update}
         />

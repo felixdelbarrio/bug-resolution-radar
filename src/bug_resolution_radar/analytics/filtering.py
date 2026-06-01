@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issue_functionality import (
+    FUNCTIONALITY_COL,
+    ensure_issue_functionality_columns,
+)
 from bug_resolution_radar.analytics.issues import normalize_text_col, open_issues_only
 from bug_resolution_radar.analytics.quincenal_scope import (
     QUINCENAL_SCOPE_ALL,
@@ -22,6 +26,7 @@ class FilterState:
     status: List[str]
     priority: List[str]
     assignee: List[str]
+    functionality: List[str] = field(default_factory=list)
 
 
 def normalize_filter_tokens(values: Sequence[str] | None) -> List[str]:
@@ -41,29 +46,38 @@ def apply_filters(df: pd.DataFrame, fs: FilterState) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
-    mask = pd.Series(True, index=df.index)
+    base = ensure_issue_functionality_columns(df) if fs.functionality else df
+    mask = pd.Series(True, index=base.index)
 
     status_norm: pd.Series | None = None
-    if "status" in df.columns:
-        status_norm = normalize_text_col(df["status"], "(sin estado)")
+    if "status" in base.columns:
+        status_norm = normalize_text_col(base["status"], "(sin estado)")
         if fs.status:
             mask &= status_norm.isin(fs.status)
 
     priority_norm: pd.Series | None = None
-    if "priority" in df.columns:
-        priority_norm = normalize_text_col(df["priority"], "(sin priority)")
+    if "priority" in base.columns:
+        priority_norm = normalize_text_col(base["priority"], "(sin priority)")
         if fs.priority:
             mask &= priority_norm.isin(fs.priority)
 
-    if fs.assignee and "assignee" in df.columns:
-        assignee_norm = normalize_text_col(df["assignee"], "(sin asignar)")
+    if fs.assignee and "assignee" in base.columns:
+        assignee_norm = normalize_text_col(base["assignee"], "(sin asignar)")
         mask &= assignee_norm.isin(fs.assignee)
 
-    dff = df.loc[mask].copy(deep=False)
+    functionality_norm: pd.Series | None = None
+    if FUNCTIONALITY_COL in base.columns:
+        functionality_norm = normalize_text_col(base[FUNCTIONALITY_COL], "(sin funcionalidad)")
+        if fs.functionality:
+            mask &= functionality_norm.isin(fs.functionality)
+
+    dff = base.loc[mask].copy(deep=False)
     if status_norm is not None:
         dff["status"] = status_norm.loc[mask].to_numpy()
     if priority_norm is not None:
         dff["priority"] = priority_norm.loc[mask].to_numpy()
+    if functionality_norm is not None:
+        dff[FUNCTIONALITY_COL] = functionality_norm.loc[mask].to_numpy()
     return dff
 
 

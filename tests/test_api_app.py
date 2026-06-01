@@ -567,13 +567,74 @@ def test_issues_and_kanban_endpoints_serialize_rows_without_pandas_scalars(
     issue_payload = issues_response.json()
     assert issue_payload["total"] == 1
     assert issue_payload["rows"][0]["key"] == "RAD-1"
+    assert issue_payload["rows"][0]["functionality"] == "Login y acceso"
+    assert "helix_executive_description" in issue_payload["rows"][0]
     assert isinstance(issue_payload["rows"][0]["updated"], str)
+
+    filtered_response = client.get(
+        "/api/issues",
+        params={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "functionality": "Login y acceso",
+            "sortBy": "functionality",
+        },
+    )
+    assert filtered_response.status_code == 200
+    assert filtered_response.json()["total"] == 1
 
     assert kanban_response.status_code == 200
     kanban_payload = kanban_response.json()
     assert kanban_payload[0]["status"] == "Open"
     assert kanban_payload[0]["items"][0]["key"] == "RAD-1"
     assert isinstance(kanban_payload[0]["items"][0]["ageDays"], float)
+
+
+def test_bootstrap_workspace_filter_options_include_real_functionalities(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get(
+        "/api/bootstrap",
+        params={"country": "España", "sourceId": source_id, "scopeMode": "source"},
+    )
+
+    assert response.status_code == 200
+    filter_options = response.json()["workspace"]["filterOptions"]
+    assert filter_options["status"] == ["Open"]
+    assert filter_options["priority"] == ["High"]
+    assert filter_options["assignee"] == ["Alice"]
+    assert filter_options["functionality"] == ["Login y acceso"]
+
+
+def test_issue_functionality_filter_has_independent_scope_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_functionality_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    dashboard_snapshot._scope_context_cache.clear()
+
+    client = TestClient(api_app.create_app())
+    base_params = {"country": "España", "sourceId": source_id, "scopeMode": "source"}
+    unfiltered = client.get("/api/issues", params=base_params)
+    filtered = client.get(
+        "/api/issues",
+        params={**base_params, "functionality": "Login y acceso"},
+    )
+
+    assert unfiltered.status_code == 200
+    assert filtered.status_code == 200
+    assert unfiltered.json()["total"] == 4
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["rows"][0]["key"] == "RAD-11"
 
 
 def test_browser_open_endpoint_allows_fallback_only_on_explicit_click(
