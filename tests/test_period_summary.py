@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.period_summary import build_country_quincenal_result
+from bug_resolution_radar.analytics.period_summary import (
+    build_country_quincenal_result,
+    build_quincenal_delta,
+)
 from bug_resolution_radar.config import Settings
 
 
@@ -44,6 +47,89 @@ def _write_helix_dump(path: Path) -> None:
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
+    zero_reference = build_quincenal_delta(
+        metric_key="created",
+        current_value=4,
+        previous_value=0,
+        value_kind="count",
+    )
+    assert zero_reference.current_value == 4.0
+    assert zero_reference.previous_value == 0.0
+    assert zero_reference.absolute_delta == 4.0
+    assert zero_reference.relative_delta is None
+    assert zero_reference.display_kind == "absolute"
+    assert zero_reference.display_text == "Δ +4 vs quincena previa"
+    assert "%" not in zero_reference.display_text
+    assert zero_reference.presentation_badge_text == "▲>100%"
+    assert zero_reference.presentation_semantic_tone == "risk"
+
+    small_reference = build_quincenal_delta(
+        metric_key="created",
+        current_value=15,
+        previous_value=1,
+        value_kind="count",
+    )
+    assert small_reference.relative_delta == 14.0
+    assert small_reference.display_kind == "absolute"
+    assert small_reference.display_text == "Δ +14 vs quincena previa"
+    assert small_reference.badge_text == "+14"
+    assert "1400" not in small_reference.display_text
+    assert small_reference.presentation_badge_text == "▲>100%"
+
+    neutral = build_quincenal_delta(
+        metric_key="closed",
+        current_value=0,
+        previous_value=0,
+        value_kind="count",
+    )
+    assert neutral.display_kind == "neutral"
+    assert neutral.direction == "neutral"
+    assert neutral.semantic_tone == "neutral"
+    assert neutral.display_text == "Sin cambios vs quincena previa"
+    assert neutral.presentation_badge_text == "•0%"
+    assert neutral.presentation_semantic_tone == "neutral"
+
+    percent_allowed = build_quincenal_delta(
+        metric_key="closed",
+        current_value=6,
+        previous_value=4,
+        value_kind="count",
+    )
+    assert percent_allowed.relative_delta == 0.5
+    assert percent_allowed.display_kind == "percent"
+    assert percent_allowed.display_text == "Δ +50.0% vs quincena previa"
+    assert percent_allowed.semantic_tone == "flow"
+    assert percent_allowed.presentation_badge_text == "▲50%"
+    assert percent_allowed.presentation_semantic_tone == "flow"
+
+    tiny_resolution_reference = build_quincenal_delta(
+        metric_key="resolution_days",
+        current_value=2.955,
+        previous_value=0.020,
+        value_kind="days",
+        current_sample_size=3,
+        previous_sample_size=3,
+    )
+    assert round(float(tiny_resolution_reference.relative_delta or 0.0) * 100.0, 0) == 14675
+    assert tiny_resolution_reference.display_kind == "absolute"
+    assert tiny_resolution_reference.display_text == "Δ +2.9 días vs quincena previa"
+    assert "1467" not in tiny_resolution_reference.display_text
+    assert "%" not in tiny_resolution_reference.badge_text
+    assert tiny_resolution_reference.presentation_badge_text == "▲>100%"
+    assert tiny_resolution_reference.presentation_semantic_tone == "risk"
+
+    null_resolution = build_quincenal_delta(
+        metric_key="resolution_days",
+        current_value=None,
+        previous_value=None,
+        value_kind="days",
+    )
+    assert null_resolution.display_kind == "no_reference"
+    assert null_resolution.badge_text == "—"
+    assert null_resolution.presentation_badge_text == "•0%"
 
 
 def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path: Path) -> None:
@@ -155,6 +241,70 @@ def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path
     assert int(round(summary.resolution_days_min_now)) == 19
     assert int(round(summary.resolution_days_max_now)) == 19
     assert set(result.by_source.keys()) == {"helix:mexico:senda", "helix:mexico:gema"}
+
+
+def test_build_country_quincenal_result_exposes_safe_delta_objects() -> None:
+    reference_day = pd.Timestamp("2026-03-20T00:00:00+00:00")
+    rows: list[dict[str, object]] = [
+        {
+            "key": "PREV-1",
+            "summary": "Referencia mínima",
+            "status": "Resolved",
+            "priority": "High",
+            "created": "2026-03-02T00:00:00+00:00",
+            "updated": "2026-03-02T00:30:00+00:00",
+            "resolved": "2026-03-02T00:30:00+00:00",
+            "country": "México",
+            "source_id": "jira:mexico:core",
+            "source_type": "jira",
+        }
+    ]
+    for idx in range(15):
+        created_day = 15 + (idx % 6)
+        row: dict[str, object] = {
+            "key": f"CUR-{idx + 1}",
+            "summary": "Actual",
+            "status": "New",
+            "priority": "Medium",
+            "created": f"2026-03-{created_day:02d}T00:00:00+00:00",
+            "updated": f"2026-03-{created_day:02d}T00:00:00+00:00",
+            "resolved": None,
+            "country": "México",
+            "source_id": "jira:mexico:core",
+            "source_type": "jira",
+        }
+        if idx < 2:
+            row["status"] = "Resolved"
+            row["created"] = f"2026-03-{15 + idx:02d}T00:00:00+00:00"
+            row["resolved"] = f"2026-03-{18 + idx:02d}T00:00:00+00:00"
+        rows.append(row)
+
+    result = build_country_quincenal_result(
+        df=pd.DataFrame(rows),
+        settings=Settings(),
+        country="México",
+        source_ids=["jira:mexico:core"],
+        reference_day=reference_day,
+    )
+
+    summary = result.aggregate.summary
+    assert summary.new_now == 15
+    assert summary.new_before == 1
+    assert summary.new_delta.current_value == 15.0
+    assert summary.new_delta.previous_value == 1.0
+    assert summary.new_delta.absolute_delta == 14.0
+    assert summary.new_delta.relative_delta == 14.0
+    assert summary.new_delta.display_kind == "absolute"
+    assert summary.new_delta.display_text == "Δ +14 vs quincena previa"
+    assert summary.new_delta_pct is None
+
+    assert summary.closed_delta.display_kind == "absolute"
+    assert summary.closed_delta.semantic_tone == "flow"
+    assert summary.resolution_delta.current_sample_size == 2
+    assert summary.resolution_delta.previous_sample_size == 1
+    assert summary.resolution_delta.display_kind == "absolute"
+    assert "%" not in summary.resolution_delta.display_text
+    assert summary.resolution_delta_pct is None
 
 
 def test_build_country_quincenal_result_defaults_to_high_criticality_focus() -> None:

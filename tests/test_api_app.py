@@ -523,6 +523,11 @@ def test_intelligence_endpoint_returns_react_aligned_payload(
     ]
     assert "caption" in payload["periodSummary"]
     assert payload["periodSummary"]["cards"]
+    assert "delta" in payload["periodSummary"]["cards"][0]
+    assert "displayText" in payload["periodSummary"]["cards"][0]["delta"]
+    assert "displayKind" in payload["periodSummary"]["cards"][0]["delta"]
+    assert "presentationBadgeText" in payload["periodSummary"]["cards"][0]["delta"]
+    assert "presentationSemanticTone" in payload["periodSummary"]["cards"][0]["delta"]
     assert payload["functionality"]["combo"]["viewMode"] == "quincenal"
     assert "statusOptions" in payload["functionality"]["combo"]
     assert isinstance(payload["functionality"]["topics"], list)

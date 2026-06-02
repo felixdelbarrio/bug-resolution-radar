@@ -1022,6 +1022,63 @@ def test_summary_timeseries_chart_uses_executive_export_tokens(monkeypatch: Any)
             assert float(trace.line.width) >= 4.2
 
 
+def test_summary_timeseries_chart_uses_slide_native_ratio_and_readable_fonts(
+    monkeypatch: Any,
+) -> None:
+    now = pd.Timestamp("2026-05-30T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": f"A-{idx}",
+                "summary": "Issue",
+                "status": "Resolved" if idx % 3 == 0 else "New",
+                "priority": "High",
+                "created": (now - pd.Timedelta(days=idx)).isoformat(),
+                "resolved": (
+                    (now - pd.Timedelta(days=max(idx - 2, 0))).isoformat() if idx % 3 == 0 else None
+                ),
+            }
+            for idx in range(1, 45)
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def _capture_fig(fig: Any, *, width: int, height: int, scale: float = 1.0) -> bytes:
+        captured["fig"] = fig
+        captured["width"] = width
+        captured["height"] = height
+        captured["scale"] = scale
+        return b"png"
+
+    monkeypatch.setattr(period_ppt_mod, "_fig_to_png_exact", _capture_fig)
+
+    payload = period_ppt_mod._chart_png(
+        Settings(),
+        dff=dff,
+        open_df=dff[dff["resolved"].isna()],
+        chart_id="timeseries",
+        width=1200,
+        height=838,
+        slide_optimized=True,
+    )
+
+    assert payload == b"png"
+    assert captured["width"] == 1200
+    assert captured["height"] == 838
+    assert captured["scale"] == 1.0
+    fig = captured["fig"]
+    assert int(fig.layout.xaxis.tickfont.size) >= int(EXEC_CHART_AXIS_FONT_PT * 1.35)
+    assert int(fig.layout.yaxis.tickfont.size) >= int(EXEC_CHART_AXIS_FONT_PT * 1.35)
+    assert int(fig.layout.legend.font.size) >= int(EXEC_CHART_LEGEND_FONT_PT * 1.35)
+    assert int(fig.layout.xaxis.nticks) <= 5
+    assert int(fig.layout.xaxis.tickangle) <= -30
+    assert int(fig.layout.margin.b) >= 260
+    for trace in fig.data:
+        if str(getattr(trace, "type", "") or "").lower() in {"scatter", "scattergl"}:
+            assert float(trace.marker.size) >= 11.0
+            assert float(trace.line.width) >= 6.4
+
+
 def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     monkeypatch: Any,
 ) -> None:
@@ -1066,7 +1123,12 @@ def test_generate_country_period_followup_ppt_uses_timeseries_for_summary(
     )
 
     def _fake_chart_png(
-        _settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, chart_id: str
+        _settings: Settings,
+        *,
+        dff: pd.DataFrame,
+        open_df: pd.DataFrame,
+        chart_id: str,
+        **_kwargs: object,
     ) -> bytes:
         _ = (dff, open_df)
         called_chart_ids.append(str(chart_id))
@@ -1126,7 +1188,12 @@ def test_period_followup_ppt_handles_three_rollup_sources(monkeypatch: Any, tmp_
     chart_scopes: list[tuple[str, ...]] = []
 
     def _fake_chart_png(
-        _settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, chart_id: str
+        _settings: Settings,
+        *,
+        dff: pd.DataFrame,
+        open_df: pd.DataFrame,
+        chart_id: str,
+        **_kwargs: object,
     ) -> bytes:
         _ = (open_df, chart_id)
         chart_scopes.append(tuple(sorted(dff["source_id"].dropna().astype(str).unique())))
@@ -2255,6 +2322,93 @@ def test_period_followup_summary_uses_quincenal_flow_wording_and_removes_artifac
         )
     assert 'type="slidenum"' not in xml_payload
     assert "p. </a:t>" not in xml_payload
+
+
+def test_period_followup_summary_uses_safe_central_delta_badges() -> None:
+    reference_day = pd.Timestamp("2026-03-20T00:00:00+00:00")
+    rows: list[dict[str, object]] = [
+        {
+            "key": "PREV-1",
+            "summary": "Referencia mínima",
+            "status": "Resolved",
+            "priority": "High",
+            "created": "2026-03-02T00:00:00+00:00",
+            "updated": "2026-03-02T00:30:00+00:00",
+            "resolved": "2026-03-02T00:30:00+00:00",
+            "country": "México",
+            "source_id": "jira:mexico:senda",
+            "source_type": "jira",
+        }
+    ]
+    for idx in range(15):
+        created_day = 15 + (idx % 6)
+        row: dict[str, object] = {
+            "key": f"CUR-{idx + 1}",
+            "summary": "Actual",
+            "status": "New",
+            "priority": "Medium",
+            "created": f"2026-03-{created_day:02d}T00:00:00+00:00",
+            "updated": f"2026-03-{created_day:02d}T00:00:00+00:00",
+            "resolved": None,
+            "country": "México",
+            "source_id": "jira:mexico:senda" if idx % 2 == 0 else "jira:mexico:gema",
+            "source_type": "jira",
+        }
+        if idx < 2:
+            row["status"] = "Resolved"
+            row["created"] = f"2026-03-{15 + idx:02d}T00:00:00+00:00"
+            row["resolved"] = f"2026-03-{18 + idx:02d}T00:00:00+00:00"
+        rows.append(row)
+    dff = pd.DataFrame(rows)
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    quincenal = period_ppt_mod.build_country_quincenal_result(
+        df=dff,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        reference_day=reference_day,
+    )
+    summary = quincenal.aggregate.summary
+    assert summary.new_delta.display_kind == "absolute"
+    assert period_ppt_mod._summary_delta_badge(summary.new_delta)[0] == "▲>100%"
+    assert period_ppt_mod._summary_delta_badge(summary.resolution_delta)[0].endswith("%")
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        reference_day=reference_day,
+    )
+    prs = Presentation(BytesIO(out.content))
+    deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert "▲>100%" in deck_text
+    assert "1400%" not in deck_text
+    assert "14673%" not in deck_text
+    badge_pattern = re.compile(r"^[▲▼•](?:>?\d+%)$")
+    for slide_idx in (2, 3, 4):
+        slide = prs.slides[slide_idx]
+        badge_texts = [
+            str(getattr(shape, "text", "") or "").strip()
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+            and badge_pattern.fullmatch(str(getattr(shape, "text", "") or "").strip())
+        ]
+        assert len(badge_texts) >= 3
+        chart_pics = []
+        for shape in slide.shapes:
+            try:
+                image = shape.image
+            except Exception:
+                continue
+            if image.size[0] >= 1000:
+                chart_pics.append((shape, image))
+        assert chart_pics
+        shape, image = max(chart_pics, key=lambda item: int(item[0].width) * int(item[0].height))
+        shape_ratio = float(shape.width) / float(shape.height)
+        image_ratio = float(image.size[0]) / float(image.size[1])
+        assert abs(shape_ratio - image_ratio) < 0.03
 
 
 def test_period_followup_metric_typography_handles_one_to_four_digit_values() -> None:
