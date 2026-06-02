@@ -200,7 +200,7 @@ export type IntelligencePayload = {
       kicker: string;
       metric: string;
       detail: string;
-      delta: QuincenalDeltaPayload;
+      delta?: QuincenalDeltaPayload | null;
       tone: string;
       label: string;
       quincenalScopeLabel: string;

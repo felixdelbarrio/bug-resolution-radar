@@ -85,16 +85,26 @@ def test_period_summary_frontend_uses_backend_delta_contract() -> None:
     ]
 
     assert "export type QuincenalDeltaPayload" in api_source
-    assert "delta: QuincenalDeltaPayload" in api_source
     assert "displayKind" in api_source
     assert "badgeText" in api_source
     assert "presentationBadgeText" in api_source
     assert "presentationSemanticTone" in api_source
     assert "relativeDelta" in api_source
+    assert "delta?: QuincenalDeltaPayload | null" in api_source
     assert "card.detail" in summary_block
-    assert "card.delta.displayKind" in summary_block
+    assert "card.delta?.displayKind" in summary_block
+    assert "card.delta.displayKind" not in summary_block
     assert "relativeDelta" not in summary_block
     assert "1400" not in summary_block
+
+
+def test_dashboard_page_does_not_prefetch_heavy_inactive_panels() -> None:
+    source = _frontend_file("pages/DashboardPage.tsx")
+
+    assert "prefetchQuery" not in source
+    assert "dashboard-intelligence" in source
+    assert "insightsTab: dashboardState.params.insightsTab" in source
+    assert "placeholderData: undefined" in source
 
 
 def test_notes_editor_allows_free_issue_edit_and_validates_before_save() -> None:
