@@ -63,6 +63,8 @@ def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
     assert zero_reference.display_kind == "absolute"
     assert zero_reference.display_text == "Δ +4 vs quincena previa"
     assert "%" not in zero_reference.display_text
+    assert zero_reference.presentation_badge_text == "▲>100%"
+    assert zero_reference.presentation_semantic_tone == "risk"
 
     small_reference = build_quincenal_delta(
         metric_key="created",
@@ -75,6 +77,7 @@ def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
     assert small_reference.display_text == "Δ +14 vs quincena previa"
     assert small_reference.badge_text == "+14"
     assert "1400" not in small_reference.display_text
+    assert small_reference.presentation_badge_text == "▲>100%"
 
     neutral = build_quincenal_delta(
         metric_key="closed",
@@ -86,6 +89,8 @@ def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
     assert neutral.direction == "neutral"
     assert neutral.semantic_tone == "neutral"
     assert neutral.display_text == "Sin cambios vs quincena previa"
+    assert neutral.presentation_badge_text == "•0%"
+    assert neutral.presentation_semantic_tone == "neutral"
 
     percent_allowed = build_quincenal_delta(
         metric_key="closed",
@@ -97,6 +102,8 @@ def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
     assert percent_allowed.display_kind == "percent"
     assert percent_allowed.display_text == "Δ +50.0% vs quincena previa"
     assert percent_allowed.semantic_tone == "flow"
+    assert percent_allowed.presentation_badge_text == "▲50%"
+    assert percent_allowed.presentation_semantic_tone == "flow"
 
     tiny_resolution_reference = build_quincenal_delta(
         metric_key="resolution_days",
@@ -111,6 +118,8 @@ def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
     assert tiny_resolution_reference.display_text == "Δ +2.9 días vs quincena previa"
     assert "1467" not in tiny_resolution_reference.display_text
     assert "%" not in tiny_resolution_reference.badge_text
+    assert tiny_resolution_reference.presentation_badge_text == "▲>100%"
+    assert tiny_resolution_reference.presentation_semantic_tone == "risk"
 
     null_resolution = build_quincenal_delta(
         metric_key="resolution_days",
@@ -120,6 +129,7 @@ def test_quincenal_delta_display_rules_avoid_extreme_percentages() -> None:
     )
     assert null_resolution.display_kind == "no_reference"
     assert null_resolution.badge_text == "—"
+    assert null_resolution.presentation_badge_text == "•0%"
 
 
 def test_build_country_quincenal_result_computes_aggregate_and_maestras(tmp_path: Path) -> None:

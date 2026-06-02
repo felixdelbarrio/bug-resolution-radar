@@ -88,6 +88,8 @@ def test_period_summary_frontend_uses_backend_delta_contract() -> None:
     assert "delta: QuincenalDeltaPayload" in api_source
     assert "displayKind" in api_source
     assert "badgeText" in api_source
+    assert "presentationBadgeText" in api_source
+    assert "presentationSemanticTone" in api_source
     assert "relativeDelta" in api_source
     assert "card.detail" in summary_block
     assert "card.delta.displayKind" in summary_block
