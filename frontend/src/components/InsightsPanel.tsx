@@ -458,6 +458,7 @@ export function InsightsPanel({
                 key={card.cardId}
                 className="period-action-card"
                 data-tone={card.tone}
+                data-delta-kind={card.delta.displayKind}
                 onClick={() => jumpToIssues(card.quincenalScopeLabel)}
               >
                 <span>{card.kicker}</span>

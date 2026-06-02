@@ -5,6 +5,7 @@ from typing import Any
 import pandas as pd
 
 from bug_resolution_radar.analytics.filtering import FilterState
+from bug_resolution_radar.analytics.period_summary import build_country_quincenal_result
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.services import dashboard_snapshot
 from bug_resolution_radar.services.dashboard_snapshot import (
@@ -162,6 +163,88 @@ def test_intelligence_payload_includes_finalist_discrepancies_tab(
     assert discrepancies["groups"][0]["helixText"] == "Helix cerrado\nDetalle INC000104154954"
     assert discrepancies["groups"][0]["jiraCount"] == 2
     assert {issue["key"] for issue in discrepancies["groups"][0]["issues"]} == {"MEX-1", "MEX-2"}
+
+
+def test_intelligence_period_summary_reuses_central_quincenal_delta(
+    monkeypatch: Any,
+    tmp_path,
+) -> None:
+    reference_day = pd.Timestamp("2026-03-20T00:00:00+00:00")
+    rows: list[dict[str, object]] = [
+        {
+            "key": "PREV-1",
+            "summary": "Referencia mínima",
+            "description": "",
+            "status": "Resolved",
+            "priority": "High",
+            "assignee": "Ana",
+            "created": "2026-03-02T00:00:00+00:00",
+            "updated": "2026-03-02T00:30:00+00:00",
+            "resolved": "2026-03-02T00:30:00+00:00",
+            "source_type": "jira",
+            "source_alias": "Core",
+            "source_id": "jira:mexico:core",
+            "country": "México",
+            "url": "",
+        }
+    ]
+    for idx in range(15):
+        day = 15 + (idx % 6)
+        rows.append(
+            {
+                "key": f"CUR-{idx + 1}",
+                "summary": "Actual",
+                "description": "",
+                "status": "New",
+                "priority": "Medium",
+                "assignee": "Ana",
+                "created": f"2026-03-{day:02d}T00:00:00+00:00",
+                "updated": f"2026-03-{day:02d}T00:00:00+00:00",
+                "resolved": "",
+                "source_type": "jira",
+                "source_alias": "Core",
+                "source_id": "jira:mexico:core",
+                "country": "México",
+                "url": "",
+            }
+        )
+    df = pd.DataFrame(rows)
+    settings = Settings(DATA_PATH=str(tmp_path / "issues.json"))
+    query = DashboardQuery(
+        workspace=WorkspaceSelection(
+            country="México",
+            source_id="jira:mexico:core",
+            scope_mode="country",
+        ),
+        filters=FilterState(status=[], priority=[], assignee=[]),
+    )
+    expected = build_country_quincenal_result(
+        df=df,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:core"],
+        reference_day=reference_day,
+    ).aggregate.summary
+
+    monkeypatch.setattr(dashboard_snapshot, "load_workspace_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(dashboard_snapshot, "load_country_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(dashboard_snapshot, "load_country_history_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(
+        "bug_resolution_radar.analytics.period_summary.TimeWindowService.today",
+        lambda self: reference_day.tz_localize(None),
+    )
+    dashboard_snapshot._scope_context_cache.clear()
+
+    payload = build_intelligence_snapshot(settings, query=query)
+    created_card = next(
+        card for card in payload["periodSummary"]["cards"] if card["cardId"] == "new_now"
+    )
+
+    assert created_card["detail"] == expected.new_delta.display_text
+    assert created_card["delta"] == expected.new_delta.to_payload()
+    assert created_card["delta"]["displayKind"] == "absolute"
+    assert created_card["delta"]["relativeDelta"] == 14.0
+    assert "1400" not in created_card["detail"]
 
 
 def test_country_finalist_mode_updates_open_kpis_consistently(

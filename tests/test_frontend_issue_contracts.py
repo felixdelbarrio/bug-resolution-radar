@@ -75,6 +75,26 @@ def test_issues_panel_exposes_functionality_and_helix_executive_description() ->
     assert "issue-table-executive-description" in styles
 
 
+def test_period_summary_frontend_uses_backend_delta_contract() -> None:
+    api_source = _frontend_file("lib/api.ts")
+    panel_source = _frontend_file("components/InsightsPanel.tsx")
+    summary_block = panel_source[
+        panel_source.index("data.periodSummary.cards.map") : panel_source.index(
+            "data.periodSummary.groups.map"
+        )
+    ]
+
+    assert "export type QuincenalDeltaPayload" in api_source
+    assert "delta: QuincenalDeltaPayload" in api_source
+    assert "displayKind" in api_source
+    assert "badgeText" in api_source
+    assert "relativeDelta" in api_source
+    assert "card.detail" in summary_block
+    assert "card.delta.displayKind" in summary_block
+    assert "relativeDelta" not in summary_block
+    assert "1400" not in summary_block
+
+
 def test_notes_editor_allows_free_issue_edit_and_validates_before_save() -> None:
     source = _frontend_file("components/NotesEditor.tsx")
     issue_on_change = source[

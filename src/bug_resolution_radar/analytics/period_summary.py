@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import inspect
+import math
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, cast
 
 import pandas as pd
 
@@ -37,6 +38,41 @@ _CRITICAL_PRIORITY_TOKENS = {
     "highest",
     "high",
 }
+_SMALL_COUNT_REFERENCE_LIMIT = 3
+_MIN_RESOLUTION_REFERENCE_DAYS = 1.0
+_MIN_RESOLUTION_SAMPLE_SIZE = 2
+
+
+@dataclass(frozen=True)
+class QuincenalDelta:
+    metric_key: str
+    current_value: float | None
+    previous_value: float | None
+    absolute_delta: float | None
+    relative_delta: float | None
+    display_text: str
+    badge_text: str
+    display_kind: str
+    direction: str
+    semantic_tone: str
+    current_sample_size: int | None = None
+    previous_sample_size: int | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "metricKey": self.metric_key,
+            "currentValue": self.current_value,
+            "previousValue": self.previous_value,
+            "absoluteDelta": self.absolute_delta,
+            "relativeDelta": self.relative_delta,
+            "displayText": self.display_text,
+            "badgeText": self.badge_text,
+            "displayKind": self.display_kind,
+            "direction": self.direction,
+            "semanticTone": self.semantic_tone,
+            "currentSampleSize": self.current_sample_size,
+            "previousSampleSize": self.previous_sample_size,
+        }
 
 
 @dataclass(frozen=True)
@@ -96,19 +132,19 @@ class QuincenalSummary:
     new_now: int
     new_before: int
     new_accumulated: int
-    new_delta_pct: float | None
+    new_delta: QuincenalDelta
     closed_now: int
     closed_focus_now: int
     closed_other_now: int
     closed_before: int
-    closed_delta_pct: float | None
+    closed_delta: QuincenalDelta
     resolution_days_now: float | None
     resolution_days_min_now: float | None
     resolution_days_max_now: float | None
     resolved_focus_now: int
     resolved_other_now: int
     resolution_days_before: float | None
-    resolution_delta_pct: float | None
+    resolution_delta: QuincenalDelta
 
     @property
     def maestras_total(self) -> int:
@@ -119,6 +155,26 @@ class QuincenalSummary:
     def others_total(self) -> int:
         # Backward-compatible alias: now represents open "other" total.
         return int(self.open_other_total)
+
+    @property
+    def new_delta_pct(self) -> float | None:
+        return self.new_delta.relative_delta if self.new_delta.display_kind == "percent" else None
+
+    @property
+    def closed_delta_pct(self) -> float | None:
+        return (
+            self.closed_delta.relative_delta
+            if self.closed_delta.display_kind == "percent"
+            else None
+        )
+
+    @property
+    def resolution_delta_pct(self) -> float | None:
+        return (
+            self.resolution_delta.relative_delta
+            if self.resolution_delta.display_kind == "percent"
+            else None
+        )
 
 
 @dataclass(frozen=True)
@@ -377,14 +433,140 @@ def _window_from_reference(
     )
 
 
-def _delta_pct(now_value: float | int, before_value: float | int) -> float | None:
-    now_val = float(now_value or 0.0)
-    before_val = float(before_value or 0.0)
-    if before_val <= 0:
-        if now_val <= 0:
-            return 0.0
+def _finite_float(value: object) -> float | None:
+    if value is None:
         return None
-    return (now_val - before_val) / before_val
+    try:
+        numeric = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _signed_count(value: float | None) -> str:
+    if value is None:
+        return "0"
+    return f"{int(round(float(value))):+d}"
+
+
+def _signed_days(value: float | None, *, compact: bool = False) -> str:
+    if value is None:
+        return "0d" if compact else "0.0 días"
+    numeric = float(value)
+    if compact:
+        decimals = 1 if abs(numeric) < 10 and not float(numeric).is_integer() else 0
+        return f"{numeric:+.{decimals}f}d"
+    return f"{numeric:+.1f} días"
+
+
+def _delta_direction(absolute_delta: float | None) -> str:
+    if absolute_delta is None:
+        return "unknown"
+    if absolute_delta > 0:
+        return "up"
+    if absolute_delta < 0:
+        return "down"
+    return "neutral"
+
+
+def _delta_semantic_tone(metric_key: str, direction: str, display_kind: str) -> str:
+    if display_kind in {"no_reference", "neutral"} or direction in {"neutral", "unknown"}:
+        return "neutral"
+    token = str(metric_key or "").strip().lower()
+    if token == "closed":
+        return "flow" if direction == "up" else "warning"
+    if token == "resolution_days":
+        return "risk" if direction == "up" else "flow"
+    if token == "created":
+        return "risk" if direction == "up" else "flow"
+    return "quality"
+
+
+def _percent_badge(relative_delta: float) -> str:
+    pct = abs(float(relative_delta) * 100.0)
+    if relative_delta > 0:
+        return f"▲{pct:.0f}%"
+    if relative_delta < 0:
+        return f"▼{pct:.0f}%"
+    return "•0%"
+
+
+def build_quincenal_delta(
+    *,
+    metric_key: str,
+    current_value: float | int | None,
+    previous_value: float | int | None,
+    value_kind: str,
+    current_sample_size: int | None = None,
+    previous_sample_size: int | None = None,
+) -> QuincenalDelta:
+    current = _finite_float(current_value)
+    previous = _finite_float(previous_value)
+    absolute_delta = current - previous if current is not None and previous is not None else None
+    relative_delta = (
+        absolute_delta / previous
+        if absolute_delta is not None and previous is not None and previous > 0
+        else None
+    )
+    direction = _delta_direction(absolute_delta)
+
+    if current is None or previous is None:
+        if current is None and previous is None:
+            display_text = "Sin datos comparables"
+        elif current is None:
+            display_text = "Sin datos en la quincena actual"
+        else:
+            display_text = "Sin referencia en quincena previa"
+        display_kind = "no_reference"
+        badge_text = "—"
+    elif absolute_delta == 0:
+        display_text = "Sin cambios vs quincena previa"
+        display_kind = "neutral"
+        badge_text = "•0"
+    else:
+        value_token = str(value_kind or "").strip().lower()
+        allow_percent = False
+        if value_token == "count":
+            allow_percent = previous > _SMALL_COUNT_REFERENCE_LIMIT
+        elif value_token == "days":
+            current_sample = int(current_sample_size or 0)
+            previous_sample = int(previous_sample_size or 0)
+            allow_percent = (
+                previous >= _MIN_RESOLUTION_REFERENCE_DAYS
+                and current_sample >= _MIN_RESOLUTION_SAMPLE_SIZE
+                and previous_sample >= _MIN_RESOLUTION_SAMPLE_SIZE
+            )
+
+        if allow_percent and relative_delta is not None:
+            display_kind = "percent"
+            display_text = f"Δ {relative_delta * 100.0:+.1f}% vs quincena previa"
+            badge_text = _percent_badge(relative_delta)
+        else:
+            display_kind = "absolute"
+            if value_token == "days":
+                display_text = f"Δ {_signed_days(absolute_delta)} vs quincena previa"
+                badge_text = _signed_days(absolute_delta, compact=True)
+            else:
+                display_text = f"Δ {_signed_count(absolute_delta)} vs quincena previa"
+                badge_text = _signed_count(absolute_delta)
+
+    semantic_tone = _delta_semantic_tone(str(metric_key or ""), direction, display_kind)
+    return QuincenalDelta(
+        metric_key=str(metric_key or "").strip(),
+        current_value=current,
+        previous_value=previous,
+        absolute_delta=absolute_delta,
+        relative_delta=relative_delta,
+        display_text=display_text,
+        badge_text=badge_text,
+        display_kind=display_kind,
+        direction=direction,
+        semantic_tone=semantic_tone,
+        current_sample_size=current_sample_size,
+        previous_sample_size=previous_sample_size,
+    )
 
 
 def _focus_group_mask(
@@ -566,10 +748,25 @@ def _scope_result(
         settings=settings,
     )
     resolution_before_days = resolution_metrics.previous_mean
-    resolution_delta_pct = (
-        _delta_pct(resolution_now_days, resolution_before_days)
-        if resolution_now_days is not None and resolution_before_days is not None
-        else None
+    new_delta = build_quincenal_delta(
+        metric_key="created",
+        current_value=int(created_metrics.current),
+        previous_value=int(created_metrics.previous),
+        value_kind="count",
+    )
+    closed_delta = build_quincenal_delta(
+        metric_key="closed",
+        current_value=int(closed_metrics.current),
+        previous_value=int(closed_metrics.previous),
+        value_kind="count",
+    )
+    resolution_delta = build_quincenal_delta(
+        metric_key="resolution_days",
+        current_value=resolution_now_days,
+        previous_value=resolution_before_days,
+        value_kind="days",
+        current_sample_size=int(len(resolution_metrics.current_days)),
+        previous_sample_size=int(len(resolution_metrics.previous_days)),
     )
 
     groups = QuincenalGroups(
@@ -621,19 +818,19 @@ def _scope_result(
         new_now=int(created_metrics.current),
         new_before=int(created_metrics.previous),
         new_accumulated=int(created_metrics.total),
-        new_delta_pct=_delta_pct(int(created_metrics.current), int(created_metrics.previous)),
+        new_delta=new_delta,
         closed_now=int(closed_metrics.current),
         closed_focus_now=int(closed_focus_now),
         closed_other_now=int(closed_other_now),
         closed_before=int(closed_metrics.previous),
-        closed_delta_pct=_delta_pct(int(closed_metrics.current), int(closed_metrics.previous)),
+        closed_delta=closed_delta,
         resolution_days_now=resolution_now_days,
         resolution_days_min_now=resolution_now_min_days,
         resolution_days_max_now=resolution_now_max_days,
         resolved_focus_now=int(resolved_focus_now),
         resolved_other_now=int(resolved_other_now),
         resolution_days_before=resolution_before_days,
-        resolution_delta_pct=resolution_delta_pct,
+        resolution_delta=resolution_delta,
     )
     return QuincenalScopeResult(summary=summary, groups=groups, dff=safe, open_df=open_df)
 

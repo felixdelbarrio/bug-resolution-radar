@@ -2257,6 +2257,71 @@ def test_period_followup_summary_uses_quincenal_flow_wording_and_removes_artifac
     assert "p. </a:t>" not in xml_payload
 
 
+def test_period_followup_summary_uses_safe_central_delta_badges(monkeypatch: Any) -> None:
+    monkeypatch.setattr(period_ppt_mod, "_chart_png", lambda *args, **kwargs: b"")
+    reference_day = pd.Timestamp("2026-03-20T00:00:00+00:00")
+    rows: list[dict[str, object]] = [
+        {
+            "key": "PREV-1",
+            "summary": "Referencia mínima",
+            "status": "Resolved",
+            "priority": "High",
+            "created": "2026-03-02T00:00:00+00:00",
+            "updated": "2026-03-02T00:30:00+00:00",
+            "resolved": "2026-03-02T00:30:00+00:00",
+            "country": "México",
+            "source_id": "jira:mexico:senda",
+            "source_type": "jira",
+        }
+    ]
+    for idx in range(15):
+        created_day = 15 + (idx % 6)
+        row: dict[str, object] = {
+            "key": f"CUR-{idx + 1}",
+            "summary": "Actual",
+            "status": "New",
+            "priority": "Medium",
+            "created": f"2026-03-{created_day:02d}T00:00:00+00:00",
+            "updated": f"2026-03-{created_day:02d}T00:00:00+00:00",
+            "resolved": None,
+            "country": "México",
+            "source_id": "jira:mexico:senda" if idx % 2 == 0 else "jira:mexico:gema",
+            "source_type": "jira",
+        }
+        if idx < 2:
+            row["status"] = "Resolved"
+            row["created"] = f"2026-03-{15 + idx:02d}T00:00:00+00:00"
+            row["resolved"] = f"2026-03-{18 + idx:02d}T00:00:00+00:00"
+        rows.append(row)
+    dff = pd.DataFrame(rows)
+    settings = Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()))
+
+    quincenal = period_ppt_mod.build_country_quincenal_result(
+        df=dff,
+        settings=settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        reference_day=reference_day,
+    )
+    summary = quincenal.aggregate.summary
+    assert summary.new_delta.display_kind == "absolute"
+    assert period_ppt_mod._summary_delta_badge(summary.new_delta)[0] == "+14"
+    assert "%" not in period_ppt_mod._summary_delta_badge(summary.resolution_delta)[0]
+
+    out = generate_country_period_followup_ppt(
+        settings,
+        country="México",
+        source_ids=["jira:mexico:senda", "jira:mexico:gema"],
+        dff_override=dff,
+        reference_day=reference_day,
+    )
+    prs = Presentation(BytesIO(out.content))
+    deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert "+14" in deck_text
+    assert "1400%" not in deck_text
+    assert "14673%" not in deck_text
+
+
 def test_period_followup_metric_typography_handles_one_to_four_digit_values() -> None:
     values = ["9", "69", "107", "138", "1024"]
     sizes = [
