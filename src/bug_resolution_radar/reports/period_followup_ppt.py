@@ -56,6 +56,7 @@ from bug_resolution_radar.analytics.period_risk_issue_lists import (
 )
 from bug_resolution_radar.analytics.period_summary import (
     OPEN_ISSUES_FOCUS_MODE_MAESTRAS,
+    QuincenalDelta,
     QuincenalScopeResult,
     build_country_quincenal_result,
     format_window_label,
@@ -78,6 +79,7 @@ from bug_resolution_radar.reports.period_followup_layout import (
     KpiRow,
     KpiSideMetric,
     apply_text_frame_margins,
+    delta_badge_font_size,
     iter_out_of_viewport_shapes,
     metric_card_typography,
 )
@@ -162,6 +164,7 @@ _FUNCTIONALITY_TABLE_HEADER_FONT_SIZE_PT = 8.4
 _SUMMARY_DELTA_FONT_SIZE_PT = 8.8
 _SUMMARY_DELTA_UP_RGB = RGBColor(201, 67, 77)
 _SUMMARY_DELTA_DOWN_RGB = RGBColor(62, 133, 64)
+_SUMMARY_DELTA_WARNING_RGB = RGBColor(*hex_to_rgb(BBVA_REPORT_AMBER_TEXT))
 _SUMMARY_DELTA_NEUTRAL_RGB = RGBColor(95, 112, 142)
 _EXEC_BG_RGB = (7, 36, 96)
 _EXEC_TEXT_PRIMARY_RGB = (247, 251, 255)
@@ -333,16 +336,17 @@ def _fmt_days(value: float | None) -> int:
     return max(0, int(round(float(value))))
 
 
-def _summary_delta_badge(value: float | None) -> tuple[str, RGBColor]:
-    if value is None or pd.isna(value):
-        return ("—", _SUMMARY_DELTA_NEUTRAL_RGB)
-    raw = float(value)
-    pct = abs(raw * 100.0)
-    if raw > 0:
-        return (f"▲{pct:.0f}%", _SUMMARY_DELTA_UP_RGB)
-    if raw < 0:
-        return (f"▼{pct:.0f}%", _SUMMARY_DELTA_DOWN_RGB)
-    return (f"•{pct:.0f}%", _SUMMARY_DELTA_NEUTRAL_RGB)
+def _summary_delta_badge(delta: QuincenalDelta) -> tuple[str, RGBColor]:
+    tone = str(getattr(delta, "semantic_tone", "") or "").strip().lower()
+    if tone == "flow":
+        color = _SUMMARY_DELTA_DOWN_RGB
+    elif tone == "warning":
+        color = _SUMMARY_DELTA_WARNING_RGB
+    elif tone == "risk":
+        color = _SUMMARY_DELTA_UP_RGB
+    else:
+        color = _SUMMARY_DELTA_NEUTRAL_RGB
+    return (str(getattr(delta, "badge_text", "") or "—"), color)
 
 
 def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
@@ -1142,7 +1146,11 @@ def _write_metric_card(
     )
     apply_text_frame_margins(tf, margin_pt=0.0)
     try:
-        tf.word_wrap = False
+        tf.word_wrap = True
+    except Exception:
+        pass
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     except Exception:
         pass
     tf.clear()
@@ -1224,7 +1232,7 @@ def _add_metric_split_column(
     split_box = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
     tf = split_box.text_frame
     try:
-        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     except Exception:
         pass
     try:
@@ -1397,7 +1405,7 @@ def _configure_summary_delta_badge(
     except Exception:
         pass
     try:
-        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     except Exception:
         pass
     try:
@@ -1657,7 +1665,8 @@ def _apply_executive_chart_layout(
 ) -> None:
     kind_token = str(kind or "").strip().lower()
     export_height = int(height or EXEC_CHART_EXPORT_HEIGHT)
-    legend_y = -0.33 if kind_token in {"trend", "timeseries"} else -0.25
+    legend_y = -0.36 if kind_token in {"trend", "timeseries"} else -0.25
+    x_tick_angle = -24 if kind_token in {"trend", "timeseries"} else 0
     fig.update_layout(
         width=EXEC_CHART_EXPORT_WIDTH,
         height=export_height,
@@ -1671,10 +1680,11 @@ def _apply_executive_chart_layout(
         paper_bgcolor="#F6F8FC",
     )
     fig.update_xaxes(
-        tickangle=0,
+        tickangle=x_tick_angle,
         tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#1E2C46"),
         title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
         automargin=True,
+        nticks=8 if kind_token in {"trend", "timeseries"} else None,
         gridcolor="rgba(155, 169, 196, 0.20)",
         zeroline=False,
     )
@@ -1682,6 +1692,7 @@ def _apply_executive_chart_layout(
         tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#1E2C46"),
         title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
         automargin=True,
+        nticks=6,
         gridcolor="rgba(155, 169, 196, 0.24)",
         zeroline=False,
     )
@@ -2538,9 +2549,9 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
     _style_summary_open_criticity_cards(slide)
     _set_shape_text(slide, 3, title)
     delta_badges = {
-        10: _summary_delta_badge(summary.closed_delta_pct),
-        13: _summary_delta_badge(summary.resolution_delta_pct),
-        19: _summary_delta_badge(summary.new_delta_pct),
+        10: _summary_delta_badge(summary.closed_delta),
+        13: _summary_delta_badge(summary.resolution_delta),
+        19: _summary_delta_badge(summary.new_delta),
     }
     for shape_idx, (badge_text, badge_color) in delta_badges.items():
         _set_shape_text(slide, shape_idx, badge_text)
@@ -2624,16 +2635,33 @@ def _populate_summary_slide(slide: Any, *, title: str, scope_result: QuincenalSc
         value_unit="días",
     )
 
-    for delta_shape_idx in (10, 13, 19):
-        _set_shape_font_size(
-            slide,
-            shape_index=delta_shape_idx,
-            font_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT,
-            bold=True,
-        )
-    _configure_summary_delta_badge(slide, shape_index=10, card_shape_index=9)
-    _configure_summary_delta_badge(slide, shape_index=13, card_shape_index=12)
-    _configure_summary_delta_badge(slide, shape_index=19, card_shape_index=15)
+    _configure_summary_delta_badge(
+        slide,
+        shape_index=10,
+        card_shape_index=9,
+        font_size_pt=delta_badge_font_size(
+            delta_badges[10][0],
+            base_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT,
+        ),
+    )
+    _configure_summary_delta_badge(
+        slide,
+        shape_index=13,
+        card_shape_index=12,
+        font_size_pt=delta_badge_font_size(
+            delta_badges[13][0],
+            base_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT,
+        ),
+    )
+    _configure_summary_delta_badge(
+        slide,
+        shape_index=19,
+        card_shape_index=15,
+        font_size_pt=delta_badge_font_size(
+            delta_badges[19][0],
+            base_size_pt=_SUMMARY_DELTA_FONT_SIZE_PT,
+        ),
+    )
 
     _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_HEAD)
     for idx in (2, 4, 5, 6, 9, 10, 12, 13, 15, 16, 19):

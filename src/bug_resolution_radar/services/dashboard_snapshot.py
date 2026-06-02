@@ -1843,12 +1843,9 @@ def _build_period_summary_payload(
             "cardId": "new_now",
             "kicker": "Insights · Creadas",
             "metric": f"{int(summary.new_now):,}",
-            "detail": (
-                f"Δ {float(summary.new_delta_pct or 0.0) * 100.0:+.1f}% vs quincena previa"
-                if summary.new_delta_pct is not None
-                else "Sin referencia en quincena previa"
-            ),
-            "tone": _period_tone(QUINCENAL_SCOPE_CREATED_CURRENT),
+            "detail": summary.new_delta.display_text,
+            "delta": summary.new_delta.to_payload(),
+            "tone": summary.new_delta.semantic_tone,
             "label": QUINCENAL_SCOPE_CREATED_CURRENT,
             "quincenalScopeLabel": QUINCENAL_SCOPE_CREATED_CURRENT,
             "issueKeys": _issue_keys(groups.new_now),
@@ -1857,12 +1854,9 @@ def _build_period_summary_payload(
             "cardId": "closed_now",
             "kicker": "Insights · Cerradas",
             "metric": f"{int(summary.closed_now):,}",
-            "detail": (
-                f"Δ {float(summary.closed_delta_pct or 0.0) * 100.0:+.1f}% vs quincena previa"
-                if summary.closed_delta_pct is not None
-                else "Sin referencia en quincena previa"
-            ),
-            "tone": _period_tone(QUINCENAL_SCOPE_CLOSED_CURRENT),
+            "detail": summary.closed_delta.display_text,
+            "delta": summary.closed_delta.to_payload(),
+            "tone": summary.closed_delta.semantic_tone,
             "label": QUINCENAL_SCOPE_CLOSED_CURRENT,
             "quincenalScopeLabel": QUINCENAL_SCOPE_CLOSED_CURRENT,
             "issueKeys": _issue_keys(groups.closed_now),
@@ -1873,12 +1867,9 @@ def _build_period_summary_payload(
             "metric": _fmt_days(summary.resolution_days_now),
             "maxDays": _fmt_days(summary.resolution_days_max_now),
             "minDays": _fmt_days(summary.resolution_days_min_now),
-            "detail": (
-                f"Δ {float(summary.resolution_delta_pct or 0.0) * 100.0:+.1f}% vs quincena previa"
-                if summary.resolution_delta_pct is not None
-                else "Sin referencia en quincena previa"
-            ),
-            "tone": _period_tone(QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT),
+            "detail": summary.resolution_delta.display_text,
+            "delta": summary.resolution_delta.to_payload(),
+            "tone": summary.resolution_delta.semantic_tone,
             "label": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
             "quincenalScopeLabel": QUINCENAL_SCOPE_RESOLUTION_CLOSED_CURRENT,
             "issueKeys": _issue_keys(groups.resolved_now),

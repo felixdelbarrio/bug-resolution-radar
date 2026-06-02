@@ -174,6 +174,21 @@ export type TrendDetailPayload = {
   adaptedForTerminal: boolean;
 };
 
+export type QuincenalDeltaPayload = {
+  metricKey: string;
+  currentValue: number | null;
+  previousValue: number | null;
+  absoluteDelta: number | null;
+  relativeDelta: number | null;
+  displayText: string;
+  badgeText: string;
+  displayKind: "percent" | "absolute" | "no_reference" | "neutral" | string;
+  direction: "up" | "down" | "neutral" | "unknown" | string;
+  semanticTone: "risk" | "warning" | "flow" | "quality" | "neutral" | string;
+  currentSampleSize: number | null;
+  previousSampleSize: number | null;
+};
+
 export type IntelligencePayload = {
   tabs: Array<{ id: string; label: string }>;
   periodSummary: {
@@ -183,6 +198,7 @@ export type IntelligencePayload = {
       kicker: string;
       metric: string;
       detail: string;
+      delta: QuincenalDeltaPayload;
       tone: string;
       label: string;
       quincenalScopeLabel: string;

@@ -45,7 +45,7 @@ class PeriodFollowupLayoutTheme:
     split_text_top_ratio: float = 0.078
     split_text_height_ratio: float = 0.845
     split_metric_gap_pt: float = 0.85
-    delta_badge_width_ratio: float = 0.106
+    delta_badge_width_ratio: float = 0.118
     delta_badge_height_ratio: float = 0.152
     delta_badge_right_gap_ratio: float = 0.014
     delta_badge_min_left_ratio: float = 0.418
@@ -75,6 +75,17 @@ def metric_card_typography(
         label_size_pt=round(label_size, 2),
         detail_size_pt=round(detail_size, 2),
     )
+
+
+def delta_badge_font_size(
+    text: object,
+    *,
+    base_size_pt: float = 8.8,
+    min_size_pt: float = 7.1,
+) -> float:
+    text_len = len(str(text or "").strip())
+    penalty = max(text_len - 4, 0) * 0.52
+    return round(max(float(base_size_pt) - penalty, float(min_size_pt)), 2)
 
 
 def apply_text_frame_margins(text_frame: Any, *, margin_pt: float = 0.0) -> None:
