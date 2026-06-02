@@ -523,6 +523,7 @@ def test_intelligence_endpoint_returns_react_aligned_payload(
     ]
     assert "caption" in payload["periodSummary"]
     assert payload["periodSummary"]["cards"]
+    assert any(card.get("delta") is None for card in payload["periodSummary"]["cards"])
     assert "delta" in payload["periodSummary"]["cards"][0]
     assert "displayText" in payload["periodSummary"]["cards"][0]["delta"]
     assert "displayKind" in payload["periodSummary"]["cards"][0]["delta"]
@@ -538,6 +539,35 @@ def test_intelligence_endpoint_returns_react_aligned_payload(
         assert "avgOpenDays" in first
         assert "d. promedio" in str(first.get("label", ""))
     assert "brief" in payload["duplicates"]
+
+
+def test_intelligence_endpoint_supports_lazy_summary_tab(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get(
+        "/api/intelligence",
+        params={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "insightsViewMode": "quincenal",
+            "insightsTab": "summary",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["periodSummary"]["cards"]
+    assert payload["functionality"]["topics"] == []
+    assert payload["duplicates"]["titleGroups"] == []
+    assert payload["people"]["cards"] == []
+    assert payload["opsHealth"]["kpis"] == []
     assert "groups" in payload["finalistDiscrepancies"]
     assert "cards" in payload["people"]
     assert "kpis" in payload["opsHealth"]

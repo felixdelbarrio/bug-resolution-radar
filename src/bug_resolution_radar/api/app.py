@@ -847,6 +847,7 @@ def create_app() -> FastAPI:
         insightsPriority: str = "",
         insightsFunctionality: str = "",
         insightsStatusManual: bool = False,
+        insightsTab: str = "all",
         darkMode: bool = False,
     ) -> dict[str, Any]:
         settings = load_settings()
@@ -872,6 +873,7 @@ def create_app() -> FastAPI:
             insights_priority_filters=_split_csv_param(insightsPriority),
             insights_functionality_filters=_split_csv_param(insightsFunctionality),
             insights_status_manual=bool(insightsStatusManual),
+            insights_tab=insightsTab,
         )
 
     @app.get("/api/trends/detail")
