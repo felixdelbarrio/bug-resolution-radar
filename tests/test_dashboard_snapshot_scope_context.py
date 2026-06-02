@@ -225,10 +225,21 @@ def test_intelligence_period_summary_reuses_central_quincenal_delta(
         source_ids=["jira:mexico:core"],
         reference_day=reference_day,
     ).aggregate.summary
+    quincenal_calls = 0
+
+    def _counted_quincenal_result(*args: Any, **kwargs: Any) -> Any:
+        nonlocal quincenal_calls
+        quincenal_calls += 1
+        return build_country_quincenal_result(*args, **kwargs)
 
     monkeypatch.setattr(dashboard_snapshot, "load_workspace_dataframe", lambda *_a, **_k: df)
     monkeypatch.setattr(dashboard_snapshot, "load_country_dataframe", lambda *_a, **_k: df)
     monkeypatch.setattr(dashboard_snapshot, "load_country_history_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(
+        dashboard_snapshot,
+        "build_country_quincenal_result",
+        _counted_quincenal_result,
+    )
     monkeypatch.setattr(
         "bug_resolution_radar.analytics.period_summary.TimeWindowService.today",
         lambda self: reference_day.tz_localize(None),
@@ -247,6 +258,76 @@ def test_intelligence_period_summary_reuses_central_quincenal_delta(
     assert created_card["delta"]["presentationBadgeText"] == "▲>100%"
     assert created_card["delta"]["presentationSemanticTone"] == "risk"
     assert "1400" not in created_card["detail"]
+    assert quincenal_calls == 1
+    assert any(
+        card["cardId"] == "open_total" and card["delta"] is None
+        for card in payload["periodSummary"]["cards"]
+    )
+
+
+def test_intelligence_summary_tab_skips_inactive_heavy_payloads(
+    monkeypatch: Any,
+    tmp_path,
+) -> None:
+    reference_day = pd.Timestamp("2026-03-20T00:00:00+00:00")
+    df = pd.DataFrame(
+        [
+            {
+                "key": "CUR-1",
+                "summary": "Actual",
+                "description": "",
+                "status": "New",
+                "priority": "Medium",
+                "assignee": "Ana",
+                "created": "2026-03-18T00:00:00+00:00",
+                "updated": "2026-03-18T00:00:00+00:00",
+                "resolved": "",
+                "source_type": "jira",
+                "source_alias": "Core",
+                "source_id": "jira:mexico:core",
+                "country": "México",
+                "url": "",
+            }
+        ]
+    )
+    settings = Settings(DATA_PATH=str(tmp_path / "issues.json"))
+    query = DashboardQuery(
+        workspace=WorkspaceSelection(
+            country="México",
+            source_id="jira:mexico:core",
+            scope_mode="country",
+        ),
+        filters=FilterState(status=[], priority=[], assignee=[]),
+    )
+
+    def _fail_inactive_builder(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("summary tab should not build inactive insight payloads")
+
+    monkeypatch.setattr(dashboard_snapshot, "load_workspace_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(dashboard_snapshot, "load_country_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(dashboard_snapshot, "load_country_history_dataframe", lambda *_a, **_k: df)
+    monkeypatch.setattr(dashboard_snapshot, "_build_functionality_payload", _fail_inactive_builder)
+    monkeypatch.setattr(dashboard_snapshot, "_build_duplicates_payload", _fail_inactive_builder)
+    monkeypatch.setattr(dashboard_snapshot, "_build_people_payload", _fail_inactive_builder)
+    monkeypatch.setattr(dashboard_snapshot, "_build_ops_health_payload", _fail_inactive_builder)
+    monkeypatch.setattr(
+        dashboard_snapshot,
+        "_build_finalist_discrepancies_payload",
+        _fail_inactive_builder,
+    )
+    monkeypatch.setattr(
+        "bug_resolution_radar.analytics.period_summary.TimeWindowService.today",
+        lambda self: reference_day.tz_localize(None),
+    )
+    dashboard_snapshot._scope_context_cache.clear()
+
+    payload = build_intelligence_snapshot(settings, query=query, insights_tab="summary")
+
+    assert payload["periodSummary"]["cards"]
+    assert payload["functionality"]["topics"] == []
+    assert payload["duplicates"]["titleGroups"] == []
+    assert payload["people"]["cards"] == []
+    assert payload["opsHealth"]["kpis"] == []
 
 
 def test_country_finalist_mode_updates_open_kpis_consistently(

@@ -58,6 +58,7 @@ from bug_resolution_radar.analytics.period_functionality_followup import (
     format_top_row_label,
 )
 from bug_resolution_radar.analytics.period_summary import (
+    QuincenalCountryResult,
     build_country_quincenal_result,
     format_window_label,
     source_label_map,
@@ -109,6 +110,15 @@ _scope_context_cache: OrderedDict[tuple[Any, ...], tuple[float, "DashboardScopeC
     OrderedDict()
 )
 _scope_context_cache_lock = Lock()
+_INSIGHTS_TABS = (
+    {"id": "summary", "label": "Resumen quincenal"},
+    {"id": "functionality", "label": "Por funcionalidad"},
+    {"id": "duplicates", "label": "Duplicados"},
+    {"id": "finalistDiscrepancies", "label": "Discrepancias finalistas"},
+    {"id": "people", "label": "Personas"},
+    {"id": "opsHealth", "label": "Salud operativa"},
+)
+_INSIGHTS_TAB_IDS = {str(tab["id"]) for tab in _INSIGHTS_TABS}
 
 
 def _fig_payload(fig: Any) -> dict[str, Any] | None:
@@ -1777,9 +1787,11 @@ def _build_period_summary_payload(
     dff: pd.DataFrame,
     query: DashboardQuery,
     source_ids: Sequence[str],
+    labels: dict[str, str] | None = None,
+    quincenal_result: QuincenalCountryResult | None = None,
 ) -> dict[str, Any]:
     safe = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
-    if safe.empty:
+    if safe.empty and quincenal_result is None:
         return {
             "caption": "",
             "cards": [],
@@ -1815,17 +1827,21 @@ def _build_period_summary_payload(
             return "quality"
         return "quality"
 
-    labels = source_label_map(
-        settings,
-        country=str(query.workspace.country or "").strip(),
-        source_ids=source_ids,
+    resolved_labels = dict(
+        labels
+        or (quincenal_result.source_label_by_id if quincenal_result is not None else {})
+        or source_label_map(
+            settings,
+            country=str(query.workspace.country or "").strip(),
+            source_ids=source_ids,
+        )
     )
-    result = build_country_quincenal_result(
+    result = quincenal_result or build_country_quincenal_result(
         df=safe,
         settings=settings,
         country=str(query.workspace.country or "").strip(),
         source_ids=source_ids,
-        source_label_by_id=labels,
+        source_label_by_id=resolved_labels,
     )
     summary = result.aggregate.summary
     groups = result.aggregate.groups
@@ -1879,6 +1895,7 @@ def _build_period_summary_payload(
             "kicker": "Insights · Abiertas totales",
             "metric": f"{int(summary.open_total):,}",
             "detail": "Backlog abierto en el scope actual",
+            "delta": None,
             "tone": _period_tone(QUINCENAL_SCOPE_OPEN_TOTAL),
             "label": QUINCENAL_SCOPE_OPEN_TOTAL,
             "quincenalScopeLabel": QUINCENAL_SCOPE_OPEN_TOTAL,
@@ -1893,6 +1910,7 @@ def _build_period_summary_payload(
                     "kicker": str(summary.open_focus_card_kicker),
                     "metric": f"{int(summary.open_focus_total):,}",
                     "detail": str(summary.open_focus_card_detail),
+                    "delta": None,
                     "tone": _period_tone(str(summary.open_focus_label)),
                     "label": str(summary.open_focus_label),
                     "quincenalScopeLabel": str(summary.open_focus_label),
@@ -1903,6 +1921,7 @@ def _build_period_summary_payload(
                     "kicker": str(summary.open_other_card_kicker),
                     "metric": f"{int(summary.open_other_total):,}",
                     "detail": str(summary.open_other_card_detail),
+                    "delta": None,
                     "tone": _period_tone(str(summary.open_other_label)),
                     "label": str(summary.open_other_label),
                     "quincenalScopeLabel": str(summary.open_other_label),
@@ -2004,7 +2023,7 @@ def _build_period_summary_payload(
             source_summary = source_scope.summary
             source_breakdown.append(
                 {
-                    "source": labels.get(source_id, source_id),
+                    "source": resolved_labels.get(source_id, source_id),
                     "abiertas": int(source_summary.open_total),
                     "focus": {
                         "label": focus_col_label,
@@ -2562,21 +2581,28 @@ def _build_functionality_followup_payload(
     priority_filters: Sequence[str] | None,
     functionality_filters: Sequence[str] | None,
     apply_default_status_when_empty: bool,
+    labels: dict[str, str] | None = None,
+    quincenal_result: QuincenalCountryResult | None = None,
 ) -> dict[str, Any]:
+    safe = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
     country_txt = str(country or "").strip()
     source_scope = [
         str(sid or "").strip() for sid in list(source_ids or []) if str(sid or "").strip()
     ]
-    if not country_txt or not source_scope:
+    if not country_txt or not source_scope or safe.empty:
         return {"periodLabel": "", "isCriticalFocus": False, "topThree": []}
 
-    labels = source_label_map(settings, country=country_txt, source_ids=source_scope)
-    quincenal = build_country_quincenal_result(
-        df=dff,
+    resolved_labels = dict(
+        labels
+        or (quincenal_result.source_label_by_id if quincenal_result is not None else {})
+        or source_label_map(settings, country=country_txt, source_ids=source_scope)
+    )
+    quincenal = quincenal_result or build_country_quincenal_result(
+        df=safe,
         settings=settings,
         country=country_txt,
         source_ids=source_scope,
-        source_label_by_id=labels,
+        source_label_by_id=resolved_labels,
     )
     followup = build_period_functionality_followup_summary(
         scope_result=quincenal.aggregate,
@@ -2609,6 +2635,66 @@ def _build_functionality_followup_payload(
     }
 
 
+def _normalize_insights_tab(value: object) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return "all"
+    return token if token in _INSIGHTS_TAB_IDS else "all"
+
+
+def _empty_period_summary_payload() -> dict[str, Any]:
+    return {
+        "caption": "",
+        "cards": [],
+        "groups": [],
+        "showOpenSplit": False,
+        "sourceBreakdown": [],
+    }
+
+
+def _empty_functionality_payload(view_mode: str) -> dict[str, Any]:
+    normalized_view_mode = (
+        str(view_mode or "").strip()
+        if str(view_mode or "").strip() in INSIGHTS_VIEW_MODE_OPTIONS
+        else "quincenal"
+    )
+    return {
+        "combo": {
+            "viewMode": normalized_view_mode,
+            "viewModeOptions": [
+                {"value": mode, "label": INSIGHTS_VIEW_MODE_LABELS.get(mode, mode)}
+                for mode in INSIGHTS_VIEW_MODE_OPTIONS
+            ],
+            "statusOptions": [],
+            "priorityOptions": [],
+            "functionalityOptions": [],
+            "selectedStatuses": [],
+            "selectedPriorities": [],
+            "selectedFunctionalities": [],
+        },
+        "chart": None,
+        "topics": [],
+        "tip": "",
+        "followup": {"periodLabel": "", "isCriticalFocus": False, "topThree": []},
+    }
+
+
+def _empty_duplicates_payload() -> dict[str, Any]:
+    return {"brief": "", "titleGroups": [], "heuristicGroups": []}
+
+
+def _empty_finalist_discrepancies_payload() -> dict[str, Any]:
+    return {"kpis": [], "groups": [], "totalRows": 0, "truncated": False}
+
+
+def _empty_people_payload() -> dict[str, Any]:
+    return {"cards": []}
+
+
+def _empty_ops_health_payload() -> dict[str, Any]:
+    return {"kpis": [], "brief": [], "oldestIssues": []}
+
+
 def build_intelligence_snapshot(
     settings: Settings,
     *,
@@ -2618,50 +2704,97 @@ def build_intelligence_snapshot(
     insights_priority_filters: Sequence[str] | None = None,
     insights_functionality_filters: Sequence[str] | None = None,
     insights_status_manual: bool = False,
+    insights_tab: str = "all",
 ) -> dict[str, Any]:
+    active_tab = _normalize_insights_tab(insights_tab)
+    build_all_tabs = active_tab == "all"
+    needs_quincenal = build_all_tabs or active_tab in {"summary", "functionality"}
+    needs_quincenal_df = build_all_tabs or active_tab in {
+        "functionality",
+        "duplicates",
+        "people",
+        "opsHealth",
+    }
     context = load_scope_context(settings, query=query)
     dff = context.dff.copy(deep=False)
     source_ids = list(context.source_ids)
-    dff_quincenal = _insights_quincenal_df(settings=settings, dff=dff)
-    functionality = _build_functionality_payload(
-        dff=dff,
-        dff_quincenal=dff_quincenal,
-        view_mode=insights_view_mode,
-        status_filters=insights_status_filters,
-        priority_filters=insights_priority_filters,
-        functionality_filters=insights_functionality_filters,
-        apply_default_status_when_empty=not bool(insights_status_manual),
-        dark_mode=bool(query.dark_mode),
+    country_txt = str(query.workspace.country or "").strip()
+    labels = source_label_map(settings, country=country_txt, source_ids=source_ids)
+    quincenal = (
+        build_country_quincenal_result(
+            df=dff,
+            settings=settings,
+            country=country_txt,
+            source_ids=source_ids,
+            source_label_by_id=labels,
+        )
+        if needs_quincenal and not dff.empty
+        else None
     )
-    functionality["followup"] = _build_functionality_followup_payload(
-        settings=settings,
-        dff=dff,
-        country=str(query.workspace.country or ""),
-        source_ids=source_ids,
-        status_filters=insights_status_filters,
-        priority_filters=insights_priority_filters,
-        functionality_filters=insights_functionality_filters,
-        apply_default_status_when_empty=not bool(insights_status_manual),
+    dff_quincenal = (
+        _insights_quincenal_df(settings=settings, dff=dff) if needs_quincenal_df else pd.DataFrame()
     )
-    duplicates = _build_duplicates_payload(dff_quincenal)
-    finalist_discrepancies = _build_finalist_discrepancies_payload(context.finalist_discrepancies)
-    people = _build_people_payload(dff_quincenal)
-    ops_health = _build_ops_health_payload(dff_quincenal)
-    return {
-        "tabs": [
-            {"id": "summary", "label": "Resumen quincenal"},
-            {"id": "functionality", "label": "Por funcionalidad"},
-            {"id": "duplicates", "label": "Duplicados"},
-            {"id": "finalistDiscrepancies", "label": "Discrepancias finalistas"},
-            {"id": "people", "label": "Personas"},
-            {"id": "opsHealth", "label": "Salud operativa"},
-        ],
-        "periodSummary": _build_period_summary_payload(
+    if build_all_tabs or active_tab == "functionality":
+        functionality = _build_functionality_payload(
+            dff=dff,
+            dff_quincenal=dff_quincenal,
+            view_mode=insights_view_mode,
+            status_filters=insights_status_filters,
+            priority_filters=insights_priority_filters,
+            functionality_filters=insights_functionality_filters,
+            apply_default_status_when_empty=not bool(insights_status_manual),
+            dark_mode=bool(query.dark_mode),
+        )
+        functionality["followup"] = _build_functionality_followup_payload(
+            settings=settings,
+            dff=dff,
+            country=country_txt,
+            source_ids=source_ids,
+            status_filters=insights_status_filters,
+            priority_filters=insights_priority_filters,
+            functionality_filters=insights_functionality_filters,
+            apply_default_status_when_empty=not bool(insights_status_manual),
+            labels=labels,
+            quincenal_result=quincenal,
+        )
+    else:
+        functionality = _empty_functionality_payload(insights_view_mode)
+
+    period_summary = (
+        _build_period_summary_payload(
             settings,
             dff=dff,
             query=query,
             source_ids=source_ids,
-        ),
+            labels=labels,
+            quincenal_result=quincenal,
+        )
+        if build_all_tabs or active_tab == "summary"
+        else _empty_period_summary_payload()
+    )
+    duplicates = (
+        _build_duplicates_payload(dff_quincenal)
+        if build_all_tabs or active_tab == "duplicates"
+        else _empty_duplicates_payload()
+    )
+    finalist_discrepancies = (
+        _build_finalist_discrepancies_payload(context.finalist_discrepancies)
+        if build_all_tabs or active_tab == "finalistDiscrepancies"
+        else _empty_finalist_discrepancies_payload()
+    )
+    people = (
+        _build_people_payload(dff_quincenal)
+        if build_all_tabs or active_tab == "people"
+        else _empty_people_payload()
+    )
+    ops_health = (
+        _build_ops_health_payload(dff_quincenal)
+        if build_all_tabs or active_tab == "opsHealth"
+        else _empty_ops_health_payload()
+    )
+    return {
+        "tabs": list(_INSIGHTS_TABS),
+        "periodSummary": period_summary,
         "functionality": functionality,
         "duplicates": duplicates,
         "finalistDiscrepancies": finalist_discrepancies,
