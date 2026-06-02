@@ -185,6 +185,8 @@ export type QuincenalDeltaPayload = {
   displayKind: "percent" | "absolute" | "no_reference" | "neutral" | string;
   direction: "up" | "down" | "neutral" | "unknown" | string;
   semanticTone: "risk" | "warning" | "flow" | "quality" | "neutral" | string;
+  presentationBadgeText: string;
+  presentationSemanticTone: "risk" | "flow" | "quality" | "neutral" | string;
   currentSampleSize: number | null;
   previousSampleSize: number | null;
 };

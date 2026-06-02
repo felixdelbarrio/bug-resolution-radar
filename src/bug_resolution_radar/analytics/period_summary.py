@@ -55,6 +55,8 @@ class QuincenalDelta:
     display_kind: str
     direction: str
     semantic_tone: str
+    presentation_badge_text: str
+    presentation_semantic_tone: str
     current_sample_size: int | None = None
     previous_sample_size: int | None = None
 
@@ -70,6 +72,8 @@ class QuincenalDelta:
             "displayKind": self.display_kind,
             "direction": self.direction,
             "semanticTone": self.semantic_tone,
+            "presentationBadgeText": self.presentation_badge_text,
+            "presentationSemanticTone": self.presentation_semantic_tone,
             "currentSampleSize": self.current_sample_size,
             "previousSampleSize": self.previous_sample_size,
         }
@@ -484,6 +488,32 @@ def _delta_semantic_tone(metric_key: str, direction: str, display_kind: str) -> 
     return "quality"
 
 
+def _presentation_direction(
+    *,
+    current: float | None,
+    previous: float | None,
+    absolute_delta: float | None,
+) -> str:
+    if absolute_delta is not None:
+        return _delta_direction(absolute_delta)
+    if (previous is None or previous <= 0) and current is not None and current > 0:
+        return "up"
+    return "neutral"
+
+
+def _presentation_semantic_tone(metric_key: str, direction: str) -> str:
+    if direction == "neutral":
+        return "neutral"
+    token = str(metric_key or "").strip().lower()
+    if token == "closed":
+        return "flow" if direction == "up" else "risk"
+    if token == "resolution_days":
+        return "risk" if direction == "up" else "flow"
+    if token == "created":
+        return "risk" if direction == "up" else "flow"
+    return "quality"
+
+
 def _percent_badge(relative_delta: float) -> str:
     pct = abs(float(relative_delta) * 100.0)
     if relative_delta > 0:
@@ -491,6 +521,17 @@ def _percent_badge(relative_delta: float) -> str:
     if relative_delta < 0:
         return f"▼{pct:.0f}%"
     return "•0%"
+
+
+def _presentation_percent_badge(relative_delta: float | None, direction: str) -> str:
+    if direction in {"neutral", "unknown"}:
+        return "•0%"
+    if relative_delta is None:
+        pct_text = ">100%" if direction == "up" else "100%"
+    else:
+        pct = abs(float(relative_delta) * 100.0)
+        pct_text = ">100%" if pct > 100.0 else f"{pct:.0f}%"
+    return f"{'▲' if direction == 'up' else '▼'}{pct_text}"
 
 
 def build_quincenal_delta(
@@ -553,6 +594,15 @@ def build_quincenal_delta(
                 badge_text = _signed_count(absolute_delta)
 
     semantic_tone = _delta_semantic_tone(str(metric_key or ""), direction, display_kind)
+    presentation_direction = _presentation_direction(
+        current=current,
+        previous=previous,
+        absolute_delta=absolute_delta,
+    )
+    presentation_semantic_tone = _presentation_semantic_tone(
+        str(metric_key or ""),
+        presentation_direction,
+    )
     return QuincenalDelta(
         metric_key=str(metric_key or "").strip(),
         current_value=current,
@@ -564,6 +614,11 @@ def build_quincenal_delta(
         display_kind=display_kind,
         direction=direction,
         semantic_tone=semantic_tone,
+        presentation_badge_text=_presentation_percent_badge(
+            relative_delta,
+            presentation_direction,
+        ),
+        presentation_semantic_tone=presentation_semantic_tone,
         current_sample_size=current_sample_size,
         previous_sample_size=previous_sample_size,
     )

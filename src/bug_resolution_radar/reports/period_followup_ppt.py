@@ -164,7 +164,6 @@ _FUNCTIONALITY_TABLE_HEADER_FONT_SIZE_PT = 8.4
 _SUMMARY_DELTA_FONT_SIZE_PT = 8.8
 _SUMMARY_DELTA_UP_RGB = RGBColor(201, 67, 77)
 _SUMMARY_DELTA_DOWN_RGB = RGBColor(62, 133, 64)
-_SUMMARY_DELTA_WARNING_RGB = RGBColor(*hex_to_rgb(BBVA_REPORT_AMBER_TEXT))
 _SUMMARY_DELTA_NEUTRAL_RGB = RGBColor(95, 112, 142)
 _EXEC_BG_RGB = (7, 36, 96)
 _EXEC_TEXT_PRIMARY_RGB = (247, 251, 255)
@@ -337,16 +336,14 @@ def _fmt_days(value: float | None) -> int:
 
 
 def _summary_delta_badge(delta: QuincenalDelta) -> tuple[str, RGBColor]:
-    tone = str(getattr(delta, "semantic_tone", "") or "").strip().lower()
+    tone = str(getattr(delta, "presentation_semantic_tone", "") or "").strip().lower()
     if tone == "flow":
         color = _SUMMARY_DELTA_DOWN_RGB
-    elif tone == "warning":
-        color = _SUMMARY_DELTA_WARNING_RGB
     elif tone == "risk":
         color = _SUMMARY_DELTA_UP_RGB
     else:
         color = _SUMMARY_DELTA_NEUTRAL_RGB
-    return (str(getattr(delta, "badge_text", "") or "—"), color)
+    return (str(getattr(delta, "presentation_badge_text", "") or "•0%"), color)
 
 
 def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
@@ -1446,6 +1443,7 @@ def _overlay_picture(
     anchor_shape: Any | None = None,
     anchor_shape_index: int | None = None,
     replace_anchor: bool = False,
+    preserve_aspect: bool = False,
 ) -> Any | None:
     anchor = anchor_shape
     if anchor is None and anchor_shape_index is not None:
@@ -1454,6 +1452,18 @@ def _overlay_picture(
         return None
     if not payload:
         return None
+    if preserve_aspect:
+        rendered = _overlay_picture_contain(
+            slide,
+            payload=payload,
+            frame_left=int(anchor.left),
+            frame_top=int(anchor.top),
+            frame_width=int(anchor.width),
+            frame_height=int(anchor.height),
+        )
+        if replace_anchor:
+            _remove_shape(anchor)
+        return rendered
     rendered = slide.shapes.add_picture(
         BytesIO(payload),
         anchor.left,
@@ -1475,8 +1485,25 @@ def _resolve_summary_chart_anchor(slide: Any) -> Any | None:
     return _shape_or_none(slide, 20)
 
 
+def _summary_chart_export_size(anchor: Any | None) -> tuple[int, int]:
+    export_width = 1200
+    if anchor is None:
+        return export_width, int(round(export_width / 1.45))
+    width = max(int(getattr(anchor, "width", 0) or 0), 1)
+    height = max(int(getattr(anchor, "height", 0) or 0), 1)
+    ratio = max(float(width) / float(height), 0.8)
+    return export_width, max(int(round(float(export_width) / ratio)), 520)
+
+
 def _chart_png(
-    settings: Settings, *, dff: pd.DataFrame, open_df: pd.DataFrame, chart_id: str
+    settings: Settings,
+    *,
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+    chart_id: str,
+    width: int | None = None,
+    height: int | None = None,
+    slide_optimized: bool = False,
 ) -> bytes:
     registry = build_trends_registry()
     spec = registry.get(chart_id)
@@ -1488,6 +1515,8 @@ def _chart_png(
     if fig is None:
         return b""
     if chart_id == "timeseries":
+        export_width = int(width or EXEC_CHART_EXPORT_WIDTH)
+        export_height = int(height or EXEC_CHART_TREND_EXPORT_HEIGHT)
         for trace in list(getattr(fig, "data", ())):
             trace_type = str(getattr(trace, "type", "") or "").lower()
             if trace_type in {"scatter", "scattergl"}:
@@ -1496,10 +1525,10 @@ def _chart_png(
                 except Exception:
                     pass
                 try:
-                    base_width = 4.2
+                    base_width = 6.4 if slide_optimized else 4.2
                     token = str(getattr(trace, "name", "") or "").strip().lower()
                     if "backlog" in token or "abierto" in token:
-                        base_width = 4.8
+                        base_width = 7.0 if slide_optimized else 4.8
                     trace.line.width = base_width
                 except Exception:
                     pass
@@ -1508,7 +1537,7 @@ def _chart_png(
                 except Exception:
                     pass
                 try:
-                    trace.marker.size = 8.0
+                    trace.marker.size = 11.0 if slide_optimized else 8.0
                 except Exception:
                     pass
                 try:
@@ -1523,12 +1552,19 @@ def _chart_png(
                     trace.opacity = 0.98
                 except Exception:
                     pass
-        _apply_executive_timeseries_chart_layout(fig)
+        _apply_executive_timeseries_chart_layout(
+            fig,
+            width=export_width,
+            height=export_height,
+            font_scale=1.42 if slide_optimized else 1.0,
+            x_nticks=5 if slide_optimized else 8,
+            tickangle=-34 if slide_optimized else -24,
+        )
         payload = _fig_to_png_exact(
             fig,
-            width=EXEC_CHART_EXPORT_WIDTH,
-            height=EXEC_CHART_TREND_EXPORT_HEIGHT,
-            scale=1.2,
+            width=export_width,
+            height=export_height,
+            scale=1.0,
         )
         return payload or b""
     payload = _fig_to_png_exact(fig, width=3400, height=760)
@@ -1660,15 +1696,28 @@ def _apply_executive_chart_layout(
     show_legend: bool = True,
     x_title: str | None = None,
     y_title: str | None = None,
+    width: int | None = None,
     height: int | None = None,
     margin: Mapping[str, int] | None = None,
+    font_scale: float = 1.0,
+    x_nticks: int | None = None,
+    tickangle: int | None = None,
 ) -> None:
     kind_token = str(kind or "").strip().lower()
+    export_width = int(width or EXEC_CHART_EXPORT_WIDTH)
     export_height = int(height or EXEC_CHART_EXPORT_HEIGHT)
     legend_y = -0.36 if kind_token in {"trend", "timeseries"} else -0.25
-    x_tick_angle = -24 if kind_token in {"trend", "timeseries"} else 0
+    x_tick_angle = (
+        int(tickangle)
+        if tickangle is not None
+        else (-24 if kind_token in {"trend", "timeseries"} else 0)
+    )
+    safe_font_scale = max(float(font_scale or 1.0), 0.6)
+    axis_font_pt = int(round(EXEC_CHART_AXIS_FONT_PT * safe_font_scale))
+    axis_title_font_pt = int(round(EXEC_CHART_AXIS_TITLE_FONT_PT * safe_font_scale))
+    legend_font_pt = int(round(EXEC_CHART_LEGEND_FONT_PT * safe_font_scale))
     fig.update_layout(
-        width=EXEC_CHART_EXPORT_WIDTH,
+        width=export_width,
         height=export_height,
         xaxis_title=str(x_title or ""),
         yaxis_title=str(y_title or ""),
@@ -1681,16 +1730,18 @@ def _apply_executive_chart_layout(
     )
     fig.update_xaxes(
         tickangle=x_tick_angle,
-        tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#1E2C46"),
-        title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
+        tickfont=dict(size=axis_font_pt, color="#1E2C46"),
+        title_font=dict(size=axis_title_font_pt, color="#17253F"),
         automargin=True,
-        nticks=8 if kind_token in {"trend", "timeseries"} else None,
+        nticks=x_nticks
+        if x_nticks is not None
+        else (8 if kind_token in {"trend", "timeseries"} else None),
         gridcolor="rgba(155, 169, 196, 0.20)",
         zeroline=False,
     )
     fig.update_yaxes(
-        tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#1E2C46"),
-        title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
+        tickfont=dict(size=axis_font_pt, color="#1E2C46"),
+        title_font=dict(size=axis_title_font_pt, color="#17253F"),
         automargin=True,
         nticks=6,
         gridcolor="rgba(155, 169, 196, 0.24)",
@@ -1705,7 +1756,7 @@ def _apply_executive_chart_layout(
                 x=0.5,
                 yanchor="top",
                 y=legend_y,
-                font=dict(size=EXEC_CHART_LEGEND_FONT_PT, color="#1A2740"),
+                font=dict(size=legend_font_pt, color="#1A2740"),
                 bgcolor="rgba(255,255,255,0.96)",
                 bordercolor="rgba(188,198,216,0.95)",
                 borderwidth=1,
@@ -1720,30 +1771,53 @@ def _axis_title_text(fig: go.Figure, axis_name: str) -> str:
     return str(getattr(title, "text", "") or "")
 
 
-def _apply_executive_timeseries_chart_layout(fig: go.Figure) -> None:
+def _apply_executive_timeseries_chart_layout(
+    fig: go.Figure,
+    *,
+    width: int = EXEC_CHART_EXPORT_WIDTH,
+    height: int = EXEC_CHART_TREND_EXPORT_HEIGHT,
+    font_scale: float = 1.0,
+    x_nticks: int = 8,
+    tickangle: int = -24,
+) -> None:
+    axis_font_pt = int(round(EXEC_CHART_AXIS_FONT_PT * max(float(font_scale or 1.0), 0.6)))
+    axis_title_font_pt = int(
+        round(EXEC_CHART_AXIS_TITLE_FONT_PT * max(float(font_scale or 1.0), 0.6))
+    )
+    margin_scale = max(float(font_scale or 1.0), 1.0)
     _apply_executive_chart_layout(
         fig,
         kind="timeseries",
         show_legend=True,
         x_title=_axis_title_text(fig, "xaxis"),
         y_title=_axis_title_text(fig, "yaxis"),
-        height=EXEC_CHART_TREND_EXPORT_HEIGHT,
-        margin=_exec_chart_margin(l=82, r=56, t=56, b=190),
+        width=int(width),
+        height=int(height),
+        margin=_exec_chart_margin(
+            l=int(round(82 * margin_scale)),
+            r=int(round(56 * margin_scale)),
+            t=int(round(56 * margin_scale)),
+            b=int(round(190 * margin_scale)),
+        ),
+        font_scale=font_scale,
+        x_nticks=int(x_nticks),
+        tickangle=int(tickangle),
     )
     fig.update_layout(
         plot_bgcolor="#FFFFFF",
         paper_bgcolor="#FFFFFF",
-        font=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#132A7B"),
+        font=dict(size=axis_font_pt, color="#132A7B"),
     )
     fig.update_xaxes(
         showgrid=False,
         showline=True,
         linecolor="#C7D1E6",
         linewidth=1.2,
-        tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#213A8F"),
-        title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
+        tickfont=dict(size=axis_font_pt, color="#213A8F"),
+        title_font=dict(size=axis_title_font_pt, color="#17253F"),
         automargin=True,
-        nticks=8,
+        nticks=int(x_nticks),
+        tickangle=int(tickangle),
     )
     fig.update_yaxes(
         showgrid=True,
@@ -1752,8 +1826,8 @@ def _apply_executive_timeseries_chart_layout(fig: go.Figure) -> None:
         showline=True,
         linecolor="#C7D1E6",
         linewidth=1.2,
-        tickfont=dict(size=EXEC_CHART_AXIS_FONT_PT, color="#213A8F"),
-        title_font=dict(size=EXEC_CHART_AXIS_TITLE_FONT_PT, color="#17253F"),
+        tickfont=dict(size=axis_font_pt, color="#213A8F"),
+        title_font=dict(size=axis_title_font_pt, color="#17253F"),
         automargin=True,
         nticks=6,
     )
@@ -1767,9 +1841,9 @@ def _overlay_picture_contain(
     frame_top: int,
     frame_width: int,
     frame_height: int,
-) -> None:
+) -> Any | None:
     if not payload:
-        return
+        return None
     try:
         img = Image.open(BytesIO(payload))
         src_w = float(max(int(getattr(img, "width", 1) or 1), 1))
@@ -1791,7 +1865,7 @@ def _overlay_picture_contain(
 
     left = int(round(float(frame_left) + (frame_w - pic_w) / 2.0))
     top = int(round(float(frame_top) + (frame_h - pic_h) / 2.0))
-    slide.shapes.add_picture(
+    return slide.shapes.add_picture(
         BytesIO(payload),
         left,
         top,
@@ -4454,13 +4528,24 @@ def generate_country_period_followup_ppt(
             title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)",
             scope_result=aggregate,
         )
+        aggregate_chart_anchor = _resolve_summary_chart_anchor(prs.slides[2])
+        aggregate_chart_width, aggregate_chart_height = _summary_chart_export_size(
+            aggregate_chart_anchor
+        )
         _overlay_picture(
             prs.slides[2],
-            anchor_shape=_resolve_summary_chart_anchor(prs.slides[2]),
+            anchor_shape=aggregate_chart_anchor,
             payload=_chart_png(
-                settings, dff=aggregate.dff, open_df=aggregate.open_df, chart_id="timeseries"
+                settings,
+                dff=aggregate.dff,
+                open_df=aggregate.open_df,
+                chart_id="timeseries",
+                width=aggregate_chart_width,
+                height=aggregate_chart_height,
+                slide_optimized=True,
             ),
             replace_anchor=True,
+            preserve_aspect=True,
         )
 
         for offset, source_id in enumerate(clean_source_ids):
@@ -4474,16 +4559,24 @@ def generate_country_period_followup_ppt(
                 title=f"Seguimiento de incidencias - {source_label}",
                 scope_result=source_scope,
             )
+            source_chart_anchor = _resolve_summary_chart_anchor(prs.slides[slide_index])
+            source_chart_width, source_chart_height = _summary_chart_export_size(
+                source_chart_anchor
+            )
             _overlay_picture(
                 prs.slides[slide_index],
-                anchor_shape=_resolve_summary_chart_anchor(prs.slides[slide_index]),
+                anchor_shape=source_chart_anchor,
                 payload=_chart_png(
                     settings,
                     dff=source_scope.dff,
                     open_df=source_scope.open_df,
                     chart_id="timeseries",
+                    width=source_chart_width,
+                    height=source_chart_height,
+                    slide_optimized=True,
                 ),
                 replace_anchor=True,
+                preserve_aspect=True,
             )
 
         extra_template_source_count = 2

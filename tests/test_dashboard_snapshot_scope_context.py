@@ -244,6 +244,8 @@ def test_intelligence_period_summary_reuses_central_quincenal_delta(
     assert created_card["delta"] == expected.new_delta.to_payload()
     assert created_card["delta"]["displayKind"] == "absolute"
     assert created_card["delta"]["relativeDelta"] == 14.0
+    assert created_card["delta"]["presentationBadgeText"] == "▲>100%"
+    assert created_card["delta"]["presentationSemanticTone"] == "risk"
     assert "1400" not in created_card["detail"]
 
 
