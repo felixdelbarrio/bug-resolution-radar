@@ -11,6 +11,7 @@ from bug_resolution_radar.config import (
     country_rollup_sources,
     helix_service_origin_buug_for_country,
     helix_sources,
+    jira_root_cause_labels_by_country,
     jira_sources,
     load_settings,
     normalize_country_name,
@@ -131,6 +132,43 @@ def _normalize_country_rollup_sources(
     return rows
 
 
+def _normalize_label_tokens(values: Any) -> List[str]:
+    raw_values = (
+        values if isinstance(values, list) else str(values or "").replace(";", ",").split(",")
+    )
+    rows: List[str] = []
+    seen: set[str] = set()
+    for raw in list(raw_values or []):
+        label = str(raw or "").strip()
+        key = _fold_sort_token(label)
+        if not label or key in seen:
+            continue
+        seen.add(key)
+        rows.append(label)
+    return rows
+
+
+def _normalize_root_cause_label_rows(
+    values: Dict[str, Any],
+    *,
+    settings: Settings,
+) -> List[Dict[str, Any]]:
+    country_by_token = {
+        _fold_sort_token(country): country
+        for country in supported_countries(settings)
+        if _fold_sort_token(country)
+    }
+    rows: List[Dict[str, Any]] = []
+    for raw_country, raw_labels in dict(values or {}).items():
+        country = country_by_token.get(
+            _fold_sort_token(raw_country), str(raw_country or "").strip()
+        )
+        labels = _normalize_label_tokens(raw_labels)
+        if country and labels:
+            rows.append({"country": country, "labels": labels})
+    return sorted(rows, key=lambda row: _fold_sort_token(row.get("country")))
+
+
 def _rollup_eligible_sources_by_country(settings: Settings) -> Dict[str, List[Dict[str, str]]]:
     configured = configured_sources_by_country(settings)
     try:
@@ -151,6 +189,7 @@ def load_settings_payload() -> Dict[str, Any]:
         "jiraSources": jira_sources(settings),
         "helixSources": helix_sources(settings),
         "countryRollupSources": country_rollup_sources(settings),
+        "jiraRootCauseLabelsByCountry": jira_root_cause_labels_by_country(settings),
         "rollupEligibleSourcesByCountry": _rollup_eligible_sources_by_country(settings),
         "jiraDisabledSourceIds": json.loads(
             str(getattr(settings, "JIRA_INGEST_DISABLED_SOURCES_JSON", "[]") or "[]")
@@ -183,6 +222,12 @@ def save_settings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     merged_values["COUNTRY_ROLLUP_SOURCES_JSON"] = to_env_json(
         _normalize_country_rollup_sources(
             dict(payload.get("countryRollupSources") or {}),
+            settings=settings_for_rollups,
+        )
+    )
+    merged_values["JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON"] = to_env_json(
+        _normalize_root_cause_label_rows(
+            dict(payload.get("jiraRootCauseLabelsByCountry") or {}),
             settings=settings_for_rollups,
         )
     )

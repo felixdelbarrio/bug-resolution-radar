@@ -106,6 +106,42 @@ def test_period_functionality_detail_setting_defaults_off() -> None:
     assert str(settings.PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED).strip().lower() == "false"
 
 
+def test_save_settings_payload_persists_root_cause_labels_by_country(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import bug_resolution_radar.config as cfg
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cfg, "ENV_PATH", env_path)
+    monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", tmp_path / ".env.example")
+
+    saved = save_settings_payload(
+        {
+            "values": Settings().model_dump(),
+            "supportedCountries": ["México", "Peru"],
+            "jiraSources": [],
+            "helixSources": [],
+            "countryRollupSources": {},
+            "jiraRootCauseLabelsByCountry": {
+                "México": ["CAUSA_RAIZ", "causa_raiz", "evolutivo"],
+                "Peru": ["ROOT_CAUSE"],
+            },
+            "jiraDisabledSourceIds": [],
+            "helixDisabledSourceIds": [],
+        }
+    )
+
+    assert saved["jiraRootCauseLabelsByCountry"] == {
+        "México": ["CAUSA_RAIZ", "evolutivo"],
+        "Perú": ["ROOT_CAUSE"],
+    }
+    persisted = env_path.read_text(encoding="utf-8")
+    assert "JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON=" in persisted
+    assert "CAUSA_RAIZ" in persisted
+    assert "Perú" in persisted
+
+
 def test_save_settings_payload_persists_period_report_preferences(
     monkeypatch, tmp_path: Path
 ) -> None:

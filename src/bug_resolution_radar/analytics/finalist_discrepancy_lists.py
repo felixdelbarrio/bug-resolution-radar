@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import cast
 
 import pandas as pd
 
@@ -25,6 +27,8 @@ class FinalistDiscrepancyIssueRow:
     helix_url: str
     source_alias: str = ""
     po_team_leader: str = ""
+    comment: str = ""
+    matched_labels: tuple[str, ...] = ()
 
     @property
     def helix_text(self) -> str:
@@ -45,11 +49,44 @@ def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
 
 
 def _text(row: pd.Series, column: str) -> str:
-    return str(row.get(column, "") or "").strip()
+    value = row.get(column, "")
+    try:
+        if value is None or bool(pd.isna(value)):
+            return ""
+    except Exception:
+        if value is None:
+            return ""
+    return str(value).strip()
+
+
+def _labels(row: pd.Series, column: str) -> tuple[str, ...]:
+    value = row.get(column, ())
+    raw_values: list[object]
+    if not isinstance(value, (str, bytes, bytearray, dict)) and pd.api.types.is_list_like(value):
+        raw_values = list(cast(Iterable[object], value))
+    else:
+        try:
+            if value is None or bool(pd.isna(value)):
+                return ()
+        except Exception:
+            if value is None:
+                return ()
+        raw_values = list(cast(Iterable[object], str(value).split(",")))
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        label = str(raw or "").strip()
+        key = label.casefold()
+        if label and key not in seen:
+            seen.add(key)
+            out.append(label)
+    return tuple(out)
 
 
 def build_finalist_discrepancy_issue_list(
     discrepancies: pd.DataFrame | None,
+    *,
+    notes_by_key: dict[str, str] | None = None,
 ) -> tuple[FinalistDiscrepancyIssueRow, ...]:
     """Return discrepancies sorted for Excel/PPT consumption."""
     safe = _safe_df(discrepancies)
@@ -80,6 +117,11 @@ def build_finalist_discrepancy_issue_list(
     )
 
     rows: list[FinalistDiscrepancyIssueRow] = []
+    notes = {
+        str(key or "").strip().upper(): str(value or "").strip()
+        for key, value in dict(notes_by_key or {}).items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
     for _, row in work.iterrows():
         jira_key = _text(row, "jira_key").upper()
         helix_id = _text(row, "helix_id").upper()
@@ -101,6 +143,8 @@ def build_finalist_discrepancy_issue_list(
                 helix_status=_text(row, "helix_status"),
                 helix_url=_text(row, "helix_url"),
                 source_alias=_text(row, "source_alias"),
+                comment=notes.get(jira_key) or notes.get(helix_id) or "",
+                matched_labels=_labels(row, "root_cause_matched_labels"),
             )
         )
     return tuple(rows)

@@ -517,6 +517,7 @@ def test_intelligence_endpoint_returns_react_aligned_payload(
         "summary",
         "functionality",
         "duplicates",
+        "rootCauseEvolutives",
         "finalistDiscrepancies",
         "people",
         "opsHealth",
