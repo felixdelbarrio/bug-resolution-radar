@@ -25,6 +25,7 @@ from bug_resolution_radar.analytics.filtering import (
 )
 from bug_resolution_radar.analytics.finalist_discrepancies import (
     apply_effective_finalist_lookup_state_for_scope,
+    split_root_cause_evolutive_discrepancies,
 )
 from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
@@ -74,6 +75,7 @@ from bug_resolution_radar.analytics.quincenal_scope import (
     quincenal_scope_options,
     should_show_open_split,
 )
+from bug_resolution_radar.analytics.status_semantics import is_finalist_status
 from bug_resolution_radar.analytics.topic_expandable_summary import (
     build_topic_expandable_summaries,
 )
@@ -114,6 +116,7 @@ _INSIGHTS_TABS = (
     {"id": "summary", "label": "Resumen quincenal"},
     {"id": "functionality", "label": "Por funcionalidad"},
     {"id": "duplicates", "label": "Duplicados"},
+    {"id": "rootCauseEvolutives", "label": "Evolutivos causas raíces"},
     {"id": "finalistDiscrepancies", "label": "Discrepancias finalistas"},
     {"id": "people", "label": "Personas"},
     {"id": "opsHealth", "label": "Salud operativa"},
@@ -744,9 +747,11 @@ def build_status_priority_matrix_payload(
                 "cells": [
                     {
                         "priority": priority,
-                        "count": int(counts.at[status, priority])
-                        if status in counts.index and priority in counts.columns
-                        else 0,
+                        "count": (
+                            int(counts.at[status, priority])
+                            if status in counts.index and priority in counts.columns
+                            else 0
+                        ),
                     }
                     for priority in priorities
                 ],
@@ -825,6 +830,7 @@ class DashboardScopeContext:
     open_df: pd.DataFrame
     source_ids: tuple[str, ...]
     kpis: dict[str, Any]
+    root_cause_evolutives: pd.DataFrame = field(default_factory=pd.DataFrame)
     finalist_discrepancies: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
@@ -888,6 +894,7 @@ def _scope_context_cache_key(
         tuple(str(item or "").strip() for item in list(query.issue_scope_keys or [])),
         str(query.issue_sort_col or "").strip(),
         str(query.issue_like_query or "").strip(),
+        str(getattr(settings, "JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON", "") or "").strip(),
     )
 
 
@@ -910,6 +917,11 @@ def _build_scope_context(
         country=str(query.workspace.country or "").strip(),
         source_ids=source_ids,
         reference_day=reference_day,
+    )
+    root_cause_evolutives, finalist_discrepancies = split_root_cause_evolutive_discrepancies(
+        finalist_discrepancies,
+        settings=settings,
+        country=str(query.workspace.country or "").strip(),
     )
     dff = ensure_issue_functionality_columns(apply_filters(scoped_df, query.filters))
     dff = apply_dashboard_issue_scope(
@@ -938,6 +950,7 @@ def _build_scope_context(
         open_df=open_df,
         source_ids=source_ids,
         kpis=dict(kpis or {}),
+        root_cause_evolutives=root_cause_evolutives,
         finalist_discrepancies=finalist_discrepancies,
     )
 
@@ -983,6 +996,7 @@ def _context_with_requested_kpis(
         open_df=context.open_df,
         source_ids=context.source_ids,
         kpis=dict(kpis or {}),
+        root_cause_evolutives=context.root_cause_evolutives,
         finalist_discrepancies=context.finalist_discrepancies,
     )
 
@@ -2231,17 +2245,19 @@ def _build_functionality_payload(
             "selectedPriorities": list(combo_ctx.selected_priorities),
             "selectedFunctionalities": list(combo_ctx.selected_functionalities),
         },
-        "chart": {
-            "title": "Tendencia por funcionalidad",
-            "subtitle": (
-                "Vista quincenal acumulada"
-                if use_accumulated_scope
-                else "Vista diaria de la quincena analizada"
-            ),
-            "figure": chart_payload,
-        }
-        if chart_payload is not None
-        else None,
+        "chart": (
+            {
+                "title": "Tendencia por funcionalidad",
+                "subtitle": (
+                    "Vista quincenal acumulada"
+                    if use_accumulated_scope
+                    else "Vista diaria de la quincena analizada"
+                ),
+                "figure": chart_payload,
+            }
+            if chart_payload is not None
+            else None
+        ),
         "topics": topics,
         "tip": "El % indica el peso real de cada tema dentro del backlog abierto filtrado.",
     }
@@ -2397,9 +2413,11 @@ def _build_people_payload(dff_quincenal: pd.DataFrame) -> dict[str, Any]:
                     "value": (
                         f"{float(aging_p90_days):.0f}d" if aging_p90_days is not None else "—"
                     ),
-                    "caption": "Casos más lentos"
-                    if aging_p90_days is not None
-                    else "Sin fecha de creación",
+                    "caption": (
+                        "Casos más lentos"
+                        if aging_p90_days is not None
+                        else "Sin fecha de creación"
+                    ),
                 },
                 "recommendations": list(recommendations[:4]),
                 "oldestIssues": _issue_records_from_df(oldest, limit=3, age_days_col="age_days"),
@@ -2458,13 +2476,59 @@ def _finalist_helix_text(row: pd.Series) -> str:
     return "\n".join(parts) if parts else "Sin descripción Helix"
 
 
-def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[str, Any]:
+def _issue_labels_for_payload(value: object) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        try:
+            if value is None or bool(pd.isna(value)):
+                return []
+        except Exception:
+            if value is None:
+                return []
+        raw_values = str(value).replace(";", ",").split(",")
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        label = str(raw or "").strip()
+        key = label.casefold()
+        if label and key not in seen:
+            seen.add(key)
+            out.append(label)
+    return out
+
+
+def _note_map(settings: Settings) -> dict[str, str]:
+    try:
+        store = NotesStore(Path(settings.NOTES_PATH))
+        store.load()
+        return {
+            str(key or "").strip().upper(): str(note or "").strip()
+            for key, note in store.items()
+            if str(key or "").strip() and str(note or "").strip()
+        }
+    except Exception:
+        return {}
+
+
+def _build_finalist_discrepancies_payload(
+    discrepancies: pd.DataFrame,
+    *,
+    note_by_key: dict[str, str] | None = None,
+    root_cause: bool = False,
+) -> dict[str, Any]:
     safe = discrepancies if isinstance(discrepancies, pd.DataFrame) else pd.DataFrame()
     if safe.empty:
+        first_label = (
+            "Evolutivos causas raíces pendientes"
+            if root_cause
+            else "Helix finalistas con JIRA abierto"
+        )
+        second_label = "Evolutivos JIRA" if root_cause else "JIRAs afectados"
         return {
             "kpis": [
-                {"label": "Helix finalistas con JIRA abierto", "value": "0", "detail": ""},
-                {"label": "JIRAs afectados", "value": "0", "detail": ""},
+                {"label": first_label, "value": "0", "detail": ""},
+                {"label": second_label, "value": "0", "detail": ""},
                 {"label": "IDs Helix únicos", "value": "0", "detail": ""},
                 {"label": "Días abiertos JIRA", "value": "0 / 0", "detail": "promedio / máximo"},
             ],
@@ -2486,15 +2550,25 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
         "jira_priority",
         "jira_assignee",
         "jira_url",
+        "jira_labels",
+        "jira_status_is_finalist",
+        "root_cause_matched_labels",
         "source_alias",
     ):
         if column not in work.columns:
             work[column] = ""
-        work[column] = work[column].fillna("").astype(str)
+        if column in {"jira_labels", "root_cause_matched_labels"}:
+            work[column] = work[column].map(_issue_labels_for_payload)
+        elif column != "jira_status_is_finalist":
+            work[column] = work[column].fillna("").astype(str)
     if "jira_open_days" in work.columns:
         work["jira_open_days"] = pd.to_numeric(work["jira_open_days"], errors="coerce").fillna(0.0)
     else:
         work["jira_open_days"] = 0.0
+    if "jira_status_is_finalist" in work.columns:
+        work["jira_status_is_finalist"] = work["jira_status_is_finalist"].fillna(False).astype(bool)
+    else:
+        work["jira_status_is_finalist"] = work["jira_status"].map(is_finalist_status).astype(bool)
 
     work["__priority_rank"] = work["jira_priority"].map(priority_rank).fillna(99)
     work = work.sort_values(
@@ -2511,22 +2585,33 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
 
     groups: list[dict[str, Any]] = []
     max_groups = 120
+    notes = {
+        str(key or "").strip().upper(): str(value or "").strip()
+        for key, value in dict(note_by_key or {}).items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
     for idx, (helix_id, bucket) in enumerate(work.groupby("helix_id", sort=False), start=1):
         if idx > max_groups:
             break
         first = bucket.iloc[0]
         issues: list[dict[str, Any]] = []
         for _, row in bucket.head(40).iterrows():
+            jira_key = str(row.get("jira_key", "") or "").strip().upper()
+            helix_key = str(row.get("helix_id", "") or "").strip().upper()
             issues.append(
                 {
-                    "key": str(row.get("jira_key", "") or ""),
+                    "key": jira_key,
                     "summary": str(row.get("jira_summary", "") or ""),
                     "status": str(row.get("jira_status", "") or ""),
+                    "jiraFinalist": bool(row.get("jira_status_is_finalist", False)),
                     "priority": str(row.get("jira_priority", "") or ""),
                     "assignee": str(row.get("jira_assignee", "") or ""),
                     "url": str(row.get("jira_url", "") or ""),
                     "sourceAlias": str(row.get("source_alias", "") or ""),
                     "openDays": float(row.get("jira_open_days", 0.0) or 0.0),
+                    "labels": list(row.get("jira_labels", []) or []),
+                    "matchedLabels": list(row.get("root_cause_matched_labels", []) or []),
+                    "note": notes.get(jira_key) or notes.get(helix_key) or "",
                 }
             )
         groups.append(
@@ -2545,14 +2630,24 @@ def _build_finalist_discrepancies_payload(discrepancies: pd.DataFrame) -> dict[s
     return {
         "kpis": [
             {
-                "label": "Helix finalistas con JIRA abierto",
+                "label": (
+                    "Evolutivos causas raíces pendientes"
+                    if root_cause
+                    else "Helix finalistas con JIRA abierto"
+                ),
                 "value": f"{unique_helix:,}",
-                "detail": "Cruces detectados por ID Helix",
+                "detail": (
+                    "Helix finalista + label configurada"
+                    if root_cause
+                    else "Cruces detectados por ID Helix"
+                ),
             },
             {
-                "label": "JIRAs afectados",
+                "label": "Evolutivos JIRA" if root_cause else "JIRAs afectados",
                 "value": f"{unique_jira:,}",
-                "detail": "Backlog pendiente en JIRA",
+                "detail": (
+                    "Con etiqueta de causa raíz" if root_cause else "Backlog pendiente en JIRA"
+                ),
             },
             {
                 "label": "IDs Helix únicos",
@@ -2777,8 +2872,25 @@ def build_intelligence_snapshot(
         if build_all_tabs or active_tab == "duplicates"
         else _empty_duplicates_payload()
     )
+    finalist_note_by_key = (
+        _note_map(settings)
+        if build_all_tabs or active_tab in {"rootCauseEvolutives", "finalistDiscrepancies"}
+        else {}
+    )
+    root_cause_evolutives = (
+        _build_finalist_discrepancies_payload(
+            context.root_cause_evolutives,
+            note_by_key=finalist_note_by_key,
+            root_cause=True,
+        )
+        if build_all_tabs or active_tab == "rootCauseEvolutives"
+        else _empty_finalist_discrepancies_payload()
+    )
     finalist_discrepancies = (
-        _build_finalist_discrepancies_payload(context.finalist_discrepancies)
+        _build_finalist_discrepancies_payload(
+            context.finalist_discrepancies,
+            note_by_key=finalist_note_by_key,
+        )
         if build_all_tabs or active_tab == "finalistDiscrepancies"
         else _empty_finalist_discrepancies_payload()
     )
@@ -2797,6 +2909,7 @@ def build_intelligence_snapshot(
         "periodSummary": period_summary,
         "functionality": functionality,
         "duplicates": duplicates,
+        "rootCauseEvolutives": root_cause_evolutives,
         "finalistDiscrepancies": finalist_discrepancies,
         "people": people,
         "opsHealth": ops_health,

@@ -9,6 +9,7 @@ from bug_resolution_radar.analytics.finalist_discrepancies import (
     build_finalist_status_discrepancies,
     build_jira_helix_links,
     extract_helix_ids_from_text,
+    split_root_cause_evolutive_discrepancies,
 )
 from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
     build_finalist_discrepancy_issue_list,
@@ -162,6 +163,33 @@ def test_discrepancy_when_helix_finalist_and_jira_open() -> None:
     assert out.iloc[0]["po_team_leader"] == "Víctor Expósito"
     assert bool(out.iloc[0]["helix_status_is_finalist"]) is True
     assert bool(out.iloc[0]["jira_status_is_finalist"]) is False
+
+
+def test_root_cause_evolutive_split_uses_configured_country_labels() -> None:
+    df = _df()
+    df["labels"] = [tuple() for _ in range(len(df))]
+    df.at[0, "labels"] = ["CAUSA_RAIZ", "otro"]
+    discrepancies = build_finalist_status_discrepancies(
+        df,
+        settings=Settings(),
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        reference_day=pd.Timestamp("2026-05-10"),
+    )
+
+    root_cause, remaining = split_root_cause_evolutive_discrepancies(
+        discrepancies,
+        settings=Settings(
+            JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON=(
+                '[{"country":"México","labels":["causa_raiz"]}]'
+            )
+        ),
+        country="México",
+    )
+
+    assert root_cause["jira_key"].tolist() == ["MEX-1"]
+    assert root_cause.iloc[0]["root_cause_matched_labels"] == ("CAUSA_RAIZ",)
+    assert remaining.empty
 
 
 def test_no_discrepancy_when_both_finalists() -> None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from typing import Any, Sequence
 from uuid import uuid4
 
@@ -29,7 +30,12 @@ from bug_resolution_radar.common.issue_links import (
     build_helix_issue_url,
     build_jira_issue_url,
 )
-from bug_resolution_radar.config import Settings, jira_sources
+from bug_resolution_radar.config import (
+    Settings,
+    jira_root_cause_labels_by_country,
+    jira_sources,
+    normalize_country_name,
+)
 
 POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS = "Lookup estados finalistas Jira"
 POST_JQL_LOOKUP_HELIX_KIND = "post_jql_inc_lookup"
@@ -55,6 +61,7 @@ _DISCREPANCY_COLUMNS: tuple[str, ...] = (
     "jira_created",
     "jira_updated",
     "jira_resolved",
+    "jira_labels",
     "jira_open_days",
     "jira_priority",
     "jira_assignee",
@@ -65,6 +72,9 @@ _DISCREPANCY_COLUMNS: tuple[str, ...] = (
     "helix_source_id",
     "helix_source_alias",
     "helix_finalized_at",
+    "root_cause_evolutive",
+    "root_cause_configured_labels",
+    "root_cause_matched_labels",
 )
 
 
@@ -114,6 +124,43 @@ def _series_text(df: pd.DataFrame, column: str, *, default: str = "") -> pd.Seri
     if column not in df.columns:
         return pd.Series([default] * len(df), index=df.index, dtype=object)
     return df[column].fillna(default).astype(str)
+
+
+def _label_key(value: object) -> str:
+    try:
+        if value is None or bool(pd.isna(value)):
+            return ""
+    except Exception:
+        if value is None:
+            return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    folded = unicodedata.normalize("NFKD", text)
+    return folded.encode("ascii", "ignore").decode("ascii").casefold().strip()
+
+
+def _issue_label_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        try:
+            if value is None or bool(pd.isna(value)):
+                return ()
+        except Exception:
+            if value is None:
+                return ()
+        raw_values = re.split(r"[,;\n]+", str(value))
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        label = str(raw or "").strip()
+        key = _label_key(label)
+        if not label or key in seen:
+            continue
+        seen.add(key)
+        out.append(label)
+    return tuple(out)
 
 
 def _to_dt_naive(series: pd.Series | None, *, index: pd.Index | None = None) -> pd.Series:
@@ -257,6 +304,11 @@ def build_jira_helix_links(
             "jira_created": jira["created"] if "created" in jira.columns else pd.NaT,
             "jira_updated": jira["updated"] if "updated" in jira.columns else pd.NaT,
             "jira_resolved": jira["resolved"] if "resolved" in jira.columns else pd.NaT,
+            "jira_labels": (
+                jira["labels"].map(_issue_label_list)
+                if "labels" in jira.columns
+                else pd.Series([tuple()] * len(jira), index=jira.index, dtype=object)
+            ),
             "jira_priority": _series_text(jira, "priority"),
             "jira_assignee": _series_text(jira, "assignee"),
             "po_team_leader": _series_text(jira, "po_team_leader"),
@@ -498,6 +550,80 @@ def build_finalist_status_discrepancies(
             },
         )
     return out.loc[:, list(_DISCREPANCY_COLUMNS)].copy(deep=False)
+
+
+def _configured_root_cause_labels(settings: Settings, *, country: str) -> tuple[str, ...]:
+    country_txt = normalize_country_name(country, settings=settings) or str(country or "").strip()
+    configured = jira_root_cause_labels_by_country(settings).get(country_txt, [])
+    return tuple(_issue_label_list(configured))
+
+
+def _matched_root_cause_labels(
+    issue_labels: object,
+    configured_labels: Sequence[str],
+) -> tuple[str, ...]:
+    labels = _issue_label_list(issue_labels)
+    if not labels or not configured_labels:
+        return ()
+    label_by_key = {_label_key(label): label for label in labels if _label_key(label)}
+    matches: list[str] = []
+    seen: set[str] = set()
+    for configured in configured_labels:
+        key = _label_key(configured)
+        if not key or key not in label_by_key or key in seen:
+            continue
+        seen.add(key)
+        matches.append(label_by_key[key])
+    return tuple(matches)
+
+
+def annotate_root_cause_evolutive_matches(
+    discrepancies: pd.DataFrame | None,
+    *,
+    settings: Settings,
+    country: str,
+) -> pd.DataFrame:
+    """Attach configured/matched JIRA labels that classify root-cause evolutives."""
+    safe = _safe_frame(discrepancies)
+    if safe.empty:
+        return _empty_discrepancies()
+
+    work = safe.copy(deep=False)
+    for column in _DISCREPANCY_COLUMNS:
+        if column not in work.columns:
+            work[column] = pd.NA
+
+    configured = _configured_root_cause_labels(settings, country=country)
+    work["jira_labels"] = work["jira_labels"].map(_issue_label_list)
+    work["root_cause_configured_labels"] = [configured] * len(work)
+    work["root_cause_matched_labels"] = [
+        _matched_root_cause_labels(labels, configured) for labels in work["jira_labels"].tolist()
+    ]
+    work["root_cause_evolutive"] = work["root_cause_matched_labels"].map(bool)
+    return work.loc[:, list(_DISCREPANCY_COLUMNS)].copy(deep=False)
+
+
+def split_root_cause_evolutive_discrepancies(
+    discrepancies: pd.DataFrame | None,
+    *,
+    settings: Settings,
+    country: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split label-matched root-cause evolutives from regular finalist discrepancies."""
+    annotated = annotate_root_cause_evolutive_matches(
+        discrepancies,
+        settings=settings,
+        country=country,
+    )
+    if annotated.empty:
+        return _empty_discrepancies(), _empty_discrepancies()
+    mask = annotated["root_cause_evolutive"].fillna(False).astype(bool)
+    root_cause = annotated.loc[mask].copy(deep=False)
+    remaining = annotated.loc[~mask].copy(deep=False)
+    return (
+        root_cause.loc[:, list(_DISCREPANCY_COLUMNS)].copy(deep=False),
+        remaining.loc[:, list(_DISCREPANCY_COLUMNS)].copy(deep=False),
+    )
 
 
 def _window_end(reference_window: Any) -> pd.Timestamp | None:

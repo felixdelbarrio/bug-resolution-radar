@@ -380,6 +380,137 @@ def test_period_followup_ppt_finalist_discrepancies_section_is_always_included(
     )
 
 
+def test_period_followup_ppt_splits_root_cause_evolutives_and_renders_notes(
+    tmp_path: Path,
+) -> None:
+    template = tmp_path / "template.pptx"
+    notes_path = tmp_path / "notes.json"
+    _build_minimal_template(template)
+    notes_path.write_text(
+        '{"EAM-ROOT":"Cliente confirma evolutivo priorizado para resolver la causa raíz."}',
+        encoding="utf-8",
+    )
+    now = pd.Timestamp("2026-05-15T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "EAM-ROOT",
+                "summary": "Evolutivo causa raíz",
+                "description": "Helix INC000104154954",
+                "status": "To Rework",
+                "priority": "High",
+                "assignee": "Ana",
+                "created": (now - pd.Timedelta(days=20)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+                "url": "https://jira.example.com/browse/EAM-ROOT",
+            },
+            {
+                "key": "EAM-REG",
+                "summary": "Discrepancia regular",
+                "description": "Helix INC000104154955",
+                "status": "To Rework",
+                "priority": "High",
+                "assignee": "Bea",
+                "created": (now - pd.Timedelta(days=25)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "México",
+                "source_id": "jira:mexico:senda",
+                "source_type": "jira",
+                "url": "https://jira.example.com/browse/EAM-REG",
+            },
+        ]
+    )
+    discrepancies = pd.DataFrame(
+        [
+            {
+                "helix_id": "INC000104154954",
+                "helix_summary": "Helix cerrado root",
+                "helix_description": "Resolución root",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154954",
+                "jira_key": "EAM-ROOT",
+                "jira_summary": "Evolutivo causa raíz",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Ana",
+                "jira_open_days": 20,
+                "jira_url": "https://jira.example.com/browse/EAM-ROOT",
+                "jira_labels": ("CAUSA_RAIZ",),
+                "source_alias": "Senda",
+            },
+            {
+                "helix_id": "INC000104154955",
+                "helix_summary": "Helix cerrado regular",
+                "helix_description": "Resolución regular",
+                "helix_status": "Closed",
+                "helix_url": "https://helix.example.com/INC000104154955",
+                "jira_key": "EAM-REG",
+                "jira_summary": "Discrepancia regular",
+                "jira_status": "To Rework",
+                "jira_priority": "High",
+                "jira_assignee": "Bea",
+                "jira_open_days": 25,
+                "jira_url": "https://jira.example.com/browse/EAM-REG",
+                "jira_labels": (),
+                "source_alias": "Senda",
+            },
+        ]
+    )
+
+    result = generate_country_period_followup_ppt(
+        Settings(
+            PERIOD_PPT_TEMPLATE_PATH=str(template),
+            NOTES_PATH=str(notes_path),
+            JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON=(
+                '[{"country":"México","labels":["causa_raiz"]}]'
+            ),
+        ),
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        dff_override=dff,
+        finalist_discrepancies_override=discrepancies,
+        reference_day=now,
+    )
+
+    prs = Presentation(BytesIO(result.content))
+    slide_texts = [_slide_all_text(slide) for slide in prs.slides]
+    root_idx = next(
+        idx
+        for idx, text in enumerate(slide_texts)
+        if "Evolutivos para solucionar causas raíces" in text
+    )
+    finalist_idx = next(
+        idx
+        for idx, text in enumerate(slide_texts)
+        if "Incidencias con discrepancias en estado finalista" in text
+    )
+    assert root_idx < finalist_idx
+    assert "EAM-ROOT" in " ".join(slide_texts)
+
+    finalist_slide = next(
+        slide
+        for slide in prs.slides
+        if "Incidencias con discrepancias en estado finalista" in _slide_all_text(slide)
+        and "EAM-REG" in _slide_all_text(slide)
+    )
+    assert "EAM-ROOT" not in _slide_all_text(finalist_slide)
+
+    root_slide = next(
+        slide
+        for slide in prs.slides
+        if "Evolutivos para solucionar causas raíces" in _slide_all_text(slide)
+        and "EAM-ROOT" in _slide_all_text(slide)
+    )
+    root_text = _slide_all_text(root_slide)
+    assert "Comentarios registrados" in root_text
+    assert "Cliente confirma evolutivo priorizado" in root_text
+
+
 def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(
     tmp_path: Path,
 ) -> None:

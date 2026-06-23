@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { Fragment, useState, type CSSProperties } from "react";
 import {
   postJson,
   type IntelligencePayload,
@@ -230,7 +230,7 @@ function finalistIssueToRecord(
   return {
     key: issue.key,
     summary: issue.summary,
-    description: "",
+    description: issue.note || "",
     status: issue.status,
     priority: issue.priority,
     assignee: issue.assignee,
@@ -247,15 +247,18 @@ function finalistIssueToRecord(
 function FinalistDiscrepanciesPanel({
   data,
   queryParams,
-  onOpenIssue
+  onOpenIssue,
+  variant = "finalist"
 }: {
   data: IntelligencePayload["finalistDiscrepancies"];
   queryParams: Record<string, string | string[] | boolean | number>;
   onOpenIssue: (row: IssueRecord) => Promise<void>;
+  variant?: "finalist" | "rootCause";
 }) {
   const [downloadState, setDownloadState] = useState<"saving" | null>(null);
   const [feedback, setFeedback] = useState<string>("");
   const groups = data.groups;
+  const isRootCause = variant === "rootCause";
 
   async function handleDownload() {
     try {
@@ -280,17 +283,25 @@ function FinalistDiscrepanciesPanel({
     <section className="page-stack">
       <section className="surface-panel finalist-hero-panel">
         <div>
-          <p className="section-kicker">Helix cerrado / JIRA pendiente</p>
-          <h3>Impacto en backlog por estados finalistas</h3>
+          <p className="section-kicker">
+            {isRootCause ? "Labels JIRA / causa raíz" : "Helix cerrado / JIRA pendiente"}
+          </p>
+          <h3>
+            {isRootCause
+              ? "Evolutivos para solucionar causas raíces"
+              : "Impacto en backlog por estados finalistas"}
+          </h3>
         </div>
-        <button
-          type="button"
-          className="action-button"
-          disabled={downloadState === "saving"}
-          onClick={() => void handleDownload()}
-        >
-          {downloadState === "saving" ? "Guardando..." : "Excel"}
-        </button>
+        {!isRootCause ? (
+          <button
+            type="button"
+            className="action-button"
+            disabled={downloadState === "saving"}
+            onClick={() => void handleDownload()}
+          >
+            {downloadState === "saving" ? "Guardando..." : "Excel"}
+          </button>
+        ) : null}
       </section>
 
       {feedback ? <p className="inline-caption">{feedback}</p> : null}
@@ -312,8 +323,14 @@ function FinalistDiscrepanciesPanel({
 
       {groups.length === 0 ? (
         <section className="surface-panel empty-panel">
-          <h3>Sin discrepancias finalistas</h3>
-          <p>No hay Helix finalistas con JIRA pendiente para la selección actual.</p>
+          <h3>
+            {isRootCause ? "Sin evolutivos de causa raíz" : "Sin discrepancias finalistas"}
+          </h3>
+          <p>
+            {isRootCause
+              ? "No hay Helix finalistas con JIRA pendiente y labels configuradas para la selección actual."
+              : "No hay Helix finalistas con JIRA pendiente para la selección actual."}
+          </p>
         </section>
       ) : null}
 
@@ -363,7 +380,8 @@ function FinalistDiscrepanciesPanel({
               <span>Días</span>
             </div>
             {group.issues.map((issue) => (
-              <div className="simple-table-row" key={`${group.helixId}-${issue.key}`}>
+              <Fragment key={`${group.helixId}-${issue.key}`}>
+              <div className="simple-table-row">
                 {buildJiraIssueUrl(issue.key, issue.url) ? (
                   <a
                     className="issue-inline-link"
@@ -382,8 +400,26 @@ function FinalistDiscrepanciesPanel({
                     {issue.key}
                   </button>
                 )}
-                <span>{issue.summary || "Sin título"}</span>
-                <span className="issue-chip" style={semanticChipStyle(issue.status, "status")}>
+                <span>
+                  {issue.summary || "Sin título"}
+                  {isRootCause && (issue.matchedLabels ?? []).length > 0 ? (
+                    <span className="finalist-label-row">
+                      {(issue.matchedLabels ?? []).map((label) => (
+                        <small className="root-cause-label-chip" key={`${issue.key}-${label}`}>
+                          {label}
+                        </small>
+                      ))}
+                    </span>
+                  ) : null}
+                </span>
+                <span
+                  className="issue-chip"
+                  style={
+                    isRootCause && !issue.jiraFinalist
+                      ? neutralChipStyle()
+                      : semanticChipStyle(issue.status, "status")
+                  }
+                >
                   JIRA: {issue.status || "—"}
                 </span>
                 <span className="issue-chip" style={semanticChipStyle(issue.priority, "priority")}>
@@ -392,6 +428,16 @@ function FinalistDiscrepanciesPanel({
                 <span>{issue.assignee || "—"}</span>
                 <span>{Math.round(issue.openDays || 0)}d</span>
               </div>
+              {issue.note ? (
+                <div className="simple-table-row finalist-note-row">
+                  <span />
+                  <span className="finalist-note-cell">
+                    <strong>Comentario registrado</strong>
+                    {issue.note}
+                  </span>
+                </div>
+              ) : null}
+              </Fragment>
             ))}
           </div>
         </details>
@@ -723,6 +769,15 @@ export function InsightsPanel({
                 </details>
               )))}
         </section>
+      ) : null}
+
+      {activeTab === "rootCauseEvolutives" ? (
+        <FinalistDiscrepanciesPanel
+          data={data.rootCauseEvolutives}
+          queryParams={queryParams}
+          onOpenIssue={onOpenIssue}
+          variant="rootCause"
+        />
       ) : null}
 
       {activeTab === "finalistDiscrepancies" ? (

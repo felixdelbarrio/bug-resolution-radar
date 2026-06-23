@@ -26,6 +26,7 @@ from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_
 from bug_resolution_radar.analytics.finalist_discrepancies import (
     apply_effective_finalist_lookup_state,
     apply_effective_finalist_lookup_state_for_scope,
+    split_root_cause_evolutive_discrepancies,
 )
 from bug_resolution_radar.analytics.finalist_discrepancy_lists import (
     FinalistDiscrepancyIssueRow,
@@ -90,6 +91,7 @@ from bug_resolution_radar.reports.pptx_native_tables import (
     rebuild_native_table_shape,
 )
 from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.services.notes import NotesStore
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_HEADLINE_PPT,
     BBVA_FONT_SANS_BOOK_PPT,
@@ -190,6 +192,11 @@ _FINALIST_DISCREPANCIES_TITLE = "Incidencias con discrepancias en estado finalis
 _FINALIST_DISCREPANCIES_ORDER_NOTE = (
     "Detalle - Helix en estado finalista y Jira pendiente - ordenado por 1º : Criticidad, "
     "2º: Días abierta, 3º: Estado y 4º: Helix ID"
+)
+_ROOT_CAUSE_EVOLUTIVES_TITLE = "Evolutivos para solucionar causas raíces"
+_ROOT_CAUSE_EVOLUTIVES_ORDER_NOTE = (
+    "Detalle - Helix en estado finalista, Jira pendiente y label de causa raíz configurada - "
+    "ordenado por 1º : Criticidad, 2º: Días abierta, 3º: Estado y 4º: Helix ID"
 )
 
 
@@ -1733,9 +1740,11 @@ def _apply_executive_chart_layout(
         tickfont=dict(size=axis_font_pt, color="#1E2C46"),
         title_font=dict(size=axis_title_font_pt, color="#17253F"),
         automargin=True,
-        nticks=x_nticks
-        if x_nticks is not None
-        else (8 if kind_token in {"trend", "timeseries"} else None),
+        nticks=(
+            x_nticks
+            if x_nticks is not None
+            else (8 if kind_token in {"trend", "timeseries"} else None)
+        ),
         gridcolor="rgba(155, 169, 196, 0.20)",
         zeroline=False,
     )
@@ -3184,6 +3193,11 @@ def _populate_issue_native_table(
     row_height = int(_ISSUE_TABLE_ROW_HEIGHT)
     if any("\n(" in str(cell or "") for row in data_rows for cell in list(row or [])):
         row_height = int(row_height * 1.18)
+    if any(
+        str(row[1] if len(row) > 1 else "").startswith("Comentarios registrados")
+        for row in data_rows
+    ):
+        row_height = int(row_height * 1.08)
     geometry = _issue_table_geometry(data_row_count=len(data_rows))
     geometry = (
         geometry[0],
@@ -3396,9 +3410,11 @@ def _populate_functionality_zoom_slide(
     _set_shape_text(
         slide,
         4,
-        "Zoom de incidencias críticas del periodo:"
-        if critical_wording
-        else "Zoom de incidencias del periodo:",
+        (
+            "Zoom de incidencias críticas del periodo:"
+            if critical_wording
+            else "Zoom de incidencias del periodo:"
+        ),
     )
     _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
 
@@ -3653,23 +3669,45 @@ def _chunk_finalist_discrepancy_issues(
     items = list(issues or [])
     if not items:
         return [tuple()]
-    return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
+    chunks: list[tuple[FinalistDiscrepancyIssueRow, ...]] = []
+    current: list[FinalistDiscrepancyIssueRow] = []
+    current_rows = 0
+    for issue in items:
+        visual_rows = 2 if str(issue.comment or "").strip() else 1
+        if current and current_rows + visual_rows > size:
+            chunks.append(tuple(current))
+            current = []
+            current_rows = 0
+        current.append(issue)
+        current_rows += visual_rows
+    if current:
+        chunks.append(tuple(current))
+    return chunks
 
 
 def _finalist_discrepancy_rows_for_table(
     issues: Sequence[FinalistDiscrepancyIssueRow],
     *,
     empty_message: str,
-) -> tuple[list[list[str]], dict[int, str], dict[int, str]]:
+) -> tuple[
+    list[list[str]],
+    dict[int, str],
+    dict[int, str],
+    dict[int, FinalistDiscrepancyIssueRow],
+    dict[int, str],
+]:
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
     description_by_row: dict[int, str] = {}
-    for idx, issue in enumerate(list(issues or [])):
+    issue_by_row: dict[int, FinalistDiscrepancyIssueRow] = {}
+    comment_by_row: dict[int, str] = {}
+    for issue in list(issues or []):
         jira_key = str(issue.jira_key or "").strip().upper()
         description_text = (
             f"JIRA: {str(issue.jira_summary or '').strip() or 'Sin título JIRA'}\n"
             f"Helix: {str(issue.helix_text or '').strip() or 'Sin descripción Helix'}"
         )
+        main_row_idx = len(rows)
         rows.append(
             [
                 jira_key,
@@ -3684,13 +3722,28 @@ def _finalist_discrepancy_rows_for_table(
             ]
         )
         if str(issue.jira_url or "").strip():
-            row_links[idx] = str(issue.jira_url or "").strip()
-        description_by_row[idx] = rows[-1][1]
+            row_links[main_row_idx] = str(issue.jira_url or "").strip()
+        description_by_row[main_row_idx] = rows[-1][1]
+        issue_by_row[main_row_idx] = issue
+        comment = str(issue.comment or "").strip()
+        if comment:
+            comment_row_idx = len(rows)
+            rows.append(
+                [
+                    "",
+                    "Comentarios registrados:\n" + ellipsize_text(comment, max_chars=310),
+                    "",
+                    "",
+                    "",
+                    "",
+                ]
+            )
+            comment_by_row[comment_row_idx] = comment
     if not rows:
         rows.append(
             ["", str(empty_message or "Sin incidencias para este criterio."), "", "", "", ""]
         )
-    return rows, row_links, description_by_row
+    return rows, row_links, description_by_row, issue_by_row, comment_by_row
 
 
 def _write_linkified_issue_cell(
@@ -3764,13 +3817,13 @@ def _write_linkified_issue_cell(
 def _linkify_finalist_description_cells(
     table_shape: Any,
     *,
-    issues_page: Sequence[FinalistDiscrepancyIssueRow],
+    issue_by_row: Mapping[int, FinalistDiscrepancyIssueRow],
     description_by_row: Mapping[int, str],
 ) -> None:
     if table_shape is None or not getattr(table_shape, "has_table", False):
         return
     table = table_shape.table
-    for idx, issue in enumerate(list(issues_page or [])):
+    for idx, issue in dict(issue_by_row or {}).items():
         if idx not in description_by_row:
             continue
         try:
@@ -3790,6 +3843,26 @@ def _frame_records(df: pd.DataFrame | None) -> list[Mapping[str, object]]:
     if not isinstance(df, pd.DataFrame) or df.empty:
         return []
     return cast(list[Mapping[str, object]], df.to_dict(orient="records"))
+
+
+def _load_report_notes_by_key(settings: Settings) -> dict[str, str]:
+    try:
+        store = NotesStore(Path(settings.NOTES_PATH))
+        store.load()
+        return {
+            str(key or "").strip().upper(): str(note or "").strip()
+            for key, note in store.items()
+            if str(key or "").strip() and str(note or "").strip()
+        }
+    except Exception:
+        return {}
+
+
+def _concat_discrepancy_frames(*frames: pd.DataFrame | None) -> pd.DataFrame:
+    safe_frames = [frame for frame in frames if isinstance(frame, pd.DataFrame) and not frame.empty]
+    if not safe_frames:
+        return pd.DataFrame()
+    return pd.concat(safe_frames, ignore_index=True, sort=False).copy(deep=False)
 
 
 def _build_report_issue_url_maps(
@@ -3933,18 +4006,92 @@ def _linkify_helix_references_in_tables(
                     )
 
 
-def _style_finalist_status_cells(table_shape: Any, issues_count: int) -> None:
+def _write_finalist_comment_cell(cell: Any, comment: str) -> None:
+    tf = getattr(cell, "text_frame", None)
+    if tf is None:
+        return
+    try:
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = RGBColor(246, 249, 255)
+    except Exception:
+        pass
+    try:
+        tf.clear()
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+        tf.word_wrap = True
+        tf.margin_left = Inches(0.06)
+        tf.margin_right = Inches(0.06)
+        tf.margin_top = Inches(0.025)
+        tf.margin_bottom = Inches(0.025)
+        cell.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    except Exception:
+        pass
+    body_rgb = RGBColor(*_TABLE_BODY_FG_RGB)
+    p0 = tf.paragraphs[0]
+    p0.alignment = PP_ALIGN.LEFT
+    p0.space_before = Pt(0)
+    p0.space_after = Pt(0)
+    run0 = p0.add_run()
+    run0.text = "Comentarios registrados"
+    run0.font.size = Pt(7.6)
+    run0.font.name = _ISSUE_TABLE_FONT_NAME
+    run0.font.bold = True
+    run0.font.color.rgb = body_rgb
+    p1 = tf.add_paragraph()
+    p1.alignment = PP_ALIGN.LEFT
+    p1.space_before = Pt(0)
+    p1.space_after = Pt(0)
+    run1 = p1.add_run()
+    run1.text = ellipsize_text(comment, max_chars=310)
+    run1.font.size = Pt(8.1)
+    run1.font.name = _ISSUE_TABLE_FONT_NAME
+    run1.font.color.rgb = body_rgb
+
+
+def _style_finalist_comment_rows(
+    table_shape: Any,
+    *,
+    comment_by_row: Mapping[int, str],
+) -> None:
     if table_shape is None or not getattr(table_shape, "has_table", False):
         return
     table = table_shape.table
-    row_limit = min(max(int(issues_count or 0), 0), max(len(table.rows) - 1, 0))
+    for data_row_idx, comment in dict(comment_by_row or {}).items():
+        ppt_row_idx = int(data_row_idx) + 1
+        main_row_idx = max(ppt_row_idx - 1, 1)
+        try:
+            table.cell(main_row_idx, 0).merge(table.cell(ppt_row_idx, 0))
+        except Exception:
+            pass
+        try:
+            merged = table.cell(ppt_row_idx, 1)
+            merged.merge(table.cell(ppt_row_idx, 5))
+        except Exception:
+            try:
+                merged = table.cell(ppt_row_idx, 1)
+            except Exception:
+                continue
+        _write_finalist_comment_cell(merged, str(comment or "").strip())
+
+
+def _style_finalist_status_cells(
+    table_shape: Any,
+    *,
+    data_row_indices: Sequence[int],
+) -> None:
+    if table_shape is None or not getattr(table_shape, "has_table", False):
+        return
+    table = table_shape.table
     jira_rgb = RGBColor(*hex_to_rgb(BBVA_REPORT_RED_TEXT))
     helix_rgb = RGBColor(*hex_to_rgb(BBVA_REPORT_AMBER_TEXT))
     try:
         helix_rgb = RGBColor(34, 139, 74)
     except Exception:
         pass
-    for ridx in range(1, row_limit + 1):
+    for data_row_idx in list(data_row_indices or []):
+        ridx = int(data_row_idx) + 1
+        if ridx <= 0 or ridx >= len(table.rows):
+            continue
         try:
             cell = table.cell(ridx, 3)
         except Exception:
@@ -3977,6 +4124,8 @@ def _style_finalist_status_cells(table_shape: Any, issues_count: int) -> None:
 def _populate_finalist_discrepancy_list_slide(
     slide: Any,
     *,
+    title: str,
+    order_note: str,
     issues_page: Sequence[FinalistDiscrepancyIssueRow],
     empty_message: str,
     page_number: int,
@@ -3985,17 +4134,19 @@ def _populate_finalist_discrepancy_list_slide(
     _ = total_pages
     roman = _to_roman(int(page_number or 1))
     page_suffix = f" ({roman})" if roman else f" ({int(page_number or 1)})"
-    _set_shape_text(slide, 1, f"{_FINALIST_DISCREPANCIES_TITLE}{page_suffix}")
+    _set_shape_text(slide, 1, f"{str(title or _FINALIST_DISCREPANCIES_TITLE)}{page_suffix}")
     _set_shape_font_name(slide, shape_index=1, font_name=_PPT_FONT_BODY_MEDIUM)
-    _set_shape_text(slide, 3, _FINALIST_DISCREPANCIES_ORDER_NOTE)
+    _set_shape_text(slide, 3, str(order_note or _FINALIST_DISCREPANCIES_ORDER_NOTE))
     _set_shape_font_color(slide, shape_index=3, color_rgb=RGBColor(*_TABLE_BODY_FG_RGB))
     _set_shape_font_name(slide, shape_index=3, font_name=_PPT_FONT_BODY)
     _set_shape_text(slide, 4, "")
     _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    rows, row_links, description_by_row = _finalist_discrepancy_rows_for_table(
-        issues_page,
-        empty_message=empty_message,
+    rows, row_links, description_by_row, issue_by_row, comment_by_row = (
+        _finalist_discrepancy_rows_for_table(
+            issues_page,
+            empty_message=empty_message,
+        )
     )
     table_shape = _populate_issue_native_table(
         slide,
@@ -4006,15 +4157,16 @@ def _populate_finalist_discrepancy_list_slide(
     )
     _linkify_finalist_description_cells(
         table_shape,
-        issues_page=issues_page,
+        issue_by_row=issue_by_row,
         description_by_row=description_by_row,
     )
-    _style_finalist_status_cells(table_shape, issues_count=len(issues_page))
+    _style_finalist_comment_rows(table_shape, comment_by_row=comment_by_row)
+    _style_finalist_status_cells(table_shape, data_row_indices=tuple(issue_by_row.keys()))
     LOGGER.info(
         "period_followup_slide_rows",
         extra={
             "run_id": uuid4().hex[:12],
-            "slide_name": _FINALIST_DISCREPANCIES_TITLE,
+            "slide_name": str(title or _FINALIST_DISCREPANCIES_TITLE),
             "rows_generated": int(len(issues_page or ())),
         },
     )
@@ -4023,6 +4175,9 @@ def _populate_finalist_discrepancy_list_slide(
 def _append_finalist_discrepancy_section(
     prs: Any,
     *,
+    title: str = _FINALIST_DISCREPANCIES_TITLE,
+    order_note: str = _FINALIST_DISCREPANCIES_ORDER_NOTE,
+    empty_message: str = "Sin incidencias con discrepancias en estado finalista en el scope actual.",
     period_label: str,
     issues: Sequence[FinalistDiscrepancyIssueRow],
 ) -> None:
@@ -4037,7 +4192,7 @@ def _append_finalist_discrepancy_section(
     _append_period_risk_issue_cover(
         prs,
         cover_template_slide=cover_template_slide,
-        title=_FINALIST_DISCREPANCIES_TITLE,
+        title=str(title or _FINALIST_DISCREPANCIES_TITLE),
         period_label=period_label,
     )
     pages = _chunk_finalist_discrepancy_issues(
@@ -4049,8 +4204,10 @@ def _append_finalist_discrepancy_section(
         slide = _append_slide_clone_from_source(prs, source_slide=zoom_template_slide)
         _populate_finalist_discrepancy_list_slide(
             slide,
+            title=str(title or _FINALIST_DISCREPANCIES_TITLE),
+            order_note=str(order_note or _FINALIST_DISCREPANCIES_ORDER_NOTE),
             issues_page=page_rows,
-            empty_message="Sin incidencias con discrepancias en estado finalista en el scope actual.",
+            empty_message=str(empty_message or "Sin incidencias para este criterio."),
             page_number=page_idx,
             total_pages=total_pages,
         )
@@ -4489,6 +4646,13 @@ def generate_country_period_followup_ppt(
             source_ids=clean_source_ids,
             reference_day=reference_day,
         )
+    root_cause_evolutives, effective_finalist_discrepancies = (
+        split_root_cause_evolutive_discrepancies(
+            effective_finalist_discrepancies,
+            settings=settings,
+            country=country_txt,
+        )
+    )
     if dff.empty:
         raise ValueError("No hay incidencias para generar el informe de seguimiento.")
 
@@ -4622,8 +4786,14 @@ def generate_country_period_followup_ppt(
         _enrich_po_team_leader_from_sources(aggregate.dff, settings),
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
+    notes_by_key = _load_report_notes_by_key(settings)
+    root_cause_evolutive_rows = build_finalist_discrepancy_issue_list(
+        root_cause_evolutives,
+        notes_by_key=notes_by_key,
+    )
     finalist_discrepancy_rows = build_finalist_discrepancy_issue_list(
-        effective_finalist_discrepancies
+        effective_finalist_discrepancies,
+        notes_by_key=notes_by_key,
     )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
@@ -4654,6 +4824,15 @@ def generate_country_period_followup_ppt(
         default=False,
     ):
         _append_functionality_zoom_slides(prs, summary=functionality_followup)
+    if root_cause_evolutive_rows:
+        _append_finalist_discrepancy_section(
+            prs,
+            title=_ROOT_CAUSE_EVOLUTIVES_TITLE,
+            order_note=_ROOT_CAUSE_EVOLUTIVES_ORDER_NOTE,
+            empty_message="Sin evolutivos de causa raíz en el scope actual.",
+            period_label=functionality_followup.period_label,
+            issues=root_cause_evolutive_rows,
+        )
     if finalist_discrepancy_rows:
         _append_finalist_discrepancy_section(
             prs,
@@ -4661,9 +4840,13 @@ def generate_country_period_followup_ppt(
             issues=finalist_discrepancy_rows,
         )
 
+    all_finalist_link_discrepancies = _concat_discrepancy_frames(
+        root_cause_evolutives,
+        effective_finalist_discrepancies,
+    )
     jira_url_map, helix_url_map = _build_report_issue_url_maps(
         all_df=all_df,
-        finalist_discrepancies=effective_finalist_discrepancies,
+        finalist_discrepancies=all_finalist_link_discrepancies,
         settings=settings,
     )
     _linkify_helix_references_in_tables(

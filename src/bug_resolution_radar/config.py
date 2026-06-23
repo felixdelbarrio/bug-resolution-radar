@@ -449,6 +449,7 @@ class Settings(BaseModel):
     PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED: str = "false"
     OPEN_ISSUES_FOCUS_MODE: str = "criticidad_alta"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
+    JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON: str = "[]"
 
 
 def ensure_env() -> None:
@@ -687,6 +688,37 @@ def country_rollup_sources(settings: Settings) -> Dict[str, List[str]]:
         normalized_ids = [sid for sid in source_ids if sid in allowed]
         if normalized_ids:
             out[country] = normalized_ids
+    return out
+
+
+def _parse_labels(value: object) -> List[str]:
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = re.split(r"[,;\n]+", str(value or ""))
+
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        label = _coerce_str(raw)
+        key = _ascii_fold(label).casefold()
+        if not label or key in seen:
+            continue
+        seen.add(key)
+        out.append(label)
+    return out
+
+
+def jira_root_cause_labels_by_country(settings: Settings) -> Dict[str, List[str]]:
+    """Return configured JIRA labels that identify root-cause evolutives by country."""
+    countries = supported_countries(settings)
+    rows = _parse_json_list(getattr(settings, "JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON", ""))
+    out: Dict[str, List[str]] = {}
+    for row in rows:
+        country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
+        labels = _parse_labels(row.get("labels"))
+        if country and labels:
+            out[country] = labels
     return out
 
 
