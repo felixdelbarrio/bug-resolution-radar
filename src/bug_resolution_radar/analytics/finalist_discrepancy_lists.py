@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import cast
 
 import pandas as pd
 
@@ -59,8 +61,9 @@ def _text(row: pd.Series, column: str) -> str:
 
 def _labels(row: pd.Series, column: str) -> tuple[str, ...]:
     value = row.get(column, ())
-    if isinstance(value, (list, tuple, set)):
-        raw_values = value
+    raw_values: list[object]
+    if not isinstance(value, (str, bytes, bytearray, dict)) and pd.api.types.is_list_like(value):
+        raw_values = list(cast(Iterable[object], value))
     else:
         try:
             if value is None or bool(pd.isna(value)):
@@ -68,7 +71,7 @@ def _labels(row: pd.Series, column: str) -> tuple[str, ...]:
         except Exception:
             if value is None:
                 return ()
-        raw_values = str(value).split(",")
+        raw_values = list(cast(Iterable[object], str(value).split(",")))
     out: list[str] = []
     seen: set[str] = set()
     for raw in raw_values:

@@ -1453,6 +1453,49 @@ def test_period_followup_ppt_renders_po_under_assignee() -> None:
     assert long_po.endswith("…)")
 
 
+def test_period_followup_risk_issue_table_renders_notes_as_grouped_row() -> None:
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    rows, row_links, comment_by_row = period_ppt_mod._risk_issue_rows_for_table(
+        [
+            period_ppt_mod.PeriodRiskIssueRow(
+                key="MEXBMI1-283305",
+                summary="Tras login la app queda con spinner",
+                functionality="Acceso",
+                assignee="Rodrigo",
+                status="Ready To Verify",
+                priority="High",
+                open_days=171,
+                url="https://jira.example.com/browse/MEXBMI1-283305",
+                po_team_leader="Juan Vicente",
+            )
+        ],
+        empty_message="Sin incidencias",
+        notes_by_key={
+            "MEXBMI1-283305": (
+                "Juan Vicente indica que debería haber sido descartada y que la va a revisar"
+            )
+        },
+    )
+    table_shape = period_ppt_mod._populate_issue_native_table(
+        slide,
+        table_shape_index=0,
+        headers=period_ppt_mod._RISK_ASSIGNEE_TABLE_HEADERS,
+        rows=rows,
+        hyperlink_by_row=row_links,
+    )
+    period_ppt_mod._style_issue_comment_rows(table_shape, comment_by_row=comment_by_row)
+
+    table = table_shape.table
+    assert len(table.rows) == 3
+    assert table.cell(1, 0).text == "MEXBMI1-283305"
+    assert "Comentarios registrados" in table.cell(2, 1).text
+    assert "debería haber sido descartada" in table.cell(2, 1).text
+    assert str(table.cell(1, 0).text_frame.paragraphs[0].runs[0].hyperlink.address).startswith(
+        "https://jira.example.com"
+    )
+
+
 def test_period_followup_ppt_enriches_po_from_source_config() -> None:
     df = pd.DataFrame(
         [

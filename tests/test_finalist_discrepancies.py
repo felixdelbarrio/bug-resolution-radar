@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from bug_resolution_radar.analytics.finalist_discrepancies import (
@@ -189,6 +190,33 @@ def test_root_cause_evolutive_split_uses_configured_country_labels() -> None:
 
     assert root_cause["jira_key"].tolist() == ["MEX-1"]
     assert root_cause.iloc[0]["root_cause_matched_labels"] == ("CAUSA_RAIZ",)
+    assert remaining.empty
+
+
+def test_root_cause_evolutive_split_handles_parquet_array_labels() -> None:
+    df = _df()
+    df["labels"] = [np.array([], dtype=object) for _ in range(len(df))]
+    df.at[0, "labels"] = np.array(["#ENTERPRISEWEB_Incidentes", "SOLUCION_RAIZ"], dtype=object)
+    discrepancies = build_finalist_status_discrepancies(
+        df,
+        settings=Settings(),
+        country="México",
+        source_ids=["jira:mexico:senda"],
+        reference_day=pd.Timestamp("2026-05-10"),
+    )
+
+    root_cause, remaining = split_root_cause_evolutive_discrepancies(
+        discrepancies,
+        settings=Settings(
+            JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON=(
+                '[{"country":"México","labels":["SOLUCION_RAIZ"]}]'
+            )
+        ),
+        country="México",
+    )
+
+    assert root_cause["jira_key"].tolist() == ["MEX-1"]
+    assert root_cause.iloc[0]["root_cause_matched_labels"] == ("SOLUCION_RAIZ",)
     assert remaining.empty
 
 

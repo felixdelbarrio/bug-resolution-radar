@@ -18,7 +18,8 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from typing import Any, Sequence
+from collections.abc import Iterable
+from typing import Any, Sequence, cast
 from uuid import uuid4
 
 import pandas as pd
@@ -141,8 +142,9 @@ def _label_key(value: object) -> str:
 
 
 def _issue_label_list(value: object) -> tuple[str, ...]:
-    if isinstance(value, (list, tuple, set)):
-        raw_values = list(value)
+    raw_values: list[object]
+    if not isinstance(value, (str, bytes, bytearray, dict)) and pd.api.types.is_list_like(value):
+        raw_values = list(cast(Iterable[object], value))
     else:
         try:
             if value is None or bool(pd.isna(value)):
@@ -150,7 +152,7 @@ def _issue_label_list(value: object) -> tuple[str, ...]:
         except Exception:
             if value is None:
                 return ()
-        raw_values = re.split(r"[,;\n]+", str(value))
+        raw_values = list(cast(Iterable[object], re.split(r"[,;\n]+", str(value))))
     out: list[str] = []
     seen: set[str] = set()
     for raw in raw_values:

@@ -921,15 +921,47 @@ def _chunk_zoom_issues(
     issues: Sequence[FunctionalityIssueRow],
     *,
     rows_per_slide: int,
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> list[tuple[FunctionalityIssueRow, ...]]:
     size = max(int(rows_per_slide or 0), 1)
     items = list(issues or [])
     if not items:
         return [tuple()]
     chunks: list[tuple[FunctionalityIssueRow, ...]] = []
-    for start in range(0, len(items), size):
-        chunks.append(tuple(items[start : start + size]))
+    current: list[FunctionalityIssueRow] = []
+    current_rows = 0
+    for issue in items:
+        visual_rows = 2 if _issue_note_for_key(issue.key, notes_by_key) else 1
+        if current and current_rows + visual_rows > size:
+            chunks.append(tuple(current))
+            current = []
+            current_rows = 0
+        current.append(issue)
+        current_rows += visual_rows
+    if current:
+        chunks.append(tuple(current))
     return chunks
+
+
+def _issue_note_for_key(
+    issue_key: object,
+    notes_by_key: Mapping[str, str] | None,
+) -> str:
+    key = str(issue_key or "").strip().upper()
+    if not key or not notes_by_key:
+        return ""
+    return str(notes_by_key.get(key) or "").strip()
+
+
+def _issue_comment_row(comment: str) -> list[str]:
+    return [
+        "",
+        "Comentarios registrados:\n" + ellipsize_text(str(comment or "").strip(), max_chars=310),
+        "",
+        "",
+        "",
+        "",
+    ]
 
 
 def _shape_text_frame(
@@ -3193,11 +3225,6 @@ def _populate_issue_native_table(
     row_height = int(_ISSUE_TABLE_ROW_HEIGHT)
     if any("\n(" in str(cell or "") for row in data_rows for cell in list(row or [])):
         row_height = int(row_height * 1.18)
-    if any(
-        str(row[1] if len(row) > 1 else "").startswith("Comentarios registrados")
-        for row in data_rows
-    ):
-        row_height = int(row_height * 1.08)
     geometry = _issue_table_geometry(data_row_count=len(data_rows))
     geometry = (
         geometry[0],
@@ -3388,6 +3415,7 @@ def _populate_functionality_zoom_slide(
     issues_page: Sequence[FunctionalityIssueRow] | None = None,
     page_number: int = 1,
     total_pages: int = 1,
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> None:
     functionality = str(zoom.functionality or "").strip() or "Sin funcionalidad"
     page_suffix = ""
@@ -3421,10 +3449,12 @@ def _populate_functionality_zoom_slide(
     page_issues = list(issues_page if issues_page is not None else zoom.issues or [])
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
-    for idx, issue in enumerate(page_issues):
+    comment_by_row: dict[int, str] = {}
+    for issue in page_issues:
         issue_key = str(issue.key or "").strip().upper()
         issue_summary = _premium_sentence_case(str(issue.summary or ""))
         issue_root_cause = _premium_sentence_case(str(issue.root_cause or ""))
+        main_row_idx = len(rows)
         rows.append(
             [
                 issue_key,
@@ -3436,26 +3466,46 @@ def _populate_functionality_zoom_slide(
             ]
         )
         if str(issue.url or "").strip():
-            row_links[idx] = str(issue.url).strip()
-    _populate_issue_native_table(
+            row_links[main_row_idx] = str(issue.url).strip()
+        comment = _issue_note_for_key(issue_key, notes_by_key)
+        if comment:
+            comment_row_idx = len(rows)
+            rows.append(_issue_comment_row(comment))
+            comment_by_row[comment_row_idx] = comment
+    table_shape = _populate_issue_native_table(
         slide,
         table_shape_index=2,
         headers=_FUNCTIONALITY_ISSUE_TABLE_HEADERS,
         rows=rows,
         hyperlink_by_row=row_links,
     )
+    _style_issue_comment_rows(table_shape, comment_by_row=comment_by_row)
 
 
 def _chunk_risk_issues(
     issues: Sequence[PeriodRiskIssueRow],
     *,
     rows_per_slide: int,
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> list[tuple[PeriodRiskIssueRow, ...]]:
     size = max(int(rows_per_slide or 0), 1)
     items = list(issues or [])
     if not items:
         return [tuple()]
-    return [tuple(items[start : start + size]) for start in range(0, len(items), size)]
+    chunks: list[tuple[PeriodRiskIssueRow, ...]] = []
+    current: list[PeriodRiskIssueRow] = []
+    current_rows = 0
+    for issue in items:
+        visual_rows = 2 if _issue_note_for_key(issue.key, notes_by_key) else 1
+        if current and current_rows + visual_rows > size:
+            chunks.append(tuple(current))
+            current = []
+            current_rows = 0
+        current.append(issue)
+        current_rows += visual_rows
+    if current:
+        chunks.append(tuple(current))
+    return chunks
 
 
 def _assignee_with_po_text(
@@ -3502,11 +3552,14 @@ def _risk_issue_rows_for_table(
     issues: Sequence[PeriodRiskIssueRow],
     *,
     empty_message: str,
-) -> tuple[list[list[str]], dict[int, str]]:
+    notes_by_key: Mapping[str, str] | None = None,
+) -> tuple[list[list[str]], dict[int, str], dict[int, str]]:
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
-    for idx, issue in enumerate(list(issues or [])):
+    comment_by_row: dict[int, str] = {}
+    for issue in list(issues or []):
         issue_key = str(issue.key or "").strip().upper()
+        main_row_idx = len(rows)
         rows.append(
             [
                 issue_key,
@@ -3521,12 +3574,17 @@ def _risk_issue_rows_for_table(
             ]
         )
         if str(issue.url or "").strip():
-            row_links[idx] = str(issue.url or "").strip()
+            row_links[main_row_idx] = str(issue.url or "").strip()
+        comment = _issue_note_for_key(issue_key, notes_by_key)
+        if comment:
+            comment_row_idx = len(rows)
+            rows.append(_issue_comment_row(comment))
+            comment_by_row[comment_row_idx] = comment
     if not rows:
         rows.append(
             ["", str(empty_message or "Sin incidencias para este criterio."), "", "", "", ""]
         )
-    return rows, row_links
+    return rows, row_links, comment_by_row
 
 
 def _populate_risk_issue_list_slide(
@@ -3538,6 +3596,7 @@ def _populate_risk_issue_list_slide(
     empty_message: str,
     page_number: int,
     total_pages: int,
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> None:
     _ = total_pages
     roman = _to_roman(int(page_number or 1))
@@ -3554,14 +3613,19 @@ def _populate_risk_issue_list_slide(
     _set_shape_text(slide, 4, "")
     _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    rows, row_links = _risk_issue_rows_for_table(issues_page, empty_message=empty_message)
-    _populate_issue_native_table(
+    rows, row_links, comment_by_row = _risk_issue_rows_for_table(
+        issues_page,
+        empty_message=empty_message,
+        notes_by_key=notes_by_key,
+    )
+    table_shape = _populate_issue_native_table(
         slide,
         table_shape_index=2,
         headers=_RISK_ASSIGNEE_TABLE_HEADERS,
         rows=rows,
         hyperlink_by_row=row_links,
     )
+    _style_issue_comment_rows(table_shape, comment_by_row=comment_by_row)
     LOGGER.info(
         "period_followup_slide_rows",
         extra={
@@ -3593,6 +3657,7 @@ def _append_period_risk_issue_section(
     period_label: str,
     cover_template_slide: Any,
     zoom_template_slide: Any,
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> None:
     _append_period_risk_issue_cover(
         prs,
@@ -3603,6 +3668,7 @@ def _append_period_risk_issue_section(
     pages = _chunk_risk_issues(
         tuple(issues or ()),
         rows_per_slide=_ISSUE_TABLE_ROWS_PER_SLIDE,
+        notes_by_key=notes_by_key,
     )
     total_pages = len(pages)
     for page_idx, page_rows in enumerate(pages, start=1):
@@ -3615,6 +3681,7 @@ def _append_period_risk_issue_section(
             empty_message=empty_message,
             page_number=page_idx,
             total_pages=total_pages,
+            notes_by_key=notes_by_key,
         )
 
 
@@ -3624,6 +3691,7 @@ def _append_period_risk_issue_sections(
     period_label: str,
     high_priority_issues: Sequence[PeriodRiskIssueRow],
     aged_issues: Sequence[PeriodRiskIssueRow],
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> None:
     template_path = _resolve_functionality_template_path()
     template_prs = Presentation(str(template_path))
@@ -3657,6 +3725,7 @@ def _append_period_risk_issue_sections(
             period_label=period_label,
             cover_template_slide=cover_template_slide,
             zoom_template_slide=zoom_template_slide,
+            notes_by_key=notes_by_key,
         )
 
 
@@ -3728,16 +3797,7 @@ def _finalist_discrepancy_rows_for_table(
         comment = str(issue.comment or "").strip()
         if comment:
             comment_row_idx = len(rows)
-            rows.append(
-                [
-                    "",
-                    "Comentarios registrados:\n" + ellipsize_text(comment, max_chars=310),
-                    "",
-                    "",
-                    "",
-                    "",
-                ]
-            )
+            rows.append(_issue_comment_row(comment))
             comment_by_row[comment_row_idx] = comment
     if not rows:
         rows.append(
@@ -4006,7 +4066,7 @@ def _linkify_helix_references_in_tables(
                     )
 
 
-def _write_finalist_comment_cell(cell: Any, comment: str) -> None:
+def _write_issue_comment_cell(cell: Any, comment: str) -> None:
     tf = getattr(cell, "text_frame", None)
     if tf is None:
         return
@@ -4048,10 +4108,11 @@ def _write_finalist_comment_cell(cell: Any, comment: str) -> None:
     run1.font.color.rgb = body_rgb
 
 
-def _style_finalist_comment_rows(
+def _style_issue_comment_rows(
     table_shape: Any,
     *,
     comment_by_row: Mapping[int, str],
+    last_column_idx: int = 5,
 ) -> None:
     if table_shape is None or not getattr(table_shape, "has_table", False):
         return
@@ -4065,13 +4126,13 @@ def _style_finalist_comment_rows(
             pass
         try:
             merged = table.cell(ppt_row_idx, 1)
-            merged.merge(table.cell(ppt_row_idx, 5))
+            merged.merge(table.cell(ppt_row_idx, max(int(last_column_idx or 0), 1)))
         except Exception:
             try:
                 merged = table.cell(ppt_row_idx, 1)
             except Exception:
                 continue
-        _write_finalist_comment_cell(merged, str(comment or "").strip())
+        _write_issue_comment_cell(merged, str(comment or "").strip())
 
 
 def _style_finalist_status_cells(
@@ -4160,7 +4221,7 @@ def _populate_finalist_discrepancy_list_slide(
         issue_by_row=issue_by_row,
         description_by_row=description_by_row,
     )
-    _style_finalist_comment_rows(table_shape, comment_by_row=comment_by_row)
+    _style_issue_comment_rows(table_shape, comment_by_row=comment_by_row)
     _style_finalist_status_cells(table_shape, data_row_indices=tuple(issue_by_row.keys()))
     LOGGER.info(
         "period_followup_slide_rows",
@@ -4522,6 +4583,7 @@ def _append_functionality_zoom_slides(
     prs: Any,
     *,
     summary: PeriodFunctionalityFollowupSummary,
+    notes_by_key: Mapping[str, str] | None = None,
 ) -> None:
     critical_wording = bool(getattr(summary, "is_critical_focus", False))
     template_path = _resolve_functionality_template_path()
@@ -4549,6 +4611,7 @@ def _append_functionality_zoom_slides(
         pages = _chunk_zoom_issues(
             tuple(getattr(zoom, "issues", ()) or ()),
             rows_per_slide=_ISSUE_TABLE_ROWS_PER_SLIDE,
+            notes_by_key=notes_by_key,
         )
         total_pages = len(pages)
         for page_idx, page_rows in enumerate(pages, start=1):
@@ -4567,6 +4630,7 @@ def _append_functionality_zoom_slides(
             issues_page=page_rows,
             page_number=page_idx,
             total_pages=total_pages,
+            notes_by_key=notes_by_key,
         )
 
 
@@ -4818,12 +4882,17 @@ def generate_country_period_followup_ppt(
         period_label=functionality_followup.period_label,
         high_priority_issues=risk_lists.high_priority,
         aged_issues=risk_lists.aged,
+        notes_by_key=notes_by_key,
     )
     if _parse_bool_flag(
         getattr(settings, "PERIOD_REPORT_FUNCTIONALITY_DETAIL_ENABLED", "false"),
         default=False,
     ):
-        _append_functionality_zoom_slides(prs, summary=functionality_followup)
+        _append_functionality_zoom_slides(
+            prs,
+            summary=functionality_followup,
+            notes_by_key=notes_by_key,
+        )
     if root_cause_evolutive_rows:
         _append_finalist_discrepancy_section(
             prs,
