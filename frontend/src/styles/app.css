@@ -2351,6 +2351,48 @@ textarea::placeholder {
   grid-template-columns: 8.5rem minmax(220px, 1.8fr) minmax(130px, 0.9fr) minmax(110px, 0.75fr) minmax(140px, 0.85fr) 4.6rem;
 }
 
+.finalist-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  margin-top: 0.34rem;
+}
+
+.root-cause-label-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0.12rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--bbva-primary) 28%, var(--bbva-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bbva-primary) 8%, var(--bbva-surface));
+  color: var(--bbva-primary-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.finalist-note-row {
+  align-items: start;
+  margin-top: -0.28rem;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--bbva-surface) 86%, var(--bbva-surface-2));
+}
+
+.finalist-note-cell {
+  display: grid;
+  grid-column: 2 / -1;
+  gap: 0.2rem;
+  color: var(--bbva-text-muted);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.finalist-note-cell strong {
+  color: var(--bbva-text);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
 .detail-actions-row {
   display: flex;
   justify-content: flex-end;
@@ -2769,7 +2811,8 @@ textarea::placeholder {
 }
 
 .source-table-row input,
-.source-table-row select {
+.source-table-row select,
+.source-table-row textarea {
   width: 100%;
   min-height: 2.16rem;
   padding: 0.58rem 0.8rem;
@@ -2777,6 +2820,28 @@ textarea::placeholder {
   border-radius: var(--bbva-radius-md);
   background: var(--bbva-surface);
   color: var(--bbva-text);
+}
+
+.source-table-row textarea {
+  min-height: 4.9rem;
+  resize: vertical;
+  line-height: 1.35;
+}
+
+.jira-root-cause-label-grid .source-table-head,
+.jira-root-cause-label-grid .source-table-row {
+  grid-template-columns: 180px minmax(260px, 1fr) minmax(120px, 0.32fr);
+}
+
+.root-cause-label-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bbva-success) 10%, var(--bbva-surface));
+  color: var(--bbva-success);
+  font-weight: 800;
 }
 
 .table-checkbox {
@@ -2955,6 +3020,17 @@ textarea::placeholder {
   .workspace-scope-status {
     justify-content: flex-start;
     min-height: auto;
+  }
+
+  .jira-root-cause-label-grid .source-table-head,
+  .jira-root-cause-label-grid .source-table-row,
+  .finalist-issues-table .simple-table-head,
+  .finalist-issues-table .simple-table-row {
+    grid-template-columns: 1fr;
+  }
+
+  .finalist-note-cell {
+    grid-column: 1 / -1;
   }
 }
 

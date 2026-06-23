@@ -469,6 +469,39 @@ export function SettingsPage() {
     });
   }
 
+  function labelsText(country: string) {
+    return (draft.jiraRootCauseLabelsByCountry[country] ?? []).join("\n");
+  }
+
+  function parseLabelText(raw: string) {
+    const seen = new Set<string>();
+    return raw
+      .split(/[\n,;]+/g)
+      .map((item) => item.trim())
+      .filter((item) => {
+        const key = asciiFold(item).toLowerCase();
+        if (!item || seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function setRootCauseLabels(country: string, raw: string) {
+    const labels = parseLabelText(raw);
+    const next = { ...draft.jiraRootCauseLabelsByCountry };
+    if (labels.length > 0) {
+      next[country] = labels;
+    } else {
+      delete next[country];
+    }
+    setDraft({
+      ...draft,
+      jiraRootCauseLabelsByCountry: next
+    });
+  }
+
   function syncFromSaved(next: SettingsPayload, flash: string) {
     const normalized = normalizeSettingsPayload(next);
     setSavedPayload(normalized);
@@ -528,7 +561,8 @@ export function SettingsPage() {
         PERIOD_PPT_TEMPLATE_PATH: "",
         DASHBOARD_SUMMARY_CHARTS: summaryCsv,
         TREND_SELECTED_CHARTS: summaryCsv
-      }
+      },
+      jiraRootCauseLabelsByCountry: draft.jiraRootCauseLabelsByCountry
     };
     const saved = await saveSettings.mutateAsync(payload);
     syncFromSaved(saved, "Preferencias guardadas.");
@@ -812,6 +846,38 @@ export function SettingsPage() {
                 />
                 <span>Usar última quincena finalizada</span>
               </label>
+            </article>
+
+            <article className="surface-card page-stack">
+              <div className="section-head">
+                <div>
+                  <h3>Fuentes Jira por país</h3>
+                  <p>Etiquetas JIRA para evolutivos de causa raíz</p>
+                </div>
+              </div>
+              <div className="source-table-grid jira-root-cause-label-grid">
+                <div className="source-table-head">
+                  <span>País</span>
+                  <span>LABELS / etiquetas JIRA</span>
+                  <span>Activas</span>
+                </div>
+                {countries.map((country) => {
+                  const configuredLabels = draft.jiraRootCauseLabelsByCountry[country] ?? [];
+                  return (
+                    <div className="source-table-row" key={country}>
+                      <strong>{country}</strong>
+                      <textarea
+                        value={labelsText(country)}
+                        onChange={(event) => setRootCauseLabels(country, event.target.value)}
+                        placeholder="ROOT_CAUSE_EVOLUTIVO"
+                      />
+                      <span className="root-cause-label-count">
+                        {configuredLabels.length}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </article>
 
           </section>

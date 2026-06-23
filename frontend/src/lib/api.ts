@@ -191,6 +191,35 @@ export type QuincenalDeltaPayload = {
   previousSampleSize: number | null;
 };
 
+export type FinalistDiscrepanciesPayload = {
+  kpis: Array<{ label: string; value: string; detail: string }>;
+  groups: Array<{
+    helixId: string;
+    helixUrl: string;
+    helixStatus: string;
+    helixSummary: string;
+    helixDescription: string;
+    helixText: string;
+    jiraCount: number;
+    issues: Array<{
+      key: string;
+      summary: string;
+      status: string;
+      jiraFinalist: boolean;
+      priority: string;
+      assignee: string;
+      url: string;
+      sourceAlias: string;
+      openDays: number;
+      labels: string[];
+      matchedLabels: string[];
+      note: string;
+    }>;
+  }>;
+  totalRows: number;
+  truncated: boolean;
+};
+
 export type IntelligencePayload = {
   tabs: Array<{ id: string; label: string }>;
   periodSummary: {
@@ -277,30 +306,8 @@ export type IntelligencePayload = {
       issues: IssueRecord[];
     }>;
   };
-  finalistDiscrepancies: {
-    kpis: Array<{ label: string; value: string; detail: string }>;
-    groups: Array<{
-      helixId: string;
-      helixUrl: string;
-      helixStatus: string;
-      helixSummary: string;
-      helixDescription: string;
-      helixText: string;
-      jiraCount: number;
-      issues: Array<{
-        key: string;
-        summary: string;
-        status: string;
-        priority: string;
-        assignee: string;
-        url: string;
-        sourceAlias: string;
-        openDays: number;
-      }>;
-    }>;
-    totalRows: number;
-    truncated: boolean;
-  };
+  rootCauseEvolutives: FinalistDiscrepanciesPayload;
+  finalistDiscrepancies: FinalistDiscrepanciesPayload;
   people: {
     cards: Array<{
       assignee: string;
@@ -335,6 +342,7 @@ export type SettingsPayload = {
   jiraSources: WorkspaceSource[];
   helixSources: WorkspaceSource[];
   countryRollupSources: Record<string, string[]>;
+  jiraRootCauseLabelsByCountry: Record<string, string[]>;
   rollupEligibleSourcesByCountry: Record<string, WorkspaceSource[]>;
   jiraDisabledSourceIds: string[];
   helixDisabledSourceIds: string[];
@@ -360,6 +368,7 @@ export function normalizeSettingsPayload(
     jiraSources: payload?.jiraSources ?? [],
     helixSources: payload?.helixSources ?? [],
     countryRollupSources: payload?.countryRollupSources ?? {},
+    jiraRootCauseLabelsByCountry: payload?.jiraRootCauseLabelsByCountry ?? {},
     rollupEligibleSourcesByCountry: payload?.rollupEligibleSourcesByCountry ?? {},
     jiraDisabledSourceIds: payload?.jiraDisabledSourceIds ?? [],
     helixDisabledSourceIds: payload?.helixDisabledSourceIds ?? []
