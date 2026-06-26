@@ -521,6 +521,16 @@ def _normalize_note_issue_key(issue_key: str) -> str:
     return normalized
 
 
+def _note_meta_text(row: pd.Series, column: str) -> str:
+    value = row.get(column, "")
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return str(value or "").strip()
+
+
 def _notes_list_payload(
     settings: Settings, *, query: DashboardQuery | None = None
 ) -> dict[str, Any]:
@@ -544,13 +554,14 @@ def _notes_list_payload(
                 continue
             issue_meta[key] = {
                 "key": key,
-                "summary": str(row.get("summary", "") or "").strip(),
-                "status": str(row.get("status", "") or "").strip(),
-                "priority": str(row.get("priority", "") or "").strip(),
-                "assignee": str(row.get("assignee", "") or "").strip(),
-                "url": str(row.get("url", "") or "").strip(),
-                "source_type": str(row.get("source_type", "") or "").strip(),
-                "source_alias": str(row.get("source_alias", "") or "").strip(),
+                "summary": _note_meta_text(row, "summary"),
+                "status": _note_meta_text(row, "status"),
+                "priority": _note_meta_text(row, "priority"),
+                "assignee": _note_meta_text(row, "assignee"),
+                "resolved": _note_meta_text(row, "resolved"),
+                "url": _note_meta_text(row, "url"),
+                "source_type": _note_meta_text(row, "source_type"),
+                "source_alias": _note_meta_text(row, "source_alias"),
             }
     rows: list[dict[str, Any]] = []
     for key, entries in store.entry_items():

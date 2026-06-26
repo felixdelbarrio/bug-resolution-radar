@@ -118,3 +118,20 @@ def test_notes_editor_allows_free_issue_edit_and_validates_before_save() -> None
     assert "isValidIssueReference" in source
     assert "La nota no puede estar vacía" in source
     assert "Limpiar" in source
+
+
+def test_notes_editor_splits_active_and_finalist_bitacoras() -> None:
+    source = _frontend_file("components/NotesEditor.tsx")
+    styles = _frontend_file("styles/app.css")
+    semantics = _frontend_file("lib/statusSemantics.ts")
+
+    assert "NOTE_BUCKETS" in source
+    assert "En seguimiento" in source
+    assert "Finalizadas" in source
+    assert "issueLifecycleBucket(row.issue)" in source
+    assert "selectedNotesRows.map" in source
+    assert "notes-bucket-tabs" in styles
+    assert "notes-index-stat-finalist" in styles
+    assert "ready to deploy" in semantics
+    assert "deployed" in semantics
+    assert "closed" in semantics
