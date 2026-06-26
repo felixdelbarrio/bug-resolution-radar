@@ -1496,6 +1496,48 @@ def test_period_followup_risk_issue_table_renders_notes_as_grouped_row() -> None
     )
 
 
+def test_period_followup_risk_issue_chunks_long_notes_across_pages() -> None:
+    issue = period_ppt_mod.PeriodRiskIssueRow(
+        key="MEXBMI1-283305",
+        summary="Tras login la app queda con spinner",
+        functionality="Acceso",
+        assignee="Rodrigo",
+        status="Ready To Verify",
+        priority="High",
+        open_days=171,
+        url="https://jira.example.com/browse/MEXBMI1-283305",
+        po_team_leader="Juan Vicente",
+    )
+    long_note = "\n\n".join(
+        f"2026-06-{day:02d} 09:00:\n"
+        f"Detalle operativo {day} con seguimiento largo para validar que no se corta "
+        f"la bitácora en el informe y que cada bloque conserva contenido trazable."
+        for day in range(1, 9)
+    )
+
+    pages = period_ppt_mod._chunk_risk_issues(
+        [issue],
+        rows_per_slide=period_ppt_mod._ISSUE_TABLE_ROWS_PER_SLIDE,
+        notes_by_key={"MEXBMI1-283305": long_note},
+    )
+
+    assert len(pages) > 1
+    rendered_comments: list[str] = []
+    for page in pages:
+        rows, _row_links, comment_by_row = period_ppt_mod._risk_issue_rows_for_table(
+            page,
+            empty_message="Sin incidencias",
+            notes_by_key={"MEXBMI1-283305": long_note},
+        )
+        assert len(rows) <= 5
+        rendered_comments.extend(comment_by_row.values())
+
+    rendered_text = "\n".join(rendered_comments)
+    assert "2026-06-01 09:00" in rendered_text
+    assert "2026-06-08 09:00" in rendered_text
+    assert "no se corta" in rendered_text
+
+
 def test_period_followup_ppt_enriches_po_from_source_config() -> None:
     df = pd.DataFrame(
         [

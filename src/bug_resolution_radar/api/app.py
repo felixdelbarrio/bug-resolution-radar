@@ -89,7 +89,7 @@ from bug_resolution_radar.services.issue_workbook_export import (
     build_issue_export_frame,
     build_issue_workbook_export,
 )
-from bug_resolution_radar.services.notes import NotesStore
+from bug_resolution_radar.services.notes import NotesStore, format_entry_date, note_entries_payload
 from bug_resolution_radar.services.settings_contracts import (
     load_settings_payload,
     save_settings_payload,
@@ -501,9 +501,15 @@ def _notes_store(settings: Settings) -> NotesStore:
 def _notes_payload(settings: Settings, *, issue_key: str = "") -> dict[str, Any]:
     store = _notes_store(settings)
     current_key = str(issue_key or "").strip()
+    entries = store.get_entries(current_key)
+    latest_created_at = store.latest_created_at(current_key)
     return {
         "issueKey": current_key,
         "note": store.get(current_key) or "",
+        "entries": note_entries_payload(entries),
+        "entryCount": len(entries),
+        "latestCreatedAt": latest_created_at,
+        "latestDateLabel": format_entry_date(latest_created_at) if latest_created_at else "",
     }
 
 
@@ -547,16 +553,31 @@ def _notes_list_payload(
                 "source_alias": str(row.get("source_alias", "") or "").strip(),
             }
     rows: list[dict[str, Any]] = []
-    for key, note in store.items():
+    for key, entries in store.entry_items():
         meta = issue_meta.get(str(key or "").strip().upper(), {})
+        note = store.get(key) or ""
+        latest_created_at = store.latest_created_at(key)
         rows.append(
             {
                 "issueKey": key,
                 "note": note,
+                "entries": note_entries_payload(entries),
+                "entryCount": len(entries),
+                "latestCreatedAt": latest_created_at,
+                "latestDateLabel": (
+                    format_entry_date(latest_created_at) if latest_created_at else ""
+                ),
                 "issue": meta,
                 "enriched": bool(meta),
             }
         )
+    rows.sort(
+        key=lambda row: (
+            str(row.get("latestCreatedAt") or ""),
+            str(row.get("issueKey") or ""),
+        ),
+        reverse=True,
+    )
     return {"total": len(rows), "rows": rows}
 
 
@@ -1247,13 +1268,29 @@ def create_app() -> FastAPI:
         clean_key = _normalize_note_issue_key(issue_key)
         store = _notes_store(settings)
         note_text = str(payload.note or "").strip()
-        store.set(clean_key, note_text)
+        store.append(clean_key, note_text)
         store.save()
         LOGGER.info(
             "notes_action",
             extra={
                 "notes_issue": clean_key,
-                "notes_action": "delete" if not note_text else "save",
+                "notes_action": "delete" if not note_text else "append",
+            },
+        )
+        return _notes_payload(settings, issue_key=clean_key)
+
+    @app.delete("/api/notes/{issue_key}/entries/{entry_id}")
+    def delete_note_entry(issue_key: str, entry_id: str) -> dict[str, Any]:
+        settings = load_settings()
+        clean_key = _normalize_note_issue_key(issue_key)
+        store = _notes_store(settings)
+        removed = store.delete_entry(clean_key, entry_id)
+        store.save()
+        LOGGER.info(
+            "notes_action",
+            extra={
+                "notes_issue": clean_key,
+                "notes_action": "delete_entry" if removed else "delete_entry_missing",
             },
         )
         return _notes_payload(settings, issue_key=clean_key)

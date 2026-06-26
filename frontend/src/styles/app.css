@@ -1476,19 +1476,157 @@ textarea::placeholder {
   flex-wrap: wrap;
 }
 
+.notes-composer,
+.notes-index-panel {
+  align-self: start;
+}
+
+.notes-composer {
+  gap: 0.9rem;
+}
+
+.notes-index-panel {
+  max-height: min(780px, calc(100vh - 185px));
+  overflow: hidden;
+}
+
+.notes-compose-grid {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.46fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.notes-draft-field {
+  min-width: 0;
+}
+
+.notes-issue-field input {
+  min-height: 2.8rem;
+}
+
+.notes-count-pill,
+.notes-meta-chip,
+.notes-list-date {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 1.72rem;
+  padding: 0.18rem 0.56rem;
+  border: 1px solid color-mix(in srgb, var(--bbva-primary) 28%, var(--bbva-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bbva-primary) 9%, var(--bbva-surface));
+  color: var(--bbva-primary-strong);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.notes-history {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.78rem;
+  border-top: 1px solid var(--bbva-border);
+}
+
+.notes-history-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.notes-history-head h4 {
+  margin: 0;
+  color: var(--bbva-text);
+  font-size: 1rem;
+  line-height: 1.16;
+  word-break: break-word;
+}
+
+.notes-timeline {
+  display: grid;
+  gap: 0.62rem;
+  max-height: min(360px, calc(100vh - 430px));
+  margin: 0;
+  padding: 0 0.1rem 0 0.72rem;
+  overflow: auto;
+  list-style: none;
+}
+
+.notes-timeline-item {
+  position: relative;
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+  padding: 0 2.2rem 0.66rem 0.72rem;
+  border-left: 2px solid color-mix(in srgb, var(--bbva-primary) 34%, var(--bbva-border));
+}
+
+.notes-timeline-item::before {
+  content: "";
+  position: absolute;
+  top: 0.18rem;
+  left: -0.36rem;
+  width: 0.62rem;
+  height: 0.62rem;
+  border: 2px solid var(--bbva-surface);
+  border-radius: 999px;
+  background: var(--bbva-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bbva-primary) 45%, transparent);
+}
+
+.notes-timeline-date {
+  color: var(--bbva-primary-strong);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.notes-timeline-item p,
+.notes-list-note-preview {
+  margin: 0;
+  color: var(--bbva-text-muted);
+  line-height: 1.42;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notes-entry-delete-button {
+  position: absolute;
+  top: -0.08rem;
+  right: 0;
+  width: 1.72rem;
+  height: 1.72rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: 999px;
+  background: var(--bbva-surface);
+  color: var(--bbva-danger);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
 .notes-list {
   display: grid;
   gap: 0.65rem;
+  max-height: min(660px, calc(100vh - 295px));
+  padding-right: 0.16rem;
+  overflow: auto;
 }
 
 .notes-list-item {
   position: relative;
   display: grid;
-  gap: 0.32rem;
-  padding: 0.78rem 2.6rem 0.78rem 0.82rem;
+  gap: 0.28rem;
+  padding: 0.72rem 2.55rem 0.72rem 0.82rem;
   border: 1px solid var(--bbva-border);
+  border-left: 4px solid color-mix(in srgb, var(--bbva-primary) 22%, var(--bbva-border));
   border-radius: var(--bbva-radius-md);
   background: var(--bbva-surface);
+}
+
+.notes-list-item-active {
+  border-color: color-mix(in srgb, var(--bbva-primary) 55%, var(--bbva-border));
+  border-left-color: var(--bbva-primary);
+  background: color-mix(in srgb, var(--bbva-primary) 6%, var(--bbva-surface));
 }
 
 .notes-list-item p {
@@ -1497,10 +1635,28 @@ textarea::placeholder {
   font-weight: 700;
   line-height: 1.32;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.notes-list-note-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: 0.84rem;
 }
 
 .notes-list-item small {
   color: var(--bbva-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.notes-list-date {
+  margin-top: 0.1rem;
 }
 
 .notes-delete-button {
@@ -1731,12 +1887,14 @@ textarea::placeholder {
 
 .notes-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.8fr);
+  grid-template-columns: minmax(0, 1.14fr) minmax(340px, 0.86fr);
   gap: 0.85rem;
+  align-items: start;
 }
 
 .notes-area {
-  min-height: 260px;
+  min-height: 154px;
+  max-height: 320px;
   resize: vertical;
 }
 
@@ -2966,6 +3124,7 @@ textarea::placeholder {
   .report-grid,
   .ingest-grid,
   .notes-layout,
+  .notes-compose-grid,
   .chart-grid,
   .insight-grid,
   .dashboard-filters,
@@ -2977,6 +3136,12 @@ textarea::placeholder {
   .people-kpi-grid-react,
   .ops-kpi-grid-react {
     grid-template-columns: 1fr;
+  }
+
+  .notes-index-panel,
+  .notes-list,
+  .notes-timeline {
+    max-height: none;
   }
 
   .overview-kpi-grid,
