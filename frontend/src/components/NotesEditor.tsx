@@ -2,6 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { NoteEntryPayload, NoteListPayload } from "../lib/api";
 import { cn } from "../lib/cn";
 import { isValidIssueReference } from "../lib/issueLinks";
+import {
+  issueLifecycleBucket,
+  issueLifecycleLabel,
+  type IssueLifecycleBucket
+} from "../lib/statusSemantics";
+
+type NotesRow = NoteListPayload["rows"][number];
+
+const NOTE_BUCKETS: Array<{ id: IssueLifecycleBucket; label: string }> = [
+  { id: "active", label: "En seguimiento" },
+  { id: "finalist", label: "Finalizadas" }
+];
 
 type NotesEditorProps = {
   issueKeys: string[];
@@ -35,6 +47,7 @@ export function NotesEditor({
   const [issueDraft, setIssueDraft] = useState(selectedIssueKey);
   const [draft, setDraft] = useState("");
   const [validationMessage, setValidationMessage] = useState("");
+  const [activeBucket, setActiveBucket] = useState<IssueLifecycleBucket>("active");
 
   useEffect(() => {
     setIssueDraft(selectedIssueKey);
@@ -80,6 +93,21 @@ export function NotesEditor({
   const visibleEntries =
     cleanIssueKey === selectedIssueKey ? entries : selectedListRow?.entries ?? [];
   const selectedMeta = selectedListRow?.issue;
+  const selectedLifecycle = issueLifecycleBucket(selectedMeta);
+  const selectedLifecycleLabel = issueLifecycleLabel(selectedLifecycle);
+  const groupedNotes = useMemo(() => {
+    const groups: Record<IssueLifecycleBucket, NotesRow[]> = {
+      active: [],
+      finalist: []
+    };
+    for (const row of notes) {
+      groups[issueLifecycleBucket(row.issue)].push(row);
+    }
+    return groups;
+  }, [notes]);
+  const activeRows = groupedNotes.active;
+  const finalistRows = groupedNotes.finalist;
+  const selectedNotesRows = groupedNotes[activeBucket];
 
   useEffect(() => {
     if (!issueIsValid || !knownIssueSet.has(cleanIssueKey) || cleanIssueKey === selectedIssueKey) {
@@ -90,6 +118,44 @@ export function NotesEditor({
     }, 260);
     return () => window.clearTimeout(timer);
   }, [cleanIssueKey, issueIsValid, knownIssueSet, onIssueChange, selectedIssueKey]);
+
+  useEffect(() => {
+    if (selectedListRow) {
+      setActiveBucket(issueLifecycleBucket(selectedListRow.issue));
+    }
+  }, [selectedListRow]);
+
+  useEffect(() => {
+    if (activeBucket === "active" && activeRows.length === 0 && finalistRows.length > 0) {
+      setActiveBucket("finalist");
+    }
+    if (activeBucket === "finalist" && finalistRows.length === 0 && activeRows.length > 0) {
+      setActiveBucket("active");
+    }
+  }, [activeBucket, activeRows.length, finalistRows.length]);
+
+  useEffect(() => {
+    const firstVisibleRow = selectedNotesRows[0];
+    if (!firstVisibleRow) {
+      return;
+    }
+    if (!selectedListRow) {
+      if (cleanIssueKey) {
+        return;
+      }
+      setIssueDraft(firstVisibleRow.issueKey);
+      setDraft("");
+      setValidationMessage("");
+      onIssueChange(firstVisibleRow.issueKey);
+      return;
+    }
+    if (issueLifecycleBucket(selectedListRow.issue) !== activeBucket) {
+      setIssueDraft(firstVisibleRow.issueKey);
+      setDraft("");
+      setValidationMessage("");
+      onIssueChange(firstVisibleRow.issueKey);
+    }
+  }, [activeBucket, cleanIssueKey, onIssueChange, selectedListRow, selectedNotesRows]);
 
   function commitIssueDraft() {
     if (cleanIssueKey && issueIsValid && cleanIssueKey !== selectedIssueKey) {
@@ -137,9 +203,16 @@ export function NotesEditor({
             <p className="section-kicker">Notas</p>
             <h3>Seguimiento local</h3>
           </div>
-          {visibleEntries.length > 0 ? (
-            <span className="notes-count-pill">{visibleEntries.length} entradas</span>
-          ) : null}
+          <div className="notes-panel-badges">
+            {cleanIssueKey && selectedListRow ? (
+              <span className={cn("notes-lifecycle-chip", `notes-lifecycle-chip-${selectedLifecycle}`)}>
+                {selectedLifecycleLabel}
+              </span>
+            ) : null}
+            {visibleEntries.length > 0 ? (
+              <span className="notes-count-pill">{visibleEntries.length} entradas</span>
+            ) : null}
+          </div>
         </div>
         <div className="notes-compose-grid">
           <label className="field notes-issue-field">
@@ -253,51 +326,116 @@ export function NotesEditor({
         <div className="panel-head">
           <div>
             <p className="section-kicker">Incidencias con notas</p>
-            <h3>{notes.length} guardadas</h3>
+            <h3>{selectedNotesRows.length} visibles</h3>
           </div>
+          <span className="notes-count-pill">{notes.length} total</span>
         </div>
         {notes.length === 0 ? (
           <p className="issue-list-empty">Todavía no hay notas locales en esta selección.</p>
         ) : (
-          <div className="notes-list">
-            {notes.map((row) => (
-              <article
-                className={cn(
-                  "notes-list-item",
-                  row.issueKey === cleanIssueKey && "notes-list-item-active"
-                )}
-                key={row.issueKey}
-              >
-                <button
-                  type="button"
-                  className="issue-inline-link issue-key-anchor-button"
-                  onClick={() => handleSelectIssue(row.issueKey)}
-                >
-                  {row.issueKey}
-                </button>
-                <p>{row.issue?.summary || row.entries[0]?.note || row.note}</p>
-                <div className="notes-list-note-preview">{row.entries.at(-1)?.note || row.note}</div>
-                <small>
-                  {[row.issue?.status, row.issue?.priority, row.issue?.assignee]
-                    .filter(Boolean)
-                    .join(" · ") || (row.enriched ? "Incidencia enriquecida" : "Sin datos del issue")}
-                </small>
-                <span className="notes-list-date">
-                  {row.latestDateLabel || `${row.entryCount} entradas`}
-                </span>
-                <button
-                  type="button"
-                  className="notes-delete-button"
-                  onClick={() => onDelete(row.issueKey)}
-                  disabled={isDeleting}
-                  aria-label={`Eliminar nota de ${row.issueKey}`}
-                  title="Eliminar nota"
-                >
-                  ×
-                </button>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className="notes-index-summary" aria-label="Resumen de bitácoras">
+              <div className="notes-index-stat notes-index-stat-active">
+                <span>En seguimiento</span>
+                <strong>{activeRows.length}</strong>
+              </div>
+              <div className="notes-index-stat notes-index-stat-finalist">
+                <span>Finalizadas</span>
+                <strong>{finalistRows.length}</strong>
+              </div>
+            </div>
+            <div className="notes-bucket-tabs" role="tablist" aria-label="Tipo de bitácora">
+              {NOTE_BUCKETS.map((bucket) => {
+                const count = groupedNotes[bucket.id].length;
+                const isActiveBucket = activeBucket === bucket.id;
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isActiveBucket}
+                    className={cn(
+                      "notes-bucket-tab",
+                      `notes-bucket-tab-${bucket.id}`,
+                      isActiveBucket && "notes-bucket-tab-active"
+                    )}
+                    key={bucket.id}
+                    onClick={() => setActiveBucket(bucket.id)}
+                  >
+                    <span>{bucket.label}</span>
+                    <strong>{count}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedNotesRows.length === 0 ? (
+              <p className="issue-list-empty">No hay bitácoras en esta categoría.</p>
+            ) : (
+              <div className="notes-list">
+                {selectedNotesRows.map((row) => {
+                  const lifecycle = issueLifecycleBucket(row.issue);
+                  const metaParts = [
+                    row.issue?.status,
+                    row.issue?.priority,
+                    row.issue?.assignee
+                  ].filter(Boolean);
+                  return (
+                    <article
+                      className={cn(
+                        "notes-list-item",
+                        `notes-list-item-${lifecycle}`,
+                        row.issueKey === cleanIssueKey && "notes-list-item-active"
+                      )}
+                      key={row.issueKey}
+                    >
+                      <div className="notes-list-item-head">
+                        <button
+                          type="button"
+                          className="issue-inline-link issue-key-anchor-button"
+                          onClick={() => handleSelectIssue(row.issueKey)}
+                        >
+                          {row.issueKey}
+                        </button>
+                        <span className="notes-list-entry-count">
+                          {row.entryCount} {row.entryCount === 1 ? "entrada" : "entradas"}
+                        </span>
+                      </div>
+                      <p>{row.issue?.summary || row.entries[0]?.note || row.note}</p>
+                      <div className="notes-list-note-preview">
+                        {row.entries.at(-1)?.note || row.note}
+                      </div>
+                      <div className="notes-list-meta-row">
+                        <span
+                          className={cn(
+                            "notes-lifecycle-chip",
+                            `notes-lifecycle-chip-${lifecycle}`
+                          )}
+                        >
+                          {issueLifecycleLabel(lifecycle)}
+                        </span>
+                        {metaParts.length > 0 ? <small>{metaParts.join(" · ")}</small> : null}
+                        {metaParts.length === 0 ? (
+                          <small>{row.enriched ? "Incidencia enriquecida" : "Sin datos del issue"}</small>
+                        ) : null}
+                      </div>
+                      <span className="notes-list-date">
+                        {row.latestDateLabel || `${row.entryCount} entradas`}
+                      </span>
+                      <button
+                        type="button"
+                        className="notes-delete-button"
+                        onClick={() => onDelete(row.issueKey)}
+                        disabled={isDeleting}
+                        aria-label={`Eliminar nota de ${row.issueKey}`}
+                        title="Eliminar nota"
+                      >
+                        ×
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </section>
     </section>

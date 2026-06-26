@@ -1121,6 +1121,7 @@ def test_notes_list_enrich_delete_and_empty_note_removes(monkeypatch, tmp_path: 
     assert rows[0]["entries"][0]["note"] == "Coordinar cierre"
     assert rows[0]["enriched"] is True
     assert rows[0]["issue"]["summary"] == "Error en login"
+    assert rows[0]["issue"]["resolved"] == ""
 
     delete_response = client.delete("/api/notes/RAD-1")
     assert delete_response.status_code == 200
