@@ -42,7 +42,10 @@ def test_notes_store_roundtrip(tmp_path: Path) -> None:
 
     reloaded = NotesStore(store_path)
     reloaded.load()
-    assert reloaded.get("X-1") == "nota local"
+    entries = reloaded.get_entries("X-1")
+    assert len(entries) == 1
+    assert entries[0].note == "nota local"
+    assert "nota local" in (reloaded.get("X-1") or "")
 
 
 def test_security_masking_helpers() -> None:

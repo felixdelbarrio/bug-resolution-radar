@@ -1070,11 +1070,24 @@ def test_notes_endpoint_roundtrip(monkeypatch, tmp_path: Path) -> None:
 
     client = TestClient(api_app.create_app())
     put_response = client.put("/api/notes/RAD-9", json={"note": "Investigar con backend"})
+    second_response = client.put("/api/notes/RAD-9", json={"note": "Pendiente de validar"})
     get_response = client.get("/api/notes/RAD-9")
 
     assert put_response.status_code == 200
+    assert second_response.status_code == 200
     assert get_response.status_code == 200
-    assert get_response.json()["note"] == "Investigar con backend"
+    payload = get_response.json()
+    assert payload["entryCount"] == 2
+    assert "Investigar con backend" in payload["note"]
+    assert "Pendiente de validar" in payload["note"]
+    assert payload["entries"][0]["dateLabel"]
+
+    entry_id = payload["entries"][0]["id"]
+    delete_entry = client.delete(f"/api/notes/RAD-9/entries/{entry_id}")
+    assert delete_entry.status_code == 200
+    assert delete_entry.json()["entryCount"] == 1
+    assert "Investigar con backend" not in delete_entry.json()["note"]
+    assert "Pendiente de validar" in delete_entry.json()["note"]
 
 
 def test_notes_endpoint_rejects_invalid_issue_key(monkeypatch, tmp_path: Path) -> None:
@@ -1103,7 +1116,9 @@ def test_notes_list_enrich_delete_and_empty_note_removes(monkeypatch, tmp_path: 
     assert listed.status_code == 200
     rows = listed.json()["rows"]
     assert rows[0]["issueKey"] == "RAD-1"
-    assert rows[0]["note"] == "Coordinar cierre"
+    assert "Coordinar cierre" in rows[0]["note"]
+    assert rows[0]["entryCount"] == 1
+    assert rows[0]["entries"][0]["note"] == "Coordinar cierre"
     assert rows[0]["enriched"] is True
     assert rows[0]["issue"]["summary"] == "Error en login"
 

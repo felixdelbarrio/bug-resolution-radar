@@ -128,6 +128,11 @@ _ISSUE_TABLE_TOP = Inches(1.48)
 _ISSUE_TABLE_WIDTH = Inches(8.96)
 _ISSUE_TABLE_HEADER_HEIGHT = Inches(0.34)
 _ISSUE_TABLE_ROW_HEIGHT = Inches(0.62)
+_ISSUE_TABLE_COMMENT_ROW_HEIGHT = int(_ISSUE_TABLE_ROW_HEIGHT * 1.55)
+_ISSUE_TABLE_COMMENT_ROW_UNITS = float(_ISSUE_TABLE_COMMENT_ROW_HEIGHT) / float(
+    _ISSUE_TABLE_ROW_HEIGHT
+)
+_ISSUE_COMMENT_CHUNK_CHARS = 240
 _ISSUE_TABLE_FONT_NAME = "Arial"
 _ISSUE_TABLE_BODY_FONT_SIZE_PT = 9.2
 _ISSUE_TABLE_HEADER_FONT_SIZE_PT = 8.4
@@ -148,6 +153,20 @@ _RISK_ASSIGNEE_TABLE_HEADERS: tuple[str, ...] = (
     "Criticidad",
     "Días abierta",
 )
+
+
+@dataclass(frozen=True)
+class _IssuePageItem:
+    issue: Any
+    comment_chunks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _FinalistIssuePageItem:
+    issue: FinalistDiscrepancyIssueRow
+    comment_chunks: tuple[str, ...] = ()
+
+
 _FUNCTIONALITY_DASHBOARD_TABLE_HEADERS: tuple[str, ...] = (
     "#",
     "Resto incidencias abiertas",
@@ -922,25 +941,12 @@ def _chunk_zoom_issues(
     *,
     rows_per_slide: int,
     notes_by_key: Mapping[str, str] | None = None,
-) -> list[tuple[FunctionalityIssueRow, ...]]:
-    size = max(int(rows_per_slide or 0), 1)
-    items = list(issues or [])
-    if not items:
-        return [tuple()]
-    chunks: list[tuple[FunctionalityIssueRow, ...]] = []
-    current: list[FunctionalityIssueRow] = []
-    current_rows = 0
-    for issue in items:
-        visual_rows = 2 if _issue_note_for_key(issue.key, notes_by_key) else 1
-        if current and current_rows + visual_rows > size:
-            chunks.append(tuple(current))
-            current = []
-            current_rows = 0
-        current.append(issue)
-        current_rows += visual_rows
-    if current:
-        chunks.append(tuple(current))
-    return chunks
+) -> list[tuple[_IssuePageItem, ...]]:
+    return _chunk_issue_page_items(
+        issues,
+        rows_per_slide=rows_per_slide,
+        notes_by_key=notes_by_key,
+    )
 
 
 def _issue_note_for_key(
@@ -953,10 +959,122 @@ def _issue_note_for_key(
     return str(notes_by_key.get(key) or "").strip()
 
 
+def _split_comment_block(block: str, *, max_chars: int) -> list[str]:
+    text = str(block or "").strip()
+    if not text:
+        return []
+    size = max(int(max_chars or 0), 80)
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > size:
+        candidate = remaining[:size].rstrip()
+        min_break = max(int(size * 0.55), 1)
+        break_positions = [
+            candidate.rfind(separator) for separator in ("\n", ". ", "; ", ", ", " ", "/", "-")
+        ]
+        best_break = max(break_positions or [-1])
+        if best_break < min_break:
+            best_break = size
+        chunk = remaining[:best_break].strip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[best_break:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def _issue_comment_chunks(comment: object) -> tuple[str, ...]:
+    clean = str(comment or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not clean:
+        return ()
+    clean = re.sub(r"\n{3,}", "\n\n", clean)
+    chunks: list[str] = []
+    for block in re.split(r"\n\s*\n", clean):
+        chunks.extend(_split_comment_block(block, max_chars=_ISSUE_COMMENT_CHUNK_CHARS))
+    return tuple(chunk for chunk in chunks if str(chunk or "").strip())
+
+
+def _issue_page_item(issue: Any, *, notes_by_key: Mapping[str, str] | None) -> _IssuePageItem:
+    return _IssuePageItem(
+        issue=issue,
+        comment_chunks=_issue_comment_chunks(
+            _issue_note_for_key(getattr(issue, "key", ""), notes_by_key)
+        ),
+    )
+
+
+def _coerce_issue_page_items(
+    issues: Sequence[Any],
+    *,
+    notes_by_key: Mapping[str, str] | None,
+) -> list[_IssuePageItem]:
+    items: list[_IssuePageItem] = []
+    for item in list(issues or []):
+        if isinstance(item, _IssuePageItem):
+            items.append(item)
+        else:
+            items.append(_issue_page_item(item, notes_by_key=notes_by_key))
+    return items
+
+
+def _chunk_issue_page_items(
+    issues: Sequence[Any],
+    *,
+    rows_per_slide: int,
+    notes_by_key: Mapping[str, str] | None = None,
+) -> list[tuple[_IssuePageItem, ...]]:
+    size = max(float(rows_per_slide or 0), 1.0)
+    items = list(issues or [])
+    if not items:
+        return [tuple()]
+
+    pages: list[tuple[_IssuePageItem, ...]] = []
+    current: list[_IssuePageItem] = []
+    current_units = 0.0
+
+    def flush() -> None:
+        nonlocal current, current_units
+        if current:
+            pages.append(tuple(current))
+            current = []
+            current_units = 0.0
+
+    for issue in items:
+        base_item = _issue_page_item(issue, notes_by_key=notes_by_key)
+        if not base_item.comment_chunks:
+            if current and current_units + 1.0 > size:
+                flush()
+            current.append(base_item)
+            current_units += 1.0
+            continue
+
+        remaining = list(base_item.comment_chunks)
+        while remaining:
+            minimum_units = 1.0 + _ISSUE_TABLE_COMMENT_ROW_UNITS
+            if current and current_units + minimum_units > size:
+                flush()
+                continue
+
+            space_units = max(size - current_units, minimum_units)
+            max_comment_chunks = int((space_units - 1.0) // _ISSUE_TABLE_COMMENT_ROW_UNITS)
+            max_comment_chunks = max(max_comment_chunks, 1)
+            take = min(len(remaining), max_comment_chunks)
+            page_item = _IssuePageItem(issue=issue, comment_chunks=tuple(remaining[:take]))
+            current.append(page_item)
+            current_units += 1.0 + (_ISSUE_TABLE_COMMENT_ROW_UNITS * float(take))
+            remaining = remaining[take:]
+            if remaining:
+                flush()
+
+    flush()
+    return pages or [tuple()]
+
+
 def _issue_comment_row(comment: str) -> list[str]:
     return [
         "",
-        "Comentarios registrados:\n" + ellipsize_text(str(comment or "").strip(), max_chars=310),
+        "Comentarios registrados:\n" + str(comment or "").strip(),
         "",
         "",
         "",
@@ -3207,6 +3325,15 @@ def _issue_table_geometry(*, data_row_count: int) -> tuple[int, int, int, int]:
     )
 
 
+def _is_issue_comment_row(row: Sequence[str]) -> bool:
+    values = list(row or [])
+    if len(values) < 2:
+        return False
+    return not str(values[0] or "").strip() and str(values[1] or "").startswith(
+        "Comentarios registrados:"
+    )
+
+
 def _populate_issue_native_table(
     slide: Any,
     *,
@@ -3222,15 +3349,21 @@ def _populate_issue_native_table(
     if not data_rows:
         filler = [""] * max(len(table_headers) - 2, 0)
         data_rows = [["", "Sin incidencias para este criterio.", *filler]]
-    row_height = int(_ISSUE_TABLE_ROW_HEIGHT)
-    if any("\n(" in str(cell or "") for row in data_rows for cell in list(row or [])):
-        row_height = int(row_height * 1.18)
+    base_row_height = int(_ISSUE_TABLE_ROW_HEIGHT)
+    row_heights: list[int] = []
+    for row in data_rows:
+        if _is_issue_comment_row(row):
+            row_heights.append(int(_ISSUE_TABLE_COMMENT_ROW_HEIGHT))
+        elif any("\n(" in str(cell or "") for cell in list(row or [])):
+            row_heights.append(int(base_row_height * 1.18))
+        else:
+            row_heights.append(base_row_height)
     geometry = _issue_table_geometry(data_row_count=len(data_rows))
     geometry = (
         geometry[0],
         geometry[1],
         geometry[2],
-        int(_ISSUE_TABLE_HEADER_HEIGHT) + row_height * max(len(data_rows), 1),
+        int(_ISSUE_TABLE_HEADER_HEIGHT) + sum(row_heights or [base_row_height]),
     )
     table_shape = _native_table_shape(
         slide,
@@ -3244,7 +3377,7 @@ def _populate_issue_native_table(
         headers=table_headers,
         rows=data_rows,
         column_widths=native_column_widths(geometry[2], _ISSUE_TABLE_COLUMN_WEIGHTS),
-        row_height=row_height,
+        row_height=base_row_height,
         header_height=int(_ISSUE_TABLE_HEADER_HEIGHT),
         font_name=_ISSUE_TABLE_FONT_NAME,
         body_font_size_pt=_ISSUE_TABLE_BODY_FONT_SIZE_PT,
@@ -3254,6 +3387,11 @@ def _populate_issue_native_table(
         hyperlink_by_row=hyperlink_by_row,
         zebra=True,
     )
+    try:
+        for data_row_idx, height in enumerate(row_heights, start=1):
+            table_shape.table.rows[data_row_idx].height = max(int(height), 1)
+    except Exception:
+        pass
     return table_shape
 
 
@@ -3412,7 +3550,7 @@ def _populate_functionality_zoom_slide(
     *,
     zoom: FunctionalityZoomSlide,
     critical_wording: bool,
-    issues_page: Sequence[FunctionalityIssueRow] | None = None,
+    issues_page: Sequence[_IssuePageItem] | None = None,
     page_number: int = 1,
     total_pages: int = 1,
     notes_by_key: Mapping[str, str] | None = None,
@@ -3446,11 +3584,15 @@ def _populate_functionality_zoom_slide(
     )
     _set_shape_font_name(slide, shape_index=4, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    page_issues = list(issues_page if issues_page is not None else zoom.issues or [])
+    page_issues = _coerce_issue_page_items(
+        list(issues_page if issues_page is not None else zoom.issues or []),
+        notes_by_key=notes_by_key,
+    )
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
     comment_by_row: dict[int, str] = {}
-    for issue in page_issues:
+    for page_item in page_issues:
+        issue = cast(FunctionalityIssueRow, page_item.issue)
         issue_key = str(issue.key or "").strip().upper()
         issue_summary = _premium_sentence_case(str(issue.summary or ""))
         issue_root_cause = _premium_sentence_case(str(issue.root_cause or ""))
@@ -3467,8 +3609,7 @@ def _populate_functionality_zoom_slide(
         )
         if str(issue.url or "").strip():
             row_links[main_row_idx] = str(issue.url).strip()
-        comment = _issue_note_for_key(issue_key, notes_by_key)
-        if comment:
+        for comment in page_item.comment_chunks:
             comment_row_idx = len(rows)
             rows.append(_issue_comment_row(comment))
             comment_by_row[comment_row_idx] = comment
@@ -3487,25 +3628,12 @@ def _chunk_risk_issues(
     *,
     rows_per_slide: int,
     notes_by_key: Mapping[str, str] | None = None,
-) -> list[tuple[PeriodRiskIssueRow, ...]]:
-    size = max(int(rows_per_slide or 0), 1)
-    items = list(issues or [])
-    if not items:
-        return [tuple()]
-    chunks: list[tuple[PeriodRiskIssueRow, ...]] = []
-    current: list[PeriodRiskIssueRow] = []
-    current_rows = 0
-    for issue in items:
-        visual_rows = 2 if _issue_note_for_key(issue.key, notes_by_key) else 1
-        if current and current_rows + visual_rows > size:
-            chunks.append(tuple(current))
-            current = []
-            current_rows = 0
-        current.append(issue)
-        current_rows += visual_rows
-    if current:
-        chunks.append(tuple(current))
-    return chunks
+) -> list[tuple[_IssuePageItem, ...]]:
+    return _chunk_issue_page_items(
+        issues,
+        rows_per_slide=rows_per_slide,
+        notes_by_key=notes_by_key,
+    )
 
 
 def _assignee_with_po_text(
@@ -3549,7 +3677,7 @@ def _enrich_po_team_leader_from_sources(df: pd.DataFrame, settings: Settings) ->
 
 
 def _risk_issue_rows_for_table(
-    issues: Sequence[PeriodRiskIssueRow],
+    issues: Sequence[PeriodRiskIssueRow | _IssuePageItem],
     *,
     empty_message: str,
     notes_by_key: Mapping[str, str] | None = None,
@@ -3557,7 +3685,9 @@ def _risk_issue_rows_for_table(
     rows: list[list[str]] = []
     row_links: dict[int, str] = {}
     comment_by_row: dict[int, str] = {}
-    for issue in list(issues or []):
+    page_items = _coerce_issue_page_items(list(issues or []), notes_by_key=notes_by_key)
+    for page_item in page_items:
+        issue = cast(PeriodRiskIssueRow, page_item.issue)
         issue_key = str(issue.key or "").strip().upper()
         main_row_idx = len(rows)
         rows.append(
@@ -3575,8 +3705,7 @@ def _risk_issue_rows_for_table(
         )
         if str(issue.url or "").strip():
             row_links[main_row_idx] = str(issue.url or "").strip()
-        comment = _issue_note_for_key(issue_key, notes_by_key)
-        if comment:
+        for comment in page_item.comment_chunks:
             comment_row_idx = len(rows)
             rows.append(_issue_comment_row(comment))
             comment_by_row[comment_row_idx] = comment
@@ -3592,7 +3721,7 @@ def _populate_risk_issue_list_slide(
     *,
     title: str,
     order_note: str,
-    issues_page: Sequence[PeriodRiskIssueRow],
+    issues_page: Sequence[PeriodRiskIssueRow | _IssuePageItem],
     empty_message: str,
     page_number: int,
     total_pages: int,
@@ -3733,29 +3862,57 @@ def _chunk_finalist_discrepancy_issues(
     issues: Sequence[FinalistDiscrepancyIssueRow],
     *,
     rows_per_slide: int,
-) -> list[tuple[FinalistDiscrepancyIssueRow, ...]]:
-    size = max(int(rows_per_slide or 0), 1)
+) -> list[tuple[_FinalistIssuePageItem, ...]]:
+    size = max(float(rows_per_slide or 0), 1.0)
     items = list(issues or [])
     if not items:
         return [tuple()]
-    chunks: list[tuple[FinalistDiscrepancyIssueRow, ...]] = []
-    current: list[FinalistDiscrepancyIssueRow] = []
-    current_rows = 0
-    for issue in items:
-        visual_rows = 2 if str(issue.comment or "").strip() else 1
-        if current and current_rows + visual_rows > size:
+
+    chunks: list[tuple[_FinalistIssuePageItem, ...]] = []
+    current: list[_FinalistIssuePageItem] = []
+    current_units = 0.0
+
+    def flush() -> None:
+        nonlocal current, current_units
+        if current:
             chunks.append(tuple(current))
             current = []
-            current_rows = 0
-        current.append(issue)
-        current_rows += visual_rows
-    if current:
-        chunks.append(tuple(current))
-    return chunks
+            current_units = 0.0
+
+    for issue in items:
+        comment_chunks = _issue_comment_chunks(issue.comment)
+        if not comment_chunks:
+            if current and current_units + 1.0 > size:
+                flush()
+            current.append(_FinalistIssuePageItem(issue=issue))
+            current_units += 1.0
+            continue
+
+        remaining = list(comment_chunks)
+        while remaining:
+            minimum_units = 1.0 + _ISSUE_TABLE_COMMENT_ROW_UNITS
+            if current and current_units + minimum_units > size:
+                flush()
+                continue
+
+            space_units = max(size - current_units, minimum_units)
+            max_comment_chunks = int((space_units - 1.0) // _ISSUE_TABLE_COMMENT_ROW_UNITS)
+            max_comment_chunks = max(max_comment_chunks, 1)
+            take = min(len(remaining), max_comment_chunks)
+            current.append(
+                _FinalistIssuePageItem(issue=issue, comment_chunks=tuple(remaining[:take]))
+            )
+            current_units += 1.0 + (_ISSUE_TABLE_COMMENT_ROW_UNITS * float(take))
+            remaining = remaining[take:]
+            if remaining:
+                flush()
+
+    flush()
+    return chunks or [tuple()]
 
 
 def _finalist_discrepancy_rows_for_table(
-    issues: Sequence[FinalistDiscrepancyIssueRow],
+    issues: Sequence[FinalistDiscrepancyIssueRow | _FinalistIssuePageItem],
     *,
     empty_message: str,
 ) -> tuple[
@@ -3770,7 +3927,19 @@ def _finalist_discrepancy_rows_for_table(
     description_by_row: dict[int, str] = {}
     issue_by_row: dict[int, FinalistDiscrepancyIssueRow] = {}
     comment_by_row: dict[int, str] = {}
-    for issue in list(issues or []):
+    page_items: list[_FinalistIssuePageItem] = []
+    for item in list(issues or []):
+        if isinstance(item, _FinalistIssuePageItem):
+            page_items.append(item)
+        else:
+            page_items.append(
+                _FinalistIssuePageItem(
+                    issue=item,
+                    comment_chunks=_issue_comment_chunks(getattr(item, "comment", "")),
+                )
+            )
+    for page_item in page_items:
+        issue = page_item.issue
         jira_key = str(issue.jira_key or "").strip().upper()
         description_text = (
             f"JIRA: {str(issue.jira_summary or '').strip() or 'Sin título JIRA'}\n"
@@ -3794,8 +3963,7 @@ def _finalist_discrepancy_rows_for_table(
             row_links[main_row_idx] = str(issue.jira_url or "").strip()
         description_by_row[main_row_idx] = rows[-1][1]
         issue_by_row[main_row_idx] = issue
-        comment = str(issue.comment or "").strip()
-        if comment:
+        for comment in page_item.comment_chunks:
             comment_row_idx = len(rows)
             rows.append(_issue_comment_row(comment))
             comment_by_row[comment_row_idx] = comment
@@ -4102,8 +4270,8 @@ def _write_issue_comment_cell(cell: Any, comment: str) -> None:
     p1.space_before = Pt(0)
     p1.space_after = Pt(0)
     run1 = p1.add_run()
-    run1.text = ellipsize_text(comment, max_chars=310)
-    run1.font.size = Pt(8.1)
+    run1.text = str(comment or "").strip()
+    run1.font.size = Pt(7.8)
     run1.font.name = _ISSUE_TABLE_FONT_NAME
     run1.font.color.rgb = body_rgb
 
@@ -4117,9 +4285,12 @@ def _style_issue_comment_rows(
     if table_shape is None or not getattr(table_shape, "has_table", False):
         return
     table = table_shape.table
+    comment_rows = {int(row_idx) for row_idx in dict(comment_by_row or {})}
     for data_row_idx, comment in dict(comment_by_row or {}).items():
         ppt_row_idx = int(data_row_idx) + 1
         main_row_idx = max(ppt_row_idx - 1, 1)
+        while main_row_idx > 1 and (main_row_idx - 1) in comment_rows:
+            main_row_idx -= 1
         try:
             table.cell(main_row_idx, 0).merge(table.cell(ppt_row_idx, 0))
         except Exception:
@@ -4187,7 +4358,7 @@ def _populate_finalist_discrepancy_list_slide(
     *,
     title: str,
     order_note: str,
-    issues_page: Sequence[FinalistDiscrepancyIssueRow],
+    issues_page: Sequence[FinalistDiscrepancyIssueRow | _FinalistIssuePageItem],
     empty_message: str,
     page_number: int,
     total_pages: int,
@@ -4604,9 +4775,7 @@ def _append_functionality_zoom_slides(
         )
     zooms = zooms[:3]
 
-    zoom_page_specs: list[
-        tuple[FunctionalityZoomSlide, tuple[FunctionalityIssueRow, ...], int, int]
-    ] = []
+    zoom_page_specs: list[tuple[FunctionalityZoomSlide, tuple[_IssuePageItem, ...], int, int]] = []
     for zoom in zooms:
         pages = _chunk_zoom_issues(
             tuple(getattr(zoom, "issues", ()) or ()),

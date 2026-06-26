@@ -452,17 +452,33 @@ export type SavedFilePayload = {
   fileSize: number;
 };
 
+export type NoteEntryPayload = {
+  id: string;
+  createdAt: string;
+  dateLabel: string;
+  note: string;
+};
+
+export type NotePayload = {
+  issueKey: string;
+  note: string;
+  entries: NoteEntryPayload[];
+  entryCount: number;
+  latestCreatedAt: string;
+  latestDateLabel: string;
+};
+
 export type NoteListPayload = {
   total: number;
-  rows: Array<{
-    issueKey: string;
-    note: string;
-    enriched: boolean;
-    issue: Partial<IssueRecord> & {
-      source_alias?: string;
-      source_type?: string;
-    };
-  }>;
+  rows: Array<
+    NotePayload & {
+      enriched: boolean;
+      issue: Partial<IssueRecord> & {
+        source_alias?: string;
+        source_type?: string;
+      };
+    }
+  >;
 };
 
 export type DownloadTargetPayload = {

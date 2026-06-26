@@ -16,6 +16,7 @@ import {
   type IssueKeysPayload,
   type IssuesPayload,
   type KanbanPayload,
+  type NotePayload,
   type NoteListPayload,
   type TrendDetailPayload
 } from "../lib/api";
@@ -291,7 +292,7 @@ export function DashboardPage() {
   const note = useQuery({
     queryKey: ["dashboard-note", dashboardState.params.notesIssueKey],
     queryFn: () =>
-      fetchJson<{ note: string }>(
+      fetchJson<NotePayload>(
         `/api/notes/${encodeURIComponent(dashboardState.params.notesIssueKey)}`
       ),
     enabled:
@@ -325,6 +326,19 @@ export function DashboardPage() {
     onSuccess: async (_payload, issueKey) => {
       await queryClient.invalidateQueries({
         queryKey: ["dashboard-note", issueKey]
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-notes-list"]
+      });
+    }
+  });
+
+  const deleteNoteEntry = useMutation({
+    mutationFn: ({ issueKey, entryId }: { issueKey: string; entryId: string }) =>
+      deleteJson(`/api/notes/${encodeURIComponent(issueKey)}/entries/${encodeURIComponent(entryId)}`),
+    onSuccess: async (_payload, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-note", variables.issueKey]
       });
       await queryClient.invalidateQueries({
         queryKey: ["dashboard-notes-list"]
@@ -742,19 +756,21 @@ export function DashboardPage() {
       <NotesEditor
         issueKeys={issueKeys.data?.keys ?? []}
         selectedIssueKey={dashboardState.params.notesIssueKey}
-        note={note.data?.note ?? ""}
+        entries={note.data?.entries ?? []}
         notes={notesList.data?.rows ?? []}
         isLoading={issueKeys.isLoading || note.isLoading || notesList.isLoading}
         isSaving={saveNote.isPending}
-        isDeleting={deleteNote.isPending}
+        isDeleting={deleteNote.isPending || deleteNoteEntry.isPending}
         saveSucceeded={saveNote.isSuccess}
         onIssueChange={(issueKey) => {
           saveNote.reset();
           deleteNote.reset();
+          deleteNoteEntry.reset();
           dashboardState.update({ notesIssueKey: issueKey });
         }}
         onSave={(issueKey, noteText) => saveNote.mutate({ issueKey, noteText })}
         onDelete={(issueKey) => deleteNote.mutate(issueKey)}
+        onDeleteEntry={(issueKey, entryId) => deleteNoteEntry.mutate({ issueKey, entryId })}
       />
     );
   }
