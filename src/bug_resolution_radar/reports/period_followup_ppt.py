@@ -129,8 +129,8 @@ _ISSUE_TABLE_WIDTH = Inches(8.96)
 _ISSUE_TABLE_HEADER_HEIGHT = Inches(0.34)
 _ISSUE_TABLE_ROW_HEIGHT = Inches(0.62)
 _ISSUE_TABLE_COMMENT_ROW_HEIGHT = int(_ISSUE_TABLE_ROW_HEIGHT * 1.55)
-_ISSUE_TABLE_COMMENT_ROW_UNITS = (
-    float(_ISSUE_TABLE_COMMENT_ROW_HEIGHT) / float(_ISSUE_TABLE_ROW_HEIGHT)
+_ISSUE_TABLE_COMMENT_ROW_UNITS = float(_ISSUE_TABLE_COMMENT_ROW_HEIGHT) / float(
+    _ISSUE_TABLE_ROW_HEIGHT
 )
 _ISSUE_COMMENT_CHUNK_CHARS = 240
 _ISSUE_TABLE_FONT_NAME = "Arial"
@@ -165,6 +165,8 @@ class _IssuePageItem:
 class _FinalistIssuePageItem:
     issue: FinalistDiscrepancyIssueRow
     comment_chunks: tuple[str, ...] = ()
+
+
 _FUNCTIONALITY_DASHBOARD_TABLE_HEADERS: tuple[str, ...] = (
     "#",
     "Resto incidencias abiertas",
@@ -4773,9 +4775,7 @@ def _append_functionality_zoom_slides(
         )
     zooms = zooms[:3]
 
-    zoom_page_specs: list[
-        tuple[FunctionalityZoomSlide, tuple[_IssuePageItem, ...], int, int]
-    ] = []
+    zoom_page_specs: list[tuple[FunctionalityZoomSlide, tuple[_IssuePageItem, ...], int, int]] = []
     for zoom in zooms:
         pages = _chunk_zoom_issues(
             tuple(getattr(zoom, "issues", ()) or ()),
