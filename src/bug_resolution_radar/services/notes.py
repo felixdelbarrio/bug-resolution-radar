@@ -150,9 +150,7 @@ class NotesStore:
             for key, entries in sorted(self._notes.items(), key=lambda item: item[0])
             if entries
         }
-        self.path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def get(self, key: str) -> Optional[str]:
         entries = self.get_entries(key)
