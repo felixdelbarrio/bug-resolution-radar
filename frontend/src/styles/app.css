@@ -55,6 +55,13 @@
   --bbva-tab-active-bg: #004481;
   --bbva-tab-active-text: #ffffff;
   --bbva-tab-active-border: #043263;
+  --notes-active-accent: var(--bbva-primary);
+  --notes-active-surface: color-mix(in srgb, var(--bbva-primary) 8%, var(--bbva-surface));
+  --notes-active-border: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-border));
+  --notes-finalist-accent: var(--bbva-success);
+  --notes-finalist-surface: color-mix(in srgb, var(--bbva-success) 9%, var(--bbva-surface));
+  --notes-finalist-border: color-mix(in srgb, var(--bbva-success) 38%, var(--bbva-border));
+  --notes-tab-surface: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2));
   --bbva-font-sans: "BentonSans", sans-serif;
   --bbva-font-headline: "Tiempos", serif;
 }
@@ -81,6 +88,13 @@
   --bbva-tab-active-bg: #ffffff;
   --bbva-tab-active-text: #072146;
   --bbva-tab-active-border: #ffffff;
+  --notes-active-accent: var(--bbva-primary);
+  --notes-active-surface: color-mix(in srgb, var(--bbva-primary) 16%, var(--bbva-surface));
+  --notes-active-border: color-mix(in srgb, var(--bbva-primary) 52%, var(--bbva-border));
+  --notes-finalist-accent: #4ade80;
+  --notes-finalist-surface: color-mix(in srgb, #4ade80 14%, var(--bbva-surface));
+  --notes-finalist-border: color-mix(in srgb, #4ade80 46%, var(--bbva-border));
+  --notes-tab-surface: color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2));
 }
 
 * {
@@ -1490,6 +1504,14 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+.notes-panel-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 .notes-compose-grid {
   display: grid;
   grid-template-columns: minmax(210px, 0.46fr) minmax(0, 1fr);
@@ -1507,7 +1529,9 @@ textarea::placeholder {
 
 .notes-count-pill,
 .notes-meta-chip,
-.notes-list-date {
+.notes-list-date,
+.notes-list-entry-count,
+.notes-lifecycle-chip {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -1519,6 +1543,116 @@ textarea::placeholder {
   color: var(--bbva-primary-strong);
   font-size: 0.74rem;
   font-weight: 800;
+}
+
+.notes-lifecycle-chip-active {
+  border-color: var(--notes-active-border);
+  background: var(--notes-active-surface);
+  color: var(--notes-active-accent);
+}
+
+.notes-lifecycle-chip-finalist {
+  border-color: var(--notes-finalist-border);
+  background: var(--notes-finalist-surface);
+  color: var(--notes-finalist-accent);
+}
+
+.notes-index-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.notes-index-stat {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.68rem 0.78rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+  background: var(--notes-tab-surface);
+}
+
+.notes-index-stat span {
+  color: var(--bbva-text-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.notes-index-stat strong {
+  color: var(--bbva-text);
+  font-family: var(--bbva-font-headline);
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.notes-index-stat-active {
+  border-color: var(--notes-active-border);
+  background: var(--notes-active-surface);
+}
+
+.notes-index-stat-finalist {
+  border-color: var(--notes-finalist-border);
+  background: var(--notes-finalist-surface);
+}
+
+.notes-bucket-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding: 0.28rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+  background: var(--notes-tab-surface);
+}
+
+.notes-bucket-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-width: 0;
+  min-height: 2.36rem;
+  padding: 0.45rem 0.66rem;
+  border: 1px solid transparent;
+  border-radius: calc(var(--bbva-radius-md) - 4px);
+  background: transparent;
+  color: var(--bbva-text-muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.notes-bucket-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-bucket-tab strong {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  padding: 0 0.32rem;
+  border-radius: 999px;
+  background: var(--bbva-surface);
+  color: var(--bbva-text);
+  font-size: 0.8rem;
+}
+
+.notes-bucket-tab-active {
+  background: var(--bbva-surface);
+  color: var(--bbva-text);
+  box-shadow: var(--bbva-shadow-soft);
+}
+
+.notes-bucket-tab-active {
+  border-color: var(--notes-active-border);
+}
+
+.notes-bucket-tab-finalist.notes-bucket-tab-active {
+  border-color: var(--notes-finalist-border);
 }
 
 .notes-history {
@@ -1616,17 +1750,54 @@ textarea::placeholder {
   position: relative;
   display: grid;
   gap: 0.28rem;
-  padding: 0.72rem 2.55rem 0.72rem 0.82rem;
+  padding: 0.72rem 2.55rem 0.76rem 0.82rem;
   border: 1px solid var(--bbva-border);
-  border-left: 4px solid color-mix(in srgb, var(--bbva-primary) 22%, var(--bbva-border));
+  border-left: 4px solid var(--notes-active-border);
   border-radius: var(--bbva-radius-md);
   background: var(--bbva-surface);
 }
 
+.notes-list-item-finalist {
+  border-left-color: var(--notes-finalist-border);
+}
+
 .notes-list-item-active {
-  border-color: color-mix(in srgb, var(--bbva-primary) 55%, var(--bbva-border));
-  border-left-color: var(--bbva-primary);
-  background: color-mix(in srgb, var(--bbva-primary) 6%, var(--bbva-surface));
+  border-color: var(--notes-active-border);
+  border-left-color: var(--notes-active-accent);
+  background: var(--notes-active-surface);
+}
+
+.notes-list-item-finalist.notes-list-item-active {
+  border-color: var(--notes-finalist-border);
+  border-left-color: var(--notes-finalist-accent);
+  background: var(--notes-finalist-surface);
+}
+
+.notes-list-item-head,
+.notes-list-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.46rem;
+  min-width: 0;
+}
+
+.notes-list-item-head {
+  justify-content: space-between;
+  padding-right: 0.25rem;
+}
+
+.notes-list-meta-row {
+  flex-wrap: wrap;
+}
+
+.notes-list-entry-count {
+  min-height: 1.46rem;
+  padding: 0.14rem 0.46rem;
+  border-color: var(--bbva-border);
+  background: color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2));
+  color: var(--bbva-text-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .notes-list-item p {
@@ -1653,6 +1824,8 @@ textarea::placeholder {
   color: var(--bbva-text-muted);
   font-size: 0.78rem;
   line-height: 1.25;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .notes-list-date {
