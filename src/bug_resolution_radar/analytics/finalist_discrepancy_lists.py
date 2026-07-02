@@ -115,6 +115,8 @@ def build_finalist_discrepancy_issue_list(
         ascending=[True, False, True, True, True],
         kind="mergesort",
     )
+    work["jira_key"] = work["jira_key"].fillna("").astype(str).str.strip().str.upper()
+    work = work.loc[work["jira_key"].ne("")].drop_duplicates(subset=["jira_key"], keep="first")
 
     rows: list[FinalistDiscrepancyIssueRow] = []
     notes = {
