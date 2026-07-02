@@ -103,16 +103,6 @@ export function NotesEditor({
   const selectedNotesRows = groupedNotes[selectedBucket];
 
   useEffect(() => {
-    if (!issueIsValid || !issueExists || cleanIssueKey === selectedIssueKey) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      onIssueChange(cleanIssueKey);
-    }, 260);
-    return () => window.clearTimeout(timer);
-  }, [cleanIssueKey, issueExists, issueIsValid, onIssueChange, selectedIssueKey]);
-
-  useEffect(() => {
     if (selectedListRow) {
       setSelectedBucket(issueStateBucket(selectedListRow.issue));
     }
@@ -127,19 +117,28 @@ export function NotesEditor({
     }
   }, [closedRows.length, openRows.length, selectedBucket]);
 
-  function commitIssueDraft() {
-    if (cleanIssueKey && issueIsValid && issueExists && cleanIssueKey !== selectedIssueKey) {
+  function commitIssueDraft(): boolean {
+    if (!cleanIssueKey) {
+      setValidationMessage("Introduce un issue JIRA o Helix.");
+      return false;
+    }
+    if (!issueIsValid) {
+      setValidationMessage("El issue debe tener formato JIRA o Helix válido.");
+      return false;
+    }
+    if (!issueExists) {
+      setValidationMessage("La incidencia no está ingestada.");
+      return false;
+    }
+    setValidationMessage("");
+    if (cleanIssueKey !== selectedIssueKey) {
       onIssueChange(cleanIssueKey);
     }
+    return true;
   }
 
   function handleBucketChange(bucket: IssueStateBucket) {
     setSelectedBucket(bucket);
-    const currentRowBucket = selectedListRow ? issueStateBucket(selectedListRow.issue) : null;
-    const firstRow = groupedNotes[bucket][0];
-    if (currentRowBucket && currentRowBucket !== bucket && firstRow) {
-      handleSelectIssue(firstRow.issueKey);
-    }
   }
 
   function handleSave() {
@@ -152,7 +151,7 @@ export function NotesEditor({
       return;
     }
     if (!issueExists) {
-      setValidationMessage("La incidencia debe existir en el inventario ingestado del alcance.");
+      setValidationMessage("La incidencia no está ingestada.");
       return;
     }
     if (!cleanNote) {
@@ -163,7 +162,9 @@ export function NotesEditor({
     if (editingEntryId) {
       onUpdateEntry(cleanIssueKey, editingEntryId, cleanNote);
     } else {
-      commitIssueDraft();
+      if (!commitIssueDraft()) {
+        return;
+      }
       onSave(cleanIssueKey, cleanNote);
     }
   }
@@ -220,7 +221,6 @@ export function NotesEditor({
             <span>Issue</span>
             <input
               value={issueDraft}
-              onBlur={commitIssueDraft}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
