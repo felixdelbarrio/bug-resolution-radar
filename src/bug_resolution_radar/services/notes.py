@@ -52,13 +52,19 @@ def format_entry_date(value: object) -> str:
     return raw or "Sin fecha"
 
 
+def format_note_entry(entry: NoteEntry) -> str:
+    note = _clean_note(entry.note)
+    if not note:
+        return ""
+    return f"{format_entry_date(entry.created_at)}:\n{note}"
+
+
 def format_note_log(entries: list[NoteEntry]) -> str:
     blocks: list[str] = []
     for entry in entries:
-        note = _clean_note(entry.note)
-        if not note:
-            continue
-        blocks.append(f"{format_entry_date(entry.created_at)}:\n{note}")
+        note = format_note_entry(entry)
+        if note:
+            blocks.append(note)
     return "\n\n".join(blocks).strip()
 
 
@@ -168,6 +174,14 @@ class NotesStore:
                 return entry.created_at
         return ""
 
+    def latest(self, key: str) -> Optional[str]:
+        entries = self.get_entries(key)
+        for entry in reversed(entries):
+            note = format_note_entry(entry)
+            if note:
+                return note
+        return None
+
     def append(self, key: str, note: str) -> Optional[NoteEntry]:
         clean_key = str(key or "").strip().upper()
         clean_note = _clean_note(note)
@@ -214,12 +228,30 @@ class NotesStore:
             self._notes[clean_key] = kept
         return removed
 
+    def update_entry(self, key: str, entry_id: str, note: str) -> bool:
+        clean_key = str(key or "").strip().upper()
+        clean_entry_id = str(entry_id or "").strip()
+        clean_note = _clean_note(note)
+        if not clean_key or not clean_entry_id or not clean_note:
+            return False
+        entries = self._notes.get(clean_key, [])
+        for index, entry in enumerate(entries):
+            if entry.id == clean_entry_id:
+                entries[index] = NoteEntry(
+                    id=entry.id, created_at=entry.created_at, note=clean_note
+                )
+                return True
+        return False
+
     def items(self) -> list[tuple[str, str]]:
         return [
             (key, format_note_log(entries))
             for key, entries in sorted(self._notes.items(), key=lambda item: item[0])
             if entries
         ]
+
+    def latest_items(self) -> list[tuple[str, str]]:
+        return [(key, note) for key in sorted(self._notes) if (note := self.latest(key))]
 
     def entry_items(self) -> list[tuple[str, list[NoteEntry]]]:
         return sorted(

@@ -38,14 +38,20 @@ def test_notes_store_roundtrip(tmp_path: Path) -> None:
     assert store.get("X-1") is None
 
     store.set("X-1", "nota local")
+    store.append("X-1", "última nota")
     store.save()
 
     reloaded = NotesStore(store_path)
     reloaded.load()
     entries = reloaded.get_entries("X-1")
-    assert len(entries) == 1
+    assert len(entries) == 2
     assert entries[0].note == "nota local"
+    assert entries[1].note == "última nota"
+    assert reloaded.update_entry("X-1", entries[1].id, "nota final editada") is True
     assert "nota local" in (reloaded.get("X-1") or "")
+    assert "nota final editada" in (reloaded.latest("X-1") or "")
+    assert "nota local" not in (reloaded.latest("X-1") or "")
+    assert reloaded.latest_items()[0][0] == "X-1"
 
 
 def test_security_masking_helpers() -> None:

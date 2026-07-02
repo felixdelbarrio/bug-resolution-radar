@@ -55,12 +55,12 @@
   --bbva-tab-active-bg: #004481;
   --bbva-tab-active-text: #ffffff;
   --bbva-tab-active-border: #043263;
-  --notes-active-accent: var(--bbva-primary);
-  --notes-active-surface: color-mix(in srgb, var(--bbva-primary) 8%, var(--bbva-surface));
-  --notes-active-border: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-border));
-  --notes-finalist-accent: var(--bbva-success);
-  --notes-finalist-surface: color-mix(in srgb, var(--bbva-success) 9%, var(--bbva-surface));
-  --notes-finalist-border: color-mix(in srgb, var(--bbva-success) 38%, var(--bbva-border));
+  --notes-open-accent: var(--bbva-primary);
+  --notes-open-surface: color-mix(in srgb, var(--bbva-primary) 8%, var(--bbva-surface));
+  --notes-open-border: color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-border));
+  --notes-closed-accent: var(--bbva-success);
+  --notes-closed-surface: color-mix(in srgb, var(--bbva-success) 9%, var(--bbva-surface));
+  --notes-closed-border: color-mix(in srgb, var(--bbva-success) 38%, var(--bbva-border));
   --notes-tab-surface: color-mix(in srgb, var(--bbva-surface) 88%, var(--bbva-surface-2));
   --bbva-font-sans: "BentonSans", sans-serif;
   --bbva-font-headline: "Tiempos", serif;
@@ -88,12 +88,12 @@
   --bbva-tab-active-bg: #ffffff;
   --bbva-tab-active-text: #072146;
   --bbva-tab-active-border: #ffffff;
-  --notes-active-accent: var(--bbva-primary);
-  --notes-active-surface: color-mix(in srgb, var(--bbva-primary) 16%, var(--bbva-surface));
-  --notes-active-border: color-mix(in srgb, var(--bbva-primary) 52%, var(--bbva-border));
-  --notes-finalist-accent: #4ade80;
-  --notes-finalist-surface: color-mix(in srgb, #4ade80 14%, var(--bbva-surface));
-  --notes-finalist-border: color-mix(in srgb, #4ade80 46%, var(--bbva-border));
+  --notes-open-accent: var(--bbva-primary);
+  --notes-open-surface: color-mix(in srgb, var(--bbva-primary) 16%, var(--bbva-surface));
+  --notes-open-border: color-mix(in srgb, var(--bbva-primary) 52%, var(--bbva-border));
+  --notes-closed-accent: #4ade80;
+  --notes-closed-surface: color-mix(in srgb, #4ade80 14%, var(--bbva-surface));
+  --notes-closed-border: color-mix(in srgb, #4ade80 46%, var(--bbva-border));
   --notes-tab-surface: color-mix(in srgb, var(--bbva-surface) 82%, var(--bbva-surface-2));
 }
 
@@ -1531,7 +1531,7 @@ textarea::placeholder {
 .notes-meta-chip,
 .notes-list-date,
 .notes-list-entry-count,
-.notes-lifecycle-chip {
+.notes-state-chip {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -1545,16 +1545,16 @@ textarea::placeholder {
   font-weight: 800;
 }
 
-.notes-lifecycle-chip-active {
-  border-color: var(--notes-active-border);
-  background: var(--notes-active-surface);
-  color: var(--notes-active-accent);
+.notes-state-chip-open {
+  border-color: var(--notes-open-border);
+  background: var(--notes-open-surface);
+  color: var(--notes-open-accent);
 }
 
-.notes-lifecycle-chip-finalist {
-  border-color: var(--notes-finalist-border);
-  background: var(--notes-finalist-surface);
-  color: var(--notes-finalist-accent);
+.notes-state-chip-closed {
+  border-color: var(--notes-closed-border);
+  background: var(--notes-closed-surface);
+  color: var(--notes-closed-accent);
 }
 
 .notes-index-summary {
@@ -1587,14 +1587,14 @@ textarea::placeholder {
   line-height: 1;
 }
 
-.notes-index-stat-active {
-  border-color: var(--notes-active-border);
-  background: var(--notes-active-surface);
+.notes-index-stat-open {
+  border-color: var(--notes-open-border);
+  background: var(--notes-open-surface);
 }
 
-.notes-index-stat-finalist {
-  border-color: var(--notes-finalist-border);
-  background: var(--notes-finalist-surface);
+.notes-index-stat-closed {
+  border-color: var(--notes-closed-border);
+  background: var(--notes-closed-surface);
 }
 
 .notes-bucket-tabs {
@@ -1643,16 +1643,13 @@ textarea::placeholder {
 
 .notes-bucket-tab-active {
   background: var(--bbva-surface);
+  border-color: var(--notes-open-border);
   color: var(--bbva-text);
   box-shadow: var(--bbva-shadow-soft);
 }
 
-.notes-bucket-tab-active {
-  border-color: var(--notes-active-border);
-}
-
-.notes-bucket-tab-finalist.notes-bucket-tab-active {
-  border-color: var(--notes-finalist-border);
+.notes-bucket-tab-closed.notes-bucket-tab-active {
+  border-color: var(--notes-closed-border);
 }
 
 .notes-history {
@@ -1692,7 +1689,7 @@ textarea::placeholder {
   display: grid;
   gap: 0.28rem;
   min-width: 0;
-  padding: 0 2.2rem 0.66rem 0.72rem;
+  padding: 0 4.45rem 0.66rem 0.72rem;
   border-left: 2px solid color-mix(in srgb, var(--bbva-primary) 34%, var(--bbva-border));
 }
 
@@ -1724,18 +1721,34 @@ textarea::placeholder {
   word-break: break-word;
 }
 
-.notes-entry-delete-button {
+.notes-entry-actions {
   position: absolute;
   top: -0.08rem;
   right: 0;
+  display: flex;
+  gap: 0.3rem;
+}
+
+.notes-entry-action-button {
+  min-width: 1.72rem;
   width: 1.72rem;
   height: 1.72rem;
   border: 1px solid var(--bbva-border);
   border-radius: 999px;
   background: var(--bbva-surface);
+  font-weight: 800;
+}
+
+.notes-entry-edit-button {
+  width: auto;
+  padding: 0 0.62rem;
+  color: var(--bbva-primary-strong);
+  font-size: 0.72rem;
+}
+
+.notes-entry-delete-button {
   color: var(--bbva-danger);
   font-size: 1rem;
-  font-weight: 800;
 }
 
 .notes-list {
@@ -1752,25 +1765,25 @@ textarea::placeholder {
   gap: 0.28rem;
   padding: 0.72rem 2.55rem 0.76rem 0.82rem;
   border: 1px solid var(--bbva-border);
-  border-left: 4px solid var(--notes-active-border);
+  border-left: 4px solid var(--notes-open-border);
   border-radius: var(--bbva-radius-md);
   background: var(--bbva-surface);
 }
 
-.notes-list-item-finalist {
-  border-left-color: var(--notes-finalist-border);
+.notes-list-item-closed {
+  border-left-color: var(--notes-closed-border);
 }
 
 .notes-list-item-active {
-  border-color: var(--notes-active-border);
-  border-left-color: var(--notes-active-accent);
-  background: var(--notes-active-surface);
+  border-color: var(--notes-open-border);
+  border-left-color: var(--notes-open-accent);
+  background: var(--notes-open-surface);
 }
 
-.notes-list-item-finalist.notes-list-item-active {
-  border-color: var(--notes-finalist-border);
-  border-left-color: var(--notes-finalist-accent);
-  background: var(--notes-finalist-surface);
+.notes-list-item-closed.notes-list-item-active {
+  border-color: var(--notes-closed-border);
+  border-left-color: var(--notes-closed-accent);
+  background: var(--notes-closed-surface);
 }
 
 .notes-list-item-head,

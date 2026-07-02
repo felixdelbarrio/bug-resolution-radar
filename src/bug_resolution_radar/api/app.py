@@ -558,7 +558,6 @@ def _notes_list_payload(
                 "status": _note_meta_text(row, "status"),
                 "priority": _note_meta_text(row, "priority"),
                 "assignee": _note_meta_text(row, "assignee"),
-                "resolved": _note_meta_text(row, "resolved"),
                 "url": _note_meta_text(row, "url"),
                 "source_type": _note_meta_text(row, "source_type"),
                 "source_alias": _note_meta_text(row, "source_alias"),
@@ -1303,6 +1302,24 @@ def create_app() -> FastAPI:
                 "notes_issue": clean_key,
                 "notes_action": "delete_entry" if removed else "delete_entry_missing",
             },
+        )
+        return _notes_payload(settings, issue_key=clean_key)
+
+    @app.put("/api/notes/{issue_key}/entries/{entry_id}")
+    def put_note_entry(issue_key: str, entry_id: str, payload: NoteRequest) -> dict[str, Any]:
+        settings = load_settings()
+        clean_key = _normalize_note_issue_key(issue_key)
+        note_text = str(payload.note or "").strip()
+        if not note_text:
+            raise HTTPException(status_code=400, detail="La nota no puede estar vacía.")
+        store = _notes_store(settings)
+        updated = store.update_entry(clean_key, entry_id, note_text)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Comentario no encontrado.")
+        store.save()
+        LOGGER.info(
+            "notes_action",
+            extra={"notes_issue": clean_key, "notes_action": "update_entry"},
         )
         return _notes_payload(settings, issue_key=clean_key)
 
