@@ -142,6 +142,20 @@ export function DashboardPage() {
       darkMode
     ]
   );
+  const notesScopeParams = useMemo(
+    () => ({
+      country: dashboardState.params.country,
+      sourceId: dashboardState.params.sourceId,
+      scopeMode: dashboardState.params.scopeMode,
+      darkMode
+    }),
+    [
+      dashboardState.params.country,
+      dashboardState.params.sourceId,
+      dashboardState.params.scopeMode,
+      darkMode
+    ]
+  );
   const overviewQueryParams = useMemo(
     () => ({
       ...sharedScopeParams,
@@ -264,9 +278,9 @@ export function DashboardPage() {
   });
 
   const issueKeys = useQuery({
-    queryKey: ["dashboard-note-keys", sharedScopeParams],
+    queryKey: ["dashboard-note-keys", notesScopeParams],
     queryFn: () =>
-      fetchJson<IssueKeysPayload>("/api/issues/keys", sharedScopeParams),
+      fetchJson<IssueKeysPayload>("/api/issues/keys", notesScopeParams),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "notes"
   });
 
@@ -278,15 +292,10 @@ export function DashboardPage() {
     if (keys.length === 0) {
       return;
     }
-    if (!dashboardState.params.notesIssueKey) {
+    if (!dashboardState.params.notesIssueKey || keys.includes(dashboardState.params.notesIssueKey)) {
       return;
     }
-    if (keys.includes(dashboardState.params.notesIssueKey)) {
-      return;
-    }
-    dashboardState.update({
-      notesIssueKey: keys[0]
-    });
+    dashboardState.update({ notesIssueKey: "" });
   }, [activePanel, dashboardState, dashboardState.params.notesIssueKey, issueKeys.data?.keys]);
 
   const note = useQuery({
@@ -302,14 +311,38 @@ export function DashboardPage() {
   });
 
   const notesList = useQuery({
-    queryKey: ["dashboard-notes-list", sharedScopeParams],
-    queryFn: () => fetchJson<NoteListPayload>("/api/notes", sharedScopeParams),
+    queryKey: ["dashboard-notes-list", notesScopeParams],
+    queryFn: () => fetchJson<NoteListPayload>("/api/notes", notesScopeParams),
     enabled: Boolean(workspace?.selectedCountry) && activePanel === "notes"
   });
 
   const saveNote = useMutation({
     mutationFn: ({ issueKey, noteText }: { issueKey: string; noteText: string }) =>
       putJson(`/api/notes/${encodeURIComponent(issueKey)}`, { note: noteText }),
+    onSuccess: async (_payload, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-note", variables.issueKey]
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["dashboard-notes-list"]
+      });
+    }
+  });
+
+  const updateNoteEntry = useMutation({
+    mutationFn: ({
+      issueKey,
+      entryId,
+      noteText
+    }: {
+      issueKey: string;
+      entryId: string;
+      noteText: string;
+    }) =>
+      putJson(
+        `/api/notes/${encodeURIComponent(issueKey)}/entries/${encodeURIComponent(entryId)}`,
+        { note: noteText }
+      ),
     onSuccess: async (_payload, variables) => {
       await queryClient.invalidateQueries({
         queryKey: ["dashboard-note", variables.issueKey]
@@ -759,16 +792,26 @@ export function DashboardPage() {
         entries={note.data?.entries ?? []}
         notes={notesList.data?.rows ?? []}
         isLoading={issueKeys.isLoading || note.isLoading || notesList.isLoading}
-        isSaving={saveNote.isPending}
+        isSaving={saveNote.isPending || updateNoteEntry.isPending}
         isDeleting={deleteNote.isPending || deleteNoteEntry.isPending}
-        saveSucceeded={saveNote.isSuccess}
+        saveSucceeded={saveNote.isSuccess || updateNoteEntry.isSuccess}
         onIssueChange={(issueKey) => {
           saveNote.reset();
+          updateNoteEntry.reset();
           deleteNote.reset();
           deleteNoteEntry.reset();
           dashboardState.update({ notesIssueKey: issueKey });
         }}
-        onSave={(issueKey, noteText) => saveNote.mutate({ issueKey, noteText })}
+        onSave={(issueKey, noteText) => {
+          saveNote.reset();
+          updateNoteEntry.reset();
+          saveNote.mutate({ issueKey, noteText });
+        }}
+        onUpdateEntry={(issueKey, entryId, noteText) => {
+          saveNote.reset();
+          updateNoteEntry.reset();
+          updateNoteEntry.mutate({ issueKey, entryId, noteText });
+        }}
         onDelete={(issueKey) => deleteNote.mutate(issueKey)}
         onDeleteEntry={(issueKey, entryId) => deleteNoteEntry.mutate({ issueKey, entryId })}
       />

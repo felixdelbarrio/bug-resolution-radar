@@ -1,8 +1,8 @@
-export type IssueLifecycleBucket = "active" | "finalist";
+export type IssueStateBucket = "open" | "closed";
 
-type IssueLifecycleInput = {
+type IssueStateInput = {
   status?: string | null;
-  resolved?: string | null;
+  source_type?: string | null;
 } | null | undefined;
 
 const FINALIST_STATUS_TOKENS = [
@@ -34,18 +34,14 @@ export function isFinalistStatus(value: unknown) {
   return FINALIST_STATUS_TOKENS.some((finalistToken) => token.includes(finalistToken));
 }
 
-function hasResolvedTimestamp(value: unknown) {
-  const token = normalizeStatusToken(value);
-  return Boolean(token && token !== "nat" && token !== "none" && token !== "null");
-}
-
-export function issueLifecycleBucket(issue: IssueLifecycleInput): IssueLifecycleBucket {
-  if (hasResolvedTimestamp(issue?.resolved) || isFinalistStatus(issue?.status)) {
-    return "finalist";
+export function issueStateBucket(issue: IssueStateInput): IssueStateBucket {
+  const sourceType = normalizeStatusToken(issue?.source_type);
+  if (sourceType === "jira" && isFinalistStatus(issue?.status)) {
+    return "closed";
   }
-  return "active";
+  return "open";
 }
 
-export function issueLifecycleLabel(bucket: IssueLifecycleBucket) {
-  return bucket === "finalist" ? "Finalizada" : "En seguimiento";
+export function issueStateLabel(bucket: IssueStateBucket) {
+  return bucket === "closed" ? "Cerrada" : "Abierta";
 }
