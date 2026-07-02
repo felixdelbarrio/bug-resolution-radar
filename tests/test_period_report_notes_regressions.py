@@ -14,8 +14,7 @@ def test_report_notes_use_latest_legacy_block_without_duplicate_chunks(
 ) -> None:
     store_path = tmp_path / "notes.json"
     store_path.write_text(
-        '{"SKSEMEX-102296": "Sin fecha:\\nNota antigua\\n\\n'
-        '2026-07-02 10:41:\\nNota vigente"}',
+        '{"SKSEMEX-102296": "Sin fecha:\\nNota antigua\\n\\n2026-07-02 10:41:\\nNota vigente"}',
         encoding="utf-8",
     )
 
