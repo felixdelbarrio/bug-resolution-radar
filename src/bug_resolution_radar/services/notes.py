@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 from uuid import uuid4
+
+_NOTE_REPORT_MAX_CHARS = 240
+_NOTE_BLOCK_HEADER_RE = re.compile(
+    r"^(?:Sin fecha|\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?):\s*$",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,35 @@ class NoteEntry:
 
 def _clean_note(value: object) -> str:
     return str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _is_formatted_note_block(value: object) -> bool:
+    text = _clean_note(value)
+    if not text:
+        return False
+    first_line = text.splitlines()[0].strip()
+    return bool(_NOTE_BLOCK_HEADER_RE.match(first_line))
+
+
+def _trim_report_note(value: object) -> str:
+    text = _clean_note(value)
+    if len(text) <= _NOTE_REPORT_MAX_CHARS:
+        return text
+    if _NOTE_REPORT_MAX_CHARS <= 3:
+        return text[:_NOTE_REPORT_MAX_CHARS]
+    return f"{text[: _NOTE_REPORT_MAX_CHARS - 3].rstrip()}..."
+
+
+def latest_note_block(value: object) -> str:
+    """Return the last block from a formatted legacy note log, or the note itself."""
+    text = _clean_note(value)
+    if not text:
+        return ""
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()]
+    formatted_blocks = [block for block in blocks if _is_formatted_note_block(block)]
+    if len(formatted_blocks) >= 2:
+        return formatted_blocks[-1]
+    return text
 
 
 def _new_entry_id(created_at: str) -> str:
@@ -177,9 +213,16 @@ class NotesStore:
     def latest(self, key: str) -> Optional[str]:
         entries = self.get_entries(key)
         for entry in reversed(entries):
-            note = format_note_entry(entry)
-            if note:
-                return note
+            note = latest_note_block(entry.note)
+            if not note:
+                continue
+            if not str(entry.created_at or "").strip() and _is_formatted_note_block(note):
+                return _trim_report_note(note)
+            formatted = format_note_entry(
+                NoteEntry(id=entry.id, created_at=entry.created_at, note=note)
+            )
+            if formatted:
+                return _trim_report_note(formatted)
         return None
 
     def append(self, key: str, note: str) -> Optional[NoteEntry]:
