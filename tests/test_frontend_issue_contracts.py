@@ -126,11 +126,14 @@ def test_notes_editor_allows_free_issue_edit_and_validates_before_save() -> None
 
     assert "setIssueDraft(event.target.value)" in issue_on_change
     assert "onIssueChange" not in issue_on_change
+    assert "onBlur={commitIssueDraft}" not in issue_on_change
     assert "notes-issue-suggestions" not in source
     assert "<datalist" not in source
     assert "isValidIssueReference" in source
     assert "issueExists" in source
-    assert "inventario ingestado" in source
+    assert "function commitIssueDraft(): boolean" in source
+    assert "La incidencia no está ingestada." in source
+    assert "window.setTimeout" not in source
     assert "La nota no puede estar vacía" in source
     assert "onUpdateEntry" in source
     assert "Actualizar entrada" in source
@@ -143,12 +146,16 @@ def test_notes_editor_splits_open_and_closed_jira_bitacoras() -> None:
     source = _frontend_file("components/NotesEditor.tsx")
     styles = _frontend_file("styles/app.css")
     semantics = _frontend_file("lib/statusSemantics.ts")
+    bucket_block = source[
+        source.index("function handleBucketChange") : source.index("function handleSave")
+    ]
 
     assert "NOTE_BUCKETS" in source
     assert "Abiertas" in source
     assert "Cerradas" in source
     assert "issueStateBucket(row.issue)" in source
     assert "selectedNotesRows.map" in source
+    assert "handleSelectIssue" not in bucket_block
     assert "notes-bucket-tabs" in styles
     assert "notes-index-stat-closed" in styles
     assert 'sourceType === "jira"' in semantics
