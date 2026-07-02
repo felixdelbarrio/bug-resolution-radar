@@ -107,31 +107,51 @@ def test_dashboard_page_does_not_prefetch_heavy_inactive_panels() -> None:
     assert "placeholderData: undefined" in source
 
 
+def test_notes_queries_ignore_dashboard_status_filters() -> None:
+    source = _frontend_file("pages/DashboardPage.tsx")
+    block = source[
+        source.index("const notesScopeParams") : source.index(
+            "const overviewQueryParams", source.index("const notesScopeParams")
+        )
+    ]
+
+    assert "dashboardState.params.status" not in block
+    assert 'queryKey: ["dashboard-note-keys", notesScopeParams]' in source
+    assert 'queryKey: ["dashboard-notes-list", notesScopeParams]' in source
+
+
 def test_notes_editor_allows_free_issue_edit_and_validates_before_save() -> None:
     source = _frontend_file("components/NotesEditor.tsx")
-    issue_on_change = source[
-        source.index('list="notes-issue-suggestions"') : source.index("</label>")
-    ]
+    issue_on_change = source[source.index("<input") : source.index("</label>")]
 
     assert "setIssueDraft(event.target.value)" in issue_on_change
     assert "onIssueChange" not in issue_on_change
+    assert "notes-issue-suggestions" not in source
+    assert "<datalist" not in source
     assert "isValidIssueReference" in source
+    assert "issueExists" in source
+    assert "inventario ingestado" in source
     assert "La nota no puede estar vacía" in source
+    assert "onUpdateEntry" in source
+    assert "Actualizar entrada" in source
+    assert "Cancelar edición" in source
+    assert "notes-entry-edit-button" in source
     assert "Limpiar" in source
 
 
-def test_notes_editor_splits_active_and_finalist_bitacoras() -> None:
+def test_notes_editor_splits_open_and_closed_jira_bitacoras() -> None:
     source = _frontend_file("components/NotesEditor.tsx")
     styles = _frontend_file("styles/app.css")
     semantics = _frontend_file("lib/statusSemantics.ts")
 
     assert "NOTE_BUCKETS" in source
-    assert "En seguimiento" in source
-    assert "Finalizadas" in source
-    assert "issueLifecycleBucket(row.issue)" in source
+    assert "Abiertas" in source
+    assert "Cerradas" in source
+    assert "issueStateBucket(row.issue)" in source
     assert "selectedNotesRows.map" in source
     assert "notes-bucket-tabs" in styles
-    assert "notes-index-stat-finalist" in styles
+    assert "notes-index-stat-closed" in styles
+    assert 'sourceType === "jira"' in semantics
     assert "ready to deploy" in semantics
     assert "deployed" in semantics
     assert "closed" in semantics

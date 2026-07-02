@@ -4079,7 +4079,7 @@ def _load_report_notes_by_key(settings: Settings) -> dict[str, str]:
         store.load()
         return {
             str(key or "").strip().upper(): str(note or "").strip()
-            for key, note in store.items()
+            for key, note in store.latest_items()
             if str(key or "").strip() and str(note or "").strip()
         }
     except Exception:

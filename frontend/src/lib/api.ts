@@ -468,15 +468,23 @@ export type NotePayload = {
   latestDateLabel: string;
 };
 
+export type NoteIssuePayload = {
+  key?: string;
+  summary?: string;
+  status?: string;
+  priority?: string;
+  assignee?: string;
+  url?: string;
+  source_alias?: string;
+  source_type?: string;
+};
+
 export type NoteListPayload = {
   total: number;
   rows: Array<
     NotePayload & {
       enriched: boolean;
-      issue: Partial<IssueRecord> & {
-        source_alias?: string;
-        source_type?: string;
-      };
+      issue: NoteIssuePayload;
     }
   >;
 };

@@ -3,16 +3,16 @@ import type { NoteEntryPayload, NoteListPayload } from "../lib/api";
 import { cn } from "../lib/cn";
 import { isValidIssueReference } from "../lib/issueLinks";
 import {
-  issueLifecycleBucket,
-  issueLifecycleLabel,
-  type IssueLifecycleBucket
+  issueStateBucket,
+  issueStateLabel,
+  type IssueStateBucket
 } from "../lib/statusSemantics";
 
 type NotesRow = NoteListPayload["rows"][number];
 
-const NOTE_BUCKETS: Array<{ id: IssueLifecycleBucket; label: string }> = [
-  { id: "active", label: "En seguimiento" },
-  { id: "finalist", label: "Finalizadas" }
+const NOTE_BUCKETS: Array<{ id: IssueStateBucket; label: string }> = [
+  { id: "open", label: "Abiertas" },
+  { id: "closed", label: "Cerradas" }
 ];
 
 type NotesEditorProps = {
@@ -26,6 +26,7 @@ type NotesEditorProps = {
   saveSucceeded: boolean;
   onIssueChange: (issueKey: string) => void;
   onSave: (issueKey: string, note: string) => void;
+  onUpdateEntry: (issueKey: string, entryId: string, note: string) => void;
   onDelete: (issueKey: string) => void;
   onDeleteEntry: (issueKey: string, entryId: string) => void;
 };
@@ -41,125 +42,103 @@ export function NotesEditor({
   saveSucceeded,
   onIssueChange,
   onSave,
+  onUpdateEntry,
   onDelete,
   onDeleteEntry
 }: NotesEditorProps) {
   const [issueDraft, setIssueDraft] = useState(selectedIssueKey);
   const [draft, setDraft] = useState("");
+  const [editingEntryId, setEditingEntryId] = useState("");
   const [validationMessage, setValidationMessage] = useState("");
-  const [activeBucket, setActiveBucket] = useState<IssueLifecycleBucket>("active");
+  const [selectedBucket, setSelectedBucket] = useState<IssueStateBucket>("open");
 
   useEffect(() => {
     setIssueDraft(selectedIssueKey);
+    setEditingEntryId("");
     setValidationMessage("");
   }, [selectedIssueKey]);
 
   useEffect(() => {
     if (saveSucceeded) {
       setDraft("");
+      setEditingEntryId("");
     }
   }, [saveSucceeded]);
 
-  const suggestions = useMemo(() => {
-    const seen = new Set<string>();
-    return issueKeys
-      .map((key) => key.trim().toUpperCase())
-      .filter((key) => {
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .slice(0, 500);
-  }, [issueKeys]);
-
   const knownIssueReferences = useMemo(() => {
     const seen = new Set<string>();
-    for (const key of [...issueKeys, ...notes.map((row) => row.issueKey)]) {
+    for (const key of issueKeys) {
       const cleanKey = key.trim().toUpperCase();
       if (cleanKey) {
         seen.add(cleanKey);
       }
     }
-    return [...seen];
-  }, [issueKeys, notes]);
-
-  const knownIssueSet = useMemo(() => new Set(knownIssueReferences), [knownIssueReferences]);
+    return seen;
+  }, [issueKeys]);
 
   const cleanIssueKey = issueDraft.trim().toUpperCase();
   const cleanNote = draft.trim();
   const issueIsValid = isValidIssueReference(cleanIssueKey);
-  const canSave = Boolean(cleanIssueKey) && issueIsValid && Boolean(cleanNote) && !isSaving;
+  const issueExists = knownIssueReferences.has(cleanIssueKey);
+  const canSave =
+    Boolean(cleanIssueKey) && issueIsValid && issueExists && Boolean(cleanNote) && !isSaving;
   const selectedListRow = notes.find((row) => row.issueKey === cleanIssueKey);
   const visibleEntries =
     cleanIssueKey === selectedIssueKey ? entries : selectedListRow?.entries ?? [];
   const selectedMeta = selectedListRow?.issue;
-  const selectedLifecycle = issueLifecycleBucket(selectedMeta);
-  const selectedLifecycleLabel = issueLifecycleLabel(selectedLifecycle);
+  const selectedState = issueStateBucket(selectedMeta);
+  const selectedStateLabel = issueStateLabel(selectedState);
   const groupedNotes = useMemo(() => {
-    const groups: Record<IssueLifecycleBucket, NotesRow[]> = {
-      active: [],
-      finalist: []
+    const groups: Record<IssueStateBucket, NotesRow[]> = {
+      open: [],
+      closed: []
     };
     for (const row of notes) {
-      groups[issueLifecycleBucket(row.issue)].push(row);
+      groups[issueStateBucket(row.issue)].push(row);
     }
     return groups;
   }, [notes]);
-  const activeRows = groupedNotes.active;
-  const finalistRows = groupedNotes.finalist;
-  const selectedNotesRows = groupedNotes[activeBucket];
+  const openRows = groupedNotes.open;
+  const closedRows = groupedNotes.closed;
+  const selectedNotesRows = groupedNotes[selectedBucket];
 
   useEffect(() => {
-    if (!issueIsValid || !knownIssueSet.has(cleanIssueKey) || cleanIssueKey === selectedIssueKey) {
+    if (!issueIsValid || !issueExists || cleanIssueKey === selectedIssueKey) {
       return;
     }
     const timer = window.setTimeout(() => {
       onIssueChange(cleanIssueKey);
     }, 260);
     return () => window.clearTimeout(timer);
-  }, [cleanIssueKey, issueIsValid, knownIssueSet, onIssueChange, selectedIssueKey]);
+  }, [cleanIssueKey, issueExists, issueIsValid, onIssueChange, selectedIssueKey]);
 
   useEffect(() => {
     if (selectedListRow) {
-      setActiveBucket(issueLifecycleBucket(selectedListRow.issue));
+      setSelectedBucket(issueStateBucket(selectedListRow.issue));
     }
   }, [selectedListRow]);
 
   useEffect(() => {
-    if (activeBucket === "active" && activeRows.length === 0 && finalistRows.length > 0) {
-      setActiveBucket("finalist");
+    if (selectedBucket === "open" && openRows.length === 0 && closedRows.length > 0) {
+      setSelectedBucket("closed");
     }
-    if (activeBucket === "finalist" && finalistRows.length === 0 && activeRows.length > 0) {
-      setActiveBucket("active");
+    if (selectedBucket === "closed" && closedRows.length === 0 && openRows.length > 0) {
+      setSelectedBucket("open");
     }
-  }, [activeBucket, activeRows.length, finalistRows.length]);
-
-  useEffect(() => {
-    const firstVisibleRow = selectedNotesRows[0];
-    if (!firstVisibleRow) {
-      return;
-    }
-    if (!selectedListRow) {
-      if (cleanIssueKey) {
-        return;
-      }
-      setIssueDraft(firstVisibleRow.issueKey);
-      setDraft("");
-      setValidationMessage("");
-      onIssueChange(firstVisibleRow.issueKey);
-      return;
-    }
-    if (issueLifecycleBucket(selectedListRow.issue) !== activeBucket) {
-      setIssueDraft(firstVisibleRow.issueKey);
-      setDraft("");
-      setValidationMessage("");
-      onIssueChange(firstVisibleRow.issueKey);
-    }
-  }, [activeBucket, cleanIssueKey, onIssueChange, selectedListRow, selectedNotesRows]);
+  }, [closedRows.length, openRows.length, selectedBucket]);
 
   function commitIssueDraft() {
-    if (cleanIssueKey && issueIsValid && cleanIssueKey !== selectedIssueKey) {
+    if (cleanIssueKey && issueIsValid && issueExists && cleanIssueKey !== selectedIssueKey) {
       onIssueChange(cleanIssueKey);
+    }
+  }
+
+  function handleBucketChange(bucket: IssueStateBucket) {
+    setSelectedBucket(bucket);
+    const currentRowBucket = selectedListRow ? issueStateBucket(selectedListRow.issue) : null;
+    const firstRow = groupedNotes[bucket][0];
+    if (currentRowBucket && currentRowBucket !== bucket && firstRow) {
+      handleSelectIssue(firstRow.issueKey);
     }
   }
 
@@ -172,18 +151,33 @@ export function NotesEditor({
       setValidationMessage("El issue debe tener formato JIRA o Helix válido.");
       return;
     }
+    if (!issueExists) {
+      setValidationMessage("La incidencia debe existir en el inventario ingestado del alcance.");
+      return;
+    }
     if (!cleanNote) {
       setValidationMessage("La nota no puede estar vacía.");
       return;
     }
     setValidationMessage("");
-    commitIssueDraft();
-    onSave(cleanIssueKey, cleanNote);
+    if (editingEntryId) {
+      onUpdateEntry(cleanIssueKey, editingEntryId, cleanNote);
+    } else {
+      commitIssueDraft();
+      onSave(cleanIssueKey, cleanNote);
+    }
   }
 
   function handleClear() {
+    if (editingEntryId) {
+      setDraft("");
+      setEditingEntryId("");
+      setValidationMessage("");
+      return;
+    }
     setIssueDraft("");
     setDraft("");
+    setEditingEntryId("");
     setValidationMessage("");
     onIssueChange("");
   }
@@ -191,8 +185,15 @@ export function NotesEditor({
   function handleSelectIssue(issueKey: string) {
     setIssueDraft(issueKey);
     setDraft("");
+    setEditingEntryId("");
     setValidationMessage("");
     onIssueChange(issueKey);
+  }
+
+  function handleEditEntry(entry: NoteEntryPayload) {
+    setEditingEntryId(entry.id);
+    setDraft(entry.note);
+    setValidationMessage("");
   }
 
   return (
@@ -205,8 +206,8 @@ export function NotesEditor({
           </div>
           <div className="notes-panel-badges">
             {cleanIssueKey && selectedListRow ? (
-              <span className={cn("notes-lifecycle-chip", `notes-lifecycle-chip-${selectedLifecycle}`)}>
-                {selectedLifecycleLabel}
+              <span className={cn("notes-state-chip", `notes-state-chip-${selectedState}`)}>
+                {selectedStateLabel}
               </span>
             ) : null}
             {visibleEntries.length > 0 ? (
@@ -218,7 +219,6 @@ export function NotesEditor({
           <label className="field notes-issue-field">
             <span>Issue</span>
             <input
-              list="notes-issue-suggestions"
               value={issueDraft}
               onBlur={commitIssueDraft}
               onKeyDown={(event) => {
@@ -229,15 +229,11 @@ export function NotesEditor({
               }}
               onChange={(event) => {
                 setIssueDraft(event.target.value);
+                setEditingEntryId("");
                 setValidationMessage("");
               }}
               placeholder="MEXBMI1-12345"
             />
-            <datalist id="notes-issue-suggestions">
-              {suggestions.map((issueKey) => (
-                <option key={issueKey} value={issueKey} />
-              ))}
-            </datalist>
           </label>
           <label className="field notes-draft-field">
             <span>Nuevo comentario</span>
@@ -259,14 +255,14 @@ export function NotesEditor({
             disabled={!canSave}
             onClick={handleSave}
           >
-            Añadir a bitácora
+            {editingEntryId ? "Actualizar entrada" : "Añadir a bitácora"}
           </button>
           <button
             type="button"
             className="secondary-button"
             onClick={handleClear}
           >
-            Limpiar
+            {editingEntryId ? "Cancelar edición" : "Limpiar"}
           </button>
           <button
             type="button"
@@ -305,16 +301,28 @@ export function NotesEditor({
                 <li className="notes-timeline-item" key={entry.id}>
                   <div className="notes-timeline-date">{entry.dateLabel}</div>
                   <p>{entry.note}</p>
-                  <button
-                    type="button"
-                    className="notes-entry-delete-button"
-                    disabled={isDeleting || !cleanIssueKey}
-                    onClick={() => onDeleteEntry(cleanIssueKey, entry.id)}
-                    aria-label={`Eliminar comentario de ${entry.dateLabel}`}
-                    title="Eliminar este comentario"
-                  >
-                    ×
-                  </button>
+                  <div className="notes-entry-actions">
+                    <button
+                      type="button"
+                      className="notes-entry-action-button notes-entry-edit-button"
+                      disabled={isSaving || !cleanIssueKey}
+                      onClick={() => handleEditEntry(entry)}
+                      aria-label={`Editar comentario de ${entry.dateLabel}`}
+                      title="Editar este comentario"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-entry-action-button notes-entry-delete-button"
+                      disabled={isDeleting || !cleanIssueKey}
+                      onClick={() => onDeleteEntry(cleanIssueKey, entry.id)}
+                      aria-label={`Eliminar comentario de ${entry.dateLabel}`}
+                      title="Eliminar este comentario"
+                    >
+                      ×
+                    </button>
+                  </div>
                 </li>
               ))}
             </ol>
@@ -335,19 +343,19 @@ export function NotesEditor({
         ) : (
           <>
             <div className="notes-index-summary" aria-label="Resumen de bitácoras">
-              <div className="notes-index-stat notes-index-stat-active">
-                <span>En seguimiento</span>
-                <strong>{activeRows.length}</strong>
+              <div className="notes-index-stat notes-index-stat-open">
+                <span>Abiertas</span>
+                <strong>{openRows.length}</strong>
               </div>
-              <div className="notes-index-stat notes-index-stat-finalist">
-                <span>Finalizadas</span>
-                <strong>{finalistRows.length}</strong>
+              <div className="notes-index-stat notes-index-stat-closed">
+                <span>Cerradas</span>
+                <strong>{closedRows.length}</strong>
               </div>
             </div>
             <div className="notes-bucket-tabs" role="tablist" aria-label="Tipo de bitácora">
               {NOTE_BUCKETS.map((bucket) => {
                 const count = groupedNotes[bucket.id].length;
-                const isActiveBucket = activeBucket === bucket.id;
+                const isActiveBucket = selectedBucket === bucket.id;
                 return (
                   <button
                     type="button"
@@ -359,7 +367,7 @@ export function NotesEditor({
                       isActiveBucket && "notes-bucket-tab-active"
                     )}
                     key={bucket.id}
-                    onClick={() => setActiveBucket(bucket.id)}
+                    onClick={() => handleBucketChange(bucket.id)}
                   >
                     <span>{bucket.label}</span>
                     <strong>{count}</strong>
@@ -372,7 +380,7 @@ export function NotesEditor({
             ) : (
               <div className="notes-list">
                 {selectedNotesRows.map((row) => {
-                  const lifecycle = issueLifecycleBucket(row.issue);
+                  const state = issueStateBucket(row.issue);
                   const metaParts = [
                     row.issue?.status,
                     row.issue?.priority,
@@ -382,7 +390,7 @@ export function NotesEditor({
                     <article
                       className={cn(
                         "notes-list-item",
-                        `notes-list-item-${lifecycle}`,
+                        `notes-list-item-${state}`,
                         row.issueKey === cleanIssueKey && "notes-list-item-active"
                       )}
                       key={row.issueKey}
@@ -406,11 +414,11 @@ export function NotesEditor({
                       <div className="notes-list-meta-row">
                         <span
                           className={cn(
-                            "notes-lifecycle-chip",
-                            `notes-lifecycle-chip-${lifecycle}`
+                            "notes-state-chip",
+                            `notes-state-chip-${state}`
                           )}
                         >
-                          {issueLifecycleLabel(lifecycle)}
+                          {issueStateLabel(state)}
                         </span>
                         {metaParts.length > 0 ? <small>{metaParts.join(" · ")}</small> : null}
                         {metaParts.length === 0 ? (

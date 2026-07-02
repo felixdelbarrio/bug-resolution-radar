@@ -387,7 +387,24 @@ def test_period_followup_ppt_splits_root_cause_evolutives_and_renders_notes(
     notes_path = tmp_path / "notes.json"
     _build_minimal_template(template)
     notes_path.write_text(
-        '{"EAM-ROOT":"Cliente confirma evolutivo priorizado para resolver la causa raíz."}',
+        """
+        {
+          "EAM-ROOT": {
+            "entries": [
+              {
+                "id": "old-note",
+                "createdAt": "2026-05-14T09:00:00+02:00",
+                "note": "Nota anterior que ya no debe aparecer en el informe."
+              },
+              {
+                "id": "latest-note",
+                "createdAt": "2026-05-15T10:00:00+02:00",
+                "note": "Cliente confirma evolutivo priorizado para resolver la causa raíz."
+              }
+            ]
+          }
+        }
+        """,
         encoding="utf-8",
     )
     now = pd.Timestamp("2026-05-15T00:00:00+00:00")
@@ -509,6 +526,7 @@ def test_period_followup_ppt_splits_root_cause_evolutives_and_renders_notes(
     root_text = _slide_all_text(root_slide)
     assert "Comentarios registrados" in root_text
     assert "Cliente confirma evolutivo priorizado" in root_text
+    assert "Nota anterior" not in root_text
 
 
 def test_period_followup_ppt_links_helix_ids_in_risk_tables_from_full_dataset(

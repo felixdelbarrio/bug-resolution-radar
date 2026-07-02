@@ -1083,10 +1083,18 @@ def test_notes_endpoint_roundtrip(monkeypatch, tmp_path: Path) -> None:
     assert payload["entries"][0]["dateLabel"]
 
     entry_id = payload["entries"][0]["id"]
+    update_entry = client.put(
+        f"/api/notes/RAD-9/entries/{entry_id}",
+        json={"note": "Investigación validada con backend"},
+    )
+    assert update_entry.status_code == 200
+    assert update_entry.json()["entries"][0]["note"] == "Investigación validada con backend"
+    assert "Investigar con backend" not in update_entry.json()["note"]
+
     delete_entry = client.delete(f"/api/notes/RAD-9/entries/{entry_id}")
     assert delete_entry.status_code == 200
     assert delete_entry.json()["entryCount"] == 1
-    assert "Investigar con backend" not in delete_entry.json()["note"]
+    assert "Investigación validada con backend" not in delete_entry.json()["note"]
     assert "Pendiente de validar" in delete_entry.json()["note"]
 
 
@@ -1121,7 +1129,7 @@ def test_notes_list_enrich_delete_and_empty_note_removes(monkeypatch, tmp_path: 
     assert rows[0]["entries"][0]["note"] == "Coordinar cierre"
     assert rows[0]["enriched"] is True
     assert rows[0]["issue"]["summary"] == "Error en login"
-    assert rows[0]["issue"]["resolved"] == ""
+    assert "resolved" not in rows[0]["issue"]
 
     delete_response = client.delete("/api/notes/RAD-1")
     assert delete_response.status_code == 200
