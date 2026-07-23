@@ -37,6 +37,11 @@ make run
 `make run` abre el contenedor desktop local.
 `make CI` valida formato, tipado, cobertura, build frontend, `pip check` y guardias de documentación/código muerto.
 
+`make run` y `make build` detienen la ejecución si la rama local está por detrás
+de su upstream conocido, para evitar empaquetar un frontend antiguo. Actualiza
+con `git pull --ff-only`; para reproducir deliberadamente un commit histórico se
+puede usar `make ALLOW_STALE_SOURCE=1 run` o `make ALLOW_STALE_SOURCE=1 build`.
+
 ## Architecture
 
 Resumen de capas:
