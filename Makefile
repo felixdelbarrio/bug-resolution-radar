@@ -7,6 +7,7 @@ PYTHON = $(VENV)/bin/python
 PYTEST = $(VENV)/bin/pytest
 PYINSTALLER = $(VENV)/bin/pyinstaller
 NPM ?= npm
+ALLOW_STALE_SOURCE ?= 0
 FRONTEND_DIR := frontend
 FRONTEND_DIST := $(FRONTEND_DIR)/dist
 API_HOST ?= 127.0.0.1
@@ -39,7 +40,7 @@ PYINSTALLER_COLLECT_ARGS = \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test run format lint ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
+.PHONY: help setup test run format lint ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-source-current _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
 
 help:
 	@echo ""
@@ -64,6 +65,21 @@ setup:
 
 _ensure-backend:
 	@if [ ! -x "$(PYTHON)" ]; then echo "Ejecuta primero: make setup"; exit 1; fi
+
+_ensure-source-current:
+	@if [ "$(ALLOW_STALE_SOURCE)" != "1" ] && command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		upstream="$$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"; \
+		if [ -n "$$upstream" ]; then \
+			local_commit="$$(git rev-parse HEAD)"; \
+			upstream_commit="$$(git rev-parse "$$upstream")"; \
+			if [ "$$local_commit" != "$$upstream_commit" ] && git merge-base --is-ancestor "$$local_commit" "$$upstream_commit"; then \
+				echo "Build detenido: la rama local está por detrás de $$upstream."; \
+				echo "Actualiza el código con: git pull --ff-only"; \
+				echo "Si quieres compilar ese commit antiguo de forma intencionada: make ALLOW_STALE_SOURCE=1 <objetivo>"; \
+				exit 1; \
+			fi; \
+		fi; \
+	fi
 
 _ensure-frontend: _ensure-backend
 	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then echo "Faltan dependencias frontend. Ejecuta: make setup"; exit 1; fi
@@ -98,7 +114,7 @@ lint: _ensure-backend
 	PYTHONPATH=src $(PYTHON) -m ruff check .
 	PYTHONPATH=src $(PYTHON) -m mypy src
 
-run: _ensure-frontend _ensure-icon-assets build-frontend
+run: _ensure-source-current _ensure-frontend _ensure-icon-assets build-frontend
 	PYTHONPATH=src $(PYTHON) run_desktop.py
 
 ci: ci-format ci-typecheck ci-coverage ci-quality
@@ -126,7 +142,7 @@ ci-quality: _ensure-frontend
 build-frontend: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run build
 
-build: _ensure-build _ensure-icon-assets build-frontend test
+build: _ensure-source-current _ensure-build _ensure-icon-assets build-frontend test
 	@case "$(HOST_UNAME)" in \
 		Darwin) $(MAKE) _build-macos ;; \
 		Linux) $(MAKE) _build-linux ;; \
