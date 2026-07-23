@@ -312,6 +312,7 @@ def generate_period_followup_report_artifact(
     functionality_priority_filters: Sequence[str] | None = None,
     functionality_filters: Sequence[str] | None = None,
     df_all: pd.DataFrame | None = None,
+    reference_day: pd.Timestamp | str | None = None,
 ) -> PeriodFollowupReportResult:
     context = _build_context_for_scope(
         settings,
@@ -335,4 +336,5 @@ def generate_period_followup_report_artifact(
         functionality_status_filters=functionality_status_filters,
         functionality_priority_filters=functionality_priority_filters,
         functionality_filters=functionality_filters,
+        reference_day=reference_day,
     )

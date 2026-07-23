@@ -120,9 +120,9 @@ def test_build_theme_fortnight_trend_builds_raw_and_cumulative_series() -> None:
     )
     assert trend["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
     assert trend["quincena_label"].drop_duplicates().tolist() == [
-        "2026-01 \u00b7 1-15",
-        "2026-01 \u00b7 16-31",
-        "2026-02 \u00b7 1-15",
+        "2026-01 \u00b7 1-14",
+        "2026-01 \u00b7 15-31",
+        "2026-02 \u00b7 1-14",
     ]
     pagos = trend.loc[trend["tema"] == "Pagos", "issues"].tolist()
     pagos_acc = trend.loc[trend["tema"] == "Pagos", "issues_cumulative"].tolist()
@@ -151,12 +151,13 @@ def test_build_theme_daily_trend_uses_day_axis_inside_fortnight() -> None:
         theme_whitelist=["Pagos", "Login y acceso"],
     )
     assert trend["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso"]
-    assert trend["date_label"].iloc[0] == "2026-01-16"
+    assert trend["date_label"].iloc[0] == "2026-01-15"
     assert trend["date_label"].iloc[-1] == "2026-01-31"
     pagos_daily = trend.loc[trend["tema"] == "Pagos", "issues"].tolist()
-    assert pagos_daily[0] == 1  # 2026-01-16
-    assert pagos_daily[1] == 0  # 2026-01-17 gap
-    assert pagos_daily[2] == 1  # 2026-01-18
+    assert pagos_daily[0] == 0  # 2026-01-15 canonical fortnight boundary
+    assert pagos_daily[1] == 1  # 2026-01-16
+    assert pagos_daily[2] == 0  # 2026-01-17 gap
+    assert pagos_daily[3] == 1  # 2026-01-18
 
 
 def test_order_theme_labels_prioritizes_business_focus_themes() -> None:

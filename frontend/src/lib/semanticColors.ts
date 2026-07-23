@@ -18,36 +18,36 @@ type SemanticConfig = {
 
 const DEFAULT_SEMANTIC_CONFIG: SemanticConfig = {
   statusByKey: {
-    new: "#E85D63",
-    ready: "#E85D63",
-    analysing: "#E85D63",
-    blocked: "#E85D63",
-    "en progreso": "#F59E0B",
-    "in progress": "#F59E0B",
-    "to rework": "#F59E0B",
-    rework: "#F59E0B",
-    test: "#F59E0B",
-    "ready to verify": "#F59E0B",
-    accepted: "#4CAF50",
-    "ready to deploy": "#4CAF50",
-    deployed: "#5B3FD0",
-    closed: "#15803D",
-    resolved: "#15803D",
-    done: "#15803D",
-    open: "#FBBF24",
-    created: "#E85D63"
+    new: "var(--bbva-status-intake)",
+    ready: "var(--bbva-status-intake)",
+    analysing: "var(--bbva-status-intake)",
+    blocked: "var(--bbva-status-intake)",
+    "en progreso": "var(--bbva-status-progress)",
+    "in progress": "var(--bbva-status-progress)",
+    "to rework": "var(--bbva-status-progress)",
+    rework: "var(--bbva-status-progress)",
+    test: "var(--bbva-status-progress)",
+    "ready to verify": "var(--bbva-status-progress)",
+    accepted: "var(--bbva-status-accepted)",
+    "ready to deploy": "var(--bbva-status-accepted)",
+    deployed: "var(--bbva-status-deployed)",
+    closed: "var(--bbva-priority-lowest)",
+    resolved: "var(--bbva-priority-lowest)",
+    done: "var(--bbva-priority-lowest)",
+    open: "var(--bbva-status-open)",
+    created: "var(--bbva-status-intake)"
   },
   priorityByKey: {
-    "supone un impedimento": "#B4232A",
-    highest: "#B4232A",
-    high: "#D64550",
-    medium: "#F59E0B",
-    low: "#22A447",
-    lowest: "#15803D"
+    "supone un impedimento": "var(--bbva-priority-highest)",
+    highest: "var(--bbva-priority-highest)",
+    high: "var(--bbva-priority-high)",
+    medium: "var(--bbva-priority-medium)",
+    low: "var(--bbva-priority-low)",
+    lowest: "var(--bbva-priority-lowest)"
   },
-  neutral: "#E2E6EE",
-  goalAccent: "#5B3FD0",
-  goalSurface: "#ECE6FF"
+  neutral: "var(--bbva-neutral)",
+  goalAccent: "var(--bbva-goal-accent)",
+  goalSurface: "var(--bbva-goal-surface)"
 };
 
 let runtimeSemanticConfig: SemanticConfig = {
@@ -109,26 +109,17 @@ export function configureSemanticColors(payload: SemanticContractPayload) {
   };
 }
 
-function hexToRgba(hexColor: string, alpha: number) {
-  const token = String(hexColor || "")
-    .trim()
-    .replace(/^#/, "");
-  if (!/^[0-9a-fA-F]{6}$/.test(token)) {
-    const fallback = runtimeSemanticConfig.neutral
-      .replace(/^#/, "")
-      .match(/^[0-9a-fA-F]{6}$/)
-      ? runtimeSemanticConfig.neutral
-      : "#E2E6EE";
-    const normalizedFallback = fallback.replace(/^#/, "");
-    const r = Number.parseInt(normalizedFallback.slice(0, 2), 16);
-    const g = Number.parseInt(normalizedFallback.slice(2, 4), 16);
-    const b = Number.parseInt(normalizedFallback.slice(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function colorWithAlpha(color: string, alpha: number) {
+  const source = String(color || "").trim() || runtimeSemanticConfig.neutral;
+  const token = source.replace(/^#/, "");
+  const boundedAlpha = Math.min(1, Math.max(0, alpha));
+  if (/^[0-9a-fA-F]{6}$/.test(token)) {
+    const r = Number.parseInt(token.slice(0, 2), 16);
+    const g = Number.parseInt(token.slice(2, 4), 16);
+    const b = Number.parseInt(token.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${boundedAlpha})`;
   }
-  const r = Number.parseInt(token.slice(0, 2), 16);
-  const g = Number.parseInt(token.slice(2, 4), 16);
-  const b = Number.parseInt(token.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  return `color-mix(in srgb, ${source} ${boundedAlpha * 100}%, transparent)`;
 }
 
 function chipPalette(color: string) {
@@ -137,14 +128,14 @@ function chipPalette(color: string) {
   if (normalized === goalAccent) {
     return {
       color: runtimeSemanticConfig.goalAccent,
-      borderColor: hexToRgba(runtimeSemanticConfig.goalAccent, 0.64),
+      borderColor: colorWithAlpha(runtimeSemanticConfig.goalAccent, 0.64),
       backgroundColor: runtimeSemanticConfig.goalSurface
     };
   }
   return {
     color,
-    borderColor: hexToRgba(color, 0.62),
-    backgroundColor: hexToRgba(color, 0.16)
+    borderColor: colorWithAlpha(color, 0.62),
+    backgroundColor: colorWithAlpha(color, 0.16)
   };
 }
 
@@ -189,9 +180,9 @@ export function kanbanHeaderStyle(status: string, active: boolean): CSSPropertie
   const color = statusColor(status);
   return {
     color,
-    borderColor: hexToRgba(color, active ? 0.72 : 0.45),
-    backgroundColor: hexToRgba(color, active ? 0.2 : 0.12),
-    boxShadow: active ? `0 0 0 3px ${hexToRgba(color, 0.18)}` : "none"
+    borderColor: colorWithAlpha(color, active ? 0.72 : 0.45),
+    backgroundColor: colorWithAlpha(color, active ? 0.2 : 0.12),
+    boxShadow: active ? `0 0 0 3px ${colorWithAlpha(color, 0.18)}` : "none"
   };
 }
 
@@ -203,8 +194,8 @@ export function semanticButtonStyle(
   const color = kind === "priority" ? priorityColor(value) : statusColor(value);
   return {
     color,
-    borderColor: hexToRgba(color, active ? 0.72 : 0.45),
-    backgroundColor: hexToRgba(color, active ? 0.2 : 0.12),
-    boxShadow: active ? `0 0 0 3px ${hexToRgba(color, 0.16)}` : "none"
+    borderColor: colorWithAlpha(color, active ? 0.72 : 0.45),
+    backgroundColor: colorWithAlpha(color, active ? 0.2 : 0.12),
+    boxShadow: active ? `0 0 0 3px ${colorWithAlpha(color, 0.16)}` : "none"
   };
 }

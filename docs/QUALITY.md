@@ -49,6 +49,12 @@ Valida:
 7. `python scripts/check_docs_references.py`
 8. regresiones rápidas de API, desktop y render PPT crítico
 
+La suite también incluye guardas del handoff cloud y Apps Script:
+- contrato v2 y hashes de proyección/PPTX;
+- ausencia de filtros y recálculos de incidencias en GPC;
+- sintaxis JavaScript y símbolos globales únicos;
+- adjunto del PPTX canónico en la newsletter.
+
 `make lint` queda como target explícito para `ruff check .` y `mypy src`.
 
 ## Dead Code Policy
@@ -69,6 +75,16 @@ Además de `quality-gate`:
 - builds por plataforma (`build-linux`, `build-macos`, `build-windows`)
 - análisis estático de seguridad (`codeql`)
 - empaquetado/release (`release-binaries`)
+
+## Desktop/GPC Parity
+
+- El calendario quincenal autoritativo es 1–14 y 15–fin.
+- Un estado finalista no sustituye por sí solo una fecha explícita de resolución.
+- El hash del PPTX del handoff debe coincidir con el artefacto generado por el
+  servicio local.
+- GPC debe fallar de forma explícita si no existe snapshot materializado; no puede
+  reconstruir un resultado aproximado.
+- El detalle de contrato y cachés se mantiene en `docs/CLOUD_HANDOFF.md`.
 
 ## Ingestion Hardening
 

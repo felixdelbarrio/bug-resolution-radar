@@ -1,0 +1,105 @@
+<script>
+const Charts = (() => {
+  const pending = new Map();
+  let sequence = 0;
+
+  function token(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function palette() {
+    return {
+      text: token('--bbva-text'),
+      surface: token('--bbva-surface'),
+      border: token('--bbva-border'),
+      transparent: token('--chart-transparent'),
+      series: [
+        token('--chart-series-1'), token('--chart-series-2'), token('--chart-series-3'),
+        token('--chart-series-4'), token('--chart-series-5'), token('--chart-series-6'),
+        token('--chart-series-7')
+      ]
+    };
+  }
+
+  function themedFigure(figure) {
+    const colors = palette();
+    const colorway = colors.series;
+    const data = (figure.data || []).map((source, index) => {
+      const trace = { ...source };
+      const semantic = UI.semanticColor(trace.name, 'chart');
+      if (trace.type === 'pie') {
+        const labels = trace.labels || [];
+        trace.marker = { ...(trace.marker || {}), colors: labels.map((label, labelIndex) => UI.semanticColor(label, 'chart') || colorway[labelIndex % colorway.length]) };
+      } else {
+        trace.marker = { ...(trace.marker || {}), color: semantic || (trace.marker && trace.marker.color) || colorway[index % colorway.length] };
+        if (trace.marker.line) trace.marker.line = { ...trace.marker.line, color: colors.text };
+        if (trace.type === 'scatter' && String(trace.mode || '').includes('lines')) {
+          trace.line = { ...(trace.line || {}), color: semantic || colorway[index % colorway.length], width: Math.max(2.5, Number((trace.line || {}).width || 0)) };
+        }
+      }
+      return trace;
+    });
+    const sourceLayout = figure.layout || {};
+    const showLegend = sourceLayout.showlegend !== false;
+    const axisTheme = axis => ({
+      ...(axis || {}),
+      showgrid: true,
+      gridcolor: colors.border,
+      zeroline: false,
+      tickfont: { ...((axis || {}).tickfont || {}), color: colors.text },
+      title: { ...((axis || {}).title || {}), font: { ...(((axis || {}).title || {}).font || {}), color: colors.text } }
+    });
+    return {
+      data,
+      layout: {
+        ...sourceLayout,
+        autosize: true,
+        paper_bgcolor: colors.transparent,
+        plot_bgcolor: colors.transparent,
+        font: { family: token('--bbva-font-sans'), color: colors.text },
+        colorway,
+        margin: { l: 36, r: 18, t: 30, b: 34, ...(sourceLayout.margin || {}) },
+        xaxis: axisTheme(sourceLayout.xaxis),
+        yaxis: axisTheme(sourceLayout.yaxis),
+        legend: showLegend ? {
+          orientation: 'h', yanchor: 'top', y: -0.22, xanchor: 'right', x: 1,
+          bgcolor: colors.surface, bordercolor: colors.border, borderwidth: 1,
+          font: { size: 11, color: colors.text }, title: { text: '' },
+          ...(sourceLayout.legend || {})
+        } : sourceLayout.legend,
+        hoverlabel: { bgcolor: colors.surface, bordercolor: colors.border, font: { color: colors.text } }
+      }
+    };
+  }
+
+  function placeholder(figure, height = 320) {
+    if (!figure || !Array.isArray(figure.data) || !figure.data.length) return '<p class="issue-list-empty">No hay gráfico disponible para este bloque.</p>';
+    sequence += 1;
+    const id = `plot-${sequence}`;
+    pending.set(id, { figure, height });
+    return `<div id="${id}" class="plotly-chart" style="height:${Math.max(240, Number(height || 320))}px" role="img" aria-label="Visualización interactiva"></div>`;
+  }
+
+  function begin(root) {
+    if (window.Plotly && root) root.querySelectorAll('.plotly-chart').forEach(node => window.Plotly.purge(node));
+    pending.clear();
+  }
+
+  function mountAll(root) {
+    if (!root || !pending.size) return;
+    if (!window.Plotly) {
+      root.querySelectorAll('.plotly-chart').forEach(node => { node.innerHTML = '<p class="issue-list-empty">No se ha podido cargar el motor de gráficos.</p>'; });
+      pending.clear();
+      return;
+    }
+    pending.forEach((entry, id) => {
+      const node = document.getElementById(id); if (!node || !root.contains(node)) return;
+      const themed = themedFigure(entry.figure);
+      window.Plotly.react(node, themed.data, { ...themed.layout, height: entry.height }, { displayModeBar: false, responsive: true, scrollZoom: false });
+    });
+    pending.clear();
+  }
+
+  return { placeholder, begin, mountAll };
+})();
+</script>

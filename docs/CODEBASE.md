@@ -45,6 +45,13 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 - `src/bug_resolution_radar/services/ingest_merge.py`
   - Merge y mapeo compartido de snapshots Jira/Helix para evitar lógica duplicada entre runner backend y contratos de presentación.
 
+- `src/bug_resolution_radar/services/cloud_projection.py`
+  - Materialización desktop-authoritative de las vistas estáticas, hechos de
+    newsletter y metadatos del PPTX para GPC.
+
+- `src/bug_resolution_radar/services/data_transfer.py`
+  - Empaquetado determinista del handoff v2 con proyección y PPTX exacto.
+
 - `src/bug_resolution_radar/analytics/analysis_window.py`
   - Ventana global de análisis por meses.
 
@@ -108,6 +115,20 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
 
 - `frontend/src/styles/app.css`
   - Tema visual, layout responsive y reglas CSS de la SPA.
+
+## GPC Package Map
+
+- `apps-script/20_Adapters.gs`
+  - Validación estricta del ZIP, esquema, ámbito, tamaños y hashes.
+
+- `apps-script/25_MaterializedSnapshots.gs`
+  - Persistencia L2 por partes, puntero atómico por ámbito y serving sin filtros.
+
+- `apps-script/55_PeriodReport.gs`
+  - Conservación del PPTX local y conversión directa a Google Slides.
+
+- `apps-script/56_Newsletter.gs`
+  - Grounding Gemini con hechos del snapshot, enlace compartido y adjunto canónico.
 
 ## Reporting and Theme
 

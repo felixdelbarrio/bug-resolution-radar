@@ -10,6 +10,10 @@ from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.time_windows import (
+    FIRST_FORTNIGHT_END_DAY,
+    SECOND_FORTNIGHT_START_DAY,
+)
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_DARK,
     BBVA_GOAL_ACCENT_7,
@@ -556,20 +560,36 @@ def prepare_open_theme_payload(
 def _quincena_axis(created: pd.Series) -> pd.DataFrame:
     month_start = created.dt.to_period("M").dt.to_timestamp()
     month_end = month_start + pd.offsets.MonthEnd(0)
-    first_half = created.dt.day <= 15
-    quincena_start = month_start.where(first_half, month_start + pd.Timedelta(days=15))
-    quincena_end = (month_start + pd.Timedelta(days=14)).where(first_half, month_end)
-    month_label = month_start.dt.strftime("%Y-%m")
-    quincena_label = (month_label + " \u00b7 1-15").where(
+    valid = created.notna()
+    first_half = valid & created.dt.day.le(FIRST_FORTNIGHT_END_DAY)
+    start_series = month_start.where(
         first_half,
-        month_label + " \u00b7 16-" + month_end.dt.day.astype(str),
+        month_start + pd.Timedelta(days=SECOND_FORTNIGHT_START_DAY - 1),
+    ).where(valid)
+    end_series = (
+        (month_start + pd.Timedelta(days=FIRST_FORTNIGHT_END_DAY - 1))
+        .where(first_half, month_end)
+        .where(valid)
+    )
+    month_label = start_series.dt.strftime("%Y-%m")
+    first_half = start_series.dt.day.eq(1)
+    quincena_label = (
+        (month_label + f" \u00b7 1-{FIRST_FORTNIGHT_END_DAY}")
+        .where(
+            first_half,
+            month_label
+            + f" \u00b7 {SECOND_FORTNIGHT_START_DAY}-"
+            + end_series.dt.day.astype("Int64").astype(str),
+        )
+        .where(valid, "")
     )
     return pd.DataFrame(
         {
-            "quincena_start": quincena_start,
-            "quincena_end": quincena_end,
+            "quincena_start": start_series,
+            "quincena_end": end_series,
             "quincena_label": quincena_label,
-        }
+        },
+        index=created.index,
     )
 
 

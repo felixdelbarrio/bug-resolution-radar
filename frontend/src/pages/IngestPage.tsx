@@ -23,22 +23,20 @@ import { DataTransferPanel } from "../components/DataTransferPanel";
 import type { ShellContextValue } from "../components/AppShell";
 
 type Connector = "jira" | "helix" | "finalist_lookup";
-type IngestTab = Connector | "export" | "import";
+type IngestTab = Connector | "export";
 
 const INGEST_TABS: IngestTab[] = [
   "jira",
   "helix",
   "finalist_lookup",
-  "export",
-  "import"
+  "export"
 ];
 
 function ingestTabLabel(tab: IngestTab): string {
   if (tab === "jira") return "Jira";
   if (tab === "helix") return "Helix";
   if (tab === "finalist_lookup") return "Buscar estados finalistas";
-  if (tab === "export") return "Exportar";
-  return "Importar";
+  return "Exportar";
 }
 
 type ConnectorFeedback = {
@@ -631,7 +629,7 @@ export function IngestPage() {
     </section>
   );
 
-  if (activeTab === "export" || activeTab === "import") {
+  if (activeTab === "export") {
     const scopeMode = workspace?.scopeMode ?? dashboardState.params.scopeMode;
     const sourceIds =
       scopeMode === "country"
@@ -644,8 +642,6 @@ export function IngestPage() {
       <section className="page-stack">
         {ingestNavigation}
         <DataTransferPanel
-          mode={activeTab}
-          onDataImported={invalidateRadarData}
           exportScope={{
             country: workspace?.selectedCountry ?? dashboardState.params.country,
             scopeMode,
