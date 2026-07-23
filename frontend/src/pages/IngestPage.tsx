@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
+import { useOutletContext } from "react-router-dom";
 import {
   fetchJson,
   type IngestProgressPayload,
@@ -19,6 +20,7 @@ import {
 } from "../lib/api";
 import { cn } from "../lib/cn";
 import { DataTransferPanel } from "../components/DataTransferPanel";
+import type { ShellContextValue } from "../components/AppShell";
 
 type Connector = "jira" | "helix" | "finalist_lookup";
 type IngestTab = Connector | "export" | "import";
@@ -306,6 +308,7 @@ function IngestSourceTable({
 
 export function IngestPage() {
   const queryClient = useQueryClient();
+  const { workspace, dashboardState } = useOutletContext<ShellContextValue>();
   const commonQueryOptions = {
     staleTime: 45_000,
     gcTime: 300_000,
@@ -629,12 +632,26 @@ export function IngestPage() {
   );
 
   if (activeTab === "export" || activeTab === "import") {
+    const scopeMode = workspace?.scopeMode ?? dashboardState.params.scopeMode;
+    const sourceIds =
+      scopeMode === "country"
+        ? (workspace?.countryRollupSourceIds ?? [])
+        : [workspace?.selectedSourceId ?? dashboardState.params.sourceId].filter(Boolean);
+    const sourceLabels = (workspace?.sources ?? [])
+      .filter((source) => sourceIds.includes(source.source_id))
+      .map((source) => source.alias);
     return (
       <section className="page-stack">
         {ingestNavigation}
         <DataTransferPanel
           mode={activeTab}
           onDataImported={invalidateRadarData}
+          exportScope={{
+            country: workspace?.selectedCountry ?? dashboardState.params.country,
+            scopeMode,
+            sourceIds,
+            sourceLabels
+          }}
         />
       </section>
     );

@@ -16,6 +16,12 @@ import { cn } from "../lib/cn";
 type DataTransferPanelProps = {
   mode: "export" | "import";
   onDataImported: () => Promise<void>;
+  exportScope: {
+    country: string;
+    scopeMode: string;
+    sourceIds: string[];
+    sourceLabels: string[];
+  };
 };
 
 function formatNumber(value: number): string {
@@ -133,7 +139,8 @@ function TransferHistory({ history }: { history?: DataTransferHistoryPayload }) 
 
 export function DataTransferPanel({
   mode,
-  onDataImported
+  onDataImported,
+  exportScope
 }: DataTransferPanelProps) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState("");
@@ -160,7 +167,11 @@ export function DataTransferPanel({
 
   const exportMutation = useMutation({
     mutationFn: () =>
-      postJson<DataTransferExportPayload>("/api/data-transfer/export", {}),
+      postJson<DataTransferExportPayload>("/api/data-transfer/export", {
+        country: exportScope.country,
+        sourceIds: exportScope.sourceIds,
+        scopeMode: exportScope.scopeMode
+      }),
     onSuccess: (payload) => {
       setExportResult(payload);
       setActionError("");
@@ -222,6 +233,13 @@ export function DataTransferPanel({
 
   const targetDir =
     downloadTarget.data?.directory || packages.data?.directory || "Descargas de Informes";
+  const exportScopeLabel = [
+    exportScope.country || "sin país",
+    exportScope.scopeMode === "country" ? "vista agregada" : "origen individual",
+    exportScope.sourceLabels.join(" · ")
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <section className="page-stack">
@@ -232,12 +250,12 @@ export function DataTransferPanel({
           </span>
           <h2>
             {mode === "export"
-              ? "Todo el radar, listo para viajar"
+              ? "La vista activa, lista para viajar"
               : "Trae un respaldo sin perder lo que ya existe"}
           </h2>
           <p>
             {mode === "export"
-              ? "Agrupa incidencias, histórico Helix, anotaciones y aprendizaje en un único respaldo verificado."
+              ? "Incluye solo las incidencias visibles en el alcance, sus notas y los cruces Helix necesarios para Insights."
               : "Primero comprobamos el fichero completo. Después sumamos lo nuevo y actualizamos solo lo que corresponda."}
           </p>
         </div>
@@ -254,19 +272,19 @@ export function DataTransferPanel({
         <section className="surface-panel page-stack">
           <div className="transfer-action-head">
             <div>
-              <h3>Crear respaldo completo</h3>
+              <h3>Crear traslado de la vista activa</h3>
               <p className="inline-caption">
-                Se guardará en <strong>{targetDir}</strong>. No incluye credenciales ni
-                modifica la configuración del equipo.
+                Alcance: <strong>{exportScopeLabel}</strong>. Se guardará en{" "}
+                <strong>{targetDir}</strong>.
               </p>
             </div>
             <button
               type="button"
               className="action-button transfer-primary-action"
-              disabled={exportMutation.isPending}
+              disabled={exportMutation.isPending || !exportScope.country}
               onClick={() => exportMutation.mutate()}
             >
-              {exportMutation.isPending ? "Preparando respaldo…" : "Exportar todos los datos"}
+              {exportMutation.isPending ? "Preparando traslado…" : "Exportar vista activa"}
             </button>
           </div>
           {exportResult ? <DatasetExportStats result={exportResult} /> : null}

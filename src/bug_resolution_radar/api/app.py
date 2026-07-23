@@ -676,6 +676,12 @@ class DataTransferFileRequest(BaseModel):
     fileName: str = ""
 
 
+class DataTransferExportRequest(BaseModel):
+    country: str = ""
+    sourceIds: list[str] = Field(default_factory=list)
+    scopeMode: str = "source"
+
+
 class DashboardExportSaveRequest(BaseModel):
     format: str = "xlsx"
     country: str = ""
@@ -1507,10 +1513,20 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/data-transfer/export")
-    def data_transfer_export() -> dict[str, Any]:
+    def data_transfer_export(payload: DataTransferExportRequest) -> dict[str, Any]:
         settings = load_settings()
+        if not str(payload.country or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Selecciona un país antes de exportar la vista activa.",
+            )
         try:
-            return export_business_data(settings)
+            return export_business_data(
+                settings,
+                country=payload.country,
+                source_ids=payload.sourceIds,
+                scope_mode=payload.scopeMode,
+            )
         except TransferValidationError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except OSError as exc:
