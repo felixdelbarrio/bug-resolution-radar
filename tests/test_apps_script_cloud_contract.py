@@ -77,6 +77,7 @@ def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
     config = _source("00_Config.gs")
     design = _source("DesignSystem.html")
     index = _source("Index.html")
+    web_app = _source("60_WebApp.gs")
     newsletter = _function_body(_source("56_Newsletter.gs"), "_newsletterRender_")
 
     result = subprocess.run(
@@ -108,12 +109,15 @@ def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
     ):
         assert required in web["light"]
 
-    assert "_safeJsonStringify_(DESIGN_TOKENS.web)" in index
+    assert "_clientBootstrapMarkup_(sharedToken || '')" in index
     assert "_include_('DesignSystem')" in index
-    assert "window.__RADAR_DESIGN_TOKENS__" in design
-    assert "document.createElement('style')" in design
-    assert "declarations(designWeb.light)" in design
-    assert "declarations(designWeb.dark)" in design
+    bootstrap = _function_body(web_app, "_clientBootstrapMarkup_")
+    assert "DESIGN_TOKENS.web.light" in bootstrap
+    assert "DESIGN_TOKENS.web.dark" in bootstrap
+    assert "window.__RADAR_SHARE_TOKEN__" in bootstrap
+    assert "radar-design-tokens" in bootstrap
+    assert "window.__RADAR_DESIGN_TOKENS__" not in design
+    assert "<script>" not in design
     assert "designColor" not in design
     assert "designDark" not in design
     assert "<?" not in design and "?>" not in design
@@ -122,16 +126,12 @@ def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
     style_blocks = re.findall(r"<style[^>]*>(.*?)</style>", design, flags=re.DOTALL)
     assert style_blocks
     assert all("<?" not in block and "?>" not in block for block in style_blocks)
-    bootstrap_script = re.search(r"<script>(.*?)</script>", design, flags=re.DOTALL)
-    assert bootstrap_script is not None
-    syntax = subprocess.run(
-        ["node", "--check", "-"],
-        input=bootstrap_script.group(1),
-        text=True,
-        capture_output=True,
-        check=False,
+    embedded_blocks = re.findall(
+        r"<(?:script|style)[^>]*>(.*?)</(?:script|style)>",
+        index,
+        flags=re.DOTALL,
     )
-    assert syntax.returncode == 0, syntax.stderr
+    assert all("<?" not in block and "?>" not in block for block in embedded_blocks)
     assert "DESIGN_TOKENS.radius" in newsletter
     assert "DESIGN_TOKENS.effect.emailShadow" in newsletter
 

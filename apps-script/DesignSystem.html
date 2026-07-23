@@ -1,17 +1,3 @@
-<script>
-(() => {
-  const designWeb = window.__RADAR_DESIGN_TOKENS__ || { light: {}, dark: {} };
-  const declarations = tokens => Object.entries(tokens)
-    .map(([name, value]) => `${name}:${value}`)
-    .join(';');
-  const tokenStyles = document.createElement('style');
-  tokenStyles.id = 'radar-design-tokens';
-  tokenStyles.textContent =
-    `:root{${declarations(designWeb.light)}}` +
-    `:root[data-theme="dark"]{${declarations(designWeb.dark)}}`;
-  document.head.appendChild(tokenStyles);
-})();
-</script>
 <style>
 :root {
   color-scheme: light;
