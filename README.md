@@ -47,6 +47,7 @@ Resumen de capas:
 - `src/bug_resolution_radar/analytics/`: KPIs, semántica de estado y ventana de análisis.
 - `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
 - `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, merge/mapeo de ingesta, exportes e ingesta asíncrona.
+- `src/bug_resolution_radar/services/data_transfer.py`: respaldo integral `.brr`, validación de integridad e importación incremental de datos de negocio.
 - El runtime de presentación es 100% React/FastAPI; no queda shell Python legacy ni dependencia de UI obsoleta en el paquete.
 
 Flujo clave de estados finalistas:
@@ -135,6 +136,12 @@ Firma/notarización (opcional, macOS):
 - Metadatos ligeros de Helix: `data/helix_dump.meta.json`
 - Insights learning: `data/insights_learning.json`
 - Notas: `data/notes.json`
+- Historial de exportaciones e importaciones: `data/data_transfer_history.json`
 - Observabilidad de ingesta:
   - `data/observability/ingest_profiles.jsonl`
   - `data/observability/ingest_circuit_state.json`
+
+Los respaldos integrales se crean desde `Ingesta > Exportar` y se guardan en la
+carpeta configurada para Descargas de Informes. `Ingesta > Importar` muestra los
+respaldos disponibles, valida su integridad y anticipa el balance incremental
+antes de incorporar altas o actualizaciones.

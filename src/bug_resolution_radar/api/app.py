@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, MutableMapping, Sequence
 
@@ -65,6 +66,14 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_kanban_columns,
     build_trend_detail,
     load_scope_context,
+)
+from bug_resolution_radar.services.data_transfer import (
+    TransferValidationError,
+    export_business_data,
+    import_transfer_package,
+    list_transfer_packages,
+    transfer_history,
+    validate_transfer_package,
 )
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
@@ -661,6 +670,10 @@ class ReportRequest(BaseModel):
 
 class PathRevealRequest(BaseModel):
     path: str = ""
+
+
+class DataTransferFileRequest(BaseModel):
+    fileName: str = ""
 
 
 class DashboardExportSaveRequest(BaseModel):
@@ -1479,6 +1492,63 @@ def create_app() -> FastAPI:
     @app.get("/api/reports/export-target")
     def report_export_target() -> dict[str, Any]:
         return download_target()
+
+    @app.get("/api/data-transfer/packages")
+    def data_transfer_packages() -> dict[str, Any]:
+        settings = load_settings()
+        return list_transfer_packages(settings)
+
+    @app.get("/api/data-transfer/history")
+    def data_transfer_history() -> dict[str, Any]:
+        settings = load_settings()
+        try:
+            return transfer_history(settings)
+        except TransferValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/data-transfer/export")
+    def data_transfer_export() -> dict[str, Any]:
+        settings = load_settings()
+        try:
+            return export_business_data(settings)
+        except TransferValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="No se ha podido guardar el respaldo en Descargas de Informes.",
+            ) from exc
+
+    @app.post("/api/data-transfer/validate")
+    def data_transfer_validate(payload: DataTransferFileRequest) -> dict[str, Any]:
+        settings = load_settings()
+        try:
+            return validate_transfer_package(settings, payload.fileName)
+        except TransferValidationError as exc:
+            return {
+                "valid": False,
+                "summary": "El respaldo no es apto para importar.",
+                "fileName": str(payload.fileName or "").strip(),
+                "checkedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "mode": "incremental",
+                "totalSourceRecords": 0,
+                "totalNewRecords": 0,
+                "totalUpdatedRecords": 0,
+                "totalUnchangedRecords": 0,
+                "stats": [],
+                "warnings": [],
+                "errors": [str(exc)],
+            }
+
+    @app.post("/api/data-transfer/import")
+    def data_transfer_import(payload: DataTransferFileRequest) -> dict[str, Any]:
+        settings = load_settings()
+        try:
+            return import_transfer_package(settings, payload.fileName)
+        except TransferValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/system/reveal-path")
     def reveal_path(payload: PathRevealRequest) -> dict[str, Any]:

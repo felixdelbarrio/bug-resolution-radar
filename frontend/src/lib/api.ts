@@ -495,6 +495,85 @@ export type DownloadTargetPayload = {
   source: "configured" | "system" | "fallback";
 };
 
+export type DataTransferExportStat = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type DataTransferMergeStat = {
+  key: string;
+  label: string;
+  sourceCount: number;
+  destinationCount: number;
+  newCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  finalCount: number;
+};
+
+export type DataTransferExportPayload = {
+  operation: "export";
+  summary: string;
+  completedAt: string;
+  fileName: string;
+  savedPath: string;
+  savedDir: string;
+  fileSize: number;
+  totalRecords: number;
+  stats: DataTransferExportStat[];
+};
+
+export type DataTransferPackagesPayload = {
+  directory: string;
+  packages: Array<{
+    fileName: string;
+    fileSize: number;
+    modifiedAt: string;
+  }>;
+};
+
+export type DataTransferValidationPayload = {
+  valid: boolean;
+  summary: string;
+  fileName: string;
+  fileSize?: number;
+  createdAt?: string;
+  checkedAt: string;
+  mode: "incremental";
+  totalSourceRecords: number;
+  totalNewRecords: number;
+  totalUpdatedRecords: number;
+  totalUnchangedRecords: number;
+  stats: DataTransferMergeStat[];
+  warnings: string[];
+  errors?: string[];
+};
+
+export type DataTransferImportPayload = {
+  operation: "import";
+  summary: string;
+  completedAt: string;
+  fileName: string;
+  mode: "incremental";
+  totalNewRecords: number;
+  totalUpdatedRecords: number;
+  totalUnchangedRecords: number;
+  totalFinalRecords: number;
+  stats: DataTransferMergeStat[];
+};
+
+export type DataTransferHistoryPayload = {
+  operations: Array<{
+    id: string;
+    operation: "export" | "import";
+    completedAt: string;
+    fileName: string;
+    totalRecords: number;
+    headline: string;
+  }>;
+};
+
 type QueryValue = string | number | boolean | null | undefined | string[];
 
 function toQueryString(params: Record<string, QueryValue>) {
