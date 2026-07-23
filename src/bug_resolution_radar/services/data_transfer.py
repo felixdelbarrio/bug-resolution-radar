@@ -7,6 +7,7 @@ import io
 import json
 import os
 import zipfile
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -15,7 +16,7 @@ from uuid import uuid4
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.models.schema import IssuesDocument
-from bug_resolution_radar.models.schema_helix import HelixDocument
+from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 from bug_resolution_radar.repositories.helix_repo import HelixRepo
 from bug_resolution_radar.repositories.issues_store import save_issues_doc
 from bug_resolution_radar.services.downloads import (
@@ -42,6 +43,22 @@ _DATASET_LABELS = {
     "notes": "Anotaciones de seguimiento",
     "learning": "Aprendizaje de insights",
 }
+_HELIX_TRANSFER_RAW_FIELDS = (
+    "BBVA_SEL_GIM_Maestra",
+    "BBVA_MasterIncident",
+)
+_HELIX_DESCRIPTION_RAW_FIELDS = (
+    "Detailed Decription",
+    "detailedDescription",
+    "Detailed Description",
+    "description2",
+)
+_HELIX_EXECUTIVE_DESCRIPTION_RAW_FIELDS = (
+    "BBVA_ExecutiveDescription",
+    "bbva_executivedescription",
+    "ExecutiveDescription",
+    "Executive Description",
+)
 _TRANSFER_LOCK = RLock()
 
 
@@ -197,6 +214,123 @@ def _dataset_counts(
     }
 
 
+def _raw_field_token(value: Any) -> str:
+    return "".join(character for character in str(value or "").casefold() if character.isalnum())
+
+
+def _raw_value_text(value: Any) -> str:
+    if isinstance(value, Mapping):
+        for key in ("fullName", "displayName", "name", "label", "value", "id"):
+            text = _raw_value_text(value.get(key))
+            if text:
+                return text
+        return ""
+    if isinstance(value, (list, tuple)):
+        values = [_raw_value_text(item) for item in value]
+        return ", ".join(dict.fromkeys(item for item in values if item))
+    return str(value or "").strip()
+
+
+def _first_raw_text(raw_fields: Mapping[str, Any], candidates: tuple[str, ...]) -> str:
+    by_token = {
+        _raw_field_token(key): value for key, value in raw_fields.items() if _raw_field_token(key)
+    }
+    for candidate in candidates:
+        text = _raw_value_text(by_token.get(_raw_field_token(candidate)))
+        if text:
+            return text
+    return ""
+
+
+def _compact_helix_raw_fields(raw_fields: Mapping[str, Any]) -> dict[str, Any]:
+    by_token = {
+        _raw_field_token(key): value for key, value in raw_fields.items() if _raw_field_token(key)
+    }
+    compact: dict[str, Any] = {}
+    for canonical_name in _HELIX_TRANSFER_RAW_FIELDS:
+        token = _raw_field_token(canonical_name)
+        if token in by_token and by_token[token] not in (None, ""):
+            compact[canonical_name] = by_token[token]
+    return compact
+
+
+def _prepare_transfer_documents(
+    issues: IssuesDocument,
+    helix: HelixDocument,
+) -> tuple[IssuesDocument, HelixDocument, dict[str, int]]:
+    """Keep the portable Helix contract small while preserving radar behaviour."""
+    compact_items: list[HelixWorkItem] = []
+    helix_index: dict[str, int] = {}
+    removed_raw_fields = 0
+    descriptions_recovered = 0
+    executive_descriptions_recovered = 0
+
+    for item in helix.items:
+        raw_fields = item.raw_fields if isinstance(item.raw_fields, Mapping) else {}
+        description = str(item.description or "").strip()
+        if not description:
+            description = _first_raw_text(raw_fields, _HELIX_DESCRIPTION_RAW_FIELDS)
+            descriptions_recovered += int(bool(description))
+        executive_description = str(item.executive_description or "").strip()
+        if not executive_description:
+            executive_description = _first_raw_text(
+                raw_fields,
+                _HELIX_EXECUTIVE_DESCRIPTION_RAW_FIELDS,
+            )
+            executive_descriptions_recovered += int(bool(executive_description))
+        compact_raw_fields = _compact_helix_raw_fields(raw_fields)
+        removed_raw_fields += max(0, len(raw_fields) - len(compact_raw_fields))
+        compact_item = item.model_copy(
+            update={
+                "description": description,
+                "executive_description": executive_description,
+                "raw_fields": compact_raw_fields,
+            }
+        )
+        helix_index[helix_merge_key(compact_item)] = len(compact_items)
+        compact_items.append(compact_item)
+
+    aligned_issues = []
+    aligned_pairs = 0
+    for issue in issues.issues:
+        index = helix_index.get(issue_merge_key(issue))
+        if index is None or str(issue.source_type or "").strip().casefold() != "helix":
+            aligned_issues.append(issue)
+            continue
+        item = compact_items[index]
+        description = str(issue.description or "").strip() or str(item.description or "").strip()
+        executive_description = (
+            str(issue.helix_executive_description or "").strip()
+            or str(item.executive_description or "").strip()
+        )
+        aligned_issues.append(
+            issue.model_copy(
+                update={
+                    "description": description,
+                    "helix_executive_description": executive_description,
+                }
+            )
+        )
+        compact_items[index] = item.model_copy(
+            update={
+                "description": description,
+                "executive_description": executive_description,
+            }
+        )
+        aligned_pairs += 1
+
+    return (
+        issues.model_copy(update={"issues": aligned_issues}),
+        helix.model_copy(update={"items": compact_items}),
+        {
+            "helixRawFieldsRemoved": removed_raw_fields,
+            "helixDescriptionsRecovered": descriptions_recovered,
+            "helixExecutiveDescriptionsRecovered": executive_descriptions_recovered,
+            "helixIssuesAligned": aligned_pairs,
+        },
+    )
+
+
 def _manifest(
     *,
     created_at: str,
@@ -260,6 +394,7 @@ def export_business_data(settings: Settings) -> dict[str, Any]:
     with _TRANSFER_LOCK:
         issues = _load_issues_for_export(settings)
         helix = _load_helix_for_export(settings)
+        issues, helix, compact_stats = _prepare_transfer_documents(issues, helix)
         notes = _normalize_notes_payload(
             _read_json_path(Path(settings.NOTES_PATH).expanduser(), default={})
         )
@@ -298,6 +433,7 @@ def export_business_data(settings: Settings) -> dict[str, Any]:
             "fileSize": len(archive_content),
             "totalRecords": sum(counts.values()),
             "stats": stats,
+            "contentPreparation": compact_stats,
         }
         _append_history(
             settings,
@@ -312,6 +448,62 @@ def export_business_data(settings: Settings) -> dict[str, Any]:
             },
         )
         return payload
+
+
+def optimize_transfer_archive(
+    source_path: str | Path,
+    destination_path: str | Path,
+) -> dict[str, Any]:
+    """Create a compact, integrity-checked copy of an existing transfer package."""
+    source = Path(source_path).expanduser().resolve()
+    destination = Path(destination_path).expanduser().resolve()
+    if source == destination:
+        raise TransferValidationError("La copia optimizada debe tener un nombre diferente.")
+    if not source.is_file():
+        raise TransferValidationError("El respaldo de origen ya no está disponible.")
+    if source.stat().st_size > MAX_ARCHIVE_BYTES:
+        raise TransferValidationError("El respaldo de origen supera el tamaño máximo admitido.")
+    if source.suffix.casefold() != TRANSFER_EXTENSION:
+        raise TransferValidationError("El fichero de origen no es un respaldo del radar.")
+    if destination.suffix.casefold() != TRANSFER_EXTENSION:
+        raise TransferValidationError("La copia optimizada debe conservar la extensión .brr.")
+    if destination.exists():
+        raise TransferValidationError("Ya existe un respaldo con el nombre de destino.")
+
+    with _TRANSFER_LOCK:
+        manifest, payloads = _decode_archive(source)
+        issues, helix, compact_stats = _prepare_transfer_documents(
+            payloads["issues"],
+            payloads["helix"],
+        )
+        notes = payloads["notes"]
+        learning = payloads["learning"]
+        counts = _dataset_counts(issues, helix, notes, learning)
+        files = {
+            "issues": issues.model_dump_json(ensure_ascii=False).encode("utf-8"),
+            "helix": helix.model_dump_json(ensure_ascii=False).encode("utf-8"),
+            "notes": _json_bytes(notes),
+            "learning": _json_bytes(learning),
+        }
+        rebuilt_manifest = _manifest(
+            created_at=str(manifest.get("createdAt") or _iso_now()),
+            files=files,
+            counts=counts,
+        )
+        archive_content = _build_archive(files, rebuilt_manifest)
+        _atomic_write(destination, archive_content)
+        _decode_archive(destination)
+
+    return {
+        "sourcePath": str(source),
+        "savedPath": str(destination),
+        "sourceFileSize": int(source.stat().st_size),
+        "fileSize": len(archive_content),
+        "expandedSize": sum(len(content) for content in files.values())
+        + len(_json_bytes(rebuilt_manifest)),
+        "totalRecords": sum(counts.values()),
+        "stats": compact_stats,
+    }
 
 
 def _safe_archive_path(settings: Settings, file_name: str) -> Path:
