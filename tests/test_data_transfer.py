@@ -1,492 +1,210 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
+import io
 import json
 import zipfile
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from bug_resolution_radar.config import Settings
-from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
-from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
-from bug_resolution_radar.repositories.helix_repo import HelixRepo
-from bug_resolution_radar.repositories.issues_store import load_issues_doc, save_issues_doc
+from bug_resolution_radar.services.cloud_projection import (
+    REPORT_MIME_TYPE,
+    CloudProjectionArtifact,
+    canonical_json_bytes,
+)
 from bug_resolution_radar.services.data_transfer import (
     TransferValidationError,
     _build_archive,
+    _decode_archive,
     _manifest,
     export_business_data,
-    import_transfer_package,
-    list_transfer_packages,
-    optimize_transfer_archive,
     validate_transfer_package,
 )
 
-api_app = importlib.import_module("bug_resolution_radar.api.app")
 
-
-def _settings(root: Path, *, downloads: Path) -> Settings:
+def _settings(tmp_path: Path) -> Settings:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    for name in ("issues.json", "helix.json", "notes.json"):
+        (data_dir / name).write_text("{}", encoding="utf-8")
     return Settings(
-        DATA_PATH=str(root / "issues.json"),
-        HELIX_DATA_PATH=str(root / "helix.json"),
-        NOTES_PATH=str(root / "notes.json"),
-        INSIGHTS_LEARNING_PATH=str(root / "learning.json"),
-        REPORT_PPT_DOWNLOAD_DIR=str(downloads),
+        DATA_PATH=str(data_dir / "issues.json"),
+        HELIX_DATA_PATH=str(data_dir / "helix.json"),
+        NOTES_PATH=str(data_dir / "notes.json"),
+        REPORT_PPT_DOWNLOAD_DIR=str(tmp_path / "downloads"),
     )
 
 
-def _issue(key: str, *, summary: str = "Resumen") -> NormalizedIssue:
-    return NormalizedIssue(
-        key=key,
-        summary=summary,
-        status="Open",
-        type="Bug",
-        priority="High",
-        country="España",
-        source_type="jira",
-        source_alias="Core",
-        source_id="jira:espana:core",
-    )
+def _pptx_bytes(marker: bytes = b"canonical-report") -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, mode="w") as archive:
+        archive.writestr("[Content_Types].xml", b"<Types/>")
+        archive.writestr("ppt/presentation.xml", b"<p:presentation/>")
+        archive.writestr("ppt/media/marker.bin", marker)
+    return output.getvalue()
 
 
-def _seed_source(settings: Settings) -> None:
-    save_issues_doc(
-        settings.DATA_PATH,
-        IssuesDocument(ingested_at="2026-07-22T10:00:00+00:00", issues=[_issue("RAD-1")]),
-    )
-    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
-        HelixDocument(
-            ingested_at="2026-07-22T10:00:00+00:00",
-            items=[
-                HelixWorkItem(
-                    id="INC0001",
-                    summary="Incidencia Helix",
-                    source_id="helix:espana:core",
-                    country="España",
-                )
-            ],
-        )
-    )
-    Path(settings.NOTES_PATH).write_text(
-        json.dumps(
-            {
-                "RAD-1": {
-                    "entries": [
-                        {
-                            "id": "note-1",
-                            "createdAt": "2026-07-22T11:00:00+00:00",
-                            "note": "Seguimiento activo",
-                        }
-                    ]
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    Path(settings.INSIGHTS_LEARNING_PATH).write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "scopes": {
-                    "España::jira:espana:core": {
-                        "interactions": 3,
-                        "updated_at": "2026-07-22T12:00:00+00:00",
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def test_export_validate_and_incrementally_import_all_business_data(tmp_path: Path) -> None:
-    downloads = tmp_path / "downloads"
-    source = _settings(tmp_path / "source", downloads=downloads)
-    Path(source.DATA_PATH).parent.mkdir(parents=True)
-    _seed_source(source)
-
-    exported = export_business_data(source)
-
-    assert exported["totalRecords"] == 4
-    assert Path(exported["savedPath"]).parent == downloads
-    assert Path(exported["savedPath"]).suffix == ".brr"
-    assert [row["count"] for row in exported["stats"]] == [1, 1, 1, 1]
-    assert list_transfer_packages(source)["packages"][0]["fileName"] == exported["fileName"]
-
-    destination = _settings(tmp_path / "destination", downloads=downloads)
-    Path(destination.DATA_PATH).parent.mkdir(parents=True)
-    save_issues_doc(
-        destination.DATA_PATH,
-        IssuesDocument(
-            issues=[
-                _issue("RAD-1", summary="Versión anterior"),
-                _issue("RAD-LOCAL", summary="Solo en destino"),
-            ]
-        ),
-    )
-
-    preview = validate_transfer_package(destination, exported["fileName"])
-
-    assert preview["valid"] is True
-    assert preview["totalNewRecords"] == 3
-    assert preview["totalUpdatedRecords"] == 1
-    assert preview["totalUnchangedRecords"] == 0
-    issue_preview = next(row for row in preview["stats"] if row["key"] == "issues")
-    assert issue_preview == {
-        "key": "issues",
-        "label": "Incidencias del radar",
-        "sourceCount": 1,
-        "destinationCount": 2,
-        "newCount": 0,
-        "updatedCount": 1,
-        "unchangedCount": 0,
-        "finalCount": 2,
-    }
-
-    imported = import_transfer_package(destination, exported["fileName"])
-
-    assert imported["totalNewRecords"] == 3
-    assert imported["totalUpdatedRecords"] == 1
-    final_issues = load_issues_doc(destination.DATA_PATH)
-    assert {item.key for item in final_issues.issues} == {"RAD-1", "RAD-LOCAL"}
-    assert next(item for item in final_issues.issues if item.key == "RAD-1").summary == "Resumen"
-    assert (
-        len((HelixRepo(Path(destination.HELIX_DATA_PATH)).load() or HelixDocument.empty()).items)
-        == 1
-    )
-    assert (
-        json.loads(Path(destination.NOTES_PATH).read_text(encoding="utf-8"))["RAD-1"]["entries"][0][
-            "note"
-        ]
-        == "Seguimiento activo"
-    )
-
-    repeated = import_transfer_package(destination, exported["fileName"])
-    assert repeated["totalNewRecords"] == 0
-    assert repeated["totalUpdatedRecords"] == 0
-    assert repeated["totalUnchangedRecords"] == 4
-
-
-def test_validation_rejects_a_package_with_modified_business_data(tmp_path: Path) -> None:
-    downloads = tmp_path / "downloads"
-    settings = _settings(tmp_path / "source", downloads=downloads)
-    Path(settings.DATA_PATH).parent.mkdir(parents=True)
-    _seed_source(settings)
-    exported = export_business_data(settings)
-    archive_path = Path(exported["savedPath"])
-
-    with zipfile.ZipFile(archive_path, mode="a") as archive:
-        archive.writestr("data/issues.json", b'{"issues":[]}')
-
-    with pytest.raises(TransferValidationError, match="duplicados"):
-        validate_transfer_package(settings, exported["fileName"])
-
-
-def test_validation_rejects_files_outside_the_configured_download_directory(
-    tmp_path: Path,
-) -> None:
-    settings = _settings(tmp_path / "source", downloads=tmp_path / "downloads")
-    Path(settings.DATA_PATH).parent.mkdir(parents=True)
-
-    with pytest.raises(TransferValidationError, match="Descargas de Informes"):
-        validate_transfer_package(settings, "../otro-respaldo.brr")
-
-
-def test_export_keeps_only_helix_fields_used_by_the_radar_and_preserves_rationale(
-    tmp_path: Path,
-) -> None:
-    downloads = tmp_path / "downloads"
-    settings = _settings(tmp_path / "source", downloads=downloads)
-    Path(settings.DATA_PATH).parent.mkdir(parents=True)
-    source_id = "helix:espana:core"
-    save_issues_doc(
-        settings.DATA_PATH,
-        IssuesDocument(
-            issues=[
-                NormalizedIssue(
-                    key="INC0001",
-                    summary="Incidencia Helix",
-                    status="Open",
-                    type="Helix",
-                    priority="",
-                    country="España",
-                    source_type="helix",
-                    source_alias="Core",
-                    source_id=source_id,
-                )
-            ]
-        ),
-    )
-    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
-        HelixDocument(
-            items=[
-                HelixWorkItem(
-                    id="INC0001",
-                    summary="Incidencia Helix",
-                    status="Open",
-                    incident_type="Helix",
-                    country="España",
-                    source_alias="Core",
-                    source_id=source_id,
-                    raw_fields={
-                        "Detailed Decription": "Racional detallado",
-                        "BBVA_ExecutiveDescription": "Resumen ejecutivo",
-                        "BBVA_SEL_GIM_Maestra": "Sí",
-                        "BBVA_MasterIncident": "No",
-                        "PayloadSinUso": "x" * 100_000,
-                    },
-                )
-            ]
-        )
-    )
-
-    exported = export_business_data(settings)
-
-    with zipfile.ZipFile(exported["savedPath"]) as archive:
-        manifest = json.loads(archive.read("manifest.json"))
-        raw_issues = archive.read("data/issues.json")
-        raw_helix = archive.read("data/helix.json")
-        issue = json.loads(raw_issues)["issues"][0]
-        item = json.loads(raw_helix)["items"][0]
-
-    assert item["description"] == "Racional detallado"
-    assert item["executive_description"] == "Resumen ejecutivo"
-    assert issue["description"] == "Racional detallado"
-    assert issue["helix_executive_description"] == "Resumen ejecutivo"
-    assert item["raw_fields"] == {
-        "BBVA_SEL_GIM_Maestra": "Sí",
-        "BBVA_MasterIncident": "No",
-    }
-    assert manifest["datasets"]["issues"]["sha256"] == hashlib.sha256(raw_issues).hexdigest()
-    assert manifest["datasets"]["helix"]["sha256"] == hashlib.sha256(raw_helix).hexdigest()
-    assert exported["contentPreparation"] == {
-        "helixRawFieldsRemoved": 3,
-        "helixDescriptionsRecovered": 1,
-        "helixExecutiveDescriptionsRecovered": 1,
-        "helixIssuesAligned": 1,
-    }
-
-
-def test_optimize_archive_preserves_creation_date_and_recalculates_integrity(
-    tmp_path: Path,
-) -> None:
-    issue = NormalizedIssue(
-        key="INC0001",
-        summary="Incidencia Helix",
-        status="Open",
-        type="Helix",
-        priority="",
-        country="España",
-        source_type="helix",
-        source_alias="Core",
-        source_id="helix:espana:core",
-    )
-    helix_item = HelixWorkItem(
-        id="INC0001",
-        summary="Incidencia Helix",
-        status="Open",
-        incident_type="Helix",
-        country="España",
-        source_alias="Core",
-        source_id="helix:espana:core",
-        raw_fields={
-            "Detailed Decription": "Racional recuperado",
-            "CampoSinUso": "x" * 100_000,
+def _artifact(report_content: bytes) -> CloudProjectionArtifact:
+    newsletter = {
+        "periodLabel": "España · Periodo 01/07 - 14/07/2026",
+        "focusLabel": "Incidencias con criticidad alta",
+        "metrics": {
+            "createdCurrent": 2,
+            "createdPrevious": 1,
+            "closedCurrent": 1,
+            "closedPrevious": 0,
+            "currentOpen": 3,
+            "focusOpen": 2,
+            "otherOpen": 1,
+            "agedOpen": 1,
+            "resolutionCurrent": "3.0d",
         },
-    )
-    issues = IssuesDocument(issues=[issue])
-    helix = HelixDocument(items=[helix_item])
-    notes: dict[str, object] = {}
-    learning = {"version": 1, "scopes": {}}
-    files = {
-        "issues": issues.model_dump_json(ensure_ascii=False).encode(),
-        "helix": helix.model_dump_json(ensure_ascii=False).encode(),
-        "notes": json.dumps(notes, separators=(",", ":")).encode(),
-        "learning": json.dumps(learning, separators=(",", ":")).encode(),
+        "facts": [{"id": "backlog", "statement": "El backlog contiene 3 incidencias."}],
     }
-    created_at = "2026-07-23T07:37:44+00:00"
-    counts = {"issues": 1, "helix": 1, "notes": 0, "learning": 0}
-    source = tmp_path / "original.brr"
-    source.write_bytes(
-        _build_archive(
-            files,
-            _manifest(created_at=created_at, files=files, counts=counts),
-        )
-    )
-    destination = tmp_path / "compatible.brr"
-
-    result = optimize_transfer_archive(source, destination)
-
-    with zipfile.ZipFile(destination) as archive:
-        rebuilt_manifest = json.loads(archive.read("manifest.json"))
-        rebuilt_helix = archive.read("data/helix.json")
-        item = json.loads(rebuilt_helix)["items"][0]
-    assert rebuilt_manifest["createdAt"] == created_at
-    assert (
-        rebuilt_manifest["datasets"]["helix"]["sha256"] == hashlib.sha256(rebuilt_helix).hexdigest()
-    )
-    assert item["description"] == "Racional recuperado"
-    assert item["raw_fields"] == {}
-    assert result["fileSize"] < result["sourceFileSize"]
-
-
-def test_scoped_export_keeps_only_active_issues_related_helix_and_notes(
-    tmp_path: Path,
-) -> None:
-    downloads = tmp_path / "downloads"
-    settings = _settings(tmp_path / "source", downloads=downloads)
-    Path(settings.DATA_PATH).parent.mkdir(parents=True)
-    core_source = "jira:mexico:core"
-    other_source = "jira:mexico:other"
-    save_issues_doc(
-        settings.DATA_PATH,
-        IssuesDocument(
-            issues=[
-                NormalizedIssue(
-                    key="MX-1",
-                    summary="Core",
-                    status="Open",
-                    type="Bug",
-                    priority="High",
-                    country="México",
-                    source_type="jira",
-                    source_alias="Core",
-                    source_id=core_source,
-                ),
-                NormalizedIssue(
-                    key="MX-2",
-                    summary="Otro",
-                    status="Open",
-                    type="Bug",
-                    priority="Low",
-                    country="México",
-                    source_type="jira",
-                    source_alias="Otro",
-                    source_id=other_source,
-                ),
-                _issue("ES-1"),
-            ]
-        ),
-    )
-    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
-        HelixDocument(
-            items=[
-                HelixWorkItem(
-                    id="INC-MX-1",
-                    status="Closed",
-                    country="México",
-                    source_id="helix:mexico:lookup",
-                    matched_jira_keys=["MX-1"],
-                ),
-                HelixWorkItem(
-                    id="INC-MX-2",
-                    status="Closed",
-                    country="México",
-                    source_id="helix:mexico:lookup",
-                    matched_jira_keys=["MX-2"],
-                ),
-            ]
-        )
-    )
-    Path(settings.NOTES_PATH).write_text(
-        json.dumps(
-            {
-                "MX-1": {"entries": [{"id": "n1", "createdAt": "", "note": "Core"}]},
-                "MX-2": {"entries": [{"id": "n2", "createdAt": "", "note": "Otro"}]},
-            }
-        ),
-        encoding="utf-8",
-    )
-    Path(settings.INSIGHTS_LEARNING_PATH).write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "scopes": {
-                    "México::jira:mexico:core": {
-                        "source_id": core_source,
-                        "interactions": 5,
+    report_hash = hashlib.sha256(report_content).hexdigest()
+    scope = {
+        "scopeKey": "espana::jira:espana:core",
+        "scopeLabel": "España · Core",
+        "country": "España",
+        "scopeMode": "source",
+        "sourceIds": ["jira:espana:core"],
+        "dataVersion": "a" * 24,
+        "referenceDate": "2026-07-14",
+        "immutable": True,
+    }
+    projection = {
+        "schema": "bug-resolution-radar-cloud-projection",
+        "schemaVersion": 1,
+        "semanticContract": "desktop-authoritative-v1",
+        "generatedAt": "2026-07-23T10:00:00+00:00",
+        "scope": scope,
+        "semantics": {"sourceOfTruth": "desktop"},
+        "views": {
+            "overview": {"stats": {"issues_total": 3}},
+            "insights": {"catalog": [], "byId": {}},
+            "trends": {"catalog": [], "byId": {}},
+            "issues": {
+                "total": 1,
+                "rows": [
+                    {
+                        "issue_uid": "jira:espana:core::RAD-1",
+                        "key": "RAD-1",
                     }
-                },
-            }
-        ),
-        encoding="utf-8",
+                ],
+            },
+            "kanban": [],
+        },
+        "newsletterFacts": newsletter,
+        "report": {
+            "fileName": "seguimiento-espana.pptx",
+            "mimeType": REPORT_MIME_TYPE,
+            "sha256": report_hash,
+            "bytes": len(report_content),
+            "slideCount": 8,
+        },
+        "factsSha256": hashlib.sha256(canonical_json_bytes(newsletter)).hexdigest(),
+    }
+    return CloudProjectionArtifact(
+        projection=projection,
+        projection_content=canonical_json_bytes(projection),
+        report_content=report_content,
     )
 
-    exported = export_business_data(
+
+def test_export_v2_contains_only_projection_and_exact_local_pptx(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    report_content = _pptx_bytes()
+    artifact = _artifact(report_content)
+    monkeypatch.setattr(
+        "bug_resolution_radar.services.data_transfer.build_cloud_projection_artifact",
+        lambda *_args, **_kwargs: artifact,
+    )
+
+    result = export_business_data(
         settings,
-        country="México",
-        source_ids=[core_source],
-        scope_mode="country",
+        country="España",
+        source_ids=["jira:espana:core"],
+        scope_mode="source",
     )
 
-    with zipfile.ZipFile(exported["savedPath"]) as archive:
-        issues = json.loads(archive.read("data/issues.json"))["issues"]
-        helix = json.loads(archive.read("data/helix.json"))["items"]
-        notes = json.loads(archive.read("data/notes.json"))
-        learning = json.loads(archive.read("data/insights_learning.json"))
-    assert [item["key"] for item in issues] == ["MX-1"]
-    assert [item["id"] for item in helix] == ["INC-MX-1"]
-    assert list(notes) == ["MX-1"]
-    assert learning == {"scopes": {}, "version": 1}
-    assert exported["totalRecords"] == 3
-    assert exported["scope"] == {
-        "country": "México",
-        "scopeMode": "country",
-        "sourceIds": [core_source],
-        "issueCount": 1,
-        "relatedHelixCount": 1,
-        "linkedHelixCount": 1,
-        "noteCount": 1,
+    assert result["totalRecords"] == 2
+    with zipfile.ZipFile(result["savedPath"]) as archive:
+        assert set(archive.namelist()) == {
+            "manifest.json",
+            "data/projection.json",
+            "artifacts/period_followup.pptx",
+        }
+        manifest = json.loads(archive.read("manifest.json"))
+        projection_bytes = archive.read("data/projection.json")
+        packaged_report = archive.read("artifacts/period_followup.pptx")
+
+    assert manifest["version"] == 2
+    assert manifest["semanticContract"] == "desktop-authoritative-v1"
+    assert set(manifest["datasets"]) == {"projection", "report"}
+    for descriptor in manifest["datasets"].values():
+        assert set(descriptor) == {"path", "sha256", "bytes", "records"}
+        assert descriptor["records"] == 1
+    assert packaged_report == report_content
+    assert manifest["datasets"]["report"]["sha256"] == hashlib.sha256(report_content).hexdigest()
+    assert (
+        manifest["datasets"]["projection"]["sha256"] == hashlib.sha256(projection_bytes).hexdigest()
+    )
+
+    preview = validate_transfer_package(settings, result["fileName"])
+    assert preview["valid"] is True
+    assert preview["mode"] == "inspect-only"
+    assert preview["scope"] == artifact.projection["scope"]
+
+
+def test_archive_is_byte_deterministic_for_identical_inputs() -> None:
+    artifact = _artifact(_pptx_bytes())
+    files = {
+        "projection": artifact.projection_content,
+        "report": artifact.report_content,
     }
-    assert exported["fileName"].startswith("respaldo_radar_mexico_agregado_")
+    manifest = _manifest(
+        created_at=artifact.projection["generatedAt"],
+        scope=artifact.projection["scope"],
+        files=files,
+    )
+    assert _build_archive(files, manifest) == _build_archive(files, manifest)
 
 
-def test_api_guides_export_validation_and_import_in_business_language(
-    monkeypatch: pytest.MonkeyPatch,
+def test_validation_rejects_report_whose_bytes_do_not_match_manifest(
     tmp_path: Path,
 ) -> None:
-    settings = _settings(tmp_path / "source", downloads=tmp_path / "downloads")
-    Path(settings.DATA_PATH).parent.mkdir(parents=True)
-    _seed_source(settings)
-    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
-    client = TestClient(api_app.create_app())
-
-    exported = client.post(
-        "/api/data-transfer/export",
-        json={
-            "country": "España",
-            "sourceIds": ["jira:espana:core"],
-            "scopeMode": "source",
-        },
+    settings = _settings(tmp_path)
+    artifact = _artifact(_pptx_bytes())
+    files = {
+        "projection": artifact.projection_content,
+        "report": artifact.report_content,
+    }
+    manifest = _manifest(
+        created_at=artifact.projection["generatedAt"],
+        scope=artifact.projection["scope"],
+        files=files,
     )
-    assert exported.status_code == 200
-    assert exported.json()["summary"] == "Vista de España preparada para trasladar."
-
-    packages = client.get("/api/data-transfer/packages")
-    assert packages.status_code == 200
-    assert packages.json()["packages"][0]["fileName"] == exported.json()["fileName"]
-
-    checked = client.post(
-        "/api/data-transfer/validate",
-        json={"fileName": exported.json()["fileName"]},
+    path = Path(settings.REPORT_PPT_DOWNLOAD_DIR) / "tampered.brr"
+    path.parent.mkdir()
+    path.write_bytes(
+        _build_archive(
+            {"projection": files["projection"], "report": _pptx_bytes(b"changed")},
+            manifest,
+        )
     )
-    assert checked.status_code == 200
-    assert checked.json()["valid"] is True
-    assert checked.json()["totalUnchangedRecords"] == 2
 
-    imported = client.post(
-        "/api/data-transfer/import",
-        json={"fileName": exported.json()["fileName"]},
-    )
-    assert imported.status_code == 200
-    assert "Importación incremental completada" in imported.json()["summary"]
+    with pytest.raises(TransferValidationError, match="manifest"):
+        _decode_archive(path)
 
-    history = client.get("/api/data-transfer/history")
-    assert history.status_code == 200
-    assert [item["operation"] for item in history.json()["operations"][:2]] == [
-        "import",
-        "export",
-    ]
+
+def test_v1_and_fake_desktop_import_contract_are_not_exposed() -> None:
+    import bug_resolution_radar.services.data_transfer as transfer
+
+    assert transfer.TRANSFER_VERSION == 2
+    assert not hasattr(transfer, "import_transfer_package")
+    assert not hasattr(transfer, "list_transfer_packages")
+    assert not hasattr(transfer, "optimize_transfer_archive")

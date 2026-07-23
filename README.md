@@ -52,8 +52,15 @@ Resumen de capas:
 - `src/bug_resolution_radar/analytics/`: KPIs, semántica de estado y ventana de análisis.
 - `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
 - `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, merge/mapeo de ingesta, exportes e ingesta asíncrona.
-- `src/bug_resolution_radar/services/data_transfer.py`: respaldo integral `.brr`, validación de integridad e importación incremental de datos de negocio.
+- `src/bug_resolution_radar/services/data_transfer.py`: handoff `.brr` v2, compacto y verificable, desde escritorio hacia GPC.
 - El runtime de presentación es 100% React/FastAPI; no queda shell Python legacy ni dependencia de UI obsoleta en el paquete.
+
+Flujo cloud:
+- Escritorio materializa el racional completo y genera el PPTX local autoritativo.
+- El handoff solo contiene `projection.json` y ese PPTX, ambos con SHA-256.
+- GPC publica un snapshot estático por geografía/vista, convierte el PPTX a Google Slides
+  y sirve la WebApp sin filtros ni recálculos de negocio.
+- La newsletter usa los hechos del mismo snapshot, enlaza Slides y adjunta el PPTX exacto.
 
 Flujo clave de estados finalistas:
 - El lookup ARSQL solo toma referencias `INC...` desde la descripción de Jira y descarta Jira ya finalistas (`Accepted`, `Ready to deploy`, `Deployed`/`Acepted`) antes de deduplicar por país/`Servicio Origen BU/UG`.
@@ -68,6 +75,7 @@ Guía detallada por tema:
 - [Mapa de Código](docs/CODEBASE.md)
 - [Motor de Insights](docs/INSIGHTS_ENGINE.md)
 - [Theming y reglas visuales](docs/THEMING.md)
+- [Handoff de escritorio a GPC](docs/CLOUD_HANDOFF.md)
 - [Calidad y CI](docs/QUALITY.md)
 
 ## Desktop Runtime
@@ -141,12 +149,12 @@ Firma/notarización (opcional, macOS):
 - Metadatos ligeros de Helix: `data/helix_dump.meta.json`
 - Insights learning: `data/insights_learning.json`
 - Notas: `data/notes.json`
-- Historial de exportaciones e importaciones: `data/data_transfer_history.json`
+- Historial de handoffs cloud: `data/data_transfer_history.json`
 - Observabilidad de ingesta:
   - `data/observability/ingest_profiles.jsonl`
   - `data/observability/ingest_circuit_state.json`
 
-Los respaldos integrales se crean desde `Ingesta > Exportar` y se guardan en la
-carpeta configurada para Descargas de Informes. `Ingesta > Importar` muestra los
-respaldos disponibles, valida su integridad y anticipa el balance incremental
-antes de incorporar altas o actualizaciones.
+Los handoffs cloud se crean desde `Ingesta > Exportar` y se guardan en la carpeta
+configurada para Descargas de Informes. Son entregas unidireccionales para GPC:
+incluyen la proyección inmutable de la vista activa y la presentación local exacta,
+sin duplicar los datasets fuente.

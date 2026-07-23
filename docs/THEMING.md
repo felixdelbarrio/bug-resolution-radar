@@ -19,6 +19,19 @@ Tokens de referencia:
 - Navegación: `--bbva-tab-*`
 - Estado objetivo (deployed): `--bbva-goal-green`, `--bbva-goal-green-bg`
 
+Fundaciones BBVA Experience:
+- Primarios: Midnight `#070E46`, Electric `#001391`, Royal Dark `#2165CA`,
+  Royal `#0C6DFF`, Serene Dark `#53A9EF`, Serene `#85C8FF` y
+  Blue Light `#D6E9F8`.
+- Neutros: Black `#000519`, Grey 900 `#11192D`, Grey 800 `#222C42`,
+  Grey 700 `#334056`, Grey 600 `#46536D`, Grey 500 `#ADB8C2`,
+  Grey 400 `#CAD1D8`, Grey 300 `#E2E6EA`, Grey 200 `#F7F8F8` y White.
+- Benton Sans es la tipografía funcional; Tiempos Headline Bold se reserva para
+  titulares.
+- La retícula usa incrementos de 8 px, margen/gutter de 24 px y ancho de contenido
+  máximo de 1296 px.
+- El radio principal es 16 px y el de elementos anidados o botones, 8 px.
+
 Reglas:
 - Cualquier componente nuevo debe consumir variables CSS, no valores hex directos salvo justificación explícita.
 - Contraste mínimo legible en tablas, chips y ejes de gráficos.

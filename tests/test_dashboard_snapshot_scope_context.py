@@ -80,6 +80,7 @@ def test_build_issue_rows_skips_kpi_computation(monkeypatch: Any, tmp_path) -> N
 
     assert out["total"] == 2
     assert [row["key"] for row in out["rows"]] == ["MEX-2"]
+    assert [row["issue_uid"] for row in out["rows"]] == ["jira:mexico:core::MEX-2"]
 
 
 def test_intelligence_payload_includes_finalist_discrepancies_tab(

@@ -14,6 +14,7 @@ REQUIRED_DOC_FILES: Tuple[str, ...] = (
     "docs/THEMING.md",
     "docs/QUALITY.md",
     "docs/CODEBASE.md",
+    "docs/CLOUD_HANDOFF.md",
 )
 
 REQUIRED_HEADINGS: Dict[str, Tuple[str, ...]] = {
@@ -23,6 +24,7 @@ REQUIRED_HEADINGS: Dict[str, Tuple[str, ...]] = {
     "docs/THEMING.md": ("## Theme Tokens", "## Plotly Rules"),
     "docs/QUALITY.md": ("## Local Commands", "## CI Pipeline"),
     "docs/CODEBASE.md": ("## Core Package Map", "## Frontend Package Map"),
+    "docs/CLOUD_HANDOFF.md": ("## Transfer contract", "## Cache and performance"),
 }
 
 STALE_DOC_TOKENS: Tuple[str, ...] = (

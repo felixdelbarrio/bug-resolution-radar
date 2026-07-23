@@ -815,6 +815,9 @@ def _effective_trends_open_scope(
 class DashboardQuery:
     workspace: WorkspaceSelection
     filters: FilterState
+    # Cloud projections materialize one immutable, explicit source scope.  The
+    # regular desktop query leaves this empty and keeps the configured rollup.
+    source_ids: tuple[str, ...] = ()
     quincenal_scope: str = "Todas"
     issue_scope_keys: tuple[str, ...] = ()
     issue_sort_col: str = ""
@@ -837,6 +840,19 @@ class DashboardScopeContext:
 def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
     df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
     scoped_df = apply_workspace_source_scope(df, settings=settings, selection=query.workspace)
+    explicit_source_ids = tuple(
+        sorted(
+            {
+                str(source_id or "").strip()
+                for source_id in query.source_ids
+                if str(source_id or "").strip()
+            }
+        )
+    )
+    if explicit_source_ids and "source_id" in scoped_df.columns:
+        scoped_df = scoped_df.loc[
+            scoped_df["source_id"].fillna("").astype(str).isin(explicit_source_ids)
+        ].copy(deep=False)
     return apply_analysis_depth_filter(scoped_df, settings=settings)
 
 
@@ -886,6 +902,7 @@ def _scope_context_cache_key(
         str(query.workspace.country or "").strip(),
         str(query.workspace.source_id or "").strip(),
         str(query.workspace.scope_mode or "").strip(),
+        tuple(str(item or "").strip() for item in query.source_ids),
         tuple(str(item or "").strip() for item in list(query.filters.status or [])),
         tuple(str(item or "").strip() for item in list(query.filters.priority or [])),
         tuple(str(item or "").strip() for item in list(query.filters.assignee or [])),
@@ -1142,6 +1159,7 @@ def build_issue_rows(
         dff = dff.sort_values(sort_column, ascending=ascending, kind="mergesort")
     page = dff.iloc[max(offset, 0) : max(offset, 0) + max(limit, 1)].copy(deep=False)
     columns = [
+        "issue_uid",
         "key",
         "summary",
         "description",
@@ -1163,6 +1181,11 @@ def build_issue_rows(
     for column in columns:
         if column not in page.columns:
             page[column] = ""
+    page["issue_uid"] = (
+        page["source_id"].fillna("").astype(str).str.strip()
+        + "::"
+        + page["key"].fillna("").astype(str).str.strip()
+    )
     try:
         notes_store = NotesStore(Path(settings.NOTES_PATH))
         notes_store.load()
@@ -1180,6 +1203,7 @@ def build_issue_rows(
         if column in page.columns:
             page[column] = page[column].astype(str).replace({"NaT": "", "nan": ""})
     for column in (
+        "issue_uid",
         "key",
         "summary",
         "description",
@@ -1250,6 +1274,7 @@ def build_kanban_columns(
         sub = sub.sort_values(by=sort_columns, ascending=ascending, kind="mergesort")
         items = sub.head(220).copy(deep=False)
         for column in (
+            "source_id",
             "key",
             "summary",
             "status",
@@ -1266,6 +1291,7 @@ def build_kanban_columns(
             if column in items.columns:
                 items[column] = items[column].astype(str).replace({"NaT": "", "nan": ""})
         for column in (
+            "source_id",
             "key",
             "summary",
             "status",
@@ -1277,6 +1303,11 @@ def build_kanban_columns(
         ):
             if column in items.columns:
                 items[column] = items[column].fillna("").astype(str)
+        items["issue_uid"] = (
+            items["source_id"].fillna("").astype(str).str.strip()
+            + "::"
+            + items["key"].fillna("").astype(str).str.strip()
+        )
         items["ageDays"] = (
             pd.to_numeric(items.get("ageDays", 0.0), errors="coerce").fillna(0.0).astype(float)
         )
@@ -1287,6 +1318,7 @@ def build_kanban_columns(
                 "items": items.loc[
                     :,
                     [
+                        "issue_uid",
                         "key",
                         "summary",
                         "status",
@@ -1764,6 +1796,15 @@ def _build_theme_trend_figure(
 
 
 def _active_source_ids(scoped_df: pd.DataFrame, *, query: DashboardQuery) -> list[str]:
+    explicit = sorted(
+        {
+            str(source_id or "").strip()
+            for source_id in query.source_ids
+            if str(source_id or "").strip()
+        }
+    )
+    if explicit:
+        return explicit
     if (
         str(query.workspace.scope_mode or "").strip().lower() == "source"
         and query.workspace.source_id

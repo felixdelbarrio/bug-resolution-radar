@@ -101,6 +101,19 @@ def test_time_window_service_handles_boundary_days() -> None:
     )
 
 
+def test_full_fortnight_has_canonical_14_15_boundary() -> None:
+    service = TimeWindowService(timezone_name="UTC")
+
+    assert service.full_fortnight("2026-05-14") == (
+        date(2026, 5, 1),
+        date(2026, 5, 14),
+    )
+    assert service.full_fortnight("2026-05-15") == (
+        date(2026, 5, 15),
+        date(2026, 5, 31),
+    )
+
+
 def test_time_window_service_explicit_timezone_is_independent_of_os_timezone(
     monkeypatch: object,
 ) -> None:
