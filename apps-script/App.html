@@ -46,7 +46,8 @@ const App = (() => {
     preferenceTimer: null,
     transferValidation: null,
     lastPeriodReport: null,
-    newsletterSettings: null
+    newsletterSettings: null,
+    newsletterReportId: ''
   };
 
   const $ = id => document.getElementById(id);
@@ -102,8 +103,10 @@ const App = (() => {
     ) || {};
     return JSON.stringify({
       contract: state.bootstrap.app.contractVersion,
+      cacheGeneration: state.bootstrap.app.cacheEpoch,
       scopeKey: request.scopeKey,
-      dataVersion: scope.dataVersion || state.bootstrap.app.dataVersion,
+      scopeVersion: scope.dataVersion || state.bootstrap.app.dataVersion,
+      snapshotId: scope.snapshotId || '',
       view: request.view,
       chartId: request.chartId,
       insightsId: request.insightsId,
@@ -518,15 +521,19 @@ const App = (() => {
   }
 
   function reportSuccess(job) {
+    const canSend = job.newsletterTested && !job.newsletterSent;
+    const sendLabel = job.newsletterSent
+      ? 'Newsletter enviada ✓'
+      : (job.newsletterTested ? 'Enviar newsletter' : 'Envía primero una prueba');
     return `<div class="report-success">
       <strong>Presentación exacta publicada</strong>
       <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
       <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
       <div class="newsletter-report-actions">
         <button id="testPeriodNewsletter" class="secondary-button" type="button">Probar newsletter</button>
-        <button id="sendPeriodNewsletter" class="action-button" ${job.newsletterSent ? 'disabled' : ''} type="button">${job.newsletterSent ? 'Newsletter enviada ✓' : 'Enviar newsletter'}</button>
+        <button id="sendPeriodNewsletter" class="action-button" ${canSend ? '' : 'disabled'} type="button">${sendLabel}</button>
       </div>
-      <small>El correo adjunta el mismo PPTX importado desde escritorio y enlaza este snapshot inmutable.</small>
+      <small>${UI.formatNumber(job.recipientCount)} destinatarios activos. El envío final se habilita tras una prueba correcta al administrador conectado.</small>
     </div>`;
   }
 
@@ -586,6 +593,23 @@ const App = (() => {
 
   async function renderImport() {
     const validation = state.transferValidation;
+    const administration = state.bootstrap.administration || {};
+    if (!administration.importReady) {
+      view().innerHTML = `<section class="page-stack">
+        <section class="surface-panel transfer-hero"><div class="transfer-hero-copy">
+          <span class="transfer-eyebrow">Configuración obligatoria</span>
+          <h2>Define primero la carpeta de informes</h2>
+          <p>La ingesta permanece bloqueada hasta que exista una carpeta de Google Drive con permiso de escritura para conservar el PPTX y crear la presentación nativa.</p>
+          <button id="openImportSettings" class="action-button" type="button">Abrir configuración</button>
+        </div></section>
+      </section>`;
+      $('openImportSettings').addEventListener('click', async () => {
+        state.route = 'settings';
+        syncNavigation();
+        await renderSettings();
+      });
+      return;
+    }
     view().innerHTML = `<section class="page-stack">
       <section class="surface-panel transfer-hero"><div class="transfer-hero-copy">
         <span class="transfer-eyebrow">Entrada controlada</span>
@@ -676,9 +700,31 @@ const App = (() => {
     try {
       newsletter = state.newsletterSettings || await loadNewsletterSettings();
     } catch (error) {
-      newsletter = { scopes: [], recipients: [], senderReady: false, geminiConfigured: false };
+      newsletter = {
+        reports: [], users: [], recipients: [], senderReady: false, geminiConfigured: false
+      };
     }
-    const folder = (state.bootstrap.preferences || {}).report_drive_folder || null;
+    const administration = state.bootstrap.administration || {};
+    const folder = administration.reportDriveFolder || null;
+    const reports = newsletter.reports || [];
+    let selectedReport = reports.find(report => report.reportId === state.newsletterReportId);
+    if (!selectedReport) {
+      selectedReport = reports.find(report => report.scopeKey === state.scopeKey) || reports[0] || null;
+    }
+    state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
+    const recipients = (newsletter.recipients || []).filter(
+      recipient => recipient.reportId === state.newsletterReportId
+    );
+    const recipientByEmail = new Map(recipients.map(recipient => [recipient.email, recipient]));
+    const newsletterUsers = (newsletter.users || []).map(user => {
+      const recipient = recipientByEmail.get(user.email);
+      return {
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        active: Boolean(recipient && recipient.active)
+      };
+    });
     view().innerHTML = `<section class="page-stack">
       <section class="surface-card">
         <h3>Apariencia</h3><div class="soft-toggle-row">
@@ -690,24 +736,21 @@ const App = (() => {
         <h3>Carpeta de Google Drive</h3>
         <p class="minor-copy">Destino del PPTX exacto y de su conversión a Google Slides.</p>
         ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
-        <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" required></label>
+        <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
         <button class="secondary-button" type="submit">Guardar carpeta</button></form>
       </section>
       <section class="surface-card">
         <h3>Newsletter</h3>
         <p>${newsletter.senderReady ? 'Alias remitente listo.' : 'Falta configurar el alias remitente.'}
         ${newsletter.geminiConfigured ? ' Gemini listo.' : ' Falta GEMINI_API_KEY.'}</p>
-        <form id="recipientForm">
-          <label class="field"><span>Ámbito</span><select id="recipientScope">${(newsletter.scopes || []).map(scope =>
-            `<option value="${UI.escape(scope.key)}">${UI.escape(scope.label)}</option>`
-          ).join('')}</select></label>
-          <label class="field"><span>Email @bbva.com</span><input id="recipientEmail" type="email" required></label>
-          <label class="field"><span>Nombre</span><input id="recipientName"></label>
-          <button class="action-button" type="submit">Añadir destinatario</button>
-        </form>
-        <div class="source-list">${(newsletter.recipients || []).map(recipient =>
-          `<article class="source-list-row"><div><strong>${UI.escape(recipient.email)}</strong><p>${UI.escape(recipient.scopeLabel)}</p></div>
-          <button class="ghost-button recipient-toggle" data-email="${UI.escape(recipient.email)}" data-scope="${UI.escape(recipient.scopeKey)}" data-name="${UI.escape(recipient.displayName)}" data-active="${recipient.active ? '1' : '0'}" type="button">${recipient.active ? 'Desactivar' : 'Activar'}</button></article>`
+        <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
+          `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
+        ).join('')}</select></label>
+        <p class="minor-copy">Activa o desactiva los usuarios autorizados que recibirán este informe.</p>
+        ${selectedReport ? '' : '<p class="minor-copy">Importa un informe para poder configurar sus destinatarios.</p>'}
+        <div class="source-list">${newsletterUsers.map(user =>
+          `<article class="source-list-row"><div><strong>${UI.escape(user.displayName || user.email)}</strong><p>${UI.escape(user.email)} · ${UI.escape(user.role)}</p></div>
+          <button class="ghost-button recipient-toggle" data-email="${UI.escape(user.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${user.active ? '1' : '0'}" ${selectedReport ? '' : 'disabled'} type="button">${user.active ? 'Desactivar' : 'Activar'}</button></article>`
         ).join('')}</div>
       </section>
     </section>`;
@@ -717,36 +760,32 @@ const App = (() => {
       event.preventDefault();
       try {
         const saved = await RPC.call('saveReportDriveFolder', $('folderReference').value);
-        state.bootstrap.preferences.report_drive_folder = saved;
+        state.bootstrap.administration.reportDriveFolder = saved;
+        state.bootstrap.administration.importReady = true;
         UI.message('Carpeta guardada.', 'success');
         await renderSettings();
       } catch (error) {
         UI.message(error.message, 'error');
       }
     });
-    $('recipientForm').addEventListener('submit', async event => {
-      event.preventDefault();
-      try {
-        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
-          scopeKey: $('recipientScope').value,
-          email: $('recipientEmail').value,
-          displayName: $('recipientName').value,
-          active: true
-        });
-        await renderSettings();
-      } catch (error) {
-        UI.message(error.message, 'error');
-      }
+    $('recipientReport').addEventListener('change', async event => {
+      state.newsletterReportId = event.target.value;
+      await renderSettings();
     });
     document.querySelectorAll('.recipient-toggle').forEach(button => {
       button.addEventListener('click', async () => {
-        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
-          scopeKey: button.dataset.scope,
-          email: button.dataset.email,
-          displayName: button.dataset.name,
-          active: button.dataset.active !== '1'
-        });
-        await renderSettings();
+        try {
+          button.disabled = true;
+          state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+            reportId: button.dataset.report,
+            email: button.dataset.email,
+            active: button.dataset.active !== '1'
+          });
+          await renderSettings();
+        } catch (error) {
+          button.disabled = false;
+          UI.message(error.message, 'error');
+        }
       });
     });
   }
@@ -837,12 +876,13 @@ const App = (() => {
       state.pageSize = Number(initial.pageSize || 50);
       state.dark = (bootstrap.preferences.theme || 'light') === 'dark';
       document.documentElement.dataset.theme = state.dark ? 'dark' : 'light';
-      document.body.className = isShared() ? 'auth-ready shared-view' : 'auth-ready';
+      document.body.className = [
+        'auth-ready',
+        isShared() ? 'shared-view' : '',
+        isAdmin() && !isShared() ? 'is-admin' : ''
+      ].filter(Boolean).join(' ');
       $('appTitle').textContent = bootstrap.app.name;
       $('userBadge').textContent = `${initials(bootstrap.user.email)} · ${bootstrap.user.displayName || bootstrap.user.email}`;
-      document.querySelectorAll('.admin-only').forEach(node => {
-        node.classList.toggle('hidden', !isAdmin() || isShared());
-      });
       syncScope();
       syncNavigation();
       $('loadingView').classList.add('hidden');
@@ -860,6 +900,7 @@ const App = (() => {
       }
       PersistentCache.prune({
         contract: bootstrap.app.contractVersion,
+        cacheGeneration: bootstrap.app.cacheEpoch,
         dataVersion: bootstrap.app.dataVersion,
         scopeVersions: bootstrap.app.scopeVersions
       }).catch(() => {});

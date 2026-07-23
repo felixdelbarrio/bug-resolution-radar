@@ -36,7 +36,7 @@ function _validateSheetContract_(sheetName) {
   if (memo.contracts[sheetName]) return true;
   const sheet = _sheet_(sheetName); const expected = _headersFor_(sheetName);
   const actual = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(_text_) : [];
-  _assert_(actual.length === expected.length && actual.every(function (h, i) { return h === expected[i]; }), 'Cabeceras incompatibles en ' + sheetName + '. Esperado: ' + expected.join(', ') + '.', 'CONTRACT_ERROR');
+  _assert_(actual.length === expected.length && actual.every(function (h, i) { return h === expected[i]; }), 'Cabeceras incompatibles en ' + sheetName + '. Actual: ' + (actual.length ? actual.join(', ') : '(vacías)') + '. Esperado: ' + expected.join(', ') + '.', 'CONTRACT_ERROR');
   memo.contracts[sheetName] = true;
   return true;
 }

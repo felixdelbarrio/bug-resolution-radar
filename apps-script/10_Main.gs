@@ -58,6 +58,7 @@ function getBootstrap() {
     const user = _requireUser_();
     const manifest = _workspaceManifest_();
     const preferences = _preferenceMap_(user.email);
+    const reportDriveFolder = user.role === 'admin' ? _reportDriveFolderSetting_() : null;
     const initialState = _initialDashboardState_(preferences, manifest);
     let dashboard = null;
     if (initialState.scopeKey) {
@@ -88,6 +89,10 @@ function getBootstrap() {
       countries: manifest.countries,
       sources: manifest.sources,
       preferences: preferences,
+      administration: user.role === 'admin' ? {
+        reportDriveFolder: reportDriveFolder,
+        importReady: Boolean(reportDriveFolder)
+      } : null,
       initialState: initialState,
       dashboard: dashboard
     };
@@ -151,7 +156,7 @@ function savePreference(key, value) {
   return _rpc_(function () {
     const user = _requireUser_();
     const preferenceKey = _text_(key);
-    _assert_(['theme', 'dashboard_state', 'report_drive_folder'].indexOf(preferenceKey) >= 0,
+    _assert_(['theme', 'dashboard_state'].indexOf(preferenceKey) >= 0,
       'Esa preferencia no está permitida.', 'VALIDATION_ERROR');
     let cleanValue = value;
     if (preferenceKey === 'dashboard_state') cleanValue = _sanitizeDashboardPreference_(value);
@@ -342,6 +347,7 @@ function _markImportRun_(runId, patch) {
 function validateTransferImport(form) {
   return _rpc_(function () {
     const user = _requireAdmin_();
+    _configuredReportDriveFolder_();
     _cleanupExpiredTransfers_();
     _validateAllContracts_();
     const decoded = _decodeTransferPackage_(form && form.transferFile);
@@ -474,8 +480,7 @@ function _publishDecodedTransfer_(decoded, meta, user) {
   const snapshotId = _uuid_();
   const reportId = _uuid_();
   const createdAt = _nowIso_();
-  const preferences = _preferenceMap_(user.email);
-  const folder = _configuredReportDriveFolder_(preferences);
+  const folder = _configuredReportDriveFolder_();
   let artifacts = null;
   let snapshotAppended = false;
   let auditAppended = false;
@@ -551,7 +556,7 @@ function commitTransferImport(token) {
         const decoded = _loadStagedDecodedTransfer_(meta);
         return _publishDecodedTransfer_(decoded, meta, user);
       });
-      _invalidateCaches_();
+      if (!published.idempotent) _invalidateCaches_();
       const cache = _warmSnapshotViews_(published.record);
       let garbageCollection = { removedSnapshots: 0, removedChunks: 0, removedParts: 0 };
       try {
@@ -566,7 +571,7 @@ function commitTransferImport(token) {
         operation: 'import',
         summary: published.idempotent
           ? 'La proyección ya estaba publicada; no se duplicaron datos ni artefactos.'
-          : 'Snapshot publicado. La WebApp, Google Slides y la newsletter quedan anclados al PPTX y racional autoritativos del escritorio.',
+          : 'Snapshot publicado, cachés regeneradas y presentación nativa de Google Slides creada desde el PPTX autoritativo.',
         completedAt: _nowIso_(),
         snapshotId: published.record.snapshot_id,
         scopeKey: published.record.scope_key,

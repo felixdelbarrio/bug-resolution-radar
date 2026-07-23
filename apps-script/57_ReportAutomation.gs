@@ -1,12 +1,19 @@
 /** Read-only status of the exact report imported with the active snapshot. */
 
-function _periodNewsletterWasSent_(reportId) {
+function _periodNewsletterState_(reportId, adminEmail) {
   const id = _text_(reportId);
-  return Boolean(id) && _readRecords_(RADAR.sheets.newsletterAudit).some(function (row) {
-    return _text_(row.report_id) === id &&
-      _text_(row.mode) === 'send' &&
-      _text_(row.status) === 'sent';
-  });
+  const admin = _canonicalEmail_(adminEmail);
+  const audits = id ? _readRecords_(RADAR.sheets.newsletterAudit).filter(function (row) {
+    return _text_(row.report_id) === id && _text_(row.status) === 'sent';
+  }) : [];
+  return {
+    testSent: audits.some(function (row) {
+      return _text_(row.mode) === 'test' && _canonicalEmail_(row.created_by) === admin;
+    }),
+    newsletterSent: audits.some(function (row) {
+      return _text_(row.mode) === 'send';
+    })
+  };
 }
 
 function getPeriodReportStatus(scopeKey) {
@@ -16,6 +23,7 @@ function getPeriodReportStatus(scopeKey) {
     _assert_(key, 'Selecciona un ámbito materializado.', 'SNAPSHOT_NOT_FOUND');
     const record = _activeSnapshotRecordForScope_(key, true);
     _snapshotHeader_(record);
+    const newsletter = _periodNewsletterState_(record.report_id, user.email);
     return {
       scopeKey: key,
       job: {
@@ -33,11 +41,13 @@ function getPeriodReportStatus(scopeKey) {
         rowCount: Number(record.row_count),
         slideCount: Number(record.slide_count),
         details: 'PPTX exacto importado desde escritorio y convertido a Google Slides.',
-        newsletterSent: _periodNewsletterWasSent_(record.report_id),
+        newsletterTested: newsletter.testSent,
+        newsletterSent: newsletter.newsletterSent,
+        recipientCount: _newsletterRecipientsForReport_(record.report_id).length,
         projectionSha256: _text_(record.projection_sha256),
         pptxSha256: _text_(record.pptx_sha256)
       },
-      folder: (_preferenceMap_(user.email) || {}).report_drive_folder || null
+      folder: _reportDriveFolderSetting_()
     };
   });
 }

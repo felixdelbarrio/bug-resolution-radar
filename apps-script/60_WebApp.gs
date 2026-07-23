@@ -1,6 +1,5 @@
 /** HTML entrypoint and public RPC surface. */
 function _include_(filename) { return HtmlService.createHtmlOutputFromFile(filename).getContent(); }
-function _includeTemplate_(filename) { return HtmlService.createTemplateFromFile(filename).evaluate().getContent(); }
 function doGet(event) {
   const template = HtmlService.createTemplateFromFile('Index');
   const requestedShare = _sanitizeText_(event && event.parameter ? event.parameter.share : '', 160);

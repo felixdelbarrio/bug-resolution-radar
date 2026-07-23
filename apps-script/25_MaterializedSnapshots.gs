@@ -450,7 +450,10 @@ function _warmSnapshotViews_(record) {
   const failed = [];
   [
     { request: { view: 'overview' }, label: 'overview' },
-    { request: { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }, label: 'issues/1' }
+    { request: { view: 'insights', insightsId: 'summary' }, label: 'insights/summary' },
+    { request: { view: 'trends', chartId: 'open_status_bar' }, label: 'trends/open_status_bar' },
+    { request: { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }, label: 'issues/1' },
+    { request: { view: 'kanban' }, label: 'kanban' }
   ].forEach(function (item) {
     try {
       _materializedViewPayload_(
@@ -468,28 +471,6 @@ function _warmSnapshotViews_(record) {
     }
   });
   return { warmed: warmed, failed: failed };
-}
-
-function _rebuildApplicationCaches_() {
-  const started = Date.now();
-  const warmed = [];
-  const failed = [];
-  _activeSnapshotPointers_().forEach(function (pointer) {
-    const record = _snapshotRecordById_(pointer.snapshot_id, false);
-    if (!record) {
-      failed.push(_text_(pointer.scope_key) + '/missing');
-      return;
-    }
-    const result = _warmSnapshotViews_(record);
-    result.warmed.forEach(function (label) { warmed.push(record.scope_key + '/' + label); });
-    result.failed.forEach(function (label) { failed.push(record.scope_key + '/' + label); });
-  });
-  return {
-    epoch: _cacheEpoch_(),
-    warmed: warmed,
-    failed: failed,
-    durationMs: Date.now() - started
-  };
 }
 
 function _workspaceManifest_() {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -70,6 +71,126 @@ def test_apps_script_has_no_duplicate_global_functions() -> None:
         function_name: files for function_name, files in declarations.items() if len(files) > 1
     }
     assert duplicates == {}
+
+
+def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
+    config = _source("00_Config.gs")
+    design = _source("DesignSystem.html")
+    index = _source("Index.html")
+    newsletter = _function_body(_source("56_Newsletter.gs"), "_newsletterRender_")
+
+    result = subprocess.run(
+        ["node", "-"],
+        input=config + "\nconsole.log(JSON.stringify(DESIGN_TOKENS.web));",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    web = json.loads(result.stdout)
+    for mode in ("light", "dark"):
+        assert web[mode]
+        assert all(
+            isinstance(name, str)
+            and name.startswith("--")
+            and isinstance(value, str)
+            and value
+            for name, value in web[mode].items()
+        )
+    for required in (
+        "--bbva-grey-500",
+        "--bbva-surface-2",
+        "--bbva-shadow",
+        "--bbva-radius-container",
+        "--bbva-font-sans",
+        "--signal-status-progress",
+        "--chart-series-1",
+    ):
+        assert required in web["light"]
+
+    assert "_safeJsonStringify_(DESIGN_TOKENS.web)" in index
+    assert "_include_('DesignSystem')" in index
+    assert "window.__RADAR_DESIGN_TOKENS__" in design
+    assert "document.createElement('style')" in design
+    assert "declarations(designWeb.light)" in design
+    assert "declarations(designWeb.dark)" in design
+    assert "designColor" not in design
+    assert "designDark" not in design
+    assert "<?" not in design and "?>" not in design
+    assert "bbva-grey-100" not in design
+    assert re.search(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(", design) is None
+    style_blocks = re.findall(r"<style[^>]*>(.*?)</style>", design, flags=re.DOTALL)
+    assert style_blocks
+    assert all("<?" not in block and "?>" not in block for block in style_blocks)
+    bootstrap_script = re.search(r"<script>(.*?)</script>", design, flags=re.DOTALL)
+    assert bootstrap_script is not None
+    syntax = subprocess.run(
+        ["node", "--check", "-"],
+        input=bootstrap_script.group(1),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
+    assert "DESIGN_TOKENS.radius" in newsletter
+    assert "DESIGN_TOKENS.effect.emailShadow" in newsletter
+
+
+def test_setup_remaps_compatible_sheet_contract_changes_by_header_name() -> None:
+    setup = _source("90_Setup.gs")
+    migration = _function_body(setup, "_migrateSheetHeaders_")
+    setup_application = _function_body(setup, "setupApplication")
+
+    assert "seen.has(header)" in migration
+    assert "expected.indexOf(header) < 0" in migration
+    assert "sourceIndex[header] = index" in migration
+    assert "formulas[rowIndex][columnIndex] || row[columnIndex]" in migration
+    assert "expected.map(function (header)" in migration
+    assert "_migrateSheetHeaders_(name, sheet)" in setup_application
+    assert "_validateSheetContract_(name)" in setup_application
+
+
+def test_setup_removes_only_known_legacy_storage_after_contract_creation() -> None:
+    setup = _source("90_Setup.gs")
+    reset_collisions = _function_body(setup, "_resetLegacyContractCollisions_")
+    remove_obsolete = _function_body(setup, "_removeObsoleteStorage_")
+    setup_application = _function_body(setup, "setupApplication")
+
+    for sheet_name in (
+        "REPORT_JOBS",
+        "_TRANSFER_STAGING",
+        "HELIX_ITEMS",
+        "INSIGHTS_LEARNING",
+        "SOURCES",
+        "ISSUES",
+        "HELIX_LINKS",
+        "NOTES",
+        "INGEST_RUNS",
+    ):
+        assert f"'{sheet_name}'" in setup
+    assert "_sameHeaders_(_sheetHeaders_(sheet), LEGACY_CONTRACT_HEADERS[sheetName])" in (
+        reset_collisions
+    )
+    assert "ss.deleteSheet(sheet)" in reset_collisions
+    assert "OBSOLETE_CONFIG_KEYS.forEach" in remove_obsolete
+    assert setup_application.index("_resetLegacyContractCollisions_(ss)") < (
+        setup_application.index("Object.keys(CONTRACTS).forEach")
+    )
+    assert setup_application.index("_removeObsoleteStorage_(ss)") > (
+        setup_application.index("Object.keys(CONTRACTS).forEach")
+    )
+    assert "_seedDefaultNewsletterRecipients_" not in setup
+    assert "report_drive_folder" in remove_obsolete
+
+
+def test_setup_keeps_the_control_sheet_visible() -> None:
+    setup_application = _function_body(_source("90_Setup.gs"), "setupApplication")
+
+    show_control = "if (controlSheet && controlSheet.isSheetHidden()) controlSheet.showSheet()"
+    hide_other_contracts = "sheet.getName() !== RADAR.sheets.config"
+    assert show_control in setup_application
+    assert hide_other_contracts in setup_application
+    assert setup_application.index(show_control) < setup_application.index(hide_other_contracts)
 
 
 def test_cloud_transfer_is_strict_desktop_authoritative_v2() -> None:
@@ -193,5 +314,82 @@ def test_legacy_cloud_calculators_admin_and_report_queues_are_removed() -> None:
         "adminClearCaches",
         "_ensureContractSheet_",
         "_replaceRecords_",
+        "_newsletterScopeKey_",
+        "_rebuildApplicationCaches_",
+        "_seedDefaultNewsletterRecipients_",
+        "listReportDriveFolders",
+        "_reportFolderList_",
     ):
         assert obsolete not in all_code
+
+
+def test_admin_controls_are_revealed_only_after_an_admin_bootstrap() -> None:
+    app = _source("App.html")
+    design = _source("DesignSystem.html")
+    main = _source("10_Main.gs")
+
+    assert ".admin-only { display: none !important; }" in design
+    assert ".is-admin .admin-only { display: inline-flex !important; }" in design
+    assert "isAdmin() && !isShared() ? 'is-admin' : ''" in app
+    assert "_requireAdmin_()" in _function_body(main, "validateTransferImport")
+    assert "_requireAdmin_()" in _function_body(main, "commitTransferImport")
+
+
+def test_report_folder_is_global_and_blocks_validation_when_missing() -> None:
+    main = _source("10_Main.gs")
+    report = _source("55_PeriodReport.gs")
+
+    assert "_configuredReportDriveFolder_();" in _function_body(
+        main, "validateTransferImport"
+    )
+    assert "_configuredReportDriveFolder_()" in _function_body(
+        main, "_publishDecodedTransfer_"
+    )
+    assert "_setConfig_(" in _function_body(report, "saveReportDriveFolder")
+    assert "'REPORT_DRIVE_FOLDER'" in _function_body(report, "saveReportDriveFolder")
+    assert "_preferenceMap_" not in _function_body(main, "_publishDecodedTransfer_")
+    assert "report_drive_folder" not in _function_body(main, "savePreference")
+
+
+def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
+    config = _source("00_Config.gs")
+    newsletter = _source("56_Newsletter.gs")
+    save_recipient = _function_body(newsletter, "saveNewsletterRecipient")
+
+    assert "['report_id', 'string', true]" in config
+    assert "['snapshot_id', 'string', true]" in config
+    assert "reportId" in save_recipient
+    assert "report_id: report.reportId" in save_recipient
+    assert "snapshot_id: report.snapshotId" in save_recipient
+    assert "_newsletterUsers_().find" in save_recipient
+    assert "usuario activo y autorizado" in save_recipient
+    assert "_newsletterRecipientsForReport_" in newsletter
+
+
+def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> None:
+    newsletter = _source("56_Newsletter.gs")
+    sender = _function_body(newsletter, "sendPeriodNewsletter")
+    status = _source("57_ReportAutomation.gs")
+    app = _source("App.html")
+
+    assert "_newsletterTestWasSentBy_(reportId, user.email)" in sender
+    assert "'NEWSLETTER_TEST_REQUIRED'" in sender
+    assert "newsletterTested" in status
+    assert "job.newsletterTested && !job.newsletterSent" in app
+
+
+def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
+    main = _function_body(_source("10_Main.gs"), "commitTransferImport")
+    materialized = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_warmSnapshotViews_"
+    )
+    app = _source("App.html")
+    cache = _source("Cache.html")
+
+    assert main.index("_invalidateCaches_()") < main.index("_warmSnapshotViews_")
+    for view_name in ("overview", "insights", "trends", "issues", "kanban"):
+        assert f"view: '{view_name}'" in materialized
+    assert "cacheGeneration: state.bootstrap.app.cacheEpoch" in app
+    assert "scopeVersion: scope.dataVersion" in app
+    assert "key.cacheGeneration !== current.cacheGeneration" in cache
+    assert "key.scopeVersion" in cache

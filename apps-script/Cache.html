@@ -98,8 +98,7 @@ const PersistentCache = (() => {
           const stale = !key
             || key.contract !== current.contract
             || key.cacheGeneration !== current.cacheGeneration
-            || !validScopeVersions.has(key.scopeVersion)
-            || (key.view === 'notes' && key.contentVersion !== current.cacheEpoch);
+            || !validScopeVersions.has(key.scopeVersion);
           if (stale) cursor.delete();
         }
         cursor.continue();

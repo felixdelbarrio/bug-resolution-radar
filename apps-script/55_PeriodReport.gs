@@ -55,116 +55,6 @@ function _reportDriveFolder_(reference) {
   return resource;
 }
 
-function _reportFolderList_(folder) {
-  const driveId = _text_(folder.driveId);
-  const options = {
-    q: "'" + _text_(folder.id).replace(/'/g, "\\'") +
-      "' in parents and trashed = false and mimeType = '" + REPORT_FOLDER_MIME + "'",
-    includeItemsFromAllDrives: true,
-    supportsAllDrives: true,
-    pageSize: 100,
-    fields: 'nextPageToken,files(id,name,mimeType,parents,driveId,webViewLink,capabilities(canAddChildren))'
-  };
-  options.corpora = driveId ? 'drive' : 'user';
-  if (driveId) options.driveId = driveId;
-  const response = Drive.Files.list(options);
-  return {
-    children: (response.files || []).map(function (item) {
-      return _reportFolderDescriptorFromResource_(item, folder.id, 'folder');
-    }).sort(function (left, right) {
-      return left.name.localeCompare(right.name, 'es', { sensitivity: 'base' });
-    }),
-    truncated: Boolean(response.nextPageToken)
-  };
-}
-
-function listReportDriveFolders(reference) {
-  return _rpc_(function () {
-    _requireAdmin_();
-    const raw = _text_(reference) || 'root:my-drive';
-    const roots = [
-      { reference: 'root:my-drive', name: 'Mi unidad', kind: 'root' },
-      { reference: 'root:starred', name: 'Destacados', kind: 'root' },
-      { reference: 'root:shared-drives', name: 'Unidades compartidas', kind: 'root' }
-    ];
-    if (raw === 'root:starred') {
-      const starred = Drive.Files.list({
-        q: "starred = true and trashed = false and mimeType = '" + REPORT_FOLDER_MIME + "'",
-        corpora: 'user',
-        spaces: 'drive',
-        includeItemsFromAllDrives: true,
-        supportsAllDrives: true,
-        pageSize: 100,
-        fields: 'nextPageToken,files(id,name,mimeType,parents,driveId,webViewLink,capabilities(canAddChildren))'
-      });
-      return {
-        roots: roots,
-        current: {
-          id: '', reference: raw, name: 'Destacados',
-          url: 'https://drive.google.com/drive/starred',
-          kind: 'collection', selectable: false, isRoot: true
-        },
-        parent: null,
-        children: (starred.files || []).map(function (item) {
-          return _reportFolderDescriptorFromResource_(item, item.driveId || '', 'folder');
-        }).sort(function (left, right) {
-          return left.name.localeCompare(right.name, 'es', { sensitivity: 'base' });
-        }),
-        truncated: Boolean(starred.nextPageToken)
-      };
-    }
-    if (raw === 'root:shared-drives') {
-      const shared = Drive.Drives.list({
-        pageSize: 100,
-        fields: 'nextPageToken,drives(id,name,capabilities(canAddChildren))'
-      });
-      return {
-        roots: roots,
-        current: {
-          id: '', reference: raw, name: 'Unidades compartidas',
-          url: 'https://drive.google.com/drive/shared-drives',
-          kind: 'collection', selectable: false, isRoot: true
-        },
-        parent: null,
-        children: (shared.drives || []).map(function (item) {
-          return _reportFolderDescriptorFromResource_(item, item.id, 'drive');
-        }).sort(function (left, right) {
-          return left.name.localeCompare(right.name, 'es', { sensitivity: 'base' });
-        }),
-        truncated: Boolean(shared.nextPageToken)
-      };
-    }
-    const folder = _reportDriveFolder_(raw);
-    const listed = _reportFolderList_(folder);
-    const rootId = _text_(folder.driveId) || DriveApp.getRootFolder().getId();
-    let parent = null;
-    const parentId = (folder.parents || [])[0];
-    if (parentId) {
-      const parentResource = Drive.Files.get(parentId, {
-        supportsAllDrives: true,
-        fields: 'id,name,mimeType,parents,driveId,webViewLink,capabilities(canAddChildren)'
-      });
-      parent = _reportFolderDescriptorFromResource_(parentResource, rootId, 'folder');
-    } else if (_text_(folder.driveId) && _text_(folder.id) !== _text_(folder.driveId)) {
-      const drive = Drive.Drives.get(folder.driveId, {
-        fields: 'id,name,capabilities(canAddChildren)'
-      });
-      parent = _reportFolderDescriptorFromResource_(drive, drive.id, 'drive');
-    }
-    return {
-      roots: roots,
-      current: _reportFolderDescriptorFromResource_(
-        folder,
-        rootId,
-        _text_(folder.id) === _text_(folder.driveId) ? 'drive' : 'folder'
-      ),
-      parent: parent,
-      children: listed.children,
-      truncated: listed.truncated
-    };
-  });
-}
-
 function saveReportDriveFolder(reference) {
   return _rpc_(function () {
     const user = _requireAdmin_();
@@ -176,22 +66,39 @@ function saveReportDriveFolder(reference) {
       _text_(folder.driveId) || DriveApp.getRootFolder().getId(),
       _text_(folder.id) === _text_(folder.driveId) ? 'drive' : 'folder'
     );
-    _upsertRecord_(RADAR.sheets.preferences, {
-      pref_uid: user.email + '::report_drive_folder',
-      email: user.email,
-      preference_key: 'report_drive_folder',
-      value_json: _safeJsonStringify_(descriptor),
-      updated_at: _nowIso_()
-    });
+    _setConfig_(
+      'REPORT_DRIVE_FOLDER',
+      descriptor,
+      'json',
+      'Carpeta compartida para PPTX y presentaciones nativas de Google',
+      user.email
+    );
     return descriptor;
   });
 }
 
-function _configuredReportDriveFolder_(preferences) {
-  const preference = (preferences || {}).report_drive_folder;
-  _assert_(preference && preference.id,
-    'Configura primero la carpeta de Google Drive en Preferencias.', 'DRIVE_FOLDER_INVALID');
-  const folder = _reportDriveFolder_(preference.id);
+function _reportDriveFolderSetting_() {
+  const descriptor = (_getConfigMap_() || {}).REPORT_DRIVE_FOLDER;
+  if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) return null;
+  const id = _text_(descriptor.id);
+  if (!/^[A-Za-z0-9_-]{10,}$/.test(id)) return null;
+  return {
+    id: id,
+    reference: 'folder:' + id,
+    name: _sanitizeText_(descriptor.name, 240) || 'Carpeta de informes',
+    url: _reportFolderUrl_(id),
+    driveId: _text_(descriptor.driveId),
+    kind: _text_(descriptor.kind) || 'folder',
+    selectable: true,
+    isRoot: descriptor.isRoot === true
+  };
+}
+
+function _configuredReportDriveFolder_() {
+  const setting = _reportDriveFolderSetting_();
+  _assert_(setting,
+    'Configura primero la carpeta de informes en Administración.', 'DRIVE_FOLDER_INVALID');
+  const folder = _reportDriveFolder_(setting.id);
   _assert_(!folder.capabilities || folder.capabilities.canAddChildren !== false,
     'No tienes permiso para publicar informes en la carpeta configurada.', 'DRIVE_FOLDER_INVALID');
   return folder;

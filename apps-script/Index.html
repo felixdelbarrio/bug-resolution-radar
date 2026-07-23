@@ -4,9 +4,12 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <script>window.__RADAR_SHARE_TOKEN__ = <?!= _safeJsonStringify_(sharedToken || '') ?>;</script>
+  <script>
+    window.__RADAR_SHARE_TOKEN__ = <?!= _safeJsonStringify_(sharedToken || '') ?>;
+    window.__RADAR_DESIGN_TOKENS__ = <?!= _safeJsonStringify_(DESIGN_TOKENS.web) ?>;
+  </script>
   <?!= _include_('BrandAssets'); ?>
-  <?!= _includeTemplate_('DesignSystem'); ?>
+  <?!= _include_('DesignSystem'); ?>
   <script defer src="https://cdn.plot.ly/plotly-basic-3.5.0.min.js"></script>
 </head>
 <body class="auth-pending">

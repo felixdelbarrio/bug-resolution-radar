@@ -1,19 +1,20 @@
 /** Gemini selects only immutable desktop-authored facts; Gmail attaches the exact PPTX. */
-function _newsletterScopeKey_(country, sourceIds) {
-  return _materializedScopeKey_(country, sourceIds);
-}
-
-function _newsletterScopes_() {
+function _newsletterReports_() {
   return _workspaceManifest_().scopes.map(function (scope) {
+    const record = _snapshotRecordById_(scope.snapshotId, false);
+    if (!record || !_text_(record.report_id)) return null;
     return {
-      key: _text_(scope.scopeKey),
+      reportId: _text_(record.report_id),
+      snapshotId: _text_(record.snapshot_id),
+      scopeKey: _text_(scope.scopeKey),
       label: _text_(scope.scopeLabel),
       country: _text_(scope.country),
       sourceIds: (scope.sourceIds || []).map(_text_),
       dataVersion: _text_(scope.dataVersion),
-      snapshotId: _text_(scope.snapshotId)
+      reportUrl: _text_(record.slides_url),
+      createdAt: record.created_at
     };
-  });
+  }).filter(Boolean);
 }
 
 function _newsletterSenderReady_() {
@@ -39,10 +40,33 @@ function _newsletterGeminiConfiguration_() {
   };
 }
 
+function _newsletterUsers_() {
+  return _readRecords_(RADAR.sheets.users).filter(function (row) {
+    return row.active === true;
+  }).map(function (row) {
+    return {
+      email: _canonicalEmail_(row.email),
+      displayName: _text_(row.display_name),
+      role: _text_(row.role)
+    };
+  }).filter(function (user) {
+    return Boolean(user.email);
+  }).sort(function (left, right) {
+    return left.displayName.localeCompare(right.displayName, 'es', { sensitivity: 'base' }) ||
+      left.email.localeCompare(right.email);
+  });
+}
+
 function _newsletterSettingsPayload_() {
-  const recipients = _readRecords_(RADAR.sheets.newsletterRecipients).map(function (row) {
+  const reports = _newsletterReports_();
+  const activeReportIds = new Set(reports.map(function (report) { return report.reportId; }));
+  const recipients = _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
+    return activeReportIds.has(_text_(row.report_id));
+  }).map(function (row) {
     return {
       recipientUid: _text_(row.recipient_uid),
+      reportId: _text_(row.report_id),
+      snapshotId: _text_(row.snapshot_id),
       scopeKey: _text_(row.scope_key),
       scopeLabel: _text_(row.scope_label),
       email: _canonicalEmail_(row.email),
@@ -61,7 +85,8 @@ function _newsletterSettingsPayload_() {
     senderReady: _newsletterSenderReady_(),
     geminiConfigured: gemini.configured,
     geminiModel: gemini.model,
-    scopes: _newsletterScopes_(),
+    reports: reports,
+    users: _newsletterUsers_(),
     recipients: recipients
   };
 }
@@ -77,16 +102,19 @@ function saveNewsletterRecipient(payload) {
   return _rpc_(function () {
     const user = _requireAdmin_();
     const input = payload || {};
-    const scopeKey = _sanitizeText_(input.scopeKey, 200);
-    const scope = _newsletterScopes_().find(function (item) {
-      return item.key === scopeKey;
+    const reportId = _sanitizeText_(input.reportId, 100);
+    const report = _newsletterReports_().find(function (item) {
+      return item.reportId === reportId;
     });
-    _assert_(scope, 'La vista materializada seleccionada no existe.', 'SNAPSHOT_NOT_FOUND');
+    _assert_(report, 'El informe seleccionado no existe o ya no está activo.', 'SNAPSHOT_NOT_FOUND');
     const email = _canonicalEmail_(input.email);
-    _assert_(/^[^@\s]+@bbva\.com$/.test(email),
-      'Indica un email corporativo @bbva.com válido.', 'VALIDATION_ERROR');
-    const displayName = _sanitizeText_(input.displayName, 180);
-    const uid = _hash_(scopeKey + '\u001f' + email).slice(0, 32);
+    const recipientUser = _newsletterUsers_().find(function (candidate) {
+      return candidate.email === email;
+    });
+    _assert_(recipientUser,
+      'El destinatario debe ser un usuario activo y autorizado de la aplicación.',
+      'VALIDATION_ERROR');
+    const uid = _hash_(reportId + '\u001f' + email).slice(0, 32);
     _withApplicationLock_(function () {
       const current = _readRecords_(RADAR.sheets.newsletterRecipients).find(function (row) {
         return _text_(row.recipient_uid) === uid;
@@ -94,10 +122,12 @@ function saveNewsletterRecipient(payload) {
       const now = _nowIso_();
       _upsertRecord_(RADAR.sheets.newsletterRecipients, {
         recipient_uid: uid,
-        scope_key: scopeKey,
-        scope_label: scope.label,
+        report_id: report.reportId,
+        snapshot_id: report.snapshotId,
+        scope_key: report.scopeKey,
+        scope_label: report.label,
         email: email,
-        display_name: displayName || (current && current.display_name) || '',
+        display_name: recipientUser.displayName,
         active: input.active !== false,
         created_at: current ? current.created_at : now,
         created_by: current ? current.created_by : user.email,
@@ -107,11 +137,6 @@ function saveNewsletterRecipient(payload) {
     });
     return _newsletterSettingsPayload_();
   });
-}
-
-// Recipient lists are always explicit configuration; setup no longer embeds PII.
-function _seedDefaultNewsletterRecipients_() {
-  return 0;
 }
 
 function _newsletterContext_(reportId) {
@@ -337,6 +362,7 @@ function _newsletterSignedDelta_(value) {
 
 function _newsletterRender_(draft, grounding, reportUrl, applicationUrl) {
   const colors = DESIGN_TOKENS.color;
+  const radius = DESIGN_TOKENS.radius;
   const slidesUrl = _newsletterEscapeHtml_(_sanitizeUrl_(reportUrl));
   const appUrl = _newsletterEscapeHtml_(_sanitizeUrl_(applicationUrl));
   const metrics = grounding.metrics;
@@ -344,7 +370,7 @@ function _newsletterRender_(draft, grounding, reportUrl, applicationUrl) {
     return '<tr><td style="padding:0 32px 18px">' +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" ' +
       'style="border-collapse:collapse;background:' + colors.grey200 +
-      ';border-left:4px solid ' + colors.royal + ';border-radius:8px">' +
+      ';border-left:4px solid ' + colors.royal + ';border-radius:' + radius.component + '">' +
       '<tr><td style="padding:18px 22px"><h2 style="margin:0 0 7px;color:' +
       colors.midnight + ';font:700 19px/25px Arial,sans-serif">' +
       _newsletterEscapeHtml_(section.title) + '</h2><p style="margin:0;color:' +
@@ -359,7 +385,7 @@ function _newsletterRender_(draft, grounding, reportUrl, applicationUrl) {
     '"><tr><td align="center" style="padding:24px 12px"><table role="presentation" ' +
     'width="640" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;' +
     'border-collapse:separate;background:' + colors.white +
-    ';border-radius:16px;overflow:hidden;box-shadow:0 8px 24px ' +
+    ';border-radius:' + radius.container + ';overflow:hidden;box-shadow:' +
     DESIGN_TOKENS.effect.emailShadow + '">' +
     '<tr><td style="padding:28px 32px;background:' + colors.electric +
     ';border-bottom:8px solid ' + colors.serene + '"><table role="presentation" ' +
@@ -377,34 +403,34 @@ function _newsletterRender_(draft, grounding, reportUrl, applicationUrl) {
     '<tr><td style="padding:0 32px 24px"><table role="presentation" width="100%" ' +
     'cellpadding="0" cellspacing="8" style="table-layout:fixed"><tr>' +
     '<td style="padding:15px;background:' + colors.blueLight +
-    ';border-radius:8px"><span style="display:block;color:' + colors.grey600 +
+    ';border-radius:' + radius.component + '"><span style="display:block;color:' + colors.grey600 +
     ';font:700 10px/14px Arial,sans-serif">BACKLOG</span><strong style="color:' +
     colors.electric + ';font:700 28px/34px Arial,sans-serif">' +
     metrics.currentOpen + '</strong></td><td style="padding:15px;background:' +
     (metrics.backlogDelta > 0 ? colors.dangerSoft : colors.successSoft) +
-    ';border-radius:8px"><span style="display:block;color:' + colors.grey600 +
+    ';border-radius:' + radius.component + '"><span style="display:block;color:' + colors.grey600 +
     ';font:700 10px/14px Arial,sans-serif">VARIACIÓN</span><strong style="color:' +
     (metrics.backlogDelta > 0 ? colors.danger : colors.success) +
     ';font:700 28px/34px Arial,sans-serif">' +
     _newsletterSignedDelta_(metrics.backlogDelta) + '</strong></td></tr><tr>' +
     '<td style="padding:15px;background:' + colors.warningSoft +
-    ';border-radius:8px"><span style="display:block;color:' + colors.grey600 +
+    ';border-radius:' + radius.component + '"><span style="display:block;color:' + colors.grey600 +
     ';font:700 10px/14px Arial,sans-serif">ALTA / MUY ALTA</span><strong style="color:' +
     colors.warningStrong + ';font:700 28px/34px Arial,sans-serif">' +
     metrics.highOpen + '</strong></td><td style="padding:15px;background:' +
-    colors.grey200 + ';border-radius:8px"><span style="display:block;color:' +
+    colors.grey200 + ';border-radius:' + radius.component + '"><span style="display:block;color:' +
     colors.grey600 + ';font:700 10px/14px Arial,sans-serif">&gt; 30 DÍAS</span>' +
     '<strong style="color:' + colors.midnight +
     ';font:700 28px/34px Arial,sans-serif">' + metrics.agedOpen +
     '</strong></td></tr></table></td></tr>' + sections +
     '<tr><td style="padding:6px 32px 32px"><table role="presentation" width="100%" ' +
     'cellpadding="0" cellspacing="0"><tr><td style="padding-bottom:10px"><a href="' +
-    appUrl + '" style="display:block;padding:14px 20px;border-radius:8px;background:' +
+    appUrl + '" style="display:block;padding:14px 20px;border-radius:' + radius.component + ';background:' +
     colors.electric + ';color:' + colors.white +
     ';font:700 15px/21px Arial,sans-serif;text-align:center;text-decoration:none">' +
     'Abrir vista web de solo lectura</a></td></tr><tr><td><a href="' + slidesUrl +
     '" style="display:block;padding:12px 20px;border:1px solid ' + colors.electric +
-    ';border-radius:8px;color:' + colors.electric +
+    ';border-radius:' + radius.component + ';color:' + colors.electric +
     ';font:700 14px/20px Arial,sans-serif;text-align:center;text-decoration:none">' +
     'Abrir el mismo informe en Google Slides</a></td></tr></table>' +
     '<p style="margin:12px 0 0;color:' + colors.grey600 +
@@ -442,14 +468,25 @@ function _newsletterRender_(draft, grounding, reportUrl, applicationUrl) {
   return { html: html, plain: plain };
 }
 
-function _newsletterRecipientsForScope_(scopeKey) {
+function _newsletterRecipientsForReport_(reportId) {
   return Array.from(new Set(
     _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
-      return _text_(row.scope_key) === _text_(scopeKey) && row.active === true;
+      return _text_(row.report_id) === _text_(reportId) && row.active === true;
     }).map(function (row) {
       return _canonicalEmail_(row.email);
     }).filter(Boolean)
   ));
+}
+
+function _newsletterTestWasSentBy_(reportId, email) {
+  const id = _text_(reportId);
+  const admin = _canonicalEmail_(email);
+  return Boolean(id && admin) && _readRecords_(RADAR.sheets.newsletterAudit).some(function (row) {
+    return _text_(row.report_id) === id &&
+      _text_(row.mode) === 'test' &&
+      _text_(row.status) === 'sent' &&
+      _canonicalEmail_(row.created_by) === admin;
+  });
 }
 
 function _newsletterAssertSender_() {
@@ -485,9 +522,16 @@ function sendPeriodNewsletter(reportId, mode) {
     const user = _requireAdmin_();
     const deliveryMode = _text_(mode) === 'send' ? 'send' : 'test';
     const context = _newsletterContext_(reportId);
+    if (deliveryMode === 'send') {
+      _assert_(
+        _newsletterTestWasSentBy_(reportId, user.email),
+        'Envía y revisa primero una prueba de esta newsletter con tu cuenta administradora.',
+        'NEWSLETTER_TEST_REQUIRED'
+      );
+    }
     const recipients = deliveryMode === 'test'
       ? [user.email]
-      : _newsletterRecipientsForScope_(context.record.scope_key);
+      : _newsletterRecipientsForReport_(reportId);
     _assert_(recipients.length,
       'No hay destinatarios activos para esta vista.', 'NEWSLETTER_NO_RECIPIENTS');
     _newsletterAssertSender_();
