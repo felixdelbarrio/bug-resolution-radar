@@ -522,6 +522,15 @@ export type DataTransferExportPayload = {
   fileSize: number;
   totalRecords: number;
   stats: DataTransferExportStat[];
+  scope?: {
+    country: string;
+    scopeMode: string;
+    sourceIds: string[];
+    issueCount: number;
+    relatedHelixCount: number;
+    linkedHelixCount: number;
+    noteCount: number;
+  };
 };
 
 export type DataTransferPackagesPayload = {

@@ -333,6 +333,117 @@ def test_optimize_archive_preserves_creation_date_and_recalculates_integrity(
     assert result["fileSize"] < result["sourceFileSize"]
 
 
+def test_scoped_export_keeps_only_active_issues_related_helix_and_notes(
+    tmp_path: Path,
+) -> None:
+    downloads = tmp_path / "downloads"
+    settings = _settings(tmp_path / "source", downloads=downloads)
+    Path(settings.DATA_PATH).parent.mkdir(parents=True)
+    core_source = "jira:mexico:core"
+    other_source = "jira:mexico:other"
+    save_issues_doc(
+        settings.DATA_PATH,
+        IssuesDocument(
+            issues=[
+                NormalizedIssue(
+                    key="MX-1",
+                    summary="Core",
+                    status="Open",
+                    type="Bug",
+                    priority="High",
+                    country="México",
+                    source_type="jira",
+                    source_alias="Core",
+                    source_id=core_source,
+                ),
+                NormalizedIssue(
+                    key="MX-2",
+                    summary="Otro",
+                    status="Open",
+                    type="Bug",
+                    priority="Low",
+                    country="México",
+                    source_type="jira",
+                    source_alias="Otro",
+                    source_id=other_source,
+                ),
+                _issue("ES-1"),
+            ]
+        ),
+    )
+    HelixRepo(Path(settings.HELIX_DATA_PATH)).save(
+        HelixDocument(
+            items=[
+                HelixWorkItem(
+                    id="INC-MX-1",
+                    status="Closed",
+                    country="México",
+                    source_id="helix:mexico:lookup",
+                    matched_jira_keys=["MX-1"],
+                ),
+                HelixWorkItem(
+                    id="INC-MX-2",
+                    status="Closed",
+                    country="México",
+                    source_id="helix:mexico:lookup",
+                    matched_jira_keys=["MX-2"],
+                ),
+            ]
+        )
+    )
+    Path(settings.NOTES_PATH).write_text(
+        json.dumps(
+            {
+                "MX-1": {"entries": [{"id": "n1", "createdAt": "", "note": "Core"}]},
+                "MX-2": {"entries": [{"id": "n2", "createdAt": "", "note": "Otro"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    Path(settings.INSIGHTS_LEARNING_PATH).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": {
+                    "México::jira:mexico:core": {
+                        "source_id": core_source,
+                        "interactions": 5,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exported = export_business_data(
+        settings,
+        country="México",
+        source_ids=[core_source],
+        scope_mode="country",
+    )
+
+    with zipfile.ZipFile(exported["savedPath"]) as archive:
+        issues = json.loads(archive.read("data/issues.json"))["issues"]
+        helix = json.loads(archive.read("data/helix.json"))["items"]
+        notes = json.loads(archive.read("data/notes.json"))
+        learning = json.loads(archive.read("data/insights_learning.json"))
+    assert [item["key"] for item in issues] == ["MX-1"]
+    assert [item["id"] for item in helix] == ["INC-MX-1"]
+    assert list(notes) == ["MX-1"]
+    assert learning == {"scopes": {}, "version": 1}
+    assert exported["totalRecords"] == 3
+    assert exported["scope"] == {
+        "country": "México",
+        "scopeMode": "country",
+        "sourceIds": [core_source],
+        "issueCount": 1,
+        "relatedHelixCount": 1,
+        "linkedHelixCount": 1,
+        "noteCount": 1,
+    }
+    assert exported["fileName"].startswith("respaldo_radar_mexico_agregado_")
+
+
 def test_api_guides_export_validation_and_import_in_business_language(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -343,9 +454,16 @@ def test_api_guides_export_validation_and_import_in_business_language(
     monkeypatch.setattr(api_app, "load_settings", lambda: settings)
     client = TestClient(api_app.create_app())
 
-    exported = client.post("/api/data-transfer/export", json={})
+    exported = client.post(
+        "/api/data-transfer/export",
+        json={
+            "country": "España",
+            "sourceIds": ["jira:espana:core"],
+            "scopeMode": "source",
+        },
+    )
     assert exported.status_code == 200
-    assert exported.json()["summary"] == "Respaldo completo creado y preparado para trasladar."
+    assert exported.json()["summary"] == "Vista de España preparada para trasladar."
 
     packages = client.get("/api/data-transfer/packages")
     assert packages.status_code == 200
@@ -357,7 +475,7 @@ def test_api_guides_export_validation_and_import_in_business_language(
     )
     assert checked.status_code == 200
     assert checked.json()["valid"] is True
-    assert checked.json()["totalUnchangedRecords"] == 4
+    assert checked.json()["totalUnchangedRecords"] == 2
 
     imported = client.post(
         "/api/data-transfer/import",
