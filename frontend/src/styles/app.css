@@ -2349,6 +2349,410 @@ textarea::placeholder {
   color: var(--bbva-danger);
 }
 
+.transfer-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  overflow: hidden;
+  padding: clamp(1.35rem, 3vw, 2.25rem);
+  color: white;
+  background:
+    radial-gradient(circle at 88% 16%, rgba(255, 255, 255, 0.19), transparent 24%),
+    linear-gradient(
+      125deg,
+      var(--bbva-primary-strong),
+      var(--bbva-primary) 58%,
+      color-mix(in srgb, var(--bbva-primary) 68%, #2dcccd)
+    );
+  border-color: transparent;
+}
+
+.transfer-hero::after {
+  content: "";
+  position: absolute;
+  right: -4rem;
+  bottom: -7rem;
+  width: 18rem;
+  height: 18rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2.6rem rgba(255, 255, 255, 0.05),
+    0 0 0 5.2rem rgba(255, 255, 255, 0.035);
+}
+
+.transfer-hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+}
+
+.transfer-hero-copy h2 {
+  max-width: 680px;
+  margin: 0.35rem 0 0.55rem;
+  color: white;
+  font-size: clamp(1.45rem, 3vw, 2.25rem);
+  line-height: 1.08;
+}
+
+.transfer-hero-copy p {
+  max-width: 680px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.86);
+  line-height: 1.55;
+}
+
+.transfer-eyebrow {
+  display: inline-block;
+  color: var(--bbva-primary-strong);
+  font-size: 0.73rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.transfer-hero .transfer-eyebrow {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.transfer-route {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.transfer-route i {
+  width: clamp(1.2rem, 3vw, 2.7rem);
+  height: 2px;
+  background: rgba(255, 255, 255, 0.36);
+}
+
+.transfer-route-step {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.1);
+  font-weight: 800;
+  backdrop-filter: blur(8px);
+}
+
+.transfer-route-step-active {
+  color: var(--bbva-primary-strong);
+  background: white;
+  border-color: white;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.15);
+}
+
+.transfer-action-head,
+.transfer-picker-head,
+.transfer-result-head,
+.transfer-import-commit,
+.transfer-complete-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.transfer-primary-action {
+  min-height: 2.85rem;
+  padding-inline: 1.25rem;
+}
+
+.transfer-result {
+  display: grid;
+  gap: 1rem;
+  padding: 1.1rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-lg);
+  background: color-mix(in srgb, var(--bbva-surface) 92%, var(--bbva-surface-2));
+}
+
+.transfer-result h3,
+.transfer-result p {
+  margin: 0.2rem 0 0;
+}
+
+.transfer-result-success {
+  border-color: color-mix(in srgb, var(--bbva-success) 34%, var(--bbva-border));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bbva-success) 8%, var(--bbva-surface)),
+      var(--bbva-surface) 55%
+    );
+}
+
+.transfer-result-error {
+  border-color: color-mix(in srgb, var(--bbva-danger) 38%, var(--bbva-border));
+  background: color-mix(in srgb, var(--bbva-danger) 7%, var(--bbva-surface));
+}
+
+.transfer-total-orb {
+  display: grid;
+  place-items: center;
+  min-width: 9.2rem;
+  min-height: 6.4rem;
+  padding: 0.7rem;
+  border-radius: 1.5rem;
+  color: white;
+  text-align: center;
+  background: linear-gradient(
+    145deg,
+    var(--bbva-primary),
+    var(--bbva-primary-strong)
+  );
+  box-shadow: 0 0.75rem 1.8rem color-mix(in srgb, var(--bbva-primary) 24%, transparent);
+}
+
+.transfer-total-orb strong {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.transfer-total-orb span {
+  font-size: 0.75rem;
+}
+
+.transfer-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.transfer-stat-card {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.9rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+  background: color-mix(in srgb, var(--bbva-surface) 96%, transparent);
+}
+
+.transfer-stat-card > span {
+  color: var(--bbva-text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.transfer-stat-card strong {
+  font-size: 1.5rem;
+}
+
+.transfer-stat-card small {
+  color: var(--bbva-success);
+}
+
+.transfer-file-picker {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.transfer-file-picker > span {
+  color: var(--bbva-text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.transfer-file-picker select {
+  width: 100%;
+  min-height: 3.15rem;
+  padding: 0.7rem 2.6rem 0.7rem 0.85rem;
+  border: 1px solid var(--bbva-border-strong);
+  border-radius: var(--bbva-radius-md);
+  color: var(--bbva-text);
+  background: var(--bbva-surface);
+  font: inherit;
+}
+
+.transfer-file-picker select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--bbva-primary) 22%, transparent);
+  outline-offset: 2px;
+  border-color: var(--bbva-primary);
+}
+
+.transfer-validation-running,
+.transfer-validation-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.transfer-validation-running {
+  padding: 1rem;
+  border: 1px dashed color-mix(in srgb, var(--bbva-primary) 42%, var(--bbva-border));
+  border-radius: var(--bbva-radius-md);
+}
+
+.transfer-validation-running p,
+.transfer-validation-badge p {
+  margin: 0.15rem 0 0;
+  color: var(--bbva-text-muted);
+  font-size: 0.84rem;
+}
+
+.transfer-validation-badge > span,
+.transfer-complete-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 50%;
+  color: white;
+  background: var(--bbva-success);
+  font-size: 1.3rem;
+  font-weight: 900;
+  box-shadow: 0 0 0 0.4rem color-mix(in srgb, var(--bbva-success) 10%, transparent);
+}
+
+.transfer-impact-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+}
+
+.transfer-impact-strip article {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.9rem 1rem;
+  background: color-mix(in srgb, var(--bbva-surface) 96%, transparent);
+}
+
+.transfer-impact-strip article + article {
+  border-left: 1px solid var(--bbva-border);
+}
+
+.transfer-impact-strip strong {
+  color: var(--bbva-primary-strong);
+  font-size: 1.35rem;
+}
+
+.transfer-impact-strip span {
+  color: var(--bbva-text-muted);
+  font-size: 0.78rem;
+}
+
+.transfer-merge-table {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+}
+
+.transfer-merge-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(100px, 0.7fr));
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 680px;
+  padding: 0.72rem 0.85rem;
+}
+
+.transfer-merge-row + .transfer-merge-row {
+  border-top: 1px solid var(--bbva-border);
+}
+
+.transfer-merge-head {
+  color: var(--bbva-text-muted);
+  background: var(--bbva-surface-2);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.transfer-positive {
+  color: var(--bbva-success);
+  font-weight: 800;
+}
+
+.transfer-import-commit {
+  padding-top: 0.2rem;
+}
+
+.transfer-import-commit p {
+  max-width: 560px;
+  color: var(--bbva-text-muted);
+  font-size: 0.84rem;
+}
+
+.transfer-complete {
+  border-color: color-mix(in srgb, var(--bbva-success) 48%, var(--bbva-border));
+  background:
+    radial-gradient(circle at 92% 15%, color-mix(in srgb, var(--bbva-success) 14%, transparent), transparent 30%),
+    var(--bbva-surface);
+}
+
+.transfer-complete-head {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+
+.transfer-history {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.transfer-history-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-md);
+  background: color-mix(in srgb, var(--bbva-surface) 96%, var(--bbva-surface-2));
+}
+
+.transfer-history-row p {
+  margin: 0.15rem 0 0;
+  overflow: hidden;
+  color: var(--bbva-text-muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-operation-mark {
+  min-width: 4.4rem;
+  padding: 0.32rem 0.48rem;
+  border-radius: 999px;
+  color: var(--bbva-primary-strong);
+  background: color-mix(in srgb, var(--bbva-primary) 11%, var(--bbva-surface));
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.transfer-operation-import {
+  color: var(--bbva-success);
+  background: color-mix(in srgb, var(--bbva-success) 11%, var(--bbva-surface));
+}
+
+.transfer-history-side {
+  display: grid;
+  justify-items: end;
+  color: var(--bbva-text-muted);
+  font-size: 0.72rem;
+}
+
+.transfer-history-side strong {
+  color: var(--bbva-text);
+  font-size: 1rem;
+}
+
 .inline-notice {
   padding: 0.8rem 0.95rem;
   border: 1px solid var(--bbva-border-strong);
@@ -3334,8 +3738,13 @@ textarea::placeholder {
   .settings-form-grid,
   .kanban-grid,
   .trend-metrics-grid,
-  .trend-metric-strip {
+  .trend-metric-strip,
+  .transfer-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transfer-hero {
+    align-items: flex-start;
   }
 
   .workspace-nav-bar,
@@ -3408,8 +3817,33 @@ textarea::placeholder {
   .trend-metrics-grid,
   .trend-metric-strip,
   .overview-summary-grid,
-  .favorites-grid {
+  .favorites-grid,
+  .transfer-stat-grid,
+  .transfer-impact-strip {
     grid-template-columns: 1fr;
+  }
+
+  .transfer-hero {
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .transfer-impact-strip article + article {
+    border-top: 1px solid var(--bbva-border);
+    border-left: 0;
+  }
+
+  .transfer-history-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .transfer-history-side {
+    grid-column: 2;
+    justify-items: start;
+  }
+
+  .transfer-complete-head {
+    align-items: flex-start;
   }
 
   .field-wide {

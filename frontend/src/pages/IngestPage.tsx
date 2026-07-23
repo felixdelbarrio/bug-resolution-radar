@@ -18,8 +18,26 @@ import {
   type WorkspaceSource
 } from "../lib/api";
 import { cn } from "../lib/cn";
+import { DataTransferPanel } from "../components/DataTransferPanel";
 
 type Connector = "jira" | "helix" | "finalist_lookup";
+type IngestTab = Connector | "export" | "import";
+
+const INGEST_TABS: IngestTab[] = [
+  "jira",
+  "helix",
+  "finalist_lookup",
+  "export",
+  "import"
+];
+
+function ingestTabLabel(tab: IngestTab): string {
+  if (tab === "jira") return "Jira";
+  if (tab === "helix") return "Helix";
+  if (tab === "finalist_lookup") return "Buscar estados finalistas";
+  if (tab === "export") return "Exportar";
+  return "Importar";
+}
 
 type ConnectorFeedback = {
   title: string;
@@ -295,7 +313,7 @@ export function IngestPage() {
     refetchOnReconnect: false,
     placeholderData: keepPreviousData
   } as const;
-  const [activeTab, setActiveTab] = useState<Connector>("jira");
+  const [activeTab, setActiveTab] = useState<IngestTab>("jira");
   const [jiraSelection, setJiraSelection] = useState<string[]>([]);
   const [helixSelection, setHelixSelection] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<Partial<Record<Connector, ConnectorFeedback>>>({});
@@ -590,6 +608,38 @@ export function IngestPage() {
     );
   }
 
+  const ingestNavigation = (
+    <section className="surface-panel insights-tabs-shell">
+      <nav className="subtab-strip" aria-label="Conectores y traslado de datos">
+        {INGEST_TABS.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={cn(
+              "subtab-button",
+              activeTab === item && "subtab-button-active"
+            )}
+            onClick={() => setActiveTab(item)}
+          >
+            {ingestTabLabel(item)}
+          </button>
+        ))}
+      </nav>
+    </section>
+  );
+
+  if (activeTab === "export" || activeTab === "import") {
+    return (
+      <section className="page-stack">
+        {ingestNavigation}
+        <DataTransferPanel
+          mode={activeTab}
+          onDataImported={invalidateRadarData}
+        />
+      </section>
+    );
+  }
+
   const connector = activeTab;
   const copy = CONNECTOR_COPY[connector];
   const sourceRows =
@@ -635,27 +685,7 @@ export function IngestPage() {
 
   return (
     <section className="page-stack">
-      <section className="surface-panel insights-tabs-shell">
-        <nav className="subtab-strip" aria-label="Conectores de ingesta">
-          {(["jira", "helix", "finalist_lookup"] as Connector[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={cn(
-                "subtab-button",
-                activeTab === item && "subtab-button-active"
-              )}
-              onClick={() => setActiveTab(item)}
-            >
-              {item === "jira"
-                ? "Jira"
-                : item === "helix"
-                  ? "Helix"
-                  : "Buscar estados finalistas"}
-            </button>
-          ))}
-        </nav>
-      </section>
+      {ingestNavigation}
 
       <section className="surface-panel page-stack">
         <p className="inline-caption">
