@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
+import { useOutletContext } from "react-router-dom";
 import {
   fetchJson,
   type IngestProgressPayload,
@@ -18,8 +19,25 @@ import {
   type WorkspaceSource
 } from "../lib/api";
 import { cn } from "../lib/cn";
+import { DataTransferPanel } from "../components/DataTransferPanel";
+import type { ShellContextValue } from "../components/AppShell";
 
 type Connector = "jira" | "helix" | "finalist_lookup";
+type IngestTab = Connector | "export";
+
+const INGEST_TABS: IngestTab[] = [
+  "jira",
+  "helix",
+  "finalist_lookup",
+  "export"
+];
+
+function ingestTabLabel(tab: IngestTab): string {
+  if (tab === "jira") return "Jira";
+  if (tab === "helix") return "Helix";
+  if (tab === "finalist_lookup") return "Buscar estados finalistas";
+  return "Exportar";
+}
 
 type ConnectorFeedback = {
   title: string;
@@ -288,6 +306,7 @@ function IngestSourceTable({
 
 export function IngestPage() {
   const queryClient = useQueryClient();
+  const { workspace, dashboardState } = useOutletContext<ShellContextValue>();
   const commonQueryOptions = {
     staleTime: 45_000,
     gcTime: 300_000,
@@ -295,7 +314,7 @@ export function IngestPage() {
     refetchOnReconnect: false,
     placeholderData: keepPreviousData
   } as const;
-  const [activeTab, setActiveTab] = useState<Connector>("jira");
+  const [activeTab, setActiveTab] = useState<IngestTab>("jira");
   const [jiraSelection, setJiraSelection] = useState<string[]>([]);
   const [helixSelection, setHelixSelection] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<Partial<Record<Connector, ConnectorFeedback>>>({});
@@ -590,6 +609,50 @@ export function IngestPage() {
     );
   }
 
+  const ingestNavigation = (
+    <section className="surface-panel insights-tabs-shell">
+      <nav className="subtab-strip" aria-label="Conectores y traslado de datos">
+        {INGEST_TABS.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={cn(
+              "subtab-button",
+              activeTab === item && "subtab-button-active"
+            )}
+            onClick={() => setActiveTab(item)}
+          >
+            {ingestTabLabel(item)}
+          </button>
+        ))}
+      </nav>
+    </section>
+  );
+
+  if (activeTab === "export") {
+    const scopeMode = workspace?.scopeMode ?? dashboardState.params.scopeMode;
+    const sourceIds =
+      scopeMode === "country"
+        ? (workspace?.countryRollupSourceIds ?? [])
+        : [workspace?.selectedSourceId ?? dashboardState.params.sourceId].filter(Boolean);
+    const sourceLabels = (workspace?.sources ?? [])
+      .filter((source) => sourceIds.includes(source.source_id))
+      .map((source) => source.alias);
+    return (
+      <section className="page-stack">
+        {ingestNavigation}
+        <DataTransferPanel
+          exportScope={{
+            country: workspace?.selectedCountry ?? dashboardState.params.country,
+            scopeMode,
+            sourceIds,
+            sourceLabels
+          }}
+        />
+      </section>
+    );
+  }
+
   const connector = activeTab;
   const copy = CONNECTOR_COPY[connector];
   const sourceRows =
@@ -635,27 +698,7 @@ export function IngestPage() {
 
   return (
     <section className="page-stack">
-      <section className="surface-panel insights-tabs-shell">
-        <nav className="subtab-strip" aria-label="Conectores de ingesta">
-          {(["jira", "helix", "finalist_lookup"] as Connector[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={cn(
-                "subtab-button",
-                activeTab === item && "subtab-button-active"
-              )}
-              onClick={() => setActiveTab(item)}
-            >
-              {item === "jira"
-                ? "Jira"
-                : item === "helix"
-                  ? "Helix"
-                  : "Buscar estados finalistas"}
-            </button>
-          ))}
-        </nav>
-      </section>
+      {ingestNavigation}
 
       <section className="surface-panel page-stack">
         <p className="inline-caption">

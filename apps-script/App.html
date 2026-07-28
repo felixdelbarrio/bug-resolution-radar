@@ -1,0 +1,1276 @@
+<script>
+const RPC = (() => {
+  const call = (name, ...args) => new Promise((resolve, reject) => {
+    const startedAt = performance.now();
+    google.script.run
+      .withSuccessHandler(response => {
+        if (response && response.ok) {
+          if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+            window.__RADAR_TELEMETRY__('rpc', {
+              name: name
+            }, Math.round(performance.now() - startedAt), 'success');
+          }
+          resolve(response.data);
+          return;
+        }
+        const error = new Error(
+          response && response.error ? response.error.message : 'Respuesta no válida.'
+        );
+        error.code = response && response.error ? response.error.code : 'INVALID_RESPONSE';
+        if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+          window.__RADAR_TELEMETRY__('rpc', {
+            name: name, code: error.code
+          }, Math.round(performance.now() - startedAt), 'error');
+        }
+        reject(error);
+      })
+      .withFailureHandler(error => {
+        const failure = new Error(
+          error && error.message
+            ? error.message
+            : 'Apps Script interrumpió la solicitud. Recarga la aplicación.'
+        );
+        failure.code = 'APPS_SCRIPT_FAILURE';
+        if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+          window.__RADAR_TELEMETRY__('rpc', {
+            name: name, code: failure.code
+          }, Math.round(performance.now() - startedAt), 'error');
+        }
+        reject(failure);
+      })[name](...args);
+  });
+  return { call };
+})();
+
+const App = (() => {
+  const state = {
+    route: 'dashboard',
+    panel: 'overview',
+    bootstrap: null,
+    dashboard: null,
+    scopeKey: '',
+    trendChart: 'open_status_bar',
+    insightsId: 'summary',
+    issuesView: 'Cards',
+    page: 1,
+    pageSize: 50,
+    dark: false,
+    sharedToken: String(window.__RADAR_SHARE_TOKEN__ || ''),
+    pending: 0,
+    memory: new Map(),
+    inFlight: new Map(),
+    preferenceTimer: null,
+    transferValidation: null,
+    lastPeriodReport: null,
+    newsletterSettings: null,
+    newsletterReportId: '',
+    settingsTab: 'health',
+    adminConsole: null,
+    analyticsReport: null,
+    analyticsUserEmail: '',
+    analyticsDays: 30,
+    driveBrowser: null,
+    analyticsQueue: [],
+    analyticsTimer: null,
+    navigationEpoch: 0,
+    sessionId: window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  };
+
+  const $ = id => document.getElementById(id);
+  const view = () => $('routeView');
+  const isShared = () => Boolean(state.sharedToken);
+  const isAdmin = () => Boolean(
+    state.bootstrap && state.bootstrap.user && state.bootstrap.user.role === 'admin'
+  );
+  const currentScope = () => (state.bootstrap.scopes || []).find(
+    scope => scope.scopeKey === state.scopeKey
+  ) || null;
+  function flushAnalytics() {
+    window.clearTimeout(state.analyticsTimer);
+    const events = state.analyticsQueue.splice(0, 20);
+    if (!events.length || isShared() || !state.bootstrap) return;
+    RPC.call('recordAnalyticsEvents', events).catch(() => {});
+    if (state.analyticsQueue.length) {
+      state.analyticsTimer = window.setTimeout(flushAnalytics, 1200);
+    }
+  }
+
+  function trackEvent(eventName, details = {}, durationMs = 0, status = 'success') {
+    if (isShared()) return;
+    state.analyticsQueue.push({
+      eventAt: new Date().toISOString(),
+      sessionId: state.sessionId,
+      eventName: String(eventName || ''),
+      route: state.route,
+      panel: state.panel,
+      scopeKey: state.scopeKey,
+      durationMs: Number(durationMs || 0),
+      status: status,
+      details: details,
+      userAgent: navigator.userAgent
+    });
+    if (state.analyticsQueue.length >= 10) flushAnalytics();
+    else {
+      window.clearTimeout(state.analyticsTimer);
+      state.analyticsTimer = window.setTimeout(flushAnalytics, 5000);
+    }
+  }
+  window.__RADAR_TELEMETRY__ = trackEvent;
+
+  function setBusy(active) {
+    state.pending = Math.max(0, state.pending + (active ? 1 : -1));
+    $('app').setAttribute('aria-busy', String(state.pending > 0));
+    $('scopeBar').classList.toggle('is-loading', state.pending > 0);
+  }
+
+  function deadline(promise, milliseconds, message) {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(
+        () => reject(Object.assign(new Error(message), { code: 'REQUEST_TIMEOUT' })),
+        milliseconds
+      );
+      promise.then(
+        value => {
+          window.clearTimeout(timer);
+          resolve(value);
+        },
+        error => {
+          window.clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }
+
+  function requestFor(panel = state.panel) {
+    return ClientDomain.queryRequest({ ...state, panel });
+  }
+
+  function requestKey(request) {
+    const scope = (state.bootstrap.scopes || []).find(
+      item => item.scopeKey === request.scopeKey
+    ) || {};
+    return JSON.stringify({
+      contract: state.bootstrap.app.contractVersion,
+      cacheGeneration: state.bootstrap.app.cacheEpoch,
+      scopeKey: request.scopeKey,
+      scopeVersion: scope.dataVersion || state.bootstrap.app.dataVersion,
+      snapshotId: scope.snapshotId || '',
+      view: request.view,
+      chartId: request.chartId,
+      insightsId: request.insightsId,
+      page: request.page,
+      pageSize: request.pageSize,
+      sortId: request.sortId
+    });
+  }
+
+  function cacheKey(request) {
+    return `dashboard:${requestKey(request)}`;
+  }
+
+  function schedulePreferenceSave() {
+    if (isShared()) return;
+    window.clearTimeout(state.preferenceTimer);
+    state.preferenceTimer = window.setTimeout(() => {
+      RPC.call('savePreference', 'dashboard_state', {
+        panel: state.panel,
+        scopeKey: state.scopeKey,
+        trendChart: state.trendChart,
+        insightsId: state.insightsId,
+        issuesView: state.issuesView
+      }).catch(() => {});
+    }, 400);
+  }
+
+  function setActionIcons() {
+    const reports = document.querySelector('[data-route="reports"]');
+    const ingest = document.querySelector('[data-route="import"]');
+    const settings = document.querySelector('[data-route="settings"]');
+    if (reports) reports.innerHTML = UI.icon('presentation');
+    if (ingest) ingest.innerHTML = UI.icon('spherica-down-cloud');
+    if (settings) settings.innerHTML = UI.icon('spherica-simulator');
+    $('themeToggle').innerHTML = UI.icon(state.dark ? 'sun' : 'moon');
+  }
+
+  function syncNavigation() {
+    document.querySelectorAll('[data-panel]').forEach(button => {
+      button.classList.toggle(
+        'workspace-tab-active',
+        state.route === 'dashboard' && button.dataset.panel === state.panel
+      );
+    });
+    document.querySelectorAll('[data-route]').forEach(button => {
+      button.classList.toggle(
+        'workspace-action-active',
+        button.dataset.route === state.route
+      );
+    });
+    setActionIcons();
+  }
+
+  function countryScopes(country) {
+    return (state.bootstrap.scopes || []).filter(scope => scope.country === country);
+  }
+
+  function aggregateScope(scopes) {
+    return scopes.find(scope => String(scope.scopeKey || '').endsWith('::*')) || null;
+  }
+
+  function syncScope() {
+    const scopes = state.bootstrap.scopes || [];
+    const active = currentScope() || scopes[0] || {};
+    const countries = [...new Set(scopes.map(scope => scope.country).filter(Boolean))];
+    $('workspaceCountry').innerHTML = countries.map(country => (
+      `<option value="${UI.escape(country)}" ${country === active.country ? 'selected' : ''}>` +
+      `${UI.escape(country)}</option>`
+    )).join('') || '<option value="">Sin ámbitos publicados</option>';
+
+    const related = countryScopes(active.country);
+    const aggregate = aggregateScope(related);
+    const individual = related.filter(scope => scope !== aggregate);
+    const rollup = Boolean(aggregate && active.scopeKey === aggregate.scopeKey);
+    $('workspaceRollup').checked = rollup;
+    $('workspaceRollup').disabled = !isAdmin() || isShared() || !aggregate;
+    $('workspaceSource').innerHTML = individual.map(scope => (
+      `<option value="${UI.escape(scope.scopeKey)}" ` +
+      `${scope.scopeKey === active.scopeKey ? 'selected' : ''}>` +
+      `${UI.escape(scope.scopeLabel)}</option>`
+    )).join('') || '<option value="">Sin vista por origen</option>';
+    $('workspaceSource').disabled = !isAdmin() || isShared() || rollup || !individual.length;
+    $('workspaceCountry').disabled = !isAdmin() || isShared();
+    document.querySelector('.workspace-source-slot').classList.toggle('hidden', rollup);
+    $('workspaceRollupCaption').classList.toggle('hidden', !rollup);
+    $('workspaceRollupCaption').textContent = rollup ? (active.scopeLabel || active.country) : '';
+    const banner = $('sharedScopeBanner');
+    banner.classList.toggle('hidden', !isShared());
+    banner.textContent = isShared()
+      ? `Vista compartida de solo lectura · ${active.scopeLabel || ''}`
+      : '';
+    $('scopeDescription').textContent = active.scopeLabel || active.country || 'Sin ámbito';
+    $('dataVersion').textContent = active.activatedAt
+      ? `Última importación: ${UI.formatDate(active.activatedAt)}`
+      : 'Sin importación';
+  }
+
+  function bindIssueLinks() {
+    document.querySelectorAll('.open-issue').forEach(button => {
+      button.addEventListener('click', () => openIssue(button.dataset.uid));
+    });
+  }
+
+  function renderMatrix(matrix) {
+    if (!matrix || !Array.isArray(matrix.rows) || !matrix.rows.length) return '';
+    return `<section class="surface-panel">
+      <div class="panel-head">
+        <div><p class="section-kicker">Distribución estática</p><h3>${UI.escape(matrix.title || 'Estado y prioridad')}</h3></div>
+        <span class="metric-chip">${UI.formatNumber(matrix.total)} issues</span>
+      </div>
+      <div class="matrix-shell"><table class="matrix-table">
+        <thead><tr><th>Estado</th>${(matrix.priorities || []).map(item =>
+          `<th><span style="color:${UI.semanticCss(item.priority, 'priority')}">${UI.escape(item.priority)} (${UI.formatNumber(item.count)})</span></th>`
+        ).join('')}</tr></thead>
+        <tbody>${matrix.rows.map(row => `<tr>
+          <th><span style="color:${UI.semanticCss(row.status)}">${UI.escape(row.status)} (${UI.formatNumber(row.count)})</span></th>
+          ${(row.cells || []).map(cell => `<td>${UI.formatNumber(cell.count)}</td>`).join('')}
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </section>`;
+  }
+
+  function renderOverview() {
+    const data = state.dashboard || {};
+    const matrix = data.statusPriorityMatrix || data.matrix;
+    Charts.begin(view());
+    view().innerHTML = `<section class="page-stack">
+      <section class="overview-kpi-grid">${(data.overviewKpis || []).map(item =>
+        UI.kpi({
+          ...item,
+          value: /^\d+$/.test(String(item.value))
+            ? UI.formatNumber(item.value)
+            : item.value
+        })
+      ).join('')}</section>
+      ${(data.focusCards || []).length ? `<section class="page-stack">
+        <div class="panel-head"><div><h3>Focos accionables</h3></div></div>
+        <div class="focus-card-grid">${data.focusCards.map(card =>
+          `<article class="focus-card focus-card-${UI.escape(card.tone || 'neutral')}">
+            <span class="focus-card-kicker">${UI.escape(card.kicker)}</span>
+            <strong class="focus-card-metric">${UI.escape(card.metric)}</strong>
+            <span class="focus-card-title">${UI.escape(card.title)}</span>
+            <span class="focus-card-detail">${UI.escape(card.detail)}</span>
+          </article>`
+        ).join('')}</div>
+      </section>` : ''}
+      <section class="chart-grid overview-summary-grid">${(data.charts || []).map(chart =>
+        `<article class="chart-card">
+          <div class="chart-copy"><div><p class="eyebrow">${UI.escape(chart.group)}</p>
+          <h4>${UI.escape(chart.title)}</h4><p>${UI.escape(chart.subtitle)}</p></div></div>
+          ${Charts.placeholder(chart.figure, 320)}
+        </article>`
+      ).join('')}</section>
+      ${renderMatrix(matrix)}
+    </section>`;
+    Charts.mountAll(view());
+  }
+
+  function renderTrends() {
+    const data = (state.dashboard && state.dashboard.trends) || {};
+    const catalog = data.chartCatalog || data.catalog || [];
+    const chart = data.chart || {};
+    Charts.begin(view());
+    view().innerHTML = `<section class="page-stack">
+      <section class="surface-panel trend-shell">
+        <label class="field trend-selector-field"><span>Gráfico precalculado</span>
+          <select id="trendChart">${catalog.map(item =>
+            `<option value="${UI.escape(item.id)}" ${item.id === (data.selectedChartId || state.trendChart) ? 'selected' : ''}>` +
+            `${UI.escape(item.title || item.label || item.id)}</option>`
+          ).join('')}</select>
+        </label>
+        <section class="trend-chart-block">
+          <div class="trend-chart-head"><div><p class="eyebrow">${UI.escape(chart.group)}</p>
+          <h4>${UI.escape(chart.title)}</h4><p>${UI.escape(chart.subtitle)}</p></div></div>
+          ${(data.metrics || []).length ? `<div class="trend-metric-strip">${data.metrics.map(metric =>
+            `<article class="trend-metric-inline"><span>${UI.escape(metric.label)}</span><strong>${UI.escape(metric.value)}</strong></article>`
+          ).join('')}</div>` : ''}
+          <div class="trend-figure-shell">${Charts.placeholder(chart.figure, 380)}</div>
+        </section>
+        ${(data.cards || []).length ? `<section class="trend-copy-section">
+          <h4>Racional del escritorio</h4>
+          <div class="trend-action-grid">${data.cards.map(card =>
+            `<article class="trend-action-card"><strong>${UI.escape(card.title)}</strong><span>${UI.escape(card.body)}</span>${issueList(card.issues || [], '')}</article>`
+          ).join('')}</div>
+        </section>` : ''}
+        ${data.executiveTip ? `<p class="trend-executive-tip">${UI.escape(data.executiveTip)}</p>` : ''}
+      </section>
+    </section>`;
+    const selector = $('trendChart');
+    if (selector) selector.addEventListener('change', async event => {
+      state.trendChart = event.target.value;
+      trackEvent('trend_chart_selected', { chartId: state.trendChart });
+      await refreshDashboard();
+    });
+    Charts.mountAll(view());
+  }
+
+  function issueList(rows, emptyText = 'No hay incidencias en este bloque.') {
+    if (!Array.isArray(rows) || !rows.length) {
+      return emptyText
+        ? `<p class="issue-list-empty">${UI.escape(emptyText)}</p>`
+        : '';
+    }
+    return `<div class="insight-issue-list">${rows.map(row =>
+      `<article class="insight-issue-row">
+        <div class="issue-primary-link">${UI.issueKey(row)}
+          <span>${UI.escape(row.summary || 'Sin resumen')}</span></div>
+        <div>${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}</div>
+      </article>`
+    ).join('')}</div>`;
+  }
+
+  function renderInsightValue(value, label = '') {
+    if (value == null || value === '') return '';
+    if (Array.isArray(value)) {
+      if (!value.length) return '';
+      if (value.every(item => item && typeof item === 'object' && item.key)) {
+        return issueList(value);
+      }
+      return `<div class="trend-action-grid">${value.slice(0, 80).map(item => {
+        if (item && typeof item === 'object') {
+          const title = item.title || item.label || item.name || item.functionality || item.status || '';
+          const body = item.body || item.detail || item.brief || item.summary || item.value || item.count || '';
+          return `<article class="trend-action-card"><strong>${UI.escape(title)}</strong><span>${UI.escape(body)}</span></article>`;
+        }
+        return `<article class="trend-action-card"><span>${UI.escape(item)}</span></article>`;
+      }).join('')}</div>`;
+    }
+    if (typeof value === 'object') {
+      if (value.figure) return Charts.placeholder(value.figure, 340);
+      return Object.entries(value).map(([key, item]) => {
+        if (['tabs', 'combo'].includes(key)) return '';
+        const rendered = renderInsightValue(item, key);
+        return rendered ? `<section class="surface-card"><h4>${UI.escape(key)}</h4>${rendered}</section>` : '';
+      }).join('');
+    }
+    return `<p>${UI.escape(label ? `${label}: ${value}` : value)}</p>`;
+  }
+
+  function renderFunctionalityInsight(data) {
+    const topics = data.topics || [];
+    return `<section class="page-stack">
+      ${data.chart ? `<section class="surface-panel"><div class="panel-head"><div>
+        <p class="section-kicker">Vista acumulada · estados no finalistas</p>
+        <h3>${UI.escape(data.chart.title)}</h3><p>${UI.escape(data.chart.subtitle)}</p>
+      </div></div>${Charts.placeholder(data.chart.figure, 360)}</section>` : ''}
+      ${topics.map(topic => `<details class="insight-detail-block">
+        <summary>${UI.escape(topic.topic)} · ${UI.formatNumber(topic.count)} · ${Number(topic.pct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
+        <p>${UI.escape(topic.brief || '')}</p>
+        ${issueList(topic.issues || [])}
+      </details>`).join('')}
+      ${data.tip ? `<p class="inline-caption">${UI.escape(data.tip)}</p>` : ''}
+    </section>`;
+  }
+
+  function renderDuplicatesInsight(data) {
+    const groups = [...(data.titleGroups || []), ...(data.heuristicGroups || [])];
+    return `<section class="page-stack">
+      ${data.brief ? `<section class="surface-panel"><p>${UI.escape(data.brief)}</p></section>` : ''}
+      ${groups.map(group => `<details class="insight-detail-block">
+        <summary>${UI.escape(group.summary || 'Grupo duplicado')} · ${UI.formatNumber(group.count)}</summary>
+        <p>${UI.escape(group.dominantStatus || '')} · ${UI.escape(group.dominantPriority || '')}</p>
+        ${issueList(group.issues || [])}
+      </details>`).join('')}
+    </section>`;
+  }
+
+  function renderFinalistInsight(data) {
+    return `<section class="page-stack">
+      <div class="overview-kpi-grid">${(data.kpis || []).map(item => UI.kpi({
+        label: item.label, value: item.value, hint: item.detail
+      })).join('')}</div>
+      ${(data.groups || []).map(group => `<details class="insight-detail-block">
+        <summary>${group.helixUrl
+          ? `<a class="issue-inline-link" href="${UI.escape(group.helixUrl)}" target="_blank" rel="noopener noreferrer">${UI.escape(group.helixId)}</a>`
+          : UI.escape(group.helixId)} · ${UI.escape(group.helixStatus)} · ${UI.formatNumber(group.jiraCount)} JIRA</summary>
+        <p>${UI.escape(group.helixText || group.helixSummary || '')}</p>
+        ${issueList(group.issues || [])}
+      </details>`).join('')}
+    </section>`;
+  }
+
+  function renderPeopleInsight(data) {
+    return `<section class="page-stack">${(data.cards || []).map(card =>
+      `<details class="insight-detail-block"><summary>${UI.escape(card.assignee)} · ${UI.formatNumber(card.openCount)} abiertas · ${Number(card.sharePct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
+      <p>${(card.recommendations || []).map(UI.escape).join(' · ')}</p>
+      ${issueList(card.oldestIssues || [])}</details>`
+    ).join('')}</section>`;
+  }
+
+  function renderInsights() {
+    const data = (state.dashboard && state.dashboard.insights) || {};
+    const tabs = data.tabs || [];
+    Charts.begin(view());
+    let body = '';
+    if (data.periodSummary && (data.periodSummary.cards || []).length) {
+      body = `<section class="page-stack">
+        <p class="inline-caption">${UI.escape(data.periodSummary.caption)}</p>
+        <div class="period-card-grid">${data.periodSummary.cards.map(card =>
+          `<article class="period-action-card" data-tone="${UI.escape(card.tone)}">
+            <span>${UI.escape(card.kicker)}</span><strong>${UI.escape(card.metric)}</strong>
+            <p>${UI.escape(card.detail)}</p>${issueList(card.issues || [], '')}
+            <div class="period-action-card-footer"><em>${UI.escape(card.label)}</em></div>
+          </article>`
+        ).join('')}</div>
+        ${(data.periodSummary.groups || []).map(group =>
+          `<details class="insight-detail-block" data-tone="${UI.escape(group.tone)}">
+            <summary>${UI.escape(group.label)}: ${UI.formatNumber(group.count)}</summary>
+            ${issueList(group.rows || group.items || [])}
+          </details>`
+        ).join('')}
+      </section>`;
+    } else {
+      const selected = { ...data };
+      delete selected.tabs;
+      delete selected.activeTab;
+      if (data.activeTab === 'functionality') body = renderFunctionalityInsight(data.functionality || selected);
+      else if (data.activeTab === 'duplicates') body = renderDuplicatesInsight(data.duplicates || selected);
+      else if (data.activeTab === 'rootCauseEvolutives') body = renderFinalistInsight(data.rootCauseEvolutives || selected);
+      else if (data.activeTab === 'finalistDiscrepancies') body = renderFinalistInsight(data.finalistDiscrepancies || selected);
+      else if (data.activeTab === 'people') body = renderPeopleInsight(data.people || selected);
+      else body = renderInsightValue(selected);
+    }
+    view().innerHTML = `<section class="page-stack">
+      <section class="surface-panel insights-nav">
+        <div class="soft-toggle-row">${tabs.map(tab =>
+          `<button class="soft-toggle-button ${tab.id === (data.activeTab || state.insightsId) ? 'soft-toggle-button-active' : ''}" data-insight-id="${UI.escape(tab.id)}" type="button">${UI.escape(tab.label || tab.id)}</button>`
+        ).join('')}</div>
+      </section>
+      ${body || UI.empty('Sin racional materializado', 'El escritorio no publicó contenido para esta sección.')}
+    </section>`;
+    document.querySelectorAll('[data-insight-id]').forEach(button => {
+      button.addEventListener('click', async () => {
+        state.insightsId = button.dataset.insightId;
+        trackEvent('insights_section_selected', { insightsId: state.insightsId });
+        await refreshDashboard();
+      });
+    });
+    bindIssueLinks();
+    Charts.mountAll(view());
+  }
+
+  function renderIssues() {
+    const data = state.dashboard || {};
+    const rows = data.rows || [];
+    const total = Number(data.totalRows == null ? data.total : data.totalRows);
+    const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+    const controls = `<section class="surface-panel issues-controls">
+      <div><strong>${UI.formatNumber(total)}</strong><span> incidencias precalculadas</span></div>
+      <div class="soft-toggle-row">
+        <button id="issuesCards" class="soft-toggle-button ${state.issuesView === 'Cards' ? 'soft-toggle-button-active' : ''}" type="button">Cards</button>
+        <button id="issuesTable" class="soft-toggle-button ${state.issuesView === 'Table' ? 'soft-toggle-button-active' : ''}" type="button">Tabla</button>
+      </div>
+    </section>`;
+    const cards = `<section class="issues-card-stack">${rows.map(row =>
+      `<article class="surface-card issue-card">
+        <div class="issue-card-button">
+          <div class="issue-card-head">${UI.issueKey(row)}<span>${UI.escape(row.source_alias || row.country)}</span></div>
+          <h3>${UI.escape(row.summary)}</h3>
+          <p>${UI.escape(row.description || row.helix_executive_description || 'Sin descripción')}</p>
+          <div class="issue-card-meta">${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}
+            <span class="issue-chip issue-chip-neutral">${UI.escape(row.assignee || 'Sin asignar')}</span>
+            <span class="issue-chip issue-chip-neutral">${UI.escape(row.functionality || 'Otros')}</span>
+          </div>
+        </div>
+      </article>`
+    ).join('')}</section>`;
+    const table = `<section class="surface-card issues-table-shell"><div class="table-wrap">
+      <table class="issues-table"><thead><tr><th>Issue</th><th>Resumen</th><th>Estado</th><th>Priority</th><th>Asignado</th><th>Actualizada</th></tr></thead>
+      <tbody>${rows.map(row => `<tr>
+        <td>${UI.issueKey(row)}</td>
+        <td>${UI.escape(row.summary)}</td><td>${UI.chip(row.status)}</td>
+        <td>${UI.chip(row.priority, 'priority')}</td><td>${UI.escape(row.assignee || 'Sin asignar')}</td>
+        <td>${UI.escape(UI.formatDate(row.updated))}</td>
+      </tr>`).join('')}</tbody></table>
+    </div></section>`;
+    view().innerHTML = `<section class="page-stack">${controls}
+      ${rows.length ? (state.issuesView === 'Table' ? table : cards) : UI.empty('Sin incidencias', 'El snapshot no contiene filas.')}
+      <div class="issues-pagination">
+        <button id="prevPage" class="secondary-button" ${state.page <= 1 ? 'disabled' : ''} type="button">Anterior</button>
+        <span>Página ${state.page} de ${totalPages}</span>
+        <button id="nextPage" class="secondary-button" ${state.page >= totalPages ? 'disabled' : ''} type="button">Siguiente</button>
+      </div>
+    </section>`;
+    $('issuesCards').addEventListener('click', () => {
+      state.issuesView = 'Cards';
+      trackEvent('issues_layout_selected', { layout: 'Cards' });
+      renderIssues();
+      schedulePreferenceSave();
+    });
+    $('issuesTable').addEventListener('click', () => {
+      state.issuesView = 'Table';
+      trackEvent('issues_layout_selected', { layout: 'Table' });
+      renderIssues();
+      schedulePreferenceSave();
+    });
+    $('prevPage').addEventListener('click', async () => {
+      state.page = Math.max(1, state.page - 1);
+      await refreshDashboard();
+    });
+    $('nextPage').addEventListener('click', async () => {
+      state.page = Math.min(totalPages, state.page + 1);
+      await refreshDashboard();
+    });
+    bindIssueLinks();
+  }
+
+  function renderCurrent() {
+    if (state.panel === 'overview') renderOverview();
+    else if (state.panel === 'insights') renderInsights();
+    else if (state.panel === 'trends') renderTrends();
+    else renderIssues();
+  }
+
+  async function openIssue(issueUid) {
+    if (!issueUid) {
+      UI.message('La incidencia no tiene una identidad unívoca en este snapshot.', 'error');
+      return;
+    }
+    try {
+      setBusy(true);
+      const issue = isShared()
+        ? await RPC.call('getSharedIssueDetail', state.sharedToken, issueUid)
+        : await RPC.call('getIssueDetail', { scopeKey: state.scopeKey, issueUid });
+      const root = $('issueDrawerRoot');
+      root.innerHTML = `<aside class="issue-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <button id="drawerBackdrop" class="issue-drawer-backdrop" aria-label="Cerrar detalle" type="button"></button>
+        <section class="issue-drawer-panel">
+          <div class="issue-drawer-head"><div><span>${UI.escape(issue.key)}</span><h2 id="drawerTitle">${UI.escape(issue.summary)}</h2></div>
+          <button id="drawerClose" class="ghost-button" type="button">Cerrar</button></div>
+          <div class="issue-drawer-body">
+            <div class="issue-card-meta">${UI.chip(issue.status)} ${UI.chip(issue.priority, 'priority')}
+              <span class="issue-chip issue-chip-neutral">${UI.escape(issue.assignee || 'Sin asignar')}</span>
+            </div>
+            <p>${UI.escape(issue.description || issue.helix_executive_description || 'Sin descripción')}</p>
+            ${issue.url ? `<a class="action-button" href="${UI.escape(issue.url)}" target="_blank" rel="noopener noreferrer">Abrir incidencia ↗</a>` : ''}
+          </div>
+        </section>
+      </aside>`;
+      const close = () => { root.innerHTML = ''; };
+      $('drawerClose').addEventListener('click', close);
+      $('drawerBackdrop').addEventListener('click', close);
+    } catch (error) {
+      UI.message(error.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reportSuccess(job) {
+    const canSend = job.newsletterTested && !job.newsletterSent;
+    const sendLabel = job.newsletterSent
+      ? 'Newsletter enviada ✓'
+      : (job.newsletterTested ? 'Enviar newsletter' : 'Envía primero una prueba');
+    return `<div class="report-success">
+      <strong>Presentación exacta publicada</strong>
+      <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
+      <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
+      <div class="newsletter-report-actions">
+        <button id="testPeriodNewsletter" class="secondary-button" type="button">Probar newsletter</button>
+        <button id="sendPeriodNewsletter" class="action-button" ${canSend ? '' : 'disabled'} type="button">${sendLabel}</button>
+      </div>
+      <small>${UI.formatNumber(job.recipientCount)} destinatarios activos. El envío final se habilita tras una prueba correcta al administrador conectado.</small>
+    </div>`;
+  }
+
+  async function deliverNewsletter(mode) {
+    const job = state.lastPeriodReport;
+    if (!job) return;
+    if (mode === 'send' && !window.confirm(
+      'Se enviará la newsletter a todos los destinatarios activos de este ámbito. ¿Continuar?'
+    )) return;
+    try {
+      setBusy(true);
+      const result = await deadline(
+        RPC.call('sendPeriodNewsletter', job.reportId, mode),
+        120000,
+        'Gmail no respondió en 120 segundos.'
+      );
+      UI.message(
+        mode === 'test'
+          ? `Prueba enviada a ${result.testRecipient}.`
+          : `Newsletter enviada a ${result.recipientCount} destinatarios.`,
+        'success'
+      );
+      if (mode === 'send') job.newsletterSent = true;
+      await renderReports();
+    } catch (error) {
+      UI.message(error.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function renderReports() {
+    const epoch = state.navigationEpoch;
+    view().innerHTML = `<section class="page-stack">
+      <section class="surface-panel report-intro"><div>
+        <p class="section-kicker">Reports</p><h3>Presentación y newsletter</h3>
+        <p class="minor-copy">La publicación reutiliza el PPTX autoritativo del escritorio; GPC no vuelve a calcular ni reconstruir el informe.</p>
+      </div></section>
+      <section class="surface-panel"><div id="periodReportResult">Consultando snapshot…</div></section>
+    </section>`;
+    try {
+      const status = await RPC.call('getPeriodReportStatus', state.scopeKey);
+      if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
+      state.lastPeriodReport = status.job;
+      $('periodReportResult').innerHTML = reportSuccess(status.job);
+      $('testPeriodNewsletter').addEventListener('click', () => deliverNewsletter('test'));
+      $('sendPeriodNewsletter').addEventListener('click', () => deliverNewsletter('send'));
+    } catch (error) {
+      if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
+      $('periodReportResult').innerHTML = `<p class="report-error">${UI.escape(error.message)}</p>`;
+    }
+  }
+
+  const formatFileSize = value => {
+    const bytes = Math.max(0, Number(value || 0));
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
+  };
+
+  async function renderImport() {
+    const epoch = state.navigationEpoch;
+    const validation = state.transferValidation;
+    const administration = state.bootstrap.administration || {};
+    if (!administration.importReady) {
+      view().innerHTML = `<section class="page-stack">
+        <section class="surface-panel transfer-hero"><div class="transfer-hero-copy">
+          <span class="transfer-eyebrow">Configuración obligatoria</span>
+          <h2>Define primero la carpeta de informes</h2>
+          <p>La ingesta permanece bloqueada hasta que exista una carpeta de Google Drive con permiso de escritura para conservar el PPTX y crear la presentación nativa.</p>
+          <button id="openImportSettings" class="action-button" type="button">Abrir configuración</button>
+        </div></section>
+      </section>`;
+      $('openImportSettings').addEventListener('click', async () => {
+        state.navigationEpoch += 1;
+        state.route = 'settings';
+        syncNavigation();
+        await renderSettings();
+      });
+      return;
+    }
+    view().innerHTML = `<section class="page-stack">
+      <section class="surface-panel transfer-hero"><div class="transfer-hero-copy">
+        <span class="transfer-eyebrow">Entrada controlada</span>
+        <h2>Publicar snapshot del escritorio</h2>
+        <p>Solo se admite el traslado .brr v3 con la proyección canónica y el PPTX exacto. La activación es atómica por ámbito.</p>
+      </div></section>
+      <section class="surface-panel page-stack">
+        <form id="transferImportForm" class="upload-zone">
+          <label for="transferFile"><strong>Seleccionar traslado .brr</strong><br>
+          <small>Máximo ${Math.floor(Number(state.bootstrap.app.maxTransferBytes || 0) / 1048576)} MB.</small></label>
+          <input id="transferFile" name="transferFile" type="file" accept=".brr,application/zip,application/octet-stream" required>
+          <button id="validateTransfer" class="action-button" type="submit">Validar</button>
+        </form>
+        ${validation ? `<section class="transfer-result transfer-result-success">
+          <strong>Verificación superada</strong>
+          <p>${UI.escape(validation.summary)}</p>
+          <small>${UI.escape(validation.fileName)} · ${formatFileSize(validation.fileSize)} · ${UI.escape(validation.scopeKey)}</small>
+          <div class="transfer-action-row">
+            <button id="cancelTransfer" class="ghost-button" type="button">Cancelar</button>
+            <button id="commitTransfer" class="action-button" type="button">Publicar snapshot</button>
+          </div>
+        </section>` : ''}
+      </section>
+      <section class="surface-panel"><div class="panel-head"><div><p class="section-kicker">Trazabilidad</p><h3>Importaciones recientes</h3></div></div><div id="runsTable">Cargando…</div></section>
+    </section>`;
+    $('transferImportForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const file = $('transferFile').files[0];
+      const maximum = Number(state.bootstrap.app.maxTransferBytes || 0);
+      if (!file || !/\.brr$/i.test(file.name) || !file.size || (maximum && file.size > maximum)) {
+        UI.message('Selecciona un traslado .brr válido.', 'error');
+        return;
+      }
+      try {
+        setBusy(true);
+        if (state.transferValidation) {
+          await RPC.call('cancelTransferImport', state.transferValidation.token);
+        }
+        state.transferValidation = await RPC.call('validateTransferImport', form);
+        UI.message('Traslado verificado sin modificar el snapshot activo.', 'success');
+        await renderImport();
+      } catch (error) {
+        UI.message(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    });
+    if (validation) {
+      $('cancelTransfer').addEventListener('click', async () => {
+        await RPC.call('cancelTransferImport', validation.token);
+        state.transferValidation = null;
+        await renderImport();
+      });
+      $('commitTransfer').addEventListener('click', async () => {
+        try {
+          setBusy(true);
+          const result = await RPC.call('commitTransferImport', validation.token);
+          state.transferValidation = null;
+          UI.message(result.summary, 'success');
+          await boot();
+        } catch (error) {
+          UI.message(error.message, 'error');
+        } finally {
+          setBusy(false);
+        }
+      });
+    }
+    try {
+      const runs = await RPC.call('listImportRuns');
+      if (epoch !== state.navigationEpoch || state.route !== 'import') return;
+      $('runsTable').innerHTML = runs.length
+        ? `<div class="simple-table">${runs.map(run =>
+          `<div class="simple-table-row"><span>${UI.escape(UI.formatDate(run.started_at))}</span><span>${UI.escape(run.file_name)}</span><span>${UI.chip(run.status)}</span></div>`
+        ).join('')}</div>`
+        : '<p>Sin importaciones registradas.</p>';
+    } catch (error) {
+      if (epoch !== state.navigationEpoch || state.route !== 'import') return;
+      $('runsTable').textContent = error.message;
+    }
+  }
+
+  async function loadNewsletterSettings() {
+    state.newsletterSettings = await RPC.call('getNewsletterSettings');
+    return state.newsletterSettings;
+  }
+
+  async function renderSettings() {
+    const epoch = state.navigationEpoch;
+    const tabs = [
+      ['health', 'Estado de la WebApp'],
+      ['drive', 'Carpeta de Drive'],
+      ['sources', 'Fuentes JIRA'],
+      ['newsletter', 'Newsletter'],
+      ['analytics', 'Adopción y analítica'],
+      ['summary', 'Gráficos de Resumen']
+    ];
+    const activeTab = tabs.some(tab => tab[0] === state.settingsTab)
+      ? state.settingsTab
+      : 'health';
+    state.settingsTab = activeTab;
+    if (!state.adminConsole) {
+      state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey);
+    }
+    if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+    let body = '';
+    const consoleData = state.adminConsole;
+    if (activeTab === 'health') {
+      const health = consoleData.health || {};
+      body = `<section class="page-stack">
+        <div class="overview-kpi-grid">
+          ${[
+            { label: 'Estado', value: health.status, hint: health.accessPolicy },
+            { label: 'Última importación', value: UI.formatDate(health.lastImportAt), hint: `${UI.formatNumber(health.importedRecords)} registros` },
+            { label: 'Newsletter', value: UI.formatNumber(health.newsletterRecipientsSent), hint: 'destinatarios del snapshot' },
+            { label: 'Analítica', value: UI.formatNumber(health.analyticsUsers), hint: `${UI.formatNumber(health.analyticsEvents)} eventos` },
+            { label: 'Proyección', value: formatFileSize(health.projectionBytes), hint: health.dataVersion || 'Sin versión' },
+            { label: 'Presentación', value: UI.formatNumber(health.reportSlides), hint: 'diapositivas' }
+          ].map(UI.kpi).join('')}
+        </div>
+        <section class="surface-card page-stack">
+          <h3>Versiones y accesos</h3>
+          <p>Generado: ${UI.escape(UI.formatDate(health.generatedAt))}</p>
+          <a href="${UI.escape(health.versionUrl)}" target="_blank" rel="noopener">Abrir versión consultada ↗</a>
+          ${health.slidesUrl ? `<a href="${UI.escape(health.slidesUrl)}" target="_blank" rel="noopener">Abrir presentación ↗</a>` : ''}
+          <div class="soft-toggle-row">
+            <button id="themeLight" class="soft-toggle-button ${!state.dark ? 'soft-toggle-button-active' : ''}" type="button">Tema claro</button>
+            <button id="themeDark" class="soft-toggle-button ${state.dark ? 'soft-toggle-button-active' : ''}" type="button">Tema oscuro</button>
+          </div>
+        </section>
+      </section>`;
+    } else if (activeTab === 'drive') {
+      if (!state.driveBrowser) {
+        state.driveBrowser = await RPC.call('browseReportDriveFolders', {
+          category: 'my', pageToken: ''
+        });
+      }
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const folder = consoleData.reportDriveFolder || null;
+      const browser = state.driveBrowser;
+      body = `<section class="page-stack">
+        <section class="surface-card page-stack">
+          <h3>Carpeta configurada</h3>
+          ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
+          <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
+          <button class="secondary-button" type="submit">Guardar referencia</button></form>
+        </section>
+        <section class="surface-card page-stack">
+          <h3>Explorar Google Drive</h3>
+          <div class="soft-toggle-row">${[
+            ['my', 'Mi unidad'], ['shared', 'Compartidas conmigo'], ['starred', 'Destacadas']
+          ].map(category => `<button class="soft-toggle-button drive-category ${browser.category === category[0] ? 'soft-toggle-button-active' : ''}" data-category="${category[0]}" type="button">${category[1]}</button>`).join('')}</div>
+          <div class="source-list">${(browser.folders || []).map(item =>
+            `<article class="source-list-row"><div><strong>${UI.escape(item.name)}</strong><p>${UI.escape(item.owner || '')} · ${UI.escape(UI.formatDate(item.modifiedAt))}</p></div>
+            <button class="ghost-button choose-folder" data-folder="${UI.escape(item.id)}" type="button">Seleccionar</button></article>`
+          ).join('') || '<p>No hay carpetas en esta categoría.</p>'}</div>
+        </section>
+      </section>`;
+    } else if (activeTab === 'sources') {
+      body = `<section class="surface-card page-stack">
+        <h3>Fuentes JIRA de la vista seleccionada</h3>
+        <p class="minor-copy">Información inmutable transportada por el snapshot activo.</p>
+        <div class="source-list">${(consoleData.jiraSources || []).map(source =>
+          `<article class="source-list-row"><div><strong>${UI.escape(source.alias)}</strong>
+          <p>${UI.escape(source.poTeamLeader || 'Sin PO / Team Leader')}</p></div>
+          ${source.dashboardUrl ? `<a class="ghost-button" href="${UI.escape(source.dashboardUrl)}" target="_blank" rel="noopener">Cuadro JIRA ↗</a>` : '<span>Sin enlace</span>'}</article>`
+        ).join('') || '<p>La vista no contiene fuentes JIRA.</p>'}</div>
+      </section>`;
+    } else if (activeTab === 'newsletter') {
+      const newsletter = state.newsletterSettings || await loadNewsletterSettings();
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const reports = newsletter.reports || [];
+      let selectedReport = reports.find(report => report.reportId === state.newsletterReportId);
+      if (!selectedReport) {
+        selectedReport = reports.find(report => report.scopeKey === state.scopeKey) || reports[0] || null;
+      }
+      state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
+      const recipients = (newsletter.recipients || []).filter(
+        recipient => recipient.reportId === state.newsletterReportId
+      );
+      const recipientByEmail = new Map(recipients.map(recipient => [recipient.email, recipient]));
+      const newsletterUsers = (newsletter.users || []).map(user => ({
+        ...user,
+        active: Boolean(recipientByEmail.get(user.email) && recipientByEmail.get(user.email).active)
+      }));
+      body = `<section class="page-stack">
+        <section class="surface-card page-stack">
+          <h3>Destinatarios</h3>
+          <p>Identidad de envío: ${UI.escape(newsletter.sender.effective)} · ${UI.escape(newsletter.sender.mode)}</p>
+          <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
+            `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
+          ).join('')}</select></label>
+          <div class="source-list">${newsletterUsers.map(user =>
+            `<article class="source-list-row"><div><strong>${UI.escape(user.displayName || user.email)}</strong><p>${UI.escape(user.email)} · ${UI.escape(user.role)}</p></div>
+            <button class="ghost-button recipient-toggle" data-email="${UI.escape(user.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${user.active ? '1' : '0'}" ${selectedReport ? '' : 'disabled'} type="button">${user.active ? 'Desactivar' : 'Activar'}</button></article>`
+          ).join('')}</div>
+        </section>
+        <section class="surface-card page-stack"><h3>Histórico de envíos</h3>
+          ${(newsletter.audit || []).map(item => `<details class="insight-detail-block">
+            <summary>${UI.escape(UI.formatDate(item.createdAt))} · ${UI.escape(item.mode)} · ${UI.escape(item.status)} · ${UI.formatNumber(item.recipientCount)} destinatarios</summary>
+            <p><strong>${UI.escape(item.subject)}</strong></p><pre class="audit-body">${UI.escape(item.bodyText)}</pre>
+            ${item.slidesUrl ? `<a href="${UI.escape(item.slidesUrl)}" target="_blank" rel="noopener">Abrir presentación ↗</a>` : ''}
+          </details>`).join('') || '<p>Sin envíos registrados.</p>'}
+        </section>
+      </section>`;
+    } else if (activeTab === 'analytics') {
+      if (!state.analyticsReport) {
+        state.analyticsReport = await RPC.call('getAnalyticsReport', {
+          userEmail: state.analyticsUserEmail, days: state.analyticsDays
+        });
+      }
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const report = state.analyticsReport;
+      body = `<section class="page-stack">
+        <section class="surface-card settings-form-grid">
+          <label class="field"><span>Usuario</span><select id="analyticsUser"><option value="">Todos</option>${(report.users || []).map(email =>
+            `<option value="${UI.escape(email)}" ${email === state.analyticsUserEmail ? 'selected' : ''}>${UI.escape(email)}</option>`
+          ).join('')}</select></label>
+          <label class="field"><span>Periodo</span><select id="analyticsDays">${[7, 30, 90, 180, 365].map(days =>
+            `<option value="${days}" ${days === state.analyticsDays ? 'selected' : ''}>${days} días</option>`
+          ).join('')}</select></label>
+          <button id="downloadAnalytics" class="secondary-button" type="button">Descargar JSON para Codex</button>
+        </section>
+        <div class="overview-kpi-grid">${[
+          { label: 'Eventos', value: UI.formatNumber(report.summary.events), hint: `${report.filters.days} días` },
+          { label: 'Usuarios', value: UI.formatNumber(report.summary.users), hint: 'usuarios únicos' },
+          { label: 'Sesiones', value: UI.formatNumber(report.summary.sessions), hint: 'sesiones únicas' },
+          { label: 'Errores', value: UI.formatNumber(report.summary.errors), hint: 'errores registrados' },
+          { label: 'WoW', value: `${report.summary.weekOverWeekPct > 0 ? '+' : ''}${report.summary.weekOverWeekPct}%`, hint: `${UI.formatNumber(report.summary.currentWeekEvents)} vs ${UI.formatNumber(report.summary.previousWeekEvents)} eventos` },
+          { label: 'Latencia media', value: `${UI.formatNumber(report.summary.averageDurationMs)} ms`, hint: 'RPC y carga' },
+          { label: 'Latencia p95', value: `${UI.formatNumber(report.summary.p95DurationMs)} ms`, hint: 'percentil 95' }
+        ].map(UI.kpi).join('')}</div>
+        <section class="surface-card"><h3>Secciones más utilizadas</h3><div class="simple-table">${(report.panels || []).map(item =>
+          `<div class="simple-table-row"><span>${UI.escape(item.label)}</span><strong>${UI.formatNumber(item.count)}</strong></div>`
+        ).join('')}</div></section>
+        <section class="surface-card"><h3>Actividad reciente</h3><div class="simple-table">${(report.rows || []).slice(0, 100).map(item =>
+          `<div class="simple-table-row"><span>${UI.escape(UI.formatDate(item.eventAt))}</span><span>${UI.escape(item.userEmail)}</span><span>${UI.escape(item.eventName)}</span><span>${UI.formatNumber(item.durationMs)} ms</span></div>`
+        ).join('')}</div></section>
+      </section>`;
+    } else {
+      const chartLabels = {
+        timeseries: 'Evolución (últimos 90 días)',
+        age_buckets: 'Distribución antigüedad (abiertas)',
+        open_status_bar: 'Issues por Estado (bar)',
+        open_priority_pie: 'Issues abiertos por prioridad (pie)',
+        resolution_hist: 'Días abiertas por prioridad'
+      };
+      const selected = consoleData.summaryCharts.selected || [];
+      body = `<section class="surface-card page-stack">
+        <h3>Tres gráficos del Resumen</h3>
+        <p class="minor-copy">La selección es global y solo cambia la presentación de vistas ya materializadas.</p>
+        ${Object.entries(chartLabels).map(([id, label]) =>
+          `<label class="checkbox-field"><input class="summary-chart-choice" type="checkbox" value="${id}" ${selected.includes(id) ? 'checked' : ''}><span>${UI.escape(label)}</span></label>`
+        ).join('')}
+        <div class="soft-toggle-row"><button id="saveSummaryCharts" class="action-button" type="button">Guardar</button>
+        <button id="resetSummaryCharts" class="secondary-button" type="button">Restaurar gráficos por defecto</button></div>
+      </section>`;
+    }
+    view().innerHTML = `<section class="page-stack">
+      <section class="surface-panel insights-nav"><div class="soft-toggle-row">${tabs.map(tab =>
+        `<button class="soft-toggle-button settings-tab ${tab[0] === activeTab ? 'soft-toggle-button-active' : ''}" data-settings-tab="${tab[0]}" type="button">${tab[1]}</button>`
+      ).join('')}</div></section>${body}</section>`;
+
+    document.querySelectorAll('.settings-tab').forEach(button => {
+      button.addEventListener('click', async () => {
+        state.navigationEpoch += 1;
+        state.settingsTab = button.dataset.settingsTab;
+        showRouteLoading('Cargando configuración…');
+        trackEvent('settings_tab_selected', { tab: state.settingsTab });
+        await renderSettings();
+      });
+    });
+    if ($('themeLight')) $('themeLight').addEventListener('click', () => setTheme(false));
+    if ($('themeDark')) $('themeDark').addEventListener('click', () => setTheme(true));
+    if ($('folderForm')) $('folderForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const saved = await RPC.call('saveReportDriveFolder', $('folderReference').value);
+      state.adminConsole = null;
+      state.bootstrap.administration.reportDriveFolder = saved;
+      state.bootstrap.administration.importReady = true;
+      UI.message('Carpeta guardada.', 'success');
+      await renderSettings();
+    });
+    document.querySelectorAll('.drive-category').forEach(button => {
+      button.addEventListener('click', async () => {
+        state.driveBrowser = await RPC.call('browseReportDriveFolders', {
+          category: button.dataset.category, pageToken: ''
+        });
+        await renderSettings();
+      });
+    });
+    document.querySelectorAll('.choose-folder').forEach(button => {
+      button.addEventListener('click', async () => {
+        await RPC.call('saveReportDriveFolder', button.dataset.folder);
+        state.adminConsole = null;
+        state.bootstrap.administration.importReady = true;
+        UI.message('Carpeta de Drive seleccionada.', 'success');
+        await renderSettings();
+      });
+    });
+    if ($('recipientReport')) $('recipientReport').addEventListener('change', async event => {
+      state.newsletterReportId = event.target.value;
+      await renderSettings();
+    });
+    document.querySelectorAll('.recipient-toggle').forEach(button => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+          reportId: button.dataset.report,
+          email: button.dataset.email,
+          active: button.dataset.active !== '1'
+        });
+        await renderSettings();
+      });
+    });
+    const reloadAnalytics = async () => {
+      state.navigationEpoch += 1;
+      state.analyticsUserEmail = $('analyticsUser').value;
+      state.analyticsDays = Number($('analyticsDays').value || 30);
+      state.analyticsReport = null;
+      showRouteLoading('Actualizando analítica…');
+      await renderSettings();
+    };
+    if ($('analyticsUser')) $('analyticsUser').addEventListener('change', reloadAnalytics);
+    if ($('analyticsDays')) $('analyticsDays').addEventListener('change', reloadAnalytics);
+    if ($('downloadAnalytics')) $('downloadAnalytics').addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(state.analyticsReport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `bug-resolution-radar-analytics-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      trackEvent('analytics_export_downloaded', { days: state.analyticsDays });
+    });
+    const saveCharts = async chartIds => {
+      const saved = await RPC.call('saveSummaryChartIds', chartIds);
+      state.adminConsole.summaryCharts = saved;
+      state.memory.clear();
+      UI.message('Gráficos de Resumen actualizados.', 'success');
+      await renderSettings();
+    };
+    if ($('saveSummaryCharts')) $('saveSummaryCharts').addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('.summary-chart-choice:checked'))
+        .map(input => input.value);
+      await saveCharts(selected);
+    });
+    if ($('resetSummaryCharts')) $('resetSummaryCharts').addEventListener('click', async () => {
+      await saveCharts(consoleData.summaryCharts.defaults);
+    });
+  }
+
+  async function setTheme(dark) {
+    state.dark = Boolean(dark);
+    document.documentElement.dataset.theme = state.dark ? 'dark' : 'light';
+    setActionIcons();
+    if (state.route === 'dashboard') renderCurrent();
+    else if (state.route === 'settings') await renderSettings();
+    if (!isShared()) {
+      await RPC.call('savePreference', 'theme', state.dark ? 'dark' : 'light');
+    }
+  }
+
+  async function fetchDashboard(request) {
+    const key = requestKey(request);
+    if (state.memory.has(key)) return state.memory.get(key);
+    if (state.inFlight.has(key)) return state.inFlight.get(key);
+    const persistent = await PersistentCache.read(cacheKey(request));
+    if (persistent) {
+      state.memory.set(key, persistent);
+      return persistent;
+    }
+    const remote = deadline(
+      isShared()
+        ? RPC.call('querySharedDashboard', state.sharedToken, request)
+        : RPC.call('queryDashboard', request),
+      30000,
+      'El snapshot no respondió en 30 segundos.'
+    ).then(payload => {
+      state.memory.set(key, payload);
+      PersistentCache.write(cacheKey(request), payload).catch(() => {});
+      return payload;
+    }).finally(() => state.inFlight.delete(key));
+    state.inFlight.set(key, remote);
+    return remote;
+  }
+
+  async function refreshDashboard(expectedEpoch = state.navigationEpoch) {
+    if (!state.scopeKey) {
+      view().innerHTML = UI.empty(
+        'No hay snapshots publicados',
+        'Un administrador debe importar un traslado .brr v3 desde escritorio.'
+      );
+      return;
+    }
+    const request = requestFor();
+    try {
+      setBusy(true);
+      const dashboard = await fetchDashboard(request);
+      if (expectedEpoch !== state.navigationEpoch || state.route !== 'dashboard') return;
+      state.dashboard = dashboard;
+      state.route = 'dashboard';
+      syncNavigation();
+      renderCurrent();
+      schedulePreferenceSave();
+    } catch (error) {
+      view().innerHTML = UI.empty('No se pudo cargar el snapshot', error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function showRouteLoading(label) {
+    Charts.begin(view());
+    view().innerHTML = `<section class="surface-panel app-loading route-loading">
+      <div><div class="loading-spinner"></div><p>${UI.escape(label || 'Cargando sección…')}</p></div>
+    </section>`;
+  }
+
+  function prefetchPrimaryViews() {
+    if (!state.scopeKey) return;
+    ['overview', 'insights', 'trends', 'issues'].forEach(panel => {
+      const request = requestFor(panel);
+      fetchDashboard(request).catch(() => {});
+    });
+  }
+
+  async function openPanel(panel) {
+    const epoch = ++state.navigationEpoch;
+    state.route = 'dashboard';
+    state.panel = panel;
+    state.page = 1;
+    syncNavigation();
+    showRouteLoading(`Abriendo ${panel === 'overview' ? 'Resumen' : panel === 'insights' ? 'Insights' : panel === 'trends' ? 'Tendencias' : 'Issues'}…`);
+    trackEvent('navigation', { target: panel });
+    await refreshDashboard(epoch);
+  }
+
+  async function boot() {
+    document.body.className = 'auth-pending';
+    $('accessGateMessage').textContent = 'Verificando identidad y snapshot…';
+    try {
+      const bootstrap = await deadline(
+        isShared()
+          ? RPC.call('getSharedBootstrap', state.sharedToken)
+          : RPC.call('getBootstrap'),
+        30000,
+        'La aplicación no respondió en 30 segundos.'
+      );
+      state.bootstrap = bootstrap;
+      const initial = bootstrap.initialState || {};
+      state.scopeKey = initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
+      state.panel = initial.panel || 'overview';
+      state.trendChart = initial.trendChart || 'open_status_bar';
+      state.insightsId = initial.insightsId || 'summary';
+      state.issuesView = initial.issuesView === 'Table' ? 'Table' : 'Cards';
+      state.pageSize = Number(initial.pageSize || 50);
+      state.dark = (bootstrap.preferences.theme || 'light') === 'dark';
+      document.documentElement.dataset.theme = state.dark ? 'dark' : 'light';
+      document.body.className = [
+        'auth-ready',
+        isShared() ? 'shared-view' : '',
+        isAdmin() && !isShared() ? 'is-admin' : ''
+      ].filter(Boolean).join(' ');
+      $('appTitle').textContent = bootstrap.app.name;
+      syncScope();
+      syncNavigation();
+      $('loadingView').classList.add('hidden');
+      $('errorView').classList.add('hidden');
+      view().classList.remove('hidden');
+      if (bootstrap.dashboard && requestKey(requestFor()) === requestKey({
+        ...requestFor(),
+        view: initial.panel || 'overview'
+      })) {
+        state.dashboard = bootstrap.dashboard;
+        state.memory.set(requestKey(requestFor()), bootstrap.dashboard);
+        renderCurrent();
+      } else {
+        await refreshDashboard();
+      }
+      trackEvent('app_open', {
+        role: bootstrap.user.role,
+        shared: isShared(),
+        dataVersion: bootstrap.app.dataVersion
+      });
+      window.setTimeout(prefetchPrimaryViews, 0);
+      PersistentCache.prune({
+        contract: bootstrap.app.contractVersion,
+        cacheGeneration: bootstrap.app.cacheEpoch,
+        dataVersion: bootstrap.app.dataVersion,
+        scopeVersions: bootstrap.app.scopeVersions
+      }).catch(() => {});
+    } catch (error) {
+      document.body.className = 'auth-denied';
+      $('accessGateMessage').textContent = error.message;
+      $('accessGateRetry').classList.remove('hidden');
+    }
+  }
+
+  function bindShell() {
+    document.querySelectorAll('[data-panel]').forEach(button => {
+      button.addEventListener('click', () => openPanel(button.dataset.panel));
+    });
+    document.querySelectorAll('[data-route]').forEach(button => {
+      button.addEventListener('click', async () => {
+        if (!isAdmin() || isShared()) return;
+        state.navigationEpoch += 1;
+        state.route = button.dataset.route;
+        syncNavigation();
+        showRouteLoading('Abriendo sección de administración…');
+        trackEvent('admin_navigation', { target: state.route });
+        if (state.route === 'reports') await renderReports();
+        else if (state.route === 'import') await renderImport();
+        else await renderSettings();
+      });
+    });
+    $('workspaceCountry').addEventListener('change', async event => {
+      const epoch = ++state.navigationEpoch;
+      const scopes = countryScopes(event.target.value);
+      state.scopeKey = (aggregateScope(scopes) || scopes[0] || {}).scopeKey || '';
+      state.page = 1;
+      syncScope();
+      await refreshDashboard(epoch);
+    });
+    $('workspaceRollup').addEventListener('change', async event => {
+      const epoch = ++state.navigationEpoch;
+      const active = currentScope();
+      const scopes = countryScopes(active.country);
+      const aggregate = aggregateScope(scopes);
+      const individual = scopes.find(scope => scope !== aggregate);
+      state.scopeKey = event.target.checked && aggregate
+        ? aggregate.scopeKey
+        : (individual && individual.scopeKey) || (aggregate && aggregate.scopeKey) || '';
+      state.page = 1;
+      syncScope();
+      await refreshDashboard(epoch);
+    });
+    $('workspaceSource').addEventListener('change', async event => {
+      const epoch = ++state.navigationEpoch;
+      state.scopeKey = event.target.value;
+      state.page = 1;
+      syncScope();
+      await refreshDashboard(epoch);
+    });
+    $('themeToggle').addEventListener('click', () => setTheme(!state.dark));
+    $('accessGateRetry').addEventListener('click', boot);
+    $('retryButton').addEventListener('click', boot);
+  }
+
+  return {
+    init() {
+      bindShell();
+      window.addEventListener('error', event => {
+        trackEvent('client_error', {
+          message: String(event.message || 'Error de cliente'),
+          source: String(event.filename || ''),
+          line: Number(event.lineno || 0)
+        }, 0, 'error');
+      });
+      window.addEventListener('unhandledrejection', event => {
+        trackEvent('client_error', {
+          message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
+        }, 0, 'error');
+      });
+      window.addEventListener('pagehide', flushAnalytics);
+      boot();
+    }
+  };
+})();
+
+window.addEventListener('DOMContentLoaded', App.init);
+</script>

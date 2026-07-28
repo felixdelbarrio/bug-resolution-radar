@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Set
 from dotenv import dotenv_values
 from pydantic import BaseModel
 
+from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.repositories.issues_store import (
     load_issues_workspace_index,
 )
@@ -564,6 +565,10 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
         alias = _coerce_str(row.get("alias"))
         po_team_leader = _coerce_str(row.get("po_team_leader"))
+        dashboard_url = validate_navigation_url(
+            _coerce_str(row.get("dashboard_url")),
+            field_name="Cuadro de mando Jira",
+        )
         jql = _decode_env_multiline(_coerce_str(row.get("jql")))
         if not country or not alias or not jql:
             continue
@@ -580,6 +585,8 @@ def jira_sources(settings: Settings) -> List[Dict[str, str]]:
         }
         if po_team_leader:
             payload["po_team_leader"] = po_team_leader
+        if dashboard_url:
+            payload["dashboard_url"] = dashboard_url
         out.append(payload)
 
     return sorted(out, key=_source_sort_key)

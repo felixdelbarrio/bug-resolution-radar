@@ -25,32 +25,53 @@ class BbvPalette:
     ink_muted: str
 
 
+# BBVA Experience core palette. These constants are the canonical source for
+# desktop UI, Plotly and report-layer brand colors.
+BBVA_MIDNIGHT = "#070E46"
+BBVA_ELECTRIC = "#001391"
+BBVA_ROYAL_DARK = "#2165CA"
+BBVA_ROYAL = "#0C6DFF"
+BBVA_SERENE_DARK = "#53A9EF"
+BBVA_SERENE = "#85C8FF"
+BBVA_BLUE_LIGHT = "#D6E9F8"
+BBVA_BLACK = "#000519"
+BBVA_GREY_900 = "#11192D"
+BBVA_GREY_800 = "#222C42"
+BBVA_GREY_700 = "#334056"
+BBVA_GREY_600 = "#46536D"
+BBVA_GREY_500 = "#ADB8C2"
+BBVA_GREY_400 = "#CAD1D8"
+BBVA_GREY_300 = "#E2E6EA"
+BBVA_GREY_200 = "#F7F8F8"
+BBVA_WHITE = "#FFFFFF"
+
+
 BBVA_LIGHT = BbvPalette(
-    midnight="#072146",
-    core_blue="#004481",
-    electric_blue="#0051F1",
-    royal_blue="#0C6DFF",
-    serene_dark_blue="#53A9EF",
-    serene_blue="#85C8FF",
-    aqua="#8BE1E9",
-    white="#FFFFFF",
-    bg_light="#F4F6F9",
-    ink="#11192D",
-    ink_muted="#5C6C84",
+    midnight=BBVA_MIDNIGHT,
+    core_blue=BBVA_ELECTRIC,
+    electric_blue=BBVA_ELECTRIC,
+    royal_blue=BBVA_ROYAL,
+    serene_dark_blue=BBVA_SERENE_DARK,
+    serene_blue=BBVA_SERENE,
+    aqua=BBVA_BLUE_LIGHT,
+    white=BBVA_WHITE,
+    bg_light=BBVA_GREY_200,
+    ink=BBVA_GREY_900,
+    ink_muted=BBVA_GREY_600,
 )
 
 BBVA_DARK = BbvPalette(
-    midnight="#072146",
-    core_blue="#0A2E67",
-    electric_blue="#53A9EF",
-    royal_blue="#5BBEFF",
-    serene_dark_blue="#53A9EF",
-    serene_blue="#85C8FF",
-    aqua="#8BE1E9",
-    white="#FFFFFF",
-    bg_light="#050B1A",
-    ink="#EAF0FF",
-    ink_muted="#C6D7EF",
+    midnight=BBVA_MIDNIGHT,
+    core_blue=BBVA_GREY_900,
+    electric_blue=BBVA_SERENE,
+    royal_blue=BBVA_ROYAL,
+    serene_dark_blue=BBVA_SERENE_DARK,
+    serene_blue=BBVA_SERENE,
+    aqua=BBVA_BLUE_LIGHT,
+    white=BBVA_WHITE,
+    bg_light=BBVA_BLACK,
+    ink=BBVA_GREY_200,
+    ink_muted=BBVA_GREY_500,
 )
 
 # Semantic signal tokens (status/priority chips and traffic-light cues).
@@ -65,7 +86,7 @@ BBVA_SIGNAL_GREEN_2 = "#22A447"
 BBVA_SIGNAL_GREEN_3 = "#4CAF50"
 BBVA_GOAL_ACCENT_7 = "#5B3FD0"
 BBVA_GOAL_SURFACE_8 = "#ECE6FF"
-BBVA_NEUTRAL_SOFT = "#E2E6EE"
+BBVA_NEUTRAL_SOFT = BBVA_GREY_300
 BBVA_DARK_SURFACE = "#0A1F45"
 
 # Report semantic tones (PowerPoint/export layer) derived from approved theme palette.
@@ -221,6 +242,7 @@ BBVA_RADIUS_INNER_PX = 8
 BBVA_GRID_BASE_PX = 8
 BBVA_GRID_MARGIN_PX = 24
 BBVA_GRID_GUTTER_PX = 24
+BBVA_CONTENT_MAX_PX = 1296
 
 # Executive PPT chart export tokens. Plotly interprets font sizes as pixels in
 # exported raster output; keep the names stable for the report layer.
@@ -266,43 +288,105 @@ def hex_with_alpha(hex_color: str, alpha: int, *, fallback: str = BBVA_LIGHT.ink
 
 def frontend_theme_tokens() -> dict[str, dict[str, str]]:
     """Return frontend CSS variables derived from the shared backend palette."""
+    shared = {
+        "--bbva-royal-dark": BBVA_ROYAL_DARK,
+        "--bbva-royal": BBVA_ROYAL,
+        "--bbva-serene-dark": BBVA_SERENE_DARK,
+        "--bbva-serene": BBVA_SERENE,
+        "--bbva-blue-light": BBVA_BLUE_LIGHT,
+        "--bbva-radius-container": f"{BBVA_RADIUS_OUTER_PX}px",
+        "--bbva-radius-component": f"{BBVA_RADIUS_INNER_PX}px",
+        "--bbva-radius-xl": f"{BBVA_RADIUS_OUTER_PX}px",
+        "--bbva-radius-lg": f"{BBVA_RADIUS_OUTER_PX}px",
+        "--bbva-radius-md": f"{BBVA_RADIUS_INNER_PX}px",
+        "--bbva-radius-sm": f"{BBVA_RADIUS_INNER_PX}px",
+        "--bbva-grid-base": f"{BBVA_GRID_BASE_PX}px",
+        "--bbva-grid-margin": f"{BBVA_GRID_MARGIN_PX}px",
+        "--bbva-grid-gutter": f"{BBVA_GRID_GUTTER_PX}px",
+        "--bbva-content-max": f"{BBVA_CONTENT_MAX_PX}px",
+        "--bbva-status-intake": BBVA_SIGNAL_RED_3,
+        "--bbva-status-progress": BBVA_SIGNAL_ORANGE_2,
+        "--bbva-status-accepted": BBVA_SIGNAL_GREEN_3,
+        "--bbva-status-deployed": BBVA_GOAL_ACCENT_7,
+        "--bbva-status-open": BBVA_SIGNAL_YELLOW_1,
+        "--bbva-priority-highest": BBVA_SIGNAL_RED_1,
+        "--bbva-priority-high": BBVA_SIGNAL_RED_2,
+        "--bbva-priority-medium": BBVA_SIGNAL_ORANGE_2,
+        "--bbva-priority-low": BBVA_SIGNAL_GREEN_2,
+        "--bbva-priority-lowest": BBVA_SIGNAL_GREEN_1,
+        "--bbva-neutral": BBVA_NEUTRAL_SOFT,
+        "--bbva-goal-accent": BBVA_GOAL_ACCENT_7,
+        "--bbva-goal-surface": BBVA_GOAL_SURFACE_8,
+    }
     return {
         "light": {
+            **shared,
+            "--bbva-electric": BBVA_ELECTRIC,
             "--bbva-primary": BBVA_LIGHT.electric_blue,
-            "--bbva-primary-strong": BBVA_LIGHT.core_blue,
+            "--bbva-primary-strong": BBVA_LIGHT.midnight,
             "--bbva-midnight": BBVA_LIGHT.midnight,
+            "--bbva-black": BBVA_BLACK,
+            "--bbva-grey-900": BBVA_GREY_900,
+            "--bbva-grey-800": BBVA_GREY_800,
+            "--bbva-grey-700": BBVA_GREY_700,
+            "--bbva-grey-600": BBVA_GREY_600,
+            "--bbva-grey-500": BBVA_GREY_500,
+            "--bbva-grey-400": BBVA_GREY_400,
+            "--bbva-grey-300": BBVA_GREY_300,
+            "--bbva-grey-200": BBVA_GREY_200,
+            "--bbva-white": BBVA_WHITE,
             "--bbva-surface": BBVA_LIGHT.white,
             "--bbva-surface-2": BBVA_LIGHT.bg_light,
-            "--bbva-surface-elevated": hex_to_rgba(BBVA_LIGHT.white, 0.96),
-            "--bbva-border": hex_to_rgba(BBVA_LIGHT.midnight, 0.12),
-            "--bbva-border-strong": hex_to_rgba(BBVA_LIGHT.midnight, 0.18),
-            "--bbva-text": BBVA_LIGHT.ink,
-            "--bbva-text-muted": hex_to_rgba(BBVA_LIGHT.ink, 0.72),
+            "--bbva-surface-elevated": BBVA_LIGHT.white,
+            "--bbva-border": BBVA_GREY_300,
+            "--bbva-border-strong": BBVA_GREY_400,
+            "--bbva-text": BBVA_LIGHT.midnight,
+            "--bbva-text-muted": BBVA_GREY_600,
             "--bbva-on-primary": BBVA_LIGHT.white,
             "--bbva-success": BBVA_SIGNAL_GREEN_1,
             "--bbva-warning": BBVA_SIGNAL_ORANGE_1,
             "--bbva-danger": BBVA_SIGNAL_RED_1,
-            "--bbva-tab-active-bg": BBVA_LIGHT.core_blue,
+            "--bbva-accent-bg": BBVA_BLUE_LIGHT,
+            "--bbva-action-bg": BBVA_WHITE,
+            "--bbva-action-border": BBVA_GREY_400,
+            "--bbva-tab-soft-text": BBVA_GREY_600,
+            "--bbva-tab-active-bg": BBVA_ELECTRIC,
             "--bbva-tab-active-text": BBVA_LIGHT.white,
-            "--bbva-tab-active-border": BBVA_LIGHT.midnight,
+            "--bbva-tab-active-border": BBVA_ELECTRIC,
         },
         "dark": {
-            "--bbva-primary": BBVA_DARK.royal_blue,
-            "--bbva-primary-strong": BBVA_DARK.serene_blue,
-            "--bbva-midnight": BBVA_DARK.midnight,
+            **shared,
+            "--bbva-electric": BBVA_SERENE,
+            "--bbva-primary": BBVA_SERENE,
+            "--bbva-primary-strong": BBVA_BLUE_LIGHT,
+            "--bbva-midnight": BBVA_GREY_200,
+            "--bbva-black": BBVA_WHITE,
+            "--bbva-grey-900": BBVA_GREY_200,
+            "--bbva-grey-800": BBVA_GREY_300,
+            "--bbva-grey-700": BBVA_GREY_400,
+            "--bbva-grey-600": BBVA_GREY_500,
+            "--bbva-grey-500": BBVA_GREY_600,
+            "--bbva-grey-400": BBVA_GREY_700,
+            "--bbva-grey-300": BBVA_GREY_800,
+            "--bbva-grey-200": BBVA_GREY_900,
+            "--bbva-white": BBVA_BLACK,
             "--bbva-surface": BBVA_DARK.core_blue,
             "--bbva-surface-2": BBVA_DARK.bg_light,
-            "--bbva-surface-elevated": hex_to_rgba(BBVA_DARK.core_blue, 0.96),
-            "--bbva-border": hex_to_rgba(BBVA_DARK.white, 0.12),
-            "--bbva-border-strong": hex_to_rgba(BBVA_DARK.white, 0.20),
+            "--bbva-surface-elevated": BBVA_GREY_900,
+            "--bbva-border": BBVA_GREY_800,
+            "--bbva-border-strong": BBVA_GREY_700,
             "--bbva-text": BBVA_DARK.ink,
-            "--bbva-text-muted": hex_to_rgba(BBVA_DARK.ink, 0.76),
-            "--bbva-on-primary": BBVA_DARK.white,
-            "--bbva-success": BBVA_SIGNAL_GREEN_1,
-            "--bbva-warning": BBVA_SIGNAL_ORANGE_1,
-            "--bbva-danger": BBVA_SIGNAL_RED_1,
-            "--bbva-tab-active-bg": BBVA_DARK.white,
-            "--bbva-tab-active-text": BBVA_DARK.midnight,
-            "--bbva-tab-active-border": BBVA_DARK.white,
+            "--bbva-text-muted": BBVA_DARK.ink_muted,
+            "--bbva-on-primary": BBVA_MIDNIGHT,
+            "--bbva-success": "#9CE67E",
+            "--bbva-warning": "#FFC553",
+            "--bbva-danger": "#FF8585",
+            "--bbva-accent-bg": BBVA_GREY_800,
+            "--bbva-action-bg": BBVA_GREY_900,
+            "--bbva-action-border": BBVA_GREY_700,
+            "--bbva-tab-soft-text": BBVA_GREY_400,
+            "--bbva-tab-active-bg": BBVA_SERENE,
+            "--bbva-tab-active-text": BBVA_MIDNIGHT,
+            "--bbva-tab-active-border": BBVA_SERENE,
         },
     }

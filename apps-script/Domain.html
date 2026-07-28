@@ -1,0 +1,15 @@
+<script>
+const ClientDomain = Object.freeze({
+  queryRequest(state) {
+    return {
+      scopeKey: String(state.scopeKey || ''),
+      view: String(state.panel || 'overview'),
+      chartId: String(state.trendChart || ''),
+      insightsId: String(state.insightsId || ''),
+      page: Math.max(1, Number(state.page || 1)),
+      pageSize: 50,
+      sortId: 'default'
+    };
+  }
+});
+</script>

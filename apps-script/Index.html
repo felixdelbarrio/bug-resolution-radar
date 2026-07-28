@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <?!= _clientBootstrapMarkup_(sharedToken || '') ?>
+  <?!= _include_('BrandAssets'); ?>
+  <?!= _include_('DesignSystem'); ?>
+</head>
+<body class="auth-pending">
+  <a class="skip-link" href="#workspaceContent">Saltar al contenido</a>
+  <section id="accessGate" class="access-gate" aria-live="polite">
+    <div class="access-gate-card">
+      <span class="access-gate-brand">BBVA</span>
+      <p class="access-gate-kicker">Bug Resolution Radar</p>
+      <h1>Acceso seguro</h1>
+      <p id="accessGateMessage">Verificando identidad y permisos…</p>
+      <div class="access-gate-progress" aria-hidden="true"><span></span></div>
+      <button id="accessGateRetry" class="action-button hidden" type="button">Reintentar</button>
+    </div>
+  </section>
+  <div id="app" class="app-shell" aria-busy="true">
+    <header class="bbva-hero">
+      <div class="bbva-hero-copy">
+        <h1 id="appTitle" class="bbva-hero-title">Cuadro de mando de incidencias</h1>
+        <p class="bbva-hero-sub">Análisis y seguimiento de incidencias</p>
+      </div>
+    </header>
+
+    <section id="scopeBar" class="workspace-scope-bar surface-panel" aria-label="Alcance del workspace">
+      <div id="sharedScopeBanner" class="shared-scope-banner hidden" role="status"></div>
+      <div class="workspace-country-field scope-admin-control">
+        <label class="field-label" for="workspaceCountry">País</label>
+        <select id="workspaceCountry"><option value="">Cargando países...</option></select>
+      </div>
+      <div class="workspace-scope-detail">
+        <div class="workspace-rollup-slot scope-admin-control">
+          <label class="checkbox-field"><input id="workspaceRollup" type="checkbox"><span>Vista agregada</span></label>
+        </div>
+        <div class="workspace-source-slot scope-admin-control">
+          <div class="workspace-source-field">
+            <label class="field-label" for="workspaceSource">Origen</label>
+            <select id="workspaceSource"><option value="">Selecciona un origen</option></select>
+          </div>
+          <p id="workspaceRollupCaption" class="workspace-rollup-caption hidden"></p>
+        </div>
+        <div class="workspace-scope-status">
+          <div class="workspace-meta"><strong id="scopeDescription">Sin ámbito</strong><span id="dataVersion">Sin datos</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace-nav-bar surface-panel">
+      <nav class="workspace-nav-tabs" aria-label="Navegación principal del radar">
+        <button class="workspace-tab workspace-tab-active" data-panel="overview" type="button">Resumen</button>
+        <button class="workspace-tab" data-panel="insights" type="button">Insights</button>
+        <button class="workspace-tab" data-panel="trends" type="button">Tendencias</button>
+        <button class="workspace-tab" data-panel="issues" type="button">Issues</button>
+      </nav>
+      <div class="workspace-nav-actions">
+        <button class="workspace-action admin-only" data-route="reports" type="button" title="Probar o enviar newsletter" aria-label="Probar o enviar newsletter"></button>
+        <button class="workspace-action admin-only" data-route="import" type="button" title="Importar datos" aria-label="Importar datos"></button>
+        <button id="themeToggle" class="workspace-action" type="button" title="Cambiar tema" aria-label="Cambiar tema"></button>
+        <button class="workspace-action admin-only" data-route="settings" type="button" title="Configuración" aria-label="Configuración"></button>
+      </div>
+    </section>
+
+    <div id="globalMessage" class="global-message hidden" role="status" aria-live="polite"></div>
+    <main id="workspaceContent" class="workspace-content" tabindex="-1">
+      <section id="loadingView" class="app-loading"><div><div class="loading-spinner"></div><p>Cargando datos contractuales…</p></div></section>
+      <section id="errorView" class="surface-panel empty-panel hidden"><div><h3>No se ha podido cargar la aplicación</h3><p id="errorMessage"></p><button id="retryButton" class="action-button" type="button">Reintentar</button></div></section>
+      <div id="routeView" class="hidden"></div>
+    </main>
+  </div>
+  <div id="issueDrawerRoot"></div>
+  <?!= _include_('Components'); ?>
+  <?!= _include_('Domain'); ?>
+  <?!= _include_('Cache'); ?>
+  <?!= _include_('Charts'); ?>
+  <?!= _include_('App'); ?>
+</body>
+</html>

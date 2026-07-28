@@ -182,6 +182,23 @@ def test_map_helix_values_to_item_reads_arsql_flat_fields_case_insensitive() -> 
     assert item.closed_date == "2024-01-02T00:00:00+00:00"
 
 
+def test_map_helix_values_to_item_recovers_arsql_detailed_description_typo() -> None:
+    item = map_helix_values_to_item(
+        values={
+            "id": "INC0004",
+            "summary": "Fallo de servicio",
+            "Detailed Decription": "Racional completo del incidente",
+        },
+        base_url="https://itsmhelixbbva-smartit.onbmc.com/smartit",
+        country="México",
+        source_alias="MX SmartIT",
+        source_id="helix:mexico:mx-smartit",
+    )
+
+    assert item is not None
+    assert item.description == "Racional completo del incidente"
+
+
 def test_map_helix_incident_type_prefers_business_field_and_keeps_consulta() -> None:
     values = {
         "incidentType": "Incident",

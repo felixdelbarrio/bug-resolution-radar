@@ -472,7 +472,8 @@ def map_helix_values_to_item(
     raw_priority = _extract_text(values.get("priority"))
     summary = _as_text(values.get("summary") or values.get("description"))
     description = _as_text(
-        values.get("detailedDescription")
+        values.get("Detailed Decription")
+        or values.get("detailedDescription")
         or values.get("Detailed Description")
         or values.get("description2")
         or values.get("description")

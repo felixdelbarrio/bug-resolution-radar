@@ -1,0 +1,114 @@
+<script>
+const PersistentCache = (() => {
+  const databaseName = 'bug-resolution-radar';
+  const storeName = 'dashboard-views';
+  const databaseVersion = 1;
+  const operationBudgetMs = 80;
+  let databasePromise = null;
+
+  function withinBudget(promise, milliseconds, fallback) {
+    return new Promise(resolve => {
+      const timer = window.setTimeout(() => resolve(fallback), milliseconds);
+      promise.then(value => { window.clearTimeout(timer); resolve(value); }, () => { window.clearTimeout(timer); resolve(fallback); });
+    });
+  }
+
+  function database() {
+    if (!window.indexedDB) return Promise.resolve(null);
+    if (databasePromise) return databasePromise;
+    databasePromise = new Promise(resolve => {
+      const request = window.indexedDB.open(databaseName, databaseVersion);
+      let settled = false;
+      const finish = value => {
+        if (settled) {
+          if (value && typeof value.close === 'function') value.close();
+          return;
+        }
+        settled = true;
+        resolve(value);
+      };
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(storeName)) db.createObjectStore(storeName);
+      };
+      request.onsuccess = () => finish(request.result);
+      request.onerror = () => finish(null);
+      request.onblocked = () => finish(null);
+    });
+    return databasePromise;
+  }
+
+  async function read(key) {
+    const db = await withinBudget(database(), operationBudgetMs, null);
+    if (!db) return null;
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = window.setTimeout(() => finish(null), operationBudgetMs);
+      const transaction = db.transaction(storeName, 'readonly');
+      const request = transaction.objectStore(storeName).get(key);
+      request.onsuccess = () => finish(request.result || null);
+      request.onerror = () => finish(null);
+      transaction.onabort = () => finish(null);
+      transaction.onerror = () => finish(null);
+    });
+  }
+
+  async function write(key, value) {
+    const db = await withinBudget(database(), operationBudgetMs * 4, null);
+    if (!db) return false;
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = window.setTimeout(() => finish(false), operationBudgetMs * 4);
+      const transaction = db.transaction(storeName, 'readwrite');
+      transaction.objectStore(storeName).put(value, key);
+      transaction.oncomplete = () => finish(true);
+      transaction.onerror = () => finish(false);
+      transaction.onabort = () => finish(false);
+    });
+  }
+
+  async function prune(active) {
+    const db = await withinBudget(database(), operationBudgetMs * 4, null);
+    if (!db) return;
+    const current = active || {};
+    const validScopeVersions = new Set(Object.values(current.scopeVersions || {}).concat([current.dataVersion]).filter(Boolean));
+    await new Promise(resolve => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const request = store.openCursor();
+      request.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) return;
+        const rawKey = String(cursor.key);
+        if (rawKey.startsWith('dashboard:')) {
+          let key = null;
+          try { key = JSON.parse(rawKey.slice('dashboard:'.length)); } catch (error) { key = null; }
+          const stale = !key
+            || key.contract !== current.contract
+            || key.cacheGeneration !== current.cacheGeneration
+            || !validScopeVersions.has(key.scopeVersion);
+          if (stale) cursor.delete();
+        }
+        cursor.continue();
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => resolve();
+      transaction.onabort = () => resolve();
+    });
+  }
+
+  return { read, write, prune };
+})();
+</script>

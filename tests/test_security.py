@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from bug_resolution_radar.common.security import sanitize_cookie_header, validate_service_base_url
+from bug_resolution_radar.common.security import (
+    sanitize_cookie_header,
+    validate_navigation_url,
+    validate_service_base_url,
+)
 
 
 def test_validate_service_base_url_accepts_https_and_normalizes() -> None:
@@ -32,6 +36,22 @@ def test_validate_service_base_url_rejects_insecure_or_risky_hosts(url: str) -> 
 def test_sanitize_cookie_header_removes_invalid_pairs() -> None:
     out = sanitize_cookie_header("a=1; bad name=2; __Host-id=abc; ; x=y")
     assert out == "a=1; __Host-id=abc; x=y"
+
+
+def test_validate_navigation_url_accepts_safe_https_and_rejects_secrets() -> None:
+    assert (
+        validate_navigation_url(
+            "https://jira.example.com/dashboard/42?view=team",
+            field_name="Dashboard",
+        )
+        == "https://jira.example.com/dashboard/42?view=team"
+    )
+    assert validate_navigation_url("", field_name="Dashboard") == ""
+    with pytest.raises(ValueError, match="parámetros sensibles"):
+        validate_navigation_url(
+            "https://jira.example.com/dashboard/42?access_token=secret",
+            field_name="Dashboard",
+        )
 
 
 def test_sanitize_cookie_header_rejects_header_injection() -> None:

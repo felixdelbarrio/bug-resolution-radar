@@ -25,6 +25,11 @@ Producir insights accionables, trazables y coherentes con el contexto visible en
 4. Navegación accionable:
 - Tarjetas con filtros aplicables disparan salto a `Issues` con filtros sincronizados.
 
+Esta interacción pertenece exclusivamente al escritorio. La proyección GPC se
+materializa con filtros vacíos y elimina filtros sugeridos, `issueKeys`, combos y
+drilldowns antes de exportar. GPC presenta el racional resultante, pero no modifica
+el universo de incidencias ni recalcula insights.
+
 ## Domain Objects
 
 - `ActionInsight`: unidad accionable con score, texto y filtros sugeridos.

@@ -1059,7 +1059,7 @@ def test_intelligence_functionality_chart_uses_dark_mode_palette_and_stack_order
     ]
     assert [trace["marker"]["color"] for trace in bar_traces] == [
         "#85C8FF",
-        "#0051F1",
+        "#001391",
         "#D64550",
     ]
 

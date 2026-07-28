@@ -5,6 +5,7 @@ export type WorkspaceSource = {
   alias: string;
   jql?: string;
   po_team_leader?: string;
+  dashboard_url?: string;
   service_origin_buug?: string;
   service_origin_n1?: string;
   service_origin_n2?: string;
@@ -493,6 +494,49 @@ export type DownloadTargetPayload = {
   directory: string;
   configured: boolean;
   source: "configured" | "system" | "fallback";
+};
+
+export type DataTransferExportStat = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type DataTransferExportPayload = {
+  operation: "export";
+  summary: string;
+  completedAt: string;
+  fileName: string;
+  savedPath: string;
+  savedDir: string;
+  fileSize: number;
+  totalRecords: number;
+  stats: DataTransferExportStat[];
+  scope: {
+    scopeKey: string;
+    scopeLabel: string;
+    country: string;
+    scopeMode: string;
+    sourceIds: string[];
+    dataVersion: string;
+    referenceDate: string;
+    immutable: true;
+  };
+  semanticContract: string;
+  projectionSha256: string;
+  reportSha256: string;
+  reportSlideCount: number;
+};
+
+export type DataTransferHistoryPayload = {
+  operations: Array<{
+    id: string;
+    operation: "export";
+    completedAt: string;
+    fileName: string;
+    totalRecords: number;
+    headline: string;
+  }>;
 };
 
 type QueryValue = string | number | boolean | null | undefined | string[];

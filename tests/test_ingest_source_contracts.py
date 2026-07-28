@@ -106,6 +106,7 @@ def test_sources_excel_exports_and_imports_jira_po_team_leader() -> None:
         "country",
         "alias",
         "po_team_leader",
+        "dashboard_url",
         "jql",
     ]
     assert exported.iloc[0]["po_team_leader"] == "Víctor Expósito"
@@ -118,6 +119,7 @@ def test_sources_excel_exports_and_imports_jira_po_team_leader() -> None:
                         "País": "México",
                         "Alias": "Core",
                         "PO / Team Leader": "Víctor Expósito",
+                        "Cuadro de mando JIRA": "https://jira.example.com/dashboard/42",
                         "JQL": "project = CORE",
                     },
                     {"País": "México", "Alias": "Retail", "JQL": "project = RET"},
@@ -129,7 +131,9 @@ def test_sources_excel_exports_and_imports_jira_po_team_leader() -> None:
     )
 
     assert imported.rows[0]["po_team_leader"] == "Víctor Expósito"
+    assert imported.rows[0]["dashboard_url"] == "https://jira.example.com/dashboard/42"
     assert imported.rows[1]["po_team_leader"] == ""
+    assert imported.rows[1]["dashboard_url"] == ""
 
 
 def test_sources_excel_corrects_imported_helix_buug_for_peru() -> None:

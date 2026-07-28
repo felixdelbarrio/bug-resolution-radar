@@ -1,0 +1,58 @@
+<script>
+const UI = (() => {
+  const escape = value => String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const formatNumber = value => Number(value || 0).toLocaleString('es-ES');
+  const formatDays = value => value == null || !Number.isFinite(Number(value)) ? 'N/D' : `${Number(value).toLocaleString('es-ES', { maximumFractionDigits: 1 })} d`;
+  const formatDate = value => value ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'N/D';
+  const icon = (name, alt = '') => `<img src="${escape(BrandAssets[name] || '')}" alt="${escape(alt)}">`;
+  const empty = (title, description) => `<section class="surface-panel empty-panel"><div><h3>${escape(title)}</h3><p>${escape(description)}</p></div></section>`;
+  const kpi = item => `<article class="kpi-card"><span>${escape(item.label)}</span><strong>${escape(item.value)}</strong><small>${escape(item.hint || '')}</small></article>`;
+  const issueKey = row => row.url
+    ? `<a class="issue-inline-link issue-key-anchor-button" href="${escape(row.url)}" target="_blank" rel="noopener noreferrer">${escape(row.key)}</a>`
+    : `<button class="issue-inline-link issue-key-anchor-button open-issue" data-uid="${escape(row.issue_uid || row.issueUid || '')}" type="button">${escape(row.key)}</button>`;
+  const normalizeSemantic = value => String(value || '').trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const semanticToken = (value, kind = 'status') => {
+    const token = normalizeSemantic(value);
+    const priority = {
+      'supone un impedimento': '--signal-priority-highest', highest: '--signal-priority-highest', p0: '--signal-priority-highest',
+      high: '--signal-priority-high', p1: '--signal-priority-high',
+      medium: '--signal-priority-medium', p2: '--signal-priority-medium',
+      low: '--signal-priority-low', p3: '--signal-priority-low',
+      lowest: '--signal-priority-lowest', p4: '--signal-priority-lowest'
+    };
+    const status = {
+      new: '--signal-status-intake', ready: '--signal-status-intake', analysing: '--signal-status-intake', analyzing: '--signal-status-intake', blocked: '--signal-status-intake',
+      'en progreso': '--signal-status-progress', 'in progress': '--signal-status-progress', 'to rework': '--signal-status-progress', rework: '--signal-status-progress', test: '--signal-status-progress', 'ready to verify': '--signal-status-progress',
+      accepted: '--signal-status-accepted', 'ready to deploy': '--signal-status-accepted',
+      deployed: '--signal-status-deployed',
+      closed: '--signal-status-closed', resolved: '--signal-status-closed', done: '--signal-status-closed',
+      open: '--signal-status-open', created: '--signal-status-intake'
+    };
+    const flow = {
+      creadas: '--signal-status-intake', created: '--signal-status-intake',
+      cerradas: '--signal-priority-low', closed: '--signal-priority-low',
+      resueltas: '--signal-priority-low', resolved: '--signal-priority-low',
+      deployed: '--signal-status-deployed',
+      abiertas: '--signal-status-open', open: '--signal-status-open',
+      'backlog abierto': '--signal-status-open', 'open backlog proxy': '--signal-status-open'
+    };
+    if (kind === 'priority') return priority[token] || '--signal-neutral';
+    if (kind === 'chart') return priority[token] || flow[token] || status[token] || '';
+    return status[token] || '--signal-neutral';
+  };
+  const semanticCss = (value, kind = 'status') => `var(${semanticToken(value, kind) || '--signal-neutral'})`;
+  const semanticColor = (value, kind = 'status') => {
+    const name = semanticToken(value, kind);
+    return name ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() : '';
+  };
+  const chip = (value, kind = 'status') => `<span class="issue-chip" style="--chip-color:${semanticCss(value, kind)}">${escape(value || 'N/D')}</span>`;
+  const message = (text, kind = 'info') => {
+    const node = document.getElementById('globalMessage');
+    node.textContent = text; node.dataset.kind = kind; node.classList.remove('hidden');
+    window.clearTimeout(message.timer); message.timer = window.setTimeout(() => node.classList.add('hidden'), 6000);
+  };
+  return { escape, formatNumber, formatDays, formatDate, icon, empty, kpi, issueKey, chip, semanticCss, semanticColor, message };
+})();
+</script>

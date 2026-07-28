@@ -10,6 +10,8 @@ import pandas as pd
 
 DEFAULT_QUINCENAL_TIMEZONE = "UTC"
 DEFAULT_QUINCENAL_LOCALE = "es"
+FIRST_FORTNIGHT_END_DAY = 14
+SECOND_FORTNIGHT_START_DAY = 15
 
 _SPANISH_MONTH_ABBR: tuple[str, ...] = (
     "ENE",
@@ -103,6 +105,18 @@ class TimeWindowService:
             use_last_completed_fortnight=bool(last_finished_only),
         )
 
+    def full_fortnight(
+        self,
+        reference_day: pd.Timestamp | str,
+    ) -> tuple[date, date]:
+        """Return the complete canonical fortnight containing ``reference_day``."""
+        reference = self.normalize_reference_day(reference_day).date()
+        if int(reference.day) <= FIRST_FORTNIGHT_END_DAY:
+            return reference.replace(day=1), reference.replace(day=FIRST_FORTNIGHT_END_DAY)
+        start = reference.replace(day=SECOND_FORTNIGHT_START_DAY)
+        end = (reference.replace(day=1) + pd.offsets.MonthEnd(0)).date()
+        return start, end
+
     def format_current_created_label(self, window: ReportingWindow, *, singular: bool) -> str:
         verb = "CREADA" if singular else "CREADAS"
         return (
@@ -122,18 +136,18 @@ class TimeWindowService:
         return f"Periodo {start} - {end}"
 
     def _active_window(self, reference: date) -> tuple[date, date]:
-        if int(reference.day) <= 14:
+        if int(reference.day) <= FIRST_FORTNIGHT_END_DAY:
             return reference.replace(day=1), reference
-        return reference.replace(day=15), reference
+        return reference.replace(day=SECOND_FORTNIGHT_START_DAY), reference
 
     def _completed_window_before(self, reference: date) -> tuple[date, date]:
         day = int(reference.day)
-        if day <= 14:
+        if day <= FIRST_FORTNIGHT_END_DAY:
             end = reference.replace(day=1) - timedelta(days=1)
-            return end.replace(day=15), end
+            return end.replace(day=SECOND_FORTNIGHT_START_DAY), end
 
         start = reference.replace(day=1)
-        return start, start.replace(day=14)
+        return start, start.replace(day=FIRST_FORTNIGHT_END_DAY)
 
     def _month_abbr(self, value: date | pd.Timestamp) -> str:
         month = int(pd.Timestamp(value).month)

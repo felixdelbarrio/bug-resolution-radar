@@ -6,6 +6,7 @@ import json
 import unicodedata
 from typing import Any, Dict, List
 
+from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.config import (
     Settings,
     country_rollup_sources,
@@ -55,6 +56,12 @@ def _normalize_source_rows(
             po_team_leader = str(raw.get("po_team_leader") or "").strip()
             if po_team_leader:
                 clean["po_team_leader"] = po_team_leader
+            dashboard_url = validate_navigation_url(
+                str(raw.get("dashboard_url") or ""),
+                field_name="Cuadro de mando Jira",
+            )
+            if dashboard_url:
+                clean["dashboard_url"] = dashboard_url
             jql = str(raw.get("jql") or "").strip()
             if not jql:
                 continue

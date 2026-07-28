@@ -18,6 +18,8 @@ Targets públicos disponibles:
 - `make CI`: cadena completa de calidad usada en local/CI.
 - `make test`: ejecución rápida de tests.
 - `make run`: arranque local de la app.
+- `make runWebapp`: WebApp GPC local con plantillas reales y servicios Google simulados.
+- `make ci-gpc`: contrato cloud, Apps Script y composición local de WebApp.
 - `make build`: build oficial con regresión PPT previa y empaquetado por OS.
 
 Detalle de la cadena `make CI`:
@@ -29,6 +31,7 @@ Detalle de la cadena `make CI`:
 - `python scripts/check_dead_private_helpers.py`
 - `python scripts/check_docs_references.py`
 - regresiones rápidas de API, desktop y render PPT crítico
+- quality gate específica de GPC/WebApp
 
 Comando operativo adicional (observabilidad de ingesta):
 - `python scripts/ingest_profile_report.py --connector jira`
@@ -39,6 +42,9 @@ Comando operativo adicional (observabilidad de ingesta):
 Workflow principal:
 - `.github/workflows/quality-gate.yml`
 
+Workflow cloud:
+- `.github/workflows/gpc-quality-gate.yml`
+
 Valida:
 1. instalación de dependencias y `pip check`
 2. `ruff format --check .`
@@ -48,6 +54,13 @@ Valida:
 6. `python scripts/check_dead_private_helpers.py`
 7. `python scripts/check_docs_references.py`
 8. regresiones rápidas de API, desktop y render PPT crítico
+
+La suite también incluye guardas del handoff cloud y Apps Script:
+- contrato v3 y hashes de proyección/PPTX;
+- ausencia de filtros y recálculos de incidencias en GPC;
+- sintaxis JavaScript y símbolos globales únicos;
+- adjunto del PPTX canónico en la newsletter.
+- composición ejecutable de la WebApp local y ausencia de runtime retirado.
 
 `make lint` queda como target explícito para `ruff check .` y `mypy src`.
 
@@ -66,9 +79,22 @@ Valida:
 ## Release Safety
 
 Además de `quality-gate`:
+- GPC Quality Gate en PRs y pushes a `develop`/`master`
 - builds por plataforma (`build-linux`, `build-macos`, `build-windows`)
 - análisis estático de seguridad (`codeql`)
 - empaquetado/release (`release-binaries`)
+
+El WoW de ramas, checks requeridos y publicación está en `docs/GPC_WOW.md`.
+
+## Desktop/GPC Parity
+
+- El calendario quincenal autoritativo es 1–14 y 15–fin.
+- Un estado finalista no sustituye por sí solo una fecha explícita de resolución.
+- El hash del PPTX del handoff debe coincidir con el artefacto generado por el
+  servicio local.
+- GPC debe fallar de forma explícita si no existe snapshot materializado; no puede
+  reconstruir un resultado aproximado.
+- El detalle de contrato y cachés se mantiene en `docs/CLOUD_HANDOFF.md`.
 
 ## Ingestion Hardening
 

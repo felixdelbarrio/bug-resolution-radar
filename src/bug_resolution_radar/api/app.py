@@ -66,6 +66,11 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_trend_detail,
     load_scope_context,
 )
+from bug_resolution_radar.services.data_transfer import (
+    TransferValidationError,
+    export_business_data,
+    transfer_history,
+)
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
     save_download_content,
@@ -661,6 +666,12 @@ class ReportRequest(BaseModel):
 
 class PathRevealRequest(BaseModel):
     path: str = ""
+
+
+class DataTransferExportRequest(BaseModel):
+    country: str = ""
+    sourceIds: list[str] = Field(default_factory=list)
+    scopeMode: str = "source"
 
 
 class DashboardExportSaveRequest(BaseModel):
@@ -1479,6 +1490,37 @@ def create_app() -> FastAPI:
     @app.get("/api/reports/export-target")
     def report_export_target() -> dict[str, Any]:
         return download_target()
+
+    @app.get("/api/data-transfer/history")
+    def data_transfer_history() -> dict[str, Any]:
+        settings = load_settings()
+        try:
+            return transfer_history(settings)
+        except TransferValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/data-transfer/export")
+    def data_transfer_export(payload: DataTransferExportRequest) -> dict[str, Any]:
+        settings = load_settings()
+        if not str(payload.country or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Selecciona un país antes de exportar la vista activa.",
+            )
+        try:
+            return export_business_data(
+                settings,
+                country=payload.country,
+                source_ids=payload.sourceIds,
+                scope_mode=payload.scopeMode,
+            )
+        except TransferValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="No se ha podido guardar el respaldo en Descargas de Informes.",
+            ) from exc
 
     @app.post("/api/system/reveal-path")
     def reveal_path(payload: PathRevealRequest) -> dict[str, Any]:

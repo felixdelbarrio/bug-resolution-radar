@@ -17,6 +17,22 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
 4. React consume `/api/*` y mantiene el estado de filtros/scope en la URL.
 5. Ingesta, apertura de navegador y descargas solo ocurren bajo acción explícita del usuario.
 
+## Cloud Publication Flow
+
+1. El backend desktop materializa la vista GPC con el mismo pipeline que consume la
+   SPA local y genera el PPTX con el servicio local de reporting.
+2. `services/data_transfer.py` empaqueta únicamente la proyección canónica y el PPTX
+   en un handoff v3 con hashes y ámbito explícito.
+3. Apps Script valida el contrato y publica la proyección en una caché L2 durable
+   mediante un puntero atómico por geografía/vista.
+4. La WebApp solo presenta ese snapshot. Una pérdida de `CacheService` recarga L2;
+   nunca activa cálculo de KPIs, insights o racionales.
+5. Google Slides se crea por conversión del PPTX local y la newsletter renderiza el
+   texto y los rollups inmutables calculados localmente.
+
+El contrato completo y sus invariantes están descritos en
+`docs/CLOUD_HANDOFF.md`.
+
 ## Finalist Lookup Flow
 
 1. Jira es la fuente de referencias funcionales: el lookup finalista que consulta ARSQL extrae `INC...` solo desde la descripción y excluye Jira con estado `Accepted`, `Ready to deploy`, `Deployed` o el legado `Acepted`.
@@ -39,7 +55,7 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
 
 - Servicios backend
   - `src/bug_resolution_radar/services`
-  - Responsabilidad: snapshots, orquestación de ingesta, lookup finalista, settings, notas, exportes y mantenimiento. El merge y mapeo de snapshots de ingesta vive centralizado en `services/ingest_merge.py`.
+  - Responsabilidad: snapshots, proyección cloud, orquestación de ingesta, lookup finalista, settings, notas, exportes y mantenimiento. El merge y mapeo de snapshots de ingesta vive centralizado en `services/ingest_merge.py`.
 
 - Analítica
   - `src/bug_resolution_radar/analytics`
@@ -49,6 +65,12 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
   - `src/bug_resolution_radar/repositories`
   - `src/bug_resolution_radar/reports`
   - Responsabilidad: almacenamiento local, read models y generación de PPT/artefactos con enlaces Jira/Helix.
+
+- Publicación GPC
+  - `apps-script`
+  - Responsabilidad: validación del handoff, publicación atómica de snapshots,
+    serving sin filtros, administración restringida, analítica de adopción, conversión
+    a Google Slides y envío determinista de newsletter.
 
 ## Permission Policy
 

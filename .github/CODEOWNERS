@@ -1,0 +1,9 @@
+# Critical delivery surfaces require an explicit review from the repository owner.
+/apps-script/ @felixdelbarrio
+/src/bug_resolution_radar/services/cloud_projection.py @felixdelbarrio
+/src/bug_resolution_radar/services/data_transfer.py @felixdelbarrio
+/src/bug_resolution_radar/common/security.py @felixdelbarrio
+/.github/workflows/ @felixdelbarrio
+/scripts/check_gpc_quality.mjs @felixdelbarrio
+/scripts/run_webapp_local.mjs @felixdelbarrio
+
