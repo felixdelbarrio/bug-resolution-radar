@@ -4,15 +4,26 @@ function _materializedScopeKey_(country, sourceIds) {
   return _fold_(country) + '::' + (sources.length === 1 ? sources[0] : '*');
 }
 
+function _isCurrentSnapshotRecord_(record) {
+  return Boolean(
+    record &&
+    _text_(record.projection_contract) === RADAR.projectionContract &&
+    Number(record.projection_version) === Number(RADAR.projectionVersion)
+  );
+}
+
 function _snapshotRecordById_(snapshotId, required) {
   const id = _text_(snapshotId);
   const record = _readRecords_(RADAR.sheets.snapshots).find(function (row) {
     return _text_(row.snapshot_id) === id;
   }) || null;
+  const current = _isCurrentSnapshotRecord_(record) ? record : null;
   if (required !== false) {
-    _assert_(record, 'El snapshot solicitado no está disponible.', 'SNAPSHOT_NOT_FOUND');
+    _assert_(current,
+      'El snapshot solicitado no pertenece al contrato vigente. Importa un traslado v3.',
+      'SNAPSHOT_NOT_FOUND');
   }
-  return record;
+  return current;
 }
 
 function _activeSnapshotPointers_() {
@@ -27,7 +38,7 @@ function _activeSnapshotRecordForScope_(scopeKey, required) {
   if (!pointer) {
     if (required !== false) {
       _assert_(false,
-        'No hay una proyección publicada para este ámbito. Importa un traslado v2 desde escritorio.',
+        'No hay una proyección publicada para este ámbito. Importa un traslado v3 desde escritorio.',
         'SNAPSHOT_NOT_FOUND');
     }
     return null;
@@ -47,6 +58,7 @@ function _projectionPartValues_(projection) {
     report: projection.report,
     factsSha256: projection.factsSha256
   };
+  parts.administration = projection.administration;
   parts.newsletter = projection.newsletterFacts;
   parts.overview = projection.views.overview;
   parts['insights/catalog'] = projection.views.insights.catalog;
@@ -94,7 +106,6 @@ function _projectionPartValues_(projection) {
     if (keyOccurrences[issueKey].length === 1) byKey[issueKey] = keyOccurrences[issueKey][0];
   });
   parts['issues/index'] = { byUid: byUid, byKey: byKey };
-  parts.kanban = projection.views.kanban;
   return parts;
 }
 
@@ -301,6 +312,10 @@ function _snapshotNewsletter_(record) {
   return newsletter;
 }
 
+function _snapshotAdministration_(record) {
+  return _loadSnapshotPart_(record, 'administration');
+}
+
 function _snapshotIssueDetail_(record, issueKey) {
   const key = _text_(issueKey);
   const index = _loadSnapshotPart_(record, 'issues/index');
@@ -342,7 +357,7 @@ function _normalizeMaterializedRequest_(request, fixedScopeKey) {
       'El enlace compartido no permite cambiar de ámbito.', 'FORBIDDEN');
   }
   const view = _text_(input.view) || 'overview';
-  _assert_(['overview', 'insights', 'trends', 'issues', 'kanban'].indexOf(view) >= 0,
+  _assert_(['overview', 'insights', 'trends', 'issues'].indexOf(view) >= 0,
     'La vista solicitada no está materializada.', 'VIEW_NOT_MATERIALIZED');
   const page = Math.max(1, Math.floor(Number(input.page || 1)));
   const pageSize = Number(input.pageSize == null ? RADAR.defaultPageSize : input.pageSize);
@@ -387,7 +402,18 @@ function _materializedCommonPayload_(record, input) {
 function _materializedViewPayload_(record, input) {
   const common = _materializedCommonPayload_(record, input);
   if (input.view === 'overview') {
-    return Object.assign({}, common, _loadSnapshotPart_(record, 'overview'));
+    const storedOverview = _loadSnapshotPart_(record, 'overview');
+    const overview = Object.assign({}, storedOverview);
+    const availableCharts = Array.isArray(storedOverview.charts)
+      ? storedOverview.charts
+      : [];
+    const configured = _configuredSummaryChartIds_();
+    overview.charts = configured.map(function (chartId) {
+      return availableCharts.find(function (chart) {
+        return _text_(chart && chart.id) === chartId;
+      });
+    }).filter(Boolean);
+    return Object.assign({}, common, overview);
   }
   if (input.view === 'insights') {
     const catalog = _loadSnapshotPart_(record, 'insights/catalog');
@@ -401,8 +427,7 @@ function _materializedViewPayload_(record, input) {
       duplicates: { brief: '', titleGroups: [], heuristicGroups: [] },
       rootCauseEvolutives: [],
       finalistDiscrepancies: [],
-      people: [],
-      opsHealth: { kpis: [], brief: [], oldestIssues: [] }
+      people: []
     };
     Object.keys(selected || {}).forEach(function (key) { insights[key] = selected[key]; });
     return Object.assign({}, common, { insights: insights });
@@ -424,11 +449,7 @@ function _materializedViewPayload_(record, input) {
       'Esa página no fue materializada.', 'VIEW_NOT_MATERIALIZED');
     return Object.assign({}, common, _loadSnapshotPart_(record, 'issues/page/' + input.page));
   }
-  const issueMeta = _loadSnapshotPart_(record, 'issues/meta');
-  return Object.assign({}, common, {
-    totalRows: Number(issueMeta.totalRows),
-    kanban: _loadSnapshotPart_(record, 'kanban')
-  });
+  _assert_(false, 'La vista solicitada no está materializada.', 'VIEW_NOT_MATERIALIZED');
 }
 
 function _dashboardPayloadFromSnapshot_(snapshotId, request, fixedScopeKey) {
@@ -452,8 +473,7 @@ function _warmSnapshotViews_(record) {
     { request: { view: 'overview' }, label: 'overview' },
     { request: { view: 'insights', insightsId: 'summary' }, label: 'insights/summary' },
     { request: { view: 'trends', chartId: 'open_status_bar' }, label: 'trends/open_status_bar' },
-    { request: { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }, label: 'issues/1' },
-    { request: { view: 'kanban' }, label: 'kanban' }
+    { request: { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }, label: 'issues/1' }
   ].forEach(function (item) {
     try {
       _materializedViewPayload_(
@@ -483,7 +503,7 @@ function _workspaceManifest_() {
   const versions = {};
   pointers.forEach(function (pointer) {
     const record = byId[_text_(pointer.snapshot_id)];
-    if (!record) return;
+    if (!_isCurrentSnapshotRecord_(record)) return;
     const sourceIds = _safeJsonParse_(record.source_ids_json, []) || [];
     scopes.push({
       scopeKey: _text_(record.scope_key),

@@ -12,6 +12,9 @@ FRONTEND_DIR := frontend
 FRONTEND_DIST := $(FRONTEND_DIR)/dist
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
+WEBAPP_HOST ?= 127.0.0.1
+WEBAPP_PORT ?= 4174
+WEBAPP_ARGS ?=
 HOST_UNAME := $(shell uname -s 2>/dev/null || echo unknown)
 ICON_SOURCE := assets/app_icon/source/BugResolutionRadarIcon.png
 ICON_PNG := assets/app_icon/bug-resolution-radar.png
@@ -40,7 +43,7 @@ PYINSTALLER_COLLECT_ARGS = \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test run format lint ci CI ci-format ci-typecheck ci-coverage ci-quality kill clean build build-frontend _ensure-source-current _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _build-macos _build-linux
+.PHONY: help setup test run runWebapp format lint ci CI ci-format ci-typecheck ci-coverage ci-quality ci-gpc kill clean build build-frontend _ensure-source-current _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _ensure-node _build-macos _build-linux
 
 help:
 	@echo ""
@@ -48,7 +51,9 @@ help:
 	@echo ""
 	@echo "  make setup        Instala backend + frontend"
 	@echo "  make run          Compila frontend y abre la app desktop autocontenida"
+	@echo "  make runWebapp    Sirve la WebApp GPC local con RPC y datos v3 simulados"
 	@echo "  make CI           Replica local de checks GitHub (format/typecheck/coverage/quality)"
+	@echo "  make ci-gpc       Ejecuta la quality gate específica de GPC/WebApp"
 	@echo "  make test         Ejecuta la suite Python seleccionada"
 	@echo "  make format       Formatea Python con ruff"
 	@echo "  make lint         Ejecuta ruff check + mypy"
@@ -88,6 +93,9 @@ _ensure-build: _ensure-backend
 	@if [ ! -x "$(PYINSTALLER)" ]; then echo "Falta pyinstaller. Ejecuta: make setup"; exit 1; fi
 	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then echo "Faltan dependencias frontend. Ejecuta: make setup"; exit 1; fi
 
+_ensure-node:
+	@if ! command -v node >/dev/null 2>&1; then echo "Falta Node.js 22 o superior."; exit 1; fi
+
 _ensure-icon-assets: _ensure-backend
 	@if [ ! -f "$(ICON_PNG)" ] || [ ! -f "$(ICON_ICO)" ] || [ ! -f "$(ICON_ICNS)" ]; then \
 		if [ ! -f "$(ICON_SOURCE)" ]; then echo "Falta icono fuente: $(ICON_SOURCE)"; exit 1; fi; \
@@ -117,7 +125,10 @@ lint: _ensure-backend
 run: _ensure-source-current _ensure-frontend _ensure-icon-assets build-frontend
 	PYTHONPATH=src $(PYTHON) run_desktop.py
 
-ci: ci-format ci-typecheck ci-coverage ci-quality
+runWebapp: _ensure-source-current _ensure-node
+	node scripts/run_webapp_local.mjs --host "$(WEBAPP_HOST)" --port "$(WEBAPP_PORT)" $(WEBAPP_ARGS)
+
+ci: ci-format ci-typecheck ci-coverage ci-quality ci-gpc
 
 CI: ci
 
@@ -138,6 +149,17 @@ ci-quality: _ensure-frontend
 	PYTHONPATH=src $(PYTEST) -q tests/test_run_desktop_entrypoint.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_api_app.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_executive_report_ppt.py -k "kaleido_png_bytes_uses_cache or prerender_section_images_populates_payload"
+
+ci-gpc: _ensure-backend _ensure-node
+	node scripts/check_gpc_quality.mjs
+	node scripts/run_webapp_local.mjs --check
+	PYTHONPATH=src $(PYTEST) -q \
+		tests/test_apps_script_cloud_contract.py \
+		tests/test_cloud_projection.py \
+		tests/test_data_transfer.py \
+		tests/test_ingest_source_contracts.py \
+		tests/test_security.py \
+		tests/test_gpc_delivery_controls.py
 
 build-frontend: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run build
@@ -193,7 +215,7 @@ _build-linux:
 
 kill:
 	@set -e; \
-	for port in 8000 5173; do \
+	for port in 8000 5173 $(WEBAPP_PORT); do \
 		if command -v lsof >/dev/null 2>&1; then \
 			pids="$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null || true)"; \
 			if [ -n "$$pids" ]; then kill $$pids 2>/dev/null || true; fi; \

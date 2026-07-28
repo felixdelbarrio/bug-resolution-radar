@@ -140,6 +140,7 @@ function emptyJiraRow(country: string): SourceDraftRow {
     country,
     alias: "",
     po_team_leader: "",
+    dashboard_url: "",
     jql: "",
     markedForDeletion: false
   };
@@ -214,6 +215,7 @@ function SourceTable({
           <span>País</span>
           <span>Alias</span>
           {isJira ? <span>PO / Team Leader</span> : null}
+          {isJira ? <span>Cuadro de mando JIRA</span> : null}
           {isJira ? <span>JQL</span> : null}
           {!isJira ? <span>Servicio Origen BU/UG</span> : null}
           {!isJira ? <span>Servicio Origen N1</span> : null}
@@ -247,6 +249,14 @@ function SourceTable({
               <input
                 value={row.po_team_leader ?? ""}
                 onChange={(event) => updateRow(index, { po_team_leader: event.target.value })}
+              />
+            ) : null}
+            {isJira ? (
+              <input
+                type="url"
+                placeholder="https://..."
+                value={row.dashboard_url ?? ""}
+                onChange={(event) => updateRow(index, { dashboard_url: event.target.value })}
               />
             ) : null}
             {isJira ? (

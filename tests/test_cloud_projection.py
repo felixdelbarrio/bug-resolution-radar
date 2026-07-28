@@ -53,7 +53,10 @@ def _intelligence(*, split: bool = True) -> dict[str, object]:
             ]
         )
     return {
-        "tabs": [{"id": "summary", "label": "Resumen"}],
+        "tabs": [
+            {"id": "summary", "label": "Resumen"},
+            {"id": "opsHealth", "label": "Salud operativa"},
+        ],
         "periodSummary": {
             "caption": "España · Periodo 01/07 - 14/07/2026",
             "showOpenSplit": split,
@@ -67,7 +70,6 @@ def _intelligence(*, split: bool = True) -> dict[str, object]:
         "rootCauseEvolutives": {},
         "finalistDiscrepancies": {},
         "people": {},
-        "opsHealth": {},
     }
 
 
@@ -85,15 +87,75 @@ def _patch_materializers(
             "resolved": [None, "2026-07-12"],
         }
     )
+    open_frame = pd.DataFrame(
+        {
+            "issue_uid": ["jira:espana:core::RAD-1"],
+            "key": ["RAD-1"],
+            "source_id": ["jira:espana:core"],
+            "po_team_leader": ["Ana Responsable"],
+            "priority": ["High"],
+        }
+    )
     monkeypatch.setattr(
         "bug_resolution_radar.services.cloud_projection.load_scope_context",
-        lambda *_args, **_kwargs: SimpleNamespace(dff=frame),
+        lambda *_args, **_kwargs: SimpleNamespace(
+            dff=frame,
+            open_df=open_frame,
+            root_cause_evolutives=pd.DataFrame(
+                {
+                    "jira_key": ["RAD-1"],
+                    "source_id": ["jira:espana:core"],
+                    "po_team_leader": ["Ana Responsable"],
+                }
+            ),
+            finalist_discrepancies=pd.DataFrame(
+                columns=["jira_key", "source_id", "po_team_leader"]
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "bug_resolution_radar.services.cloud_projection.jira_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "source_id": "jira:espana:core",
+                "country": "España",
+                "alias": "Core",
+                "po_team_leader": "Ana Responsable",
+                "dashboard_url": "https://jira.example.com/dashboard/1",
+            }
+        ],
     )
     monkeypatch.setattr(
         "bug_resolution_radar.services.cloud_projection.build_dashboard_snapshot",
         lambda *_args, **_kwargs: {
             "overviewKpis": [{"label": "En cola > 30 días", "value": "1"}],
-            "statusPriorityMatrix": {"selected": {"status": []}},
+            "charts": [
+                {"id": chart_id, "figure": {"data": [{"x": [1]}]}}
+                for chart_id in (
+                    "timeseries",
+                    "age_buckets",
+                    "open_status_bar",
+                    "open_priority_pie",
+                    "resolution_hist",
+                )
+            ],
+            "statusPriorityMatrix": {
+                "total": 2,
+                "priorities": [{"priority": "High", "count": 2}],
+                "rows": [
+                    {
+                        "status": "Open",
+                        "count": 1,
+                        "cells": [{"priority": "High", "count": 1}],
+                    },
+                    {
+                        "status": "Closed",
+                        "count": 1,
+                        "cells": [{"priority": "High", "count": 1}],
+                    },
+                ],
+                "selected": {"status": []},
+            },
         },
     )
     monkeypatch.setattr(
@@ -116,15 +178,12 @@ def _patch_materializers(
                     "issue_uid": "jira:espana:core::RAD-1",
                     "key": "RAD-1",
                     "summary": issue_summary,
+                    "url": "https://jira.example.com/browse/RAD-1",
+                    "status": "Open",
+                    "priority": "High",
                 }
             ],
         },
-    )
-    monkeypatch.setattr(
-        "bug_resolution_radar.services.cloud_projection.build_kanban_columns",
-        lambda *_args, **_kwargs: [
-            {"status": "Open", "items": [{"key": "RAD-1", "priorityFilters": ["High"]}]}
-        ],
     )
     captured: dict[str, object] = {}
 
@@ -180,7 +239,28 @@ def test_projection_is_explicit_static_and_packages_exact_report_bytes(
     assert not (_all_keys(projection["views"]) & _CLOUD_ACTION_KEYS)
     assert set(projection["views"]["trends"]) == {"catalog", "byId"}
     assert set(projection["views"]["insights"]) == {"catalog", "byId"}
-    assert projection["views"]["kanban"][0]["items"][0]["issue_uid"] == "jira:espana:core::RAD-1"
+    assert set(projection["views"]) == {"overview", "insights", "trends", "issues"}
+    summary_card = projection["views"]["insights"]["byId"]["summary"]["periodSummary"]["cards"][0]
+    assert "issueKeys" not in summary_card
+    assert summary_card["issues"][0]["url"] == "https://jira.example.com/browse/RAD-1"
+    assert projection["views"]["overview"]["statusPriorityMatrix"]["total"] == 1
+    assert projection["views"]["overview"]["statusPriorityMatrix"]["priorities"] == [
+        {"priority": "High", "count": 1}
+    ]
+    assert projection["administration"]["jiraSources"][0]["dashboardUrl"] == (
+        "https://jira.example.com/dashboard/1"
+    )
+    assert projection["newsletterFacts"]["responsibleRollups"] == [
+        {
+            "name": "Ana Responsable",
+            "dashboardUrl": "https://jira.example.com/dashboard/1",
+            "openIssues": 1,
+            "rootCauseEvolutives": 1,
+            "finalistDiscrepancies": 0,
+        }
+    ]
+    assert projection["newsletterFacts"]["previousOpen"] == 2
+    assert projection["newsletterFacts"]["backlogDelta"] == 1
     assert (
         projection["factsSha256"]
         == hashlib.sha256(canonical_json_bytes(projection["newsletterFacts"])).hexdigest()
@@ -202,7 +282,7 @@ def test_newsletter_omits_false_open_split_when_desktop_hides_it(
     newsletter = projection["newsletterFacts"]
     assert "focusOpen" not in newsletter["metrics"]
     assert "otherOpen" not in newsletter["metrics"]
-    assert "focus" not in {fact["id"] for fact in newsletter["facts"]}
+    assert newsletter["focusLabel"] == ""
 
 
 def test_data_version_changes_when_materialized_detail_changes(

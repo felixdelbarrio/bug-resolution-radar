@@ -12,12 +12,14 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.services.cloud_projection import (
     PROJECTION_SCHEMA,
     PROJECTION_SCHEMA_VERSION,
     REPORT_MIME_TYPE,
     SEMANTIC_CONTRACT,
+    TREND_IDS,
     build_cloud_projection_artifact,
     canonical_json_bytes,
     sha256_bytes,
@@ -25,7 +27,7 @@ from bug_resolution_radar.services.cloud_projection import (
 from bug_resolution_radar.services.downloads import ensure_download_dir, save_download_content
 
 TRANSFER_FORMAT = "bug-resolution-radar-transfer"
-TRANSFER_VERSION = 2
+TRANSFER_VERSION = 3
 TRANSFER_EXTENSION = ".brr"
 MAX_ARCHIVE_BYTES = 40 * 1024 * 1024
 MAX_EXPANDED_BYTES = 120 * 1024 * 1024
@@ -47,6 +49,7 @@ _PROJECTION_FIELDS = {
     "generatedAt",
     "scope",
     "semantics",
+    "administration",
     "views",
     "newsletterFacts",
     "report",
@@ -93,7 +96,7 @@ def _manifest(
     files: dict[str, bytes],
 ) -> dict[str, Any]:
     if set(files) != set(_DATASET_FILES):
-        raise TransferValidationError("Los artefactos del traslado v2 están incompletos.")
+        raise TransferValidationError("Los artefactos del traslado v3 están incompletos.")
     return {
         "format": TRANSFER_FORMAT,
         "version": TRANSFER_VERSION,
@@ -161,7 +164,7 @@ def _append_history(settings: Settings, record: dict[str, Any]) -> None:
         operations.append(record)
         _atomic_write(
             path,
-            canonical_json_bytes({"version": 2, "operations": operations[-50:]}),
+            canonical_json_bytes({"version": 3, "operations": operations[-50:]}),
         )
     except Exception:
         # History is operational metadata and cannot invalidate a completed export.
@@ -298,7 +301,7 @@ def _safe_archive_path(settings: Settings, file_name: str) -> Path:
 
 def _require_exact_fields(value: Any, fields: set[str], *, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != fields:
-        raise TransferValidationError(f"«{label}» no cumple el contrato v2.")
+        raise TransferValidationError(f"«{label}» no cumple el contrato v3.")
     return value
 
 
@@ -368,17 +371,64 @@ def _validate_projection(
         raise TransferValidationError("El ámbito del manifest no coincide con la proyección.")
     _require_exact_fields(
         payload.get("views"),
-        {"overview", "insights", "trends", "issues", "kanban"},
+        {"overview", "insights", "trends", "issues"},
         label="projection.views",
     )
     views = payload["views"]
+    overview_charts = views["overview"].get("charts")
+    overview_chart_ids = (
+        [str(chart.get("id") or "") for chart in overview_charts if isinstance(chart, dict)]
+        if isinstance(overview_charts, list)
+        else []
+    )
+    if overview_chart_ids != list(TREND_IDS):
+        raise TransferValidationError("El catálogo de gráficos de Resumen está incompleto.")
     _require_exact_fields(views["trends"], {"catalog", "byId"}, label="views.trends")
+    trend_catalog = views["trends"]["catalog"]
+    trend_by_id = views["trends"]["byId"]
+    trend_catalog_ids = (
+        [str(item.get("id") or "") for item in trend_catalog if isinstance(item, dict)]
+        if isinstance(trend_catalog, list)
+        else []
+    )
+    if (
+        trend_catalog_ids != list(TREND_IDS)
+        or not isinstance(trend_by_id, dict)
+        or set(trend_by_id) != set(TREND_IDS)
+    ):
+        raise TransferValidationError("El catálogo de Tendencias está incompleto.")
     _require_exact_fields(views["insights"], {"catalog", "byId"}, label="views.insights")
     issues = _require_exact_fields(views["issues"], {"total", "rows"}, label="views.issues")
     if not isinstance(issues["rows"], list) or int(issues["total"]) != len(issues["rows"]):
         raise TransferValidationError("La vista materializada de incidencias está incompleta.")
-    if not isinstance(views["kanban"], list):
-        raise TransferValidationError("La vista materializada de kanban no es válida.")
+    administration = _require_exact_fields(
+        payload.get("administration"), {"jiraSources"}, label="projection.administration"
+    )
+    if not isinstance(administration["jiraSources"], list):
+        raise TransferValidationError("Las fuentes administrativas no son válidas.")
+    administration_source_ids: set[str] = set()
+    for row in administration["jiraSources"]:
+        source = _require_exact_fields(
+            row,
+            {"sourceId", "alias", "poTeamLeader", "dashboardUrl"},
+            label="projection.administration.jiraSources",
+        )
+        source_id = str(source["sourceId"] or "").strip()
+        if (
+            not source_id
+            or source_id not in scope["sourceIds"]
+            or source_id in administration_source_ids
+            or not str(source["alias"] or "").strip()
+        ):
+            raise TransferValidationError("Una fuente administrativa no es válida.")
+        administration_source_ids.add(source_id)
+        try:
+            validate_navigation_url(
+                str(source["dashboardUrl"] or ""),
+                field_name="Cuadro de mando Jira",
+            )
+        except ValueError as exc:
+            raise TransferValidationError(str(exc)) from exc
     if not isinstance(payload.get("semantics"), dict):
         raise TransferValidationError(
             "La trazabilidad semántica del escritorio no está disponible."
@@ -417,7 +467,7 @@ def _decode_archive(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
                 raise TransferValidationError("El traslado contiene elementos duplicados.")
             if set(names) != required:
                 raise TransferValidationError(
-                    "El traslado v2 debe contener exclusivamente la proyección y el PPTX."
+                    "El traslado v3 debe contener exclusivamente la proyección y el PPTX."
                 )
             if any(
                 info.is_dir()
@@ -440,7 +490,7 @@ def _decode_archive(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
                 or manifest.get("version") != TRANSFER_VERSION
                 or manifest.get("semanticContract") != SEMANTIC_CONTRACT
             ):
-                raise TransferValidationError("Solo se admite el traslado GPC v2 vigente.")
+                raise TransferValidationError("Solo se admite el traslado GPC v3 vigente.")
             _validate_scope(manifest.get("scope"))
             datasets = _require_exact_fields(
                 manifest.get("datasets"), set(_DATASET_FILES), label="manifest.datasets"

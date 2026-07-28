@@ -1,4 +1,4 @@
-/** Strict portable transfer v2 adapter. Desktop owns every business rationale. */
+/** Strict portable transfer v3 adapter. Desktop owns every business rationale. */
 const TRANSFER_FILES = Object.freeze({
   projection: 'data/projection.json',
   report: 'artifacts/period_followup.pptx'
@@ -78,7 +78,7 @@ function _transferEntryMap_(archiveBlob, archiveBytes) {
     .sort();
   _assert_(directoryNames.length === expected.length && directoryNames.every(function (name, index) {
     return name === expected[index];
-  }), 'El respaldo v2 debe contener exclusivamente manifest.json, data/projection.json y artifacts/period_followup.pptx.', 'TRANSFER_INVALID');
+  }), 'El traslado v3 debe contener exclusivamente manifest.json, data/projection.json y artifacts/period_followup.pptx.', 'TRANSFER_INVALID');
   let blobs;
   try {
     blobs = Utilities.unzip(archiveBlob);
@@ -220,7 +220,10 @@ function _assertCanonicalFactScalars_(value, path) {
 function _validateProjectionNewsletter_(newsletter) {
   _assertExactFields_(
     newsletter,
-    ['periodLabel', 'focusLabel', 'metrics', 'facts'],
+    [
+      'periodLabel', 'focusLabel', 'metrics', 'previousOpen', 'backlogDelta',
+      'criticalOpen', 'responsibleRollups', 'draft'
+    ],
     'projection.newsletterFacts'
   );
   _assert_(_sanitizeText_(newsletter.periodLabel, 300), 'projection.newsletterFacts.periodLabel está vacío.', 'TRANSFER_INVALID');
@@ -263,17 +266,42 @@ function _validateProjectionNewsletter_(newsletter) {
       'focusLabel debe estar vacío cuando no existe desglose de foco.',
       'TRANSFER_INVALID');
   }
-  _assert_(Array.isArray(newsletter.facts) && newsletter.facts.length > 0 && newsletter.facts.length <= 100,
-    'projection.newsletterFacts.facts debe contener hechos verificables.', 'TRANSFER_INVALID');
-  const ids = new Set();
-  newsletter.facts.forEach(function (fact) {
-    _assertExactFields_(fact, ['id', 'statement'], 'projection.newsletterFacts.fact');
-    const id = _text_(fact.id);
-    _assert_(/^[a-z0-9][a-z0-9_.:-]{0,79}$/i.test(id) && !ids.has(id),
-      'projection.newsletterFacts contiene identificadores no válidos o duplicados.', 'TRANSFER_INVALID');
-    ids.add(id);
-    _assert_(_sanitizeText_(fact.statement, 2000), 'Un hecho de newsletter está vacío.', 'TRANSFER_INVALID');
+  ['previousOpen', 'backlogDelta', 'criticalOpen'].forEach(function (key) {
+    _assert_(Number.isInteger(newsletter[key]),
+      'projection.newsletterFacts.' + key + ' debe ser entero.', 'TRANSFER_INVALID');
   });
+  _assert_(newsletter.backlogDelta === newsletter.metrics.currentOpen - newsletter.previousOpen,
+    'El delta de backlog de la newsletter no es coherente.', 'TRANSFER_INVALID');
+  _assert_(Array.isArray(newsletter.responsibleRollups),
+    'projection.newsletterFacts.responsibleRollups debe ser una lista.', 'TRANSFER_INVALID');
+  newsletter.responsibleRollups.forEach(function (row) {
+    _assertExactFields_(
+      row,
+      ['name', 'dashboardUrl', 'openIssues', 'rootCauseEvolutives', 'finalistDiscrepancies'],
+      'projection.newsletterFacts.responsibleRollups'
+    );
+    _assert_(_sanitizeText_(row.name, 300), 'El responsable de newsletter está vacío.', 'TRANSFER_INVALID');
+    ['openIssues', 'rootCauseEvolutives', 'finalistDiscrepancies'].forEach(function (key) {
+      _assert_(Number.isInteger(row[key]) && row[key] >= 0,
+        'Un conteo por responsable no es válido.', 'TRANSFER_INVALID');
+    });
+    if (_text_(row.dashboardUrl)) _sanitizeUrl_(row.dashboardUrl);
+  });
+  _assertExactFields_(
+    newsletter.draft,
+    [
+      'subject', 'greeting', 'intro', 'reportLinkLabel', 'summary',
+      'responsibleIntro', 'responsibleParagraphs', 'closing'
+    ],
+    'projection.newsletterFacts.draft'
+  );
+  ['subject', 'greeting', 'intro', 'reportLinkLabel', 'summary', 'responsibleIntro', 'closing']
+    .forEach(function (key) {
+      _assert_(_sanitizeText_(newsletter.draft[key], 4000),
+        'El borrador local de newsletter está incompleto.', 'TRANSFER_INVALID');
+    });
+  _assert_(Array.isArray(newsletter.draft.responsibleParagraphs),
+    'Los párrafos por responsable no son válidos.', 'TRANSFER_INVALID');
   _assertCanonicalFactScalars_(newsletter, 'projection.newsletterFacts');
 }
 
@@ -292,27 +320,66 @@ function _validateProjectionReport_(report, descriptor) {
 function _validateProjection_(projection, manifest, reportDescriptor) {
   _assertExactFields_(projection, [
     'schema', 'schemaVersion', 'semanticContract', 'generatedAt', 'scope',
-    'semantics', 'views', 'newsletterFacts', 'report', 'factsSha256'
+    'semantics', 'administration', 'views', 'newsletterFacts', 'report', 'factsSha256'
   ], TRANSFER_LABELS.projection);
   _assert_(projection.schema === RADAR.projectionContract && projection.schemaVersion === RADAR.projectionVersion,
     'La proyección no pertenece al contrato GPC vigente.', 'TRANSFER_INVALID');
   _assert_(projection.semanticContract === RADAR.semanticContract &&
     manifest.semanticContract === RADAR.semanticContract,
-  'El contrato semántico debe ser desktop-authoritative-v1.', 'TRANSFER_INVALID');
+  'El contrato semántico debe ser desktop-authoritative-v2.', 'TRANSFER_INVALID');
   _assert_(_date_(projection.generatedAt), 'projection.generatedAt no es una fecha válida.', 'TRANSFER_INVALID');
   const scope = _normalizeProjectionScope_(projection.scope, 'projection.scope');
   const manifestScope = _normalizeManifestScope_(manifest.scope, 'manifest.scope');
   _assert_(_stableJsonStringify_(scope) === _stableJsonStringify_(manifestScope),
     'El ámbito del manifest no coincide con la proyección.', 'TRANSFER_INVALID');
   _assertObject_(projection.semantics, 'projection.semantics no es un objeto de trazabilidad.');
-  _assertExactFields_(projection.views, ['overview', 'insights', 'trends', 'issues', 'kanban'], 'projection.views');
-  ['overview', 'insights', 'trends', 'issues', 'kanban'].forEach(function (view) {
+  _assertExactFields_(projection.administration, ['jiraSources'], 'projection.administration');
+  _assert_(Array.isArray(projection.administration.jiraSources),
+    'projection.administration.jiraSources no es una lista.', 'TRANSFER_INVALID');
+  const administrationSourceIds = new Set();
+  projection.administration.jiraSources.forEach(function (row) {
+    _assertExactFields_(
+      row,
+      ['sourceId', 'alias', 'poTeamLeader', 'dashboardUrl'],
+      'projection.administration.jiraSources'
+    );
+    const sourceId = _sanitizeSourceId_(row.sourceId);
+    _assert_(scope.sourceIds.indexOf(sourceId) >= 0 && !administrationSourceIds.has(sourceId),
+      'Una fuente JIRA administrativa está duplicada o fuera del ámbito.',
+      'TRANSFER_INVALID');
+    administrationSourceIds.add(sourceId);
+    _assert_(_sanitizeText_(row.alias, 300),
+      'Una fuente JIRA administrativa no contiene alias.', 'TRANSFER_INVALID');
+    _sanitizeText_(row.poTeamLeader, 300);
+    if (_text_(row.dashboardUrl)) _sanitizeUrl_(row.dashboardUrl);
+  });
+  _assertExactFields_(projection.views, ['overview', 'insights', 'trends', 'issues'], 'projection.views');
+  ['overview', 'insights', 'trends', 'issues'].forEach(function (view) {
     _assert_(projection.views[view] && typeof projection.views[view] === 'object',
       'La vista materializada «' + view + '» no está disponible.', 'TRANSFER_INVALID');
   });
+  const expectedChartIds = [
+    'timeseries', 'age_buckets', 'open_status_bar', 'open_priority_pie', 'resolution_hist'
+  ];
+  const overviewCharts = projection.views.overview.charts;
+  _assert_(Array.isArray(overviewCharts) &&
+    overviewCharts.map(function (chart) { return _text_(chart && chart.id); })
+      .every(function (id, index) { return id === expectedChartIds[index]; }) &&
+    overviewCharts.length === expectedChartIds.length,
+  'El catálogo de gráficos de Resumen está incompleto.', 'TRANSFER_INVALID');
   _assertExactFields_(projection.views.trends, ['catalog', 'byId'], 'projection.views.trends');
   _assert_(Array.isArray(projection.views.trends.catalog), 'projection.views.trends.catalog no es una lista.', 'TRANSFER_INVALID');
   _assertObject_(projection.views.trends.byId, 'projection.views.trends.byId no es un objeto.');
+  _assert_(
+    projection.views.trends.catalog.length === expectedChartIds.length &&
+    projection.views.trends.catalog.every(function (item, index) {
+      return _text_(item && item.id) === expectedChartIds[index];
+    }) &&
+    Object.keys(projection.views.trends.byId).sort().join('|') ===
+      expectedChartIds.slice().sort().join('|'),
+    'El catálogo de Tendencias está incompleto.',
+    'TRANSFER_INVALID'
+  );
   _assertExactFields_(projection.views.issues, ['total', 'rows'], 'projection.views.issues');
   _assert_(Number.isInteger(projection.views.issues.total) && projection.views.issues.total >= 0 &&
     Array.isArray(projection.views.issues.rows) &&
@@ -371,7 +438,7 @@ function _decodeTransferPackage_(archiveBlob) {
   _assert_(archiveBlob && typeof archiveBlob.getBytes === 'function', 'Selecciona un fichero .brr.', 'TRANSFER_INVALID');
   const fileName = _text_(archiveBlob.getName());
   const archiveBytes = archiveBlob.getBytes();
-  _assert_(/\.brr$/i.test(fileName), 'Selecciona un respaldo .brr v2.', 'TRANSFER_INVALID');
+  _assert_(/\.brr$/i.test(fileName), 'Selecciona un traslado .brr v3.', 'TRANSFER_INVALID');
   _assert_(archiveBytes.length > 0 && archiveBytes.length <= RADAR.maxTransferBytes,
     'El respaldo está vacío o supera el tamaño máximo de ' + Math.floor(RADAR.maxTransferBytes / 1048576) + ' MB.',
     'TRANSFER_TOO_LARGE');
@@ -379,7 +446,7 @@ function _decodeTransferPackage_(archiveBlob) {
   const manifest = _entryJson_(entries, 'manifest.json', 'manifest');
   _assertExactFields_(manifest, ['format', 'version', 'createdAt', 'scope', 'semanticContract', 'datasets'], 'manifest');
   _assert_(manifest.format === RADAR.transferFormat && manifest.version === RADAR.transferVersion,
-    'Solo se admite el contrato de traslado v2.', 'TRANSFER_INVALID');
+    'Solo se admite el contrato de traslado v3.', 'TRANSFER_INVALID');
   _assert_(manifest.semanticContract === RADAR.semanticContract,
     'El respaldo no fue generado con el racional autoritativo del escritorio.', 'TRANSFER_INVALID');
   _assert_(_date_(manifest.createdAt), 'manifest.createdAt no es una fecha válida.', 'TRANSFER_INVALID');

@@ -1,15 +1,14 @@
 /** Configuration and immutable contracts. No secrets belong in this file. */
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
-  contractVersion: '4.1.0',
+  contractVersion: '5.0.0',
   projectionContract: 'bug-resolution-radar-cloud-projection',
-  projectionVersion: 1,
-  semanticContract: 'desktop-authoritative-v1',
+  projectionVersion: 2,
+  semanticContract: 'desktop-authoritative-v2',
   spreadsheetId: '10_kDe-giOQtJxBX_M67z8In17MIh-6IQpmQl_9eo7c8',
   initialAdmin: 'felix.delbarrio@bbva.com',
   allowedDomain: 'bbva.com',
   newsletterFrom: 'bug-resolution-radar.group@bbva.com',
-  geminiModel: 'gemini-3.6-flash',
   maxPageSize: 250,
   defaultPageSize: 50,
   cacheSeconds: 21600,
@@ -21,7 +20,7 @@ const RADAR = Object.freeze({
   maxReportBytes: 20 * 1024 * 1024,
   snapshotChunkSize: 40000,
   transferFormat: 'bug-resolution-radar-transfer',
-  transferVersion: 2,
+  transferVersion: 3,
   sheets: Object.freeze({
     config: '_CONFIG',
     users: 'AUTH_USERS',
@@ -34,7 +33,8 @@ const RADAR = Object.freeze({
     reportAudit: 'REPORT_AUDIT',
     reportShares: 'REPORT_SHARES',
     newsletterRecipients: 'NEWSLETTER_RECIPIENTS',
-    newsletterAudit: 'NEWSLETTER_AUDIT'
+    newsletterAudit: 'NEWSLETTER_AUDIT',
+    analyticsEvents: 'ANALYTICS_EVENTS'
   })
 });
 
@@ -230,21 +230,21 @@ const DESIGN_TOKENS = (function () {
 
 const CONTRACTS = Object.freeze({
   _CONFIG: Object.freeze({
-    key: 'key', version: '4.1.0', unique: ['key'],
+    key: 'key', version: '5.0.0', unique: ['key'],
     columns: Object.freeze([
       ['key', 'string', true], ['value', 'string', false], ['kind', 'enum', true, ['string', 'number', 'boolean', 'json']],
       ['description', 'string', false], ['updated_at', 'datetime', true], ['updated_by', 'email', true]
     ])
   }),
   AUTH_USERS: Object.freeze({
-    key: 'email', version: '4.1.0', unique: ['email'],
+    key: 'email', version: '5.0.0', unique: ['email'],
     columns: Object.freeze([
       ['email', 'email', true], ['role', 'enum', true, ['admin', 'viewer']], ['active', 'boolean', true],
       ['display_name', 'string', false], ['updated_at', 'datetime', true], ['updated_by', 'email', true]
     ])
   }),
   IMPORT_RUNS: Object.freeze({
-    key: 'run_id', version: '4.1.0', unique: ['run_id'],
+    key: 'run_id', version: '5.0.0', unique: ['run_id'],
     columns: Object.freeze([
       ['run_id', 'string', true], ['file_name', 'string', true], ['file_sha256', 'string', true],
       ['status', 'enum', true, ['validated', 'completed', 'failed', 'cancelled']],
@@ -254,14 +254,14 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   USER_PREFS: Object.freeze({
-    key: 'pref_uid', version: '4.1.0', unique: ['pref_uid'],
+    key: 'pref_uid', version: '5.0.0', unique: ['pref_uid'],
     columns: Object.freeze([
       ['pref_uid', 'string', true], ['email', 'email', true], ['preference_key', 'string', true],
       ['value_json', 'json', true], ['updated_at', 'datetime', true]
     ])
   }),
   MATERIALIZED_SNAPSHOTS: Object.freeze({
-    key: 'snapshot_id', version: '4.1.0', unique: ['snapshot_id'],
+    key: 'snapshot_id', version: '5.0.0', unique: ['snapshot_id'],
     columns: Object.freeze([
       ['snapshot_id', 'string', true], ['scope_key', 'string', true], ['scope_label', 'string', true],
       ['country', 'string', true], ['source_ids_json', 'json', true], ['data_version', 'string', true],
@@ -276,7 +276,7 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   MATERIALIZED_PARTS: Object.freeze({
-    key: 'part_uid', version: '4.1.0', unique: ['part_uid'],
+    key: 'part_uid', version: '5.0.0', unique: ['part_uid'],
     columns: Object.freeze([
       ['part_uid', 'string', true], ['snapshot_id', 'string', true],
       ['part_key', 'string', true], ['part_sha256', 'string', true],
@@ -285,7 +285,7 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   MATERIALIZED_CHUNKS: Object.freeze({
-    key: 'chunk_uid', version: '4.1.0', unique: ['chunk_uid'],
+    key: 'chunk_uid', version: '5.0.0', unique: ['chunk_uid'],
     columns: Object.freeze([
       ['chunk_uid', 'string', true], ['snapshot_id', 'string', true], ['part_uid', 'string', true],
       ['part_key', 'string', true], ['chunk_index', 'number', true],
@@ -293,14 +293,14 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   MATERIALIZED_POINTERS: Object.freeze({
-    key: 'scope_key', version: '4.1.0', unique: ['scope_key'],
+    key: 'scope_key', version: '5.0.0', unique: ['scope_key'],
     columns: Object.freeze([
       ['scope_key', 'string', true], ['snapshot_id', 'string', true], ['data_version', 'string', true],
       ['activated_at', 'datetime', true], ['activated_by', 'email', true]
     ])
   }),
   REPORT_AUDIT: Object.freeze({
-    key: 'report_id', version: '4.1.0', unique: ['report_id'],
+    key: 'report_id', version: '5.0.0', unique: ['report_id'],
     columns: Object.freeze([
       ['report_id', 'string', true], ['report_type', 'enum', true, ['period']],
       ['snapshot_id', 'string', true], ['scope_key', 'string', true], ['data_version', 'string', true],
@@ -312,7 +312,7 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   REPORT_SHARES: Object.freeze({
-    key: 'share_id', version: '4.1.0', unique: ['share_id'],
+    key: 'share_id', version: '5.0.0', unique: ['share_id'],
     columns: Object.freeze([
       ['share_id', 'string', true], ['token_sha256', 'string', true], ['report_id', 'string', true],
       ['snapshot_id', 'string', true], ['scope_key', 'string', true], ['scope_label', 'string', true],
@@ -321,7 +321,7 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   NEWSLETTER_RECIPIENTS: Object.freeze({
-    key: 'recipient_uid', version: '4.1.0', unique: ['recipient_uid'],
+    key: 'recipient_uid', version: '5.0.0', unique: ['recipient_uid'],
     columns: Object.freeze([
       ['recipient_uid', 'string', true], ['report_id', 'string', true], ['snapshot_id', 'string', true],
       ['scope_key', 'string', true], ['scope_label', 'string', true],
@@ -331,14 +331,27 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   NEWSLETTER_AUDIT: Object.freeze({
-    key: 'newsletter_id', version: '4.1.0', unique: ['newsletter_id'],
+    key: 'newsletter_id', version: '5.0.0', unique: ['newsletter_id'],
     columns: Object.freeze([
       ['newsletter_id', 'string', true], ['report_id', 'string', true],
       ['mode', 'enum', true, ['test', 'send']], ['scope_key', 'string', true],
       ['data_version', 'string', true], ['recipients_json', 'json', true],
-      ['subject', 'string', true], ['facts_sha256', 'string', true], ['gemini_model', 'string', true],
+      ['subject', 'string', true], ['facts_sha256', 'string', true],
+      ['body_text', 'string', true], ['slides_url', 'url', true],
+      ['recipient_count', 'number', true], ['effective_sender', 'email', true],
       ['created_at', 'datetime', true], ['created_by', 'email', true],
       ['status', 'enum', true, ['processing', 'sent', 'failed']], ['details', 'string', false]
+    ])
+  }),
+  ANALYTICS_EVENTS: Object.freeze({
+    key: 'event_id', version: '5.0.0', unique: ['event_id'],
+    columns: Object.freeze([
+      ['event_id', 'string', true], ['event_at', 'datetime', true],
+      ['user_email', 'email', true], ['session_id', 'string', true],
+      ['event_name', 'string', true], ['route', 'string', false],
+      ['panel', 'string', false], ['scope_key', 'string', false],
+      ['duration_ms', 'number', false], ['status', 'string', false],
+      ['details_json', 'json', true], ['user_agent', 'string', false]
     ])
   })
 });

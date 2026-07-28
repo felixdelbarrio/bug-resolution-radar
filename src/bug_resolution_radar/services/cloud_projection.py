@@ -33,8 +33,13 @@ from bug_resolution_radar.analytics.period_summary import (
 from bug_resolution_radar.analytics.status_semantics import (
     CORE_FINAL_STATUS_TOKENS,
     FINALIST_STATUS_TOKENS,
+    is_finalist_status,
 )
-from bug_resolution_radar.config import Settings, jira_root_cause_labels_by_country
+from bug_resolution_radar.config import (
+    Settings,
+    jira_root_cause_labels_by_country,
+    jira_sources,
+)
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
 from bug_resolution_radar.reports.service import (
     build_report_filters,
@@ -45,15 +50,14 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_dashboard_snapshot,
     build_intelligence_snapshot,
     build_issue_rows,
-    build_kanban_columns,
     build_trend_detail,
     load_scope_context,
 )
 from bug_resolution_radar.services.workspace import WorkspaceSelection
 
 PROJECTION_SCHEMA = "bug-resolution-radar-cloud-projection"
-PROJECTION_SCHEMA_VERSION = 1
-SEMANTIC_CONTRACT = "desktop-authoritative-v1"
+PROJECTION_SCHEMA_VERSION = 2
+SEMANTIC_CONTRACT = "desktop-authoritative-v2"
 REPORT_PATH = "artifacts/period_followup.pptx"
 REPORT_MIME_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 TREND_IDS: tuple[str, ...] = (
@@ -229,10 +233,115 @@ def _metric_int(value: Any) -> int:
         return 0
 
 
+def _manager_source_catalog(
+    settings: Settings,
+    *,
+    country: str,
+    source_ids: Sequence[str],
+) -> list[dict[str, str]]:
+    selected = set(source_ids)
+    rows: list[dict[str, str]] = []
+    for source in jira_sources(settings):
+        source_id = str(source.get("source_id") or "").strip()
+        if source_id not in selected or str(source.get("country") or "").strip() != country:
+            continue
+        rows.append(
+            {
+                "sourceId": source_id,
+                "alias": str(source.get("alias") or "").strip(),
+                "poTeamLeader": str(source.get("po_team_leader") or "").strip(),
+                "dashboardUrl": str(source.get("dashboard_url") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _series_text(frame: pd.DataFrame, column: str) -> pd.Series:
+    if frame.empty or column not in frame.columns:
+        return pd.Series("", index=frame.index, dtype=str)
+    return frame[column].fillna("").astype(str).str.strip()
+
+
+def _unique_issue_count(frame: pd.DataFrame, *, key_columns: Sequence[str]) -> int:
+    if frame.empty:
+        return 0
+    for column in key_columns:
+        if column in frame.columns:
+            values = _series_text(frame, column)
+            non_empty = values.loc[values.ne("")]
+            if not non_empty.empty:
+                return int(non_empty.nunique())
+    return int(len(frame))
+
+
+def _manager_rollups(
+    *,
+    context: Any,
+    sources: Sequence[Mapping[str, str]],
+) -> list[dict[str, Any]]:
+    source_by_id = {str(row.get("sourceId") or ""): row for row in sources}
+
+    def with_manager(frame: pd.DataFrame) -> pd.DataFrame:
+        work = frame.copy(deep=False) if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+        if work.empty:
+            return work
+        configured = _series_text(work, "source_id").map(
+            lambda source_id: str(source_by_id.get(source_id, {}).get("poTeamLeader") or "").strip()
+        )
+        existing = _series_text(work, "po_team_leader")
+        work = work.copy()
+        work["__manager"] = existing.where(existing.ne(""), configured)
+        work["__manager"] = work["__manager"].replace("", "Sin responsable configurado")
+        return work
+
+    open_frame = with_manager(context.open_df)
+    root_frame = with_manager(context.root_cause_evolutives)
+    finalist_frame = with_manager(context.finalist_discrepancies)
+    managers = sorted(
+        set(_series_text(open_frame, "__manager"))
+        | set(_series_text(root_frame, "__manager"))
+        | set(_series_text(finalist_frame, "__manager")),
+        key=lambda value: unicodedata.normalize("NFKD", value).casefold(),
+    )
+    rows: list[dict[str, Any]] = []
+    for manager in managers:
+        open_bucket = open_frame.loc[_series_text(open_frame, "__manager").eq(manager)]
+        root_bucket = root_frame.loc[_series_text(root_frame, "__manager").eq(manager)]
+        finalist_bucket = finalist_frame.loc[_series_text(finalist_frame, "__manager").eq(manager)]
+        manager_source_ids = set(_series_text(open_bucket, "source_id"))
+        manager_source_ids.update(_series_text(root_bucket, "source_id"))
+        manager_source_ids.update(_series_text(finalist_bucket, "source_id"))
+        dashboard_url = next(
+            (
+                str(source_by_id[source_id].get("dashboardUrl") or "")
+                for source_id in sorted(manager_source_ids)
+                if source_id in source_by_id
+                and str(source_by_id[source_id].get("dashboardUrl") or "")
+            ),
+            "",
+        )
+        rows.append(
+            {
+                "name": manager,
+                "dashboardUrl": dashboard_url,
+                "openIssues": _unique_issue_count(open_bucket, key_columns=("issue_uid", "key")),
+                "rootCauseEvolutives": _unique_issue_count(
+                    root_bucket, key_columns=("jira_key", "key")
+                ),
+                "finalistDiscrepancies": _unique_issue_count(
+                    finalist_bucket, key_columns=("jira_key", "key")
+                ),
+            }
+        )
+    return rows
+
+
 def _newsletter_facts(
     *,
     overview: Mapping[str, Any],
     insights: Mapping[str, Any],
+    context: Any,
+    sources: Sequence[Mapping[str, str]],
 ) -> dict[str, Any]:
     period = insights.get("periodSummary")
     period = period if isinstance(period, Mapping) else {}
@@ -259,12 +368,16 @@ def _newsletter_facts(
     closed_current = card_metric("closed_now")
     closed_previous = previous_metric("closed_now")
     current_open = card_metric("open_total")
+    # Backlog conservation within the current fortnight:
+    # current = previous + created - closed.
+    previous_open = max(0, current_open - created_current + closed_current)
     focus_open = card_metric("open_focus")
     other_open = card_metric("open_other")
     focus_card = by_id.get("open_focus", {})
     focus_label = str(focus_card.get("label") or "Foco abierto")
     resolution_card = by_id.get("resolution_now", {})
     resolution_current = str(resolution_card.get("metric") or "0.0d")
+    backlog_delta = current_open - previous_open
 
     aged_open = 0
     for item in overview.get("overviewKpis", []) if isinstance(overview, Mapping) else []:
@@ -288,46 +401,53 @@ def _newsletter_facts(
     if valid_open_split:
         metrics["focusOpen"] = focus_open
         metrics["otherOpen"] = other_open
-    facts = [
-        {
-            "id": "backlog",
-            "statement": f"El backlog abierto del ámbito contiene {current_open} incidencias.",
-        },
-        {
-            "id": "flow",
-            "statement": (
-                f"En la quincena actual se crearon {created_current} incidencias y se "
-                f"cerraron {closed_current}."
-            ),
-        },
-        {
-            "id": "aging",
-            "statement": f"Hay {aged_open} incidencias abiertas con más de 30 días.",
-        },
-        {
-            "id": "resolution",
-            "statement": (
-                "El tiempo medio de resolución de las incidencias cerradas en la "
-                f"quincena actual es {resolution_current}."
-            ),
-        },
-    ]
-    if valid_open_split:
-        facts.insert(
-            2,
-            {
-                "id": "focus",
-                "statement": (
-                    f"El foco «{focus_label}» reúne {focus_open} incidencias abiertas; "
-                    f"el resto suma {other_open}."
-                ),
-            },
+    critical_tokens = {"supone un impedimento", "highest", "high", "p0", "p1"}
+    priorities = _series_text(context.open_df, "priority").str.casefold()
+    critical_open = int(priorities.isin(critical_tokens).sum())
+    rollups = _manager_rollups(context=context, sources=sources)
+    direction = (
+        "crecimiento" if backlog_delta > 0 else "reducción" if backlog_delta < 0 else "estabilidad"
+    )
+    summary = (
+        f"Se observa {direction} del backlog de {abs(backlog_delta)} incidencias, "
+        f"pasando de {previous_open} abiertas a {current_open} incidencias abiertas"
+    )
+    summary += (
+        f", con {critical_open} incidencias de criticidad alta o muy alta."
+        if critical_open
+        else ", sin incidencias de criticidad alta o muy alta."
+    )
+    responsible_paragraphs = [
+        (
+            f"{row['name']}: {row['openIssues']} incidencias abiertas, "
+            f"de las cuales {row['rootCauseEvolutives']} son evolutivos para solucionar "
+            f"causas raíces y {row['finalistDiscrepancies']} son discrepancias finalistas."
         )
+        for row in rollups
+    ]
     return {
         "periodLabel": str(period.get("caption") or ""),
         "focusLabel": focus_label if valid_open_split else "",
         "metrics": metrics,
-        "facts": facts,
+        "previousOpen": previous_open,
+        "backlogDelta": backlog_delta,
+        "criticalOpen": critical_open,
+        "responsibleRollups": rollups,
+        "draft": {
+            "subject": f"Seguimiento quincenal de incidencias · {str(period.get('caption') or '')}",
+            "greeting": "Buenos días,",
+            "intro": (
+                "Adjunto el informe correspondiente al seguimiento de incidencias "
+                "de la última quincena:"
+            ),
+            "reportLinkLabel": "Enlace a la presentación",
+            "summary": summary,
+            "responsibleIntro": (
+                "Conforme al análisis realizado, los datos por responsable son los siguientes:"
+            ),
+            "responsibleParagraphs": responsible_paragraphs,
+            "closing": "Esperamos que esta información os sea de utilidad.",
+        },
     }
 
 
@@ -352,33 +472,91 @@ def _projection_query(
     )
 
 
-def _propagate_issue_uids(views: dict[str, Any]) -> dict[str, Any]:
-    """Attach the desktop issue identity to every unambiguous issue reference."""
+def _propagate_issue_links(views: dict[str, Any]) -> dict[str, Any]:
+    """Attach desktop identity and URL to every unambiguous issue reference."""
     issue_rows = (views.get("issues") or {}).get("rows") or []
-    uids_by_key: dict[str, list[str]] = {}
+    refs_by_key: dict[str, list[tuple[str, str]]] = {}
     for row in issue_rows:
         if not isinstance(row, Mapping):
             continue
         key = str(row.get("key") or "").strip()
         uid = str(row.get("issue_uid") or "").strip()
+        url = str(row.get("url") or "").strip()
         if key and uid:
-            uids_by_key.setdefault(key, []).append(uid)
-    unique_uids = {key: values[0] for key, values in uids_by_key.items() if len(set(values)) == 1}
+            refs_by_key.setdefault(key, []).append((uid, url))
+    unique_refs = {
+        key: values[0]
+        for key, values in refs_by_key.items()
+        if len({uid for uid, _url in values}) == 1
+    }
 
     def enrich(value: Any) -> Any:
         if isinstance(value, Mapping):
             out = {str(key): enrich(item) for key, item in value.items()}
             issue_key = str(out.get("key") or "").strip()
             if issue_key and not str(out.get("issue_uid") or "").strip():
-                issue_uid = unique_uids.get(issue_key)
-                if issue_uid:
-                    out["issue_uid"] = issue_uid
+                reference = unique_refs.get(issue_key)
+                if reference:
+                    out["issue_uid"] = reference[0]
+                    if reference[1] and not str(out.get("url") or "").strip():
+                        out["url"] = reference[1]
             return out
         if isinstance(value, list):
             return [enrich(item) for item in value]
         return value
 
     return cast(dict[str, Any], enrich(views))
+
+
+def _materialize_issue_references(value: Any, issue_rows: Sequence[Mapping[str, Any]]) -> Any:
+    """Turn desktop filter keys into immutable, directly navigable issue records."""
+    refs_by_key: dict[str, list[dict[str, str]]] = {}
+    for row in issue_rows:
+        key = str(row.get("key") or "").strip()
+        uid = str(row.get("issue_uid") or "").strip()
+        if not key or not uid:
+            continue
+        refs_by_key.setdefault(key, []).append(
+            {
+                "key": key,
+                "issue_uid": uid,
+                "url": str(row.get("url") or "").strip(),
+                "summary": str(row.get("summary") or "").strip(),
+                "status": str(row.get("status") or "").strip(),
+                "priority": str(row.get("priority") or "").strip(),
+            }
+        )
+    unique_refs: dict[str, dict[str, str]] = {}
+    for key, rows in refs_by_key.items():
+        identities = {row["issue_uid"] for row in rows}
+        urls = {row["url"] for row in rows if row["url"]}
+        if len(identities) == 1:
+            unique_refs[key] = rows[0]
+        elif len(urls) == 1:
+            unique_refs[key] = {**rows[0], "issue_uid": "", "url": next(iter(urls))}
+
+    def convert(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            out = {
+                str(key): convert(nested) for key, nested in item.items() if str(key) != "issueKeys"
+            }
+            issue_keys = item.get("issueKeys")
+            if isinstance(issue_keys, Sequence) and not isinstance(issue_keys, str):
+                referenced = [
+                    unique_refs[key]
+                    for raw_key in issue_keys
+                    if (key := str(raw_key or "").strip()) in unique_refs
+                ]
+                if referenced and "issues" not in out:
+                    out["issues"] = referenced
+            return out
+        if isinstance(item, list):
+            return [convert(nested) for nested in item]
+        if isinstance(item, tuple):
+            return [convert(nested) for nested in item]
+        return item
+
+    return convert(value)
 
 
 def build_cloud_projection_artifact(
@@ -423,9 +601,62 @@ def build_cloud_projection_artifact(
     reference_date = _scope_reference_date(context.dff)
 
     overview = build_dashboard_snapshot(settings, query=query)
-    intelligence = build_intelligence_snapshot(settings, query=query, insights_tab="all")
+    overview_chart_ids = [
+        str(chart.get("id") or "")
+        for chart in list(overview.get("charts") or [])
+        if isinstance(chart, Mapping)
+    ]
+    if overview_chart_ids != list(TREND_IDS):
+        raise ValueError("El escritorio no ha materializado el catálogo completo de gráficos GPC.")
+    matrix = overview.get("statusPriorityMatrix")
+    if isinstance(matrix, Mapping):
+        matrix_rows = [
+            row
+            for row in list(matrix.get("rows") or [])
+            if isinstance(row, Mapping) and not is_finalist_status(row.get("status"))
+        ]
+        priority_totals: dict[str, int] = {}
+        for row in matrix_rows:
+            for cell in list(row.get("cells") or []):
+                if not isinstance(cell, Mapping):
+                    continue
+                priority = str(cell.get("priority") or "")
+                priority_totals[priority] = priority_totals.get(priority, 0) + _metric_int(
+                    cell.get("count")
+                )
+        filtered_matrix = dict(matrix)
+        filtered_matrix["rows"] = matrix_rows
+        filtered_matrix["total"] = sum(_metric_int(row.get("count")) for row in matrix_rows)
+        filtered_matrix["priorities"] = [
+            {
+                **dict(priority),
+                "count": priority_totals.get(str(priority.get("priority") or ""), 0),
+            }
+            for priority in list(matrix.get("priorities") or [])
+            if isinstance(priority, Mapping)
+        ]
+        overview["statusPriorityMatrix"] = filtered_matrix
+    intelligence = build_intelligence_snapshot(
+        settings,
+        query=query,
+        insights_tab="all",
+        insights_view_mode="accumulated",
+    )
+    cloud_insight_ids = {
+        "summary",
+        "functionality",
+        "duplicates",
+        "rootCauseEvolutives",
+        "finalistDiscrepancies",
+        "people",
+    }
+    insight_catalog = [
+        item
+        for item in list(intelligence.get("tabs") or [])
+        if str(item.get("id") or "") in cloud_insight_ids
+    ]
     insights = {
-        "catalog": list(intelligence.get("tabs") or []),
+        "catalog": insight_catalog,
         "byId": {
             "summary": {"periodSummary": intelligence.get("periodSummary") or {}},
             "functionality": intelligence.get("functionality") or {},
@@ -433,7 +664,6 @@ def build_cloud_projection_artifact(
             "rootCauseEvolutives": intelligence.get("rootCauseEvolutives") or {},
             "finalistDiscrepancies": intelligence.get("finalistDiscrepancies") or {},
             "people": intelligence.get("people") or {},
-            "opsHealth": intelligence.get("opsHealth") or {},
         },
     }
     trend_details = {
@@ -457,17 +687,15 @@ def build_cloud_projection_artifact(
         sort_by="key",
         sort_dir="asc",
     )
-    kanban = build_kanban_columns(settings, query=query)
-    views = _propagate_issue_uids(
-        _strip_cloud_actions(
-            {
-                "overview": overview,
-                "insights": insights,
-                "trends": {"catalog": trend_catalog, "byId": trend_details},
-                "issues": issues,
-                "kanban": kanban,
-            }
-        )
+    raw_views = {
+        "overview": overview,
+        "insights": insights,
+        "trends": {"catalog": trend_catalog, "byId": trend_details},
+        "issues": issues,
+    }
+    issue_rows = [row for row in list(issues.get("rows") or []) if isinstance(row, Mapping)]
+    views = _propagate_issue_links(
+        _strip_cloud_actions(_materialize_issue_references(raw_views, issue_rows))
     )
 
     if report_result is None:
@@ -486,14 +714,26 @@ def build_cloud_projection_artifact(
         "bytes": len(report_content),
         "slideCount": int(report_result.slide_count),
     }
-    newsletter = _newsletter_facts(overview=overview, insights=intelligence)
+    manager_sources = _manager_source_catalog(
+        settings,
+        country=country_text,
+        source_ids=clean_source_ids,
+    )
+    newsletter = _newsletter_facts(
+        overview=overview,
+        insights=intelligence,
+        context=context,
+        sources=manager_sources,
+    )
     facts_sha256 = sha256_bytes(canonical_json_bytes(newsletter))
     revision_payload = {
         "country": country_text,
         "scopeMode": mode,
         "sourceIds": list(clean_source_ids),
         "referenceDate": reference_date,
+        "administration": {"jiraSources": manager_sources},
         "views": views,
+        "newsletterFacts": newsletter,
         "report": report,
     }
     data_version = sha256_bytes(canonical_json_bytes(revision_payload))[:24]
@@ -519,6 +759,7 @@ def build_cloud_projection_artifact(
         "generatedAt": stamp,
         "scope": scope,
         "semantics": _semantic_trace(settings),
+        "administration": {"jiraSources": manager_sources},
         "views": views,
         "newsletterFacts": newsletter,
         "report": report,

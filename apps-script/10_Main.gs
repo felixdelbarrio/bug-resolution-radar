@@ -8,13 +8,22 @@ function _requireUser_() {
   _assert_(email, 'Debes abrir la aplicación con tu cuenta corporativa.', 'AUTH_REQUIRED');
   _assert_(email.endsWith('@' + RADAR.allowedDomain),
     'La cuenta no pertenece al dominio autorizado.', 'FORBIDDEN');
-  const user = _readRecords_(RADAR.sheets.users).find(function (row) {
-    return _canonicalEmail_(row.email) === email && row.active === true;
+  let user = _readRecords_(RADAR.sheets.users).find(function (row) {
+    return _canonicalEmail_(row.email) === email;
   });
-  _assert_(user, 'Tu usuario no está autorizado.', 'FORBIDDEN');
+  if (!user) {
+    user = _upsertRecord_(RADAR.sheets.users, {
+      email: email,
+      role: 'viewer',
+      active: true,
+      display_name: email.split('@')[0],
+      updated_at: _nowIso_(),
+      updated_by: email
+    });
+  }
   return {
     email: email,
-    role: _text_(user.role),
+    role: user.active === true && _text_(user.role) === 'admin' ? 'admin' : 'viewer',
     displayName: _text_(user.display_name)
   };
 }
@@ -41,7 +50,7 @@ function _initialDashboardState_(preferences, manifest) {
   const validScopeKeys = new Set(scopes.map(function (scope) { return _text_(scope.scopeKey); }));
   let scopeKey = _text_(saved.scopeKey);
   if (!validScopeKeys.has(scopeKey)) scopeKey = scopes.length ? _text_(scopes[0].scopeKey) : '';
-  const panels = ['overview', 'insights', 'trends', 'issues', 'kanban'];
+  const panels = ['overview', 'insights', 'trends', 'issues'];
   return {
     panel: panels.indexOf(_text_(saved.panel)) >= 0 ? _text_(saved.panel) : 'overview',
     scopeKey: scopeKey,
@@ -138,7 +147,7 @@ function _sanitizeDashboardPreference_(value) {
     _assert_(allowed.has(key),
       'La WebApp no guarda filtros ni variantes no materializadas.', 'VIEW_NOT_MATERIALIZED');
   });
-  const panels = ['overview', 'insights', 'trends', 'issues', 'kanban'];
+  const panels = ['overview', 'insights', 'trends', 'issues'];
   const panel = _text_(input.panel) || 'overview';
   _assert_(panels.indexOf(panel) >= 0, 'La vista indicada no está disponible.', 'VIEW_NOT_MATERIALIZED');
   const scopeKey = _text_(input.scopeKey);

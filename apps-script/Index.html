@@ -7,7 +7,6 @@
   <?!= _clientBootstrapMarkup_(sharedToken || '') ?>
   <?!= _include_('BrandAssets'); ?>
   <?!= _include_('DesignSystem'); ?>
-  <script defer src="https://cdn.plot.ly/plotly-basic-3.5.0.min.js"></script>
 </head>
 <body class="auth-pending">
   <a class="skip-link" href="#workspaceContent">Saltar al contenido</a>
@@ -31,15 +30,15 @@
 
     <section id="scopeBar" class="workspace-scope-bar surface-panel" aria-label="Alcance del workspace">
       <div id="sharedScopeBanner" class="shared-scope-banner hidden" role="status"></div>
-      <div class="workspace-country-field">
+      <div class="workspace-country-field scope-admin-control">
         <label class="field-label" for="workspaceCountry">País</label>
         <select id="workspaceCountry"><option value="">Cargando países...</option></select>
       </div>
       <div class="workspace-scope-detail">
-        <div class="workspace-rollup-slot">
+        <div class="workspace-rollup-slot scope-admin-control">
           <label class="checkbox-field"><input id="workspaceRollup" type="checkbox"><span>Vista agregada</span></label>
         </div>
-        <div class="workspace-source-slot">
+        <div class="workspace-source-slot scope-admin-control">
           <div class="workspace-source-field">
             <label class="field-label" for="workspaceSource">Origen</label>
             <select id="workspaceSource"><option value="">Selecciona un origen</option></select>
@@ -47,7 +46,7 @@
           <p id="workspaceRollupCaption" class="workspace-rollup-caption hidden"></p>
         </div>
         <div class="workspace-scope-status">
-          <div class="workspace-meta"><span id="dataVersion">Sin datos</span><span id="userBadge" class="workspace-user"></span></div>
+          <div class="workspace-meta"><strong id="scopeDescription">Sin ámbito</strong><span id="dataVersion">Sin datos</span></div>
         </div>
       </div>
     </section>
@@ -58,7 +57,6 @@
         <button class="workspace-tab" data-panel="insights" type="button">Insights</button>
         <button class="workspace-tab" data-panel="trends" type="button">Tendencias</button>
         <button class="workspace-tab" data-panel="issues" type="button">Issues</button>
-        <button class="workspace-tab" data-panel="kanban" type="button">Kanban</button>
       </nav>
       <div class="workspace-nav-actions">
         <button class="workspace-action admin-only" data-route="reports" type="button" title="Probar o enviar newsletter" aria-label="Probar o enviar newsletter"></button>
