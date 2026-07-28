@@ -3453,7 +3453,7 @@ textarea::placeholder {
 
 .source-table-grid-jira .source-table-head,
 .source-table-grid-jira .source-table-row {
-  grid-template-columns: 80px 160px minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(220px, 1.4fr);
+  grid-template-columns: 80px 160px minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(220px, 1.2fr) minmax(260px, 1.4fr);
 }
 
 .source-table-grid-helix .source-table-head,

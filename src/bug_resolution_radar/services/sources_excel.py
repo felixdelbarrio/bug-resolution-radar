@@ -10,6 +10,7 @@ from typing import Any
 
 import pandas as pd
 
+from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
@@ -21,7 +22,7 @@ from bug_resolution_radar.config import (
 
 _SUPPORTED_SOURCE_TYPES = {"jira", "helix"}
 _EXPORT_COLUMNS: dict[str, list[str]] = {
-    "jira": ["source_id", "country", "alias", "po_team_leader", "jql"],
+    "jira": ["source_id", "country", "alias", "po_team_leader", "dashboard_url", "jql"],
     "helix": [
         "source_id",
         "country",
@@ -64,6 +65,11 @@ _HEADER_ALIASES: dict[str, dict[str, str]] = {
         "po_teamleader": "po_team_leader",
         "po_lider_equipo": "po_team_leader",
         "po_team_leader_": "po_team_leader",
+        "dashboard_url": "dashboard_url",
+        "jira_dashboard_url": "dashboard_url",
+        "url_cuadro_de_mando": "dashboard_url",
+        "enlace_cuadro_de_mando": "dashboard_url",
+        "cuadro_de_mando_jira": "dashboard_url",
         "jql": "jql",
         "query": "jql",
         "consulta": "jql",
@@ -158,6 +164,7 @@ def _build_export_rows(settings: Settings, *, source_type: str) -> list[dict[str
         }
         if normalized_type == "jira":
             payload["po_team_leader"] = _as_text(row.get("po_team_leader"))
+            payload["dashboard_url"] = _as_text(row.get("dashboard_url"))
             payload["jql"] = _as_text(row.get("jql"))
         else:
             payload["service_origin_buug"] = helix_service_origin_buug_for_country(
@@ -369,6 +376,14 @@ def _parse_source_rows_from_frame(
         }
         if normalized_type == "jira":
             clean["po_team_leader"] = _as_text(row_data.get("po_team_leader", ""))
+            try:
+                clean["dashboard_url"] = validate_navigation_url(
+                    _as_text(row_data.get("dashboard_url", "")),
+                    field_name="Cuadro de mando Jira",
+                )
+            except ValueError as exc:
+                warnings.append(f"Fila {idx}: {exc} Se elimina el enlace.")
+                clean["dashboard_url"] = ""
             clean["jql"] = _as_text(row_data.get("jql", ""))
         else:
             clean["service_origin_buug"] = helix_service_origin_buug_for_country(country)

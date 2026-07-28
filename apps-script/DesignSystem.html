@@ -143,22 +143,25 @@ h4 { font-size: 15px; line-height: 24px; }
 .bbva-hero-title { color: var(--bbva-white); font-size: 40px; line-height: 48px; }
 .bbva-hero-sub { margin: 4px 0 0; color: var(--bbva-blue-light); font-size: 15px; line-height: 24px; }
 
-.surface-panel, .surface-card, .chart-card, .kanban-column {
+.surface-panel, .surface-card, .chart-card {
   min-width: 0;
   border: 1px solid var(--bbva-border);
   background: var(--bbva-surface-elevated);
   color: var(--bbva-text);
 }
 .surface-panel { padding: 24px; border-radius: 16px; }
-.surface-card, .chart-card, .kanban-column { padding: 16px; border-radius: 8px; }
+.surface-card, .chart-card { padding: 16px; border-radius: 8px; }
 .surface-panel, .chart-card { box-shadow: var(--bbva-shadow-soft); }
 
 .workspace-scope-bar {
   display: grid;
-  grid-template-columns: minmax(176px, 1fr) minmax(0, 3fr);
+  grid-template-columns: 1fr;
   gap: 24px;
   align-items: end;
   margin-bottom: 16px;
+}
+.is-admin .workspace-scope-bar {
+  grid-template-columns: minmax(176px, 1fr) minmax(0, 3fr);
 }
 .shared-scope-banner {
   grid-column: 1 / -1;
@@ -170,6 +173,9 @@ h4 { font-size: 15px; line-height: 24px; }
   font-weight: 700;
 }
 .shared-view [data-route] { display: none !important; }
+.scope-admin-control { display: none !important; }
+.is-admin .scope-admin-control { display: flex !important; }
+.is-admin .workspace-country-field.scope-admin-control { display: grid !important; }
 .shared-view .workspace-country-field select,
 .shared-view .workspace-source-field select { color: var(--bbva-text); opacity: 1; }
 .workspace-scope-detail {
@@ -184,17 +190,7 @@ h4 { font-size: 15px; line-height: 24px; }
 .workspace-source-field { width: 100%; }
 .workspace-scope-status { justify-content: end; }
 .workspace-rollup-caption { margin: 0; color: var(--bbva-text-muted); font-size: 12px; line-height: 16px; }
-.workspace-meta { display: flex; align-items: center; gap: 8px; color: var(--bbva-text-muted); font-size: 12px; line-height: 16px; }
-.workspace-user {
-  width: 32px;
-  height: 32px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--bbva-electric);
-  color: var(--bbva-white);
-  font-weight: 500;
-}
+.workspace-meta { display: grid; justify-items: end; gap: 4px; color: var(--bbva-text-muted); font-size: 12px; line-height: 16px; }
 
 .field-label, .field > span, .checkbox-field span, .eyebrow, .section-kicker, .transfer-eyebrow {
   color: var(--bbva-text-muted);
@@ -357,14 +353,14 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 }
 .kpi-card small { font-size: 12px; line-height: 16px; }
 
-.focus-card-grid, .chart-grid, .period-card-grid, .trend-action-grid, .people-kpi-grid-react, .ops-kpi-grid-react, .report-grid {
+.focus-card-grid, .chart-grid, .period-card-grid, .trend-action-grid, .people-kpi-grid-react, .report-grid {
   display: grid;
   gap: 16px;
 }
 .focus-card-grid, .chart-grid, .trend-action-grid, .report-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.period-card-grid, .people-kpi-grid-react, .ops-kpi-grid-react { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.period-card-grid, .people-kpi-grid-react { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .focus-card, .period-action-card, .trend-action-card {
   min-width: 0;
   display: grid;
@@ -502,13 +498,13 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 .issue-card-head { color: var(--bbva-text-muted); font-size: 12px; line-height: 16px; }
 .issue-card h3 { margin-top: 8px; }
 .issue-card p { margin: 8px 0; color: var(--bbva-text-muted); }
-.issue-card-meta, .kanban-card-meta, .topic-meta-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.issue-card-meta, .topic-meta-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .issue-key-anchor-button {
   color: var(--bbva-electric);
   font-weight: 500;
   text-decoration: none;
 }
-.insight-issue-key, .kanban-card-link { color: var(--bbva-electric); font-weight: 500; }
+.insight-issue-key { color: var(--bbva-electric); font-weight: 500; }
 .issue-inline-link, .issue-primary-link {
   padding: 0;
   border: 0;
@@ -519,24 +515,6 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 .issues-table-shell { padding: 0; }
 .issues-table tbody tr:hover { background: var(--bbva-surface-2); }
 .issues-pagination { align-items: center; padding: 8px 0; }
-
-.kanban-grid { display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 16px; overflow-x: auto; }
-.kanban-column { padding: 8px; background: var(--bbva-surface-2); }
-.kanban-column-head { padding: 8px; }
-.kanban-column-button {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--semantic-color, var(--bbva-border)) 45%, var(--bbva-border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--semantic-color, var(--bbva-surface)) 12%, var(--bbva-surface));
-  color: var(--semantic-color, var(--bbva-text));
-  font-weight: 700;
-  text-align: left;
-}
-.kanban-stack { display: grid; gap: 8px; }
-.kanban-card { padding: 12px; border: 1px solid var(--bbva-border); border-radius: 8px; background: var(--bbva-surface); }
-.kanban-card-main { width: 100%; display: grid; gap: 4px; }
-.kanban-card-summary { margin: 0 0 8px; color: var(--bbva-text); }
 
 .insights-tabs-shell { overflow-x: auto; }
 .insight-detail-block {
@@ -958,7 +936,6 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
   .insights-filter-grid { grid-template-columns: 1fr; }
   .overview-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid, .period-card-grid, .report-grid { grid-template-columns: 1fr; }
-  .kanban-grid { grid-template-columns: repeat(4, minmax(264px, 1fr)); }
   .notes-editor-shell { grid-template-columns: 1fr 1fr; }
   .notes-editor-shell .action-button { grid-column: 1 / -1; }
 }
@@ -972,7 +949,7 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
   .surface-panel { padding: 16px; }
   .workspace-scope-bar, .workspace-scope-detail, .dashboard-filters,
   .overview-kpi-grid, .focus-card-grid, .trend-action-grid,
-  .people-kpi-grid-react, .ops-kpi-grid-react, .settings-form-grid,
+  .people-kpi-grid-react, .settings-form-grid,
   .transfer-hero, .upload-zone, .transfer-impact-strip, .notes-editor-shell,
   .folder-jump-form, .folder-current, .newsletter-recipient-form, .newsletter-recipient-row {
     grid-template-columns: 1fr;
@@ -990,7 +967,6 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
   .kpi-card { min-height: 120px; }
   .filter-combo-menu { position: fixed; inset: auto 16px 16px; width: auto; max-height: 56vh; }
   .trend-metric-strip { grid-template-columns: 1fr; }
-  .kanban-grid { margin-inline: -16px; padding-inline: 16px; }
   .notes-index-card, .insight-issue-row, .source-list-row { grid-template-columns: 1fr; }
   .notes-index-card > div:last-child { justify-items: start; }
   .issue-drawer { width: 100%; padding: 16px; }

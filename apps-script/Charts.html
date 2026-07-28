@@ -2,6 +2,26 @@
 const Charts = (() => {
   const pending = new Map();
   let sequence = 0;
+  let plotlyLoader = null;
+
+  function loadPlotly() {
+    if (window.Plotly) return Promise.resolve(window.Plotly);
+    if (plotlyLoader) return plotlyLoader;
+    plotlyLoader = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.plot.ly/plotly-basic-3.5.0.min.js';
+      script.async = true;
+      script.onload = () => window.Plotly
+        ? resolve(window.Plotly)
+        : reject(new Error('Plotly no está disponible.'));
+      script.onerror = () => reject(new Error('No se ha podido cargar Plotly.'));
+      document.head.appendChild(script);
+    }).catch(error => {
+      plotlyLoader = null;
+      throw error;
+    });
+    return plotlyLoader;
+  }
 
   function token(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -88,8 +108,16 @@ const Charts = (() => {
   function mountAll(root) {
     if (!root || !pending.size) return;
     if (!window.Plotly) {
-      root.querySelectorAll('.plotly-chart').forEach(node => { node.innerHTML = '<p class="issue-list-empty">No se ha podido cargar el motor de gráficos.</p>'; });
-      pending.clear();
+      loadPlotly()
+        .then(() => {
+          if (root.isConnected) mountAll(root);
+        })
+        .catch(() => {
+          root.querySelectorAll('.plotly-chart').forEach(node => {
+            node.innerHTML = '<p class="issue-list-empty">No se ha podido cargar el motor de gráficos.</p>';
+          });
+          pending.clear();
+        });
       return;
     }
     pending.forEach((entry, id) => {

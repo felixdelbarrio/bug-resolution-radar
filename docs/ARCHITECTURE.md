@@ -22,13 +22,13 @@ Separar completamente presentación, runtime desktop y lógica de negocio:
 1. El backend desktop materializa la vista GPC con el mismo pipeline que consume la
    SPA local y genera el PPTX con el servicio local de reporting.
 2. `services/data_transfer.py` empaqueta únicamente la proyección canónica y el PPTX
-   en un handoff v2 con hashes y ámbito explícito.
+   en un handoff v3 con hashes y ámbito explícito.
 3. Apps Script valida el contrato y publica la proyección en una caché L2 durable
    mediante un puntero atómico por geografía/vista.
 4. La WebApp solo presenta ese snapshot. Una pérdida de `CacheService` recarga L2;
    nunca activa cálculo de KPIs, insights o racionales.
-5. Google Slides se crea por conversión del PPTX local y la newsletter consume los
-   hechos inmutables de la misma proyección.
+5. Google Slides se crea por conversión del PPTX local y la newsletter renderiza el
+   texto y los rollups inmutables calculados localmente.
 
 El contrato completo y sus invariantes están descritos en
 `docs/CLOUD_HANDOFF.md`.
@@ -69,7 +69,8 @@ El contrato completo y sus invariantes están descritos en
 - Publicación GPC
   - `apps-script`
   - Responsabilidad: validación del handoff, publicación atómica de snapshots,
-    serving sin filtros, conversión a Google Slides y envío de newsletter.
+    serving sin filtros, administración restringida, analítica de adopción, conversión
+    a Google Slides y envío determinista de newsletter.
 
 ## Permission Policy
 

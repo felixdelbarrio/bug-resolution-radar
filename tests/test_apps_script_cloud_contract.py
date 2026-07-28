@@ -92,10 +92,7 @@ def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
     for mode in ("light", "dark"):
         assert web[mode]
         assert all(
-            isinstance(name, str)
-            and name.startswith("--")
-            and isinstance(value, str)
-            and value
+            isinstance(name, str) and name.startswith("--") and isinstance(value, str) and value
             for name, value in web[mode].items()
         )
     for required in (
@@ -142,7 +139,7 @@ def test_setup_remaps_compatible_sheet_contract_changes_by_header_name() -> None
     setup_application = _function_body(setup, "setupApplication")
 
     assert "seen.has(header)" in migration
-    assert "expected.indexOf(header) < 0" in migration
+    assert "expected.indexOf(header) < 0" not in migration
     assert "sourceIndex[header] = index" in migration
     assert "formulas[rowIndex][columnIndex] || row[columnIndex]" in migration
     assert "expected.map(function (header)" in migration
@@ -193,12 +190,12 @@ def test_setup_keeps_the_control_sheet_visible() -> None:
     assert setup_application.index(show_control) < setup_application.index(hide_other_contracts)
 
 
-def test_cloud_transfer_is_strict_desktop_authoritative_v2() -> None:
+def test_cloud_transfer_is_strict_desktop_authoritative_v3() -> None:
     config = _source("00_Config.gs")
     adapters = _source("20_Adapters.gs")
 
-    assert re.search(r"transferVersion:\s*2\b", config)
-    assert "desktop-authoritative-v1" in config
+    assert re.search(r"transferVersion:\s*3\b", config)
+    assert "desktop-authoritative-v2" in config
     assert "data/projection.json" in adapters
     assert "artifacts/period_followup.pptx" in adapters
     assert "data/issues.json" not in adapters
@@ -206,6 +203,11 @@ def test_cloud_transfer_is_strict_desktop_authoritative_v2() -> None:
     assert "insights_learning.json" not in adapters
     assert "_validateNoCloudActionsDeep_" in adapters
     assert "issue_uid compuesto y único" in adapters
+    snapshots = _source("25_MaterializedSnapshots.gs")
+    current_record = _function_body(snapshots, "_isCurrentSnapshotRecord_")
+    assert "RADAR.projectionContract" in current_record
+    assert "RADAR.projectionVersion" in current_record
+    assert "_isCurrentSnapshotRecord_(record)" in _function_body(snapshots, "_snapshotRecordById_")
 
 
 def test_dashboard_rpc_cannot_accept_incident_filters_or_recalculate_business_rules() -> None:
@@ -291,7 +293,7 @@ def test_issue_detail_uses_scope_and_composite_identity() -> None:
     assert "scopeKey" in main
     assert "issueUid" in main
     assert "issueKey" not in main
-    assert "issue_uid" in app
+    assert "issueUid" in app
     assert re.search(
         r"getIssueDetail'\s*,\s*\{\s*scopeKey:\s*state\.scopeKey,\s*issueUid",
         app,
@@ -339,12 +341,8 @@ def test_report_folder_is_global_and_blocks_validation_when_missing() -> None:
     main = _source("10_Main.gs")
     report = _source("55_PeriodReport.gs")
 
-    assert "_configuredReportDriveFolder_();" in _function_body(
-        main, "validateTransferImport"
-    )
-    assert "_configuredReportDriveFolder_()" in _function_body(
-        main, "_publishDecodedTransfer_"
-    )
+    assert "_configuredReportDriveFolder_();" in _function_body(main, "validateTransferImport")
+    assert "_configuredReportDriveFolder_()" in _function_body(main, "_publishDecodedTransfer_")
     assert "_setConfig_(" in _function_body(report, "saveReportDriveFolder")
     assert "'REPORT_DRIVE_FOLDER'" in _function_body(report, "saveReportDriveFolder")
     assert "_preferenceMap_" not in _function_body(main, "_publishDecodedTransfer_")
@@ -380,16 +378,90 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
 
 def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
     main = _function_body(_source("10_Main.gs"), "commitTransferImport")
-    materialized = _function_body(
-        _source("25_MaterializedSnapshots.gs"), "_warmSnapshotViews_"
-    )
+    materialized = _function_body(_source("25_MaterializedSnapshots.gs"), "_warmSnapshotViews_")
     app = _source("App.html")
     cache = _source("Cache.html")
 
     assert main.index("_invalidateCaches_()") < main.index("_warmSnapshotViews_")
-    for view_name in ("overview", "insights", "trends", "issues", "kanban"):
+    for view_name in ("overview", "insights", "trends", "issues"):
         assert f"view: '{view_name}'" in materialized
+    assert "kanban" not in materialized.casefold()
     assert "cacheGeneration: state.bootstrap.app.cacheEpoch" in app
     assert "scopeVersion: scope.dataVersion" in app
     assert "key.cacheGeneration !== current.cacheGeneration" in cache
     assert "key.scopeVersion" in cache
+
+
+def test_cloud_removes_retired_views_and_generative_newsletter_code() -> None:
+    cloud_code = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(APPS_SCRIPT.glob("*"))
+        if path.is_file() and path.name != "BrandAssets.html"
+    )
+    folded = cloud_code.casefold()
+    assert "kanban" not in folded
+    assert "opshealth" not in folded
+    assert "salud operativa" not in folded
+    runtime_newsletter = _source("56_Newsletter.gs").casefold()
+    assert "gemini" not in runtime_newsletter
+    assert "urlfetchapp" not in _source("56_Newsletter.gs").casefold()
+    assert "properties.deleteproperty(key)" in _source("90_Setup.gs").casefold()
+
+
+def test_domain_access_and_configuration_are_separated_by_role() -> None:
+    manifest = json.loads(_source("appsscript.json"))
+    main = _source("10_Main.gs")
+    index = _source("Index.html")
+    design = _source("DesignSystem.html")
+
+    assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_ACCESSING"}
+    assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_requireUser_")
+    assert "role: 'viewer'" in _function_body(main, "_requireUser_")
+    assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
+    assert index.count("scope-admin-control") >= 3
+    assert ".scope-admin-control { display: none !important; }" in design
+    assert ".is-admin .scope-admin-control" in design
+
+
+def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_charts() -> None:
+    administration = _source("58_Administration.gs")
+    newsletter = _source("56_Newsletter.gs")
+    app = _source("App.html")
+
+    for rpc in (
+        "getAdminConsole",
+        "browseReportDriveFolders",
+        "recordAnalyticsEvents",
+        "getAnalyticsReport",
+        "saveSummaryChartIds",
+    ):
+        assert f"function {rpc}" in administration
+    assert "weekOverWeekPct" in administration
+    assert "body_text" in _source("00_Config.gs")
+    assert "slides_url" in _source("00_Config.gs")
+    assert "_newsletterSenderIdentity_" in newsletter
+    assert "sender.usesAlias" in newsletter
+    assert "context.newsletter.draft.subject" in newsletter
+    for label in (
+        "Estado de la WebApp",
+        "Carpeta de Drive",
+        "Fuentes JIRA",
+        "Newsletter",
+        "Adopción y analítica",
+        "Gráficos de Resumen",
+        "Descargar JSON para Codex",
+    ):
+        assert label in app
+
+
+def test_plotly_is_loaded_on_demand_and_navigation_discards_stale_responses() -> None:
+    index = _source("Index.html")
+    charts = _source("Charts.html")
+    app = _source("App.html")
+
+    assert "cdn.plot.ly" not in index
+    assert "function loadPlotly()" in charts
+    assert "document.head.appendChild(script)" in charts
+    assert "navigationEpoch" in app
+    assert "expectedEpoch !== state.navigationEpoch" in app
+    assert "showRouteLoading" in _function_body(app, "openPanel")

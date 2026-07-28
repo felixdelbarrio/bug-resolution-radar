@@ -4,13 +4,17 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build-windows:
-    if: github.ref == 'refs/heads/master'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
     runs-on: windows-2025-vs2026
 
     steps:

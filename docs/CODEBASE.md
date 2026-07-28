@@ -50,7 +50,7 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
     newsletter y metadatos del PPTX para GPC.
 
 - `src/bug_resolution_radar/services/data_transfer.py`
-  - Empaquetado determinista del handoff v2 con proyección y PPTX exacto.
+  - Empaquetado determinista del handoff v3 con proyección y PPTX exacto.
 
 - `src/bug_resolution_radar/analytics/analysis_window.py`
   - Ventana global de análisis por meses.
@@ -128,7 +128,12 @@ Servir como mapa operativo del repositorio para onboarding y mantenimiento sin a
   - Conservación del PPTX local y conversión directa a Google Slides.
 
 - `apps-script/56_Newsletter.gs`
-  - Grounding Gemini con hechos del snapshot, enlace compartido y adjunto canónico.
+  - Render determinista del texto generado localmente, destinatarios por snapshot,
+    enlace compartido, adjunto canónico y auditoría del envío exacto.
+
+- `apps-script/58_Administration.gs`
+  - Salud de publicación, navegación de carpetas Drive, fuentes Jira materializadas,
+    selección de los tres gráficos de resumen y analítica de adopción.
 
 ## Reporting and Theme
 

@@ -25,6 +25,10 @@ const OBSOLETE_CONFIG_KEYS = Object.freeze([
   'DEFAULT_AUTH_MODE',
   'LAST_TRANSFER_METADATA'
 ]);
+const OBSOLETE_SCRIPT_PROPERTIES = Object.freeze([
+  'GEMINI_API_KEY',
+  'GEMINI_MODEL'
+]);
 
 function _sheetHeaders_(sheet) {
   const lastColumn = sheet.getLastColumn();
@@ -56,6 +60,10 @@ function _removeObsoleteStorage_(ss) {
   OBSOLETE_CONFIG_KEYS.forEach(function (key) {
     _deleteRecord_(RADAR.sheets.config, key);
   });
+  const properties = PropertiesService.getScriptProperties();
+  OBSOLETE_SCRIPT_PROPERTIES.forEach(function (key) {
+    properties.deleteProperty(key);
+  });
   _readRecords_(RADAR.sheets.preferences).filter(function (row) {
     return _text_(row.preference_key) === 'report_drive_folder';
   }).forEach(function (row) {
@@ -81,7 +89,7 @@ function _migrateSheetHeaders_(sheetName, sheet) {
   if (_sameHeaders_(actual, expected)) return;
   const seen = new Set();
   const canRemap = actual.every(function (header) {
-    if (!header || seen.has(header) || expected.indexOf(header) < 0) return false;
+    if (!header || seen.has(header)) return false;
     seen.add(header);
     return true;
   });
@@ -120,7 +128,11 @@ function setupApplication() {
     });
     _upsertRecord_(RADAR.sheets.users, { email: RADAR.initialAdmin, role: 'admin', active: true, display_name: 'Félix del Barrio', updated_at: _nowIso_(), updated_by: email });
     _setConfig_('CONTRACT_VERSION', RADAR.contractVersion, 'string', 'Versión estricta de contratos', email);
-    const config = _getConfigMap_(); if (!config.DATA_VERSION) _setConfig_('DATA_VERSION', 'empty', 'string', 'Versión de datos activa', email);
+    const config = _getConfigMap_();
+    if (!config.SUMMARY_CHART_IDS) {
+      _setConfig_('SUMMARY_CHART_IDS', ['timeseries', 'open_priority_pie', 'resolution_hist'], 'json', 'Tres gráficos visibles en Resumen', email);
+    }
+    if (!config.DATA_VERSION) _setConfig_('DATA_VERSION', 'empty', 'string', 'Versión de datos activa', email);
     _removeObsoleteStorage_(ss);
     const controlSheet = ss.getSheetByName(RADAR.sheets.config);
     if (controlSheet && controlSheet.isSheetHidden()) controlSheet.showSheet();

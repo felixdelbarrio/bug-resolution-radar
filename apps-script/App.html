@@ -1,9 +1,15 @@
 <script>
 const RPC = (() => {
   const call = (name, ...args) => new Promise((resolve, reject) => {
+    const startedAt = performance.now();
     google.script.run
       .withSuccessHandler(response => {
         if (response && response.ok) {
+          if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+            window.__RADAR_TELEMETRY__('rpc', {
+              name: name
+            }, Math.round(performance.now() - startedAt), 'success');
+          }
           resolve(response.data);
           return;
         }
@@ -11,6 +17,11 @@ const RPC = (() => {
           response && response.error ? response.error.message : 'Respuesta no válida.'
         );
         error.code = response && response.error ? response.error.code : 'INVALID_RESPONSE';
+        if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+          window.__RADAR_TELEMETRY__('rpc', {
+            name: name, code: error.code
+          }, Math.round(performance.now() - startedAt), 'error');
+        }
         reject(error);
       })
       .withFailureHandler(error => {
@@ -20,6 +31,11 @@ const RPC = (() => {
             : 'Apps Script interrumpió la solicitud. Recarga la aplicación.'
         );
         failure.code = 'APPS_SCRIPT_FAILURE';
+        if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+          window.__RADAR_TELEMETRY__('rpc', {
+            name: name, code: failure.code
+          }, Math.round(performance.now() - startedAt), 'error');
+        }
         reject(failure);
       })[name](...args);
   });
@@ -47,7 +63,19 @@ const App = (() => {
     transferValidation: null,
     lastPeriodReport: null,
     newsletterSettings: null,
-    newsletterReportId: ''
+    newsletterReportId: '',
+    settingsTab: 'health',
+    adminConsole: null,
+    analyticsReport: null,
+    analyticsUserEmail: '',
+    analyticsDays: 30,
+    driveBrowser: null,
+    analyticsQueue: [],
+    analyticsTimer: null,
+    navigationEpoch: 0,
+    sessionId: window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`
   };
 
   const $ = id => document.getElementById(id);
@@ -59,14 +87,37 @@ const App = (() => {
   const currentScope = () => (state.bootstrap.scopes || []).find(
     scope => scope.scopeKey === state.scopeKey
   ) || null;
-  const initials = email => String(email || '')
-    .split('@')[0]
-    .split(/[._-]/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(part => part[0])
-    .join('')
-    .toUpperCase();
+  function flushAnalytics() {
+    window.clearTimeout(state.analyticsTimer);
+    const events = state.analyticsQueue.splice(0, 20);
+    if (!events.length || isShared() || !state.bootstrap) return;
+    RPC.call('recordAnalyticsEvents', events).catch(() => {});
+    if (state.analyticsQueue.length) {
+      state.analyticsTimer = window.setTimeout(flushAnalytics, 1200);
+    }
+  }
+
+  function trackEvent(eventName, details = {}, durationMs = 0, status = 'success') {
+    if (isShared()) return;
+    state.analyticsQueue.push({
+      eventAt: new Date().toISOString(),
+      sessionId: state.sessionId,
+      eventName: String(eventName || ''),
+      route: state.route,
+      panel: state.panel,
+      scopeKey: state.scopeKey,
+      durationMs: Number(durationMs || 0),
+      status: status,
+      details: details,
+      userAgent: navigator.userAgent
+    });
+    if (state.analyticsQueue.length >= 10) flushAnalytics();
+    else {
+      window.clearTimeout(state.analyticsTimer);
+      state.analyticsTimer = window.setTimeout(flushAnalytics, 5000);
+    }
+  }
+  window.__RADAR_TELEMETRY__ = trackEvent;
 
   function setBusy(active) {
     state.pending = Math.max(0, state.pending + (active ? 1 : -1));
@@ -182,26 +233,26 @@ const App = (() => {
     const individual = related.filter(scope => scope !== aggregate);
     const rollup = Boolean(aggregate && active.scopeKey === aggregate.scopeKey);
     $('workspaceRollup').checked = rollup;
-    $('workspaceRollup').disabled = isShared() || !aggregate;
+    $('workspaceRollup').disabled = !isAdmin() || isShared() || !aggregate;
     $('workspaceSource').innerHTML = individual.map(scope => (
       `<option value="${UI.escape(scope.scopeKey)}" ` +
       `${scope.scopeKey === active.scopeKey ? 'selected' : ''}>` +
       `${UI.escape(scope.scopeLabel)}</option>`
     )).join('') || '<option value="">Sin vista por origen</option>';
-    $('workspaceSource').disabled = isShared() || rollup || !individual.length;
-    $('workspaceCountry').disabled = isShared();
+    $('workspaceSource').disabled = !isAdmin() || isShared() || rollup || !individual.length;
+    $('workspaceCountry').disabled = !isAdmin() || isShared();
+    document.querySelector('.workspace-source-slot').classList.toggle('hidden', rollup);
     $('workspaceRollupCaption').classList.toggle('hidden', !rollup);
-    $('workspaceRollupCaption').textContent = rollup
-      ? `Snapshot agregado e inmutable · ${active.scopeLabel || active.country}`
-      : '';
+    $('workspaceRollupCaption').textContent = rollup ? (active.scopeLabel || active.country) : '';
     const banner = $('sharedScopeBanner');
     banner.classList.toggle('hidden', !isShared());
     banner.textContent = isShared()
       ? `Vista compartida de solo lectura · ${active.scopeLabel || ''}`
       : '';
-    $('dataVersion').textContent = active.dataVersion
-      ? `Datos ${String(active.dataVersion).slice(0, 12)}`
-      : 'Sin snapshot';
+    $('scopeDescription').textContent = active.scopeLabel || active.country || 'Sin ámbito';
+    $('dataVersion').textContent = active.activatedAt
+      ? `Última importación: ${UI.formatDate(active.activatedAt)}`
+      : 'Sin importación';
   }
 
   function bindIssueLinks() {
@@ -289,7 +340,7 @@ const App = (() => {
         ${(data.cards || []).length ? `<section class="trend-copy-section">
           <h4>Racional del escritorio</h4>
           <div class="trend-action-grid">${data.cards.map(card =>
-            `<article class="trend-action-card"><strong>${UI.escape(card.title)}</strong><span>${UI.escape(card.body)}</span></article>`
+            `<article class="trend-action-card"><strong>${UI.escape(card.title)}</strong><span>${UI.escape(card.body)}</span>${issueList(card.issues || [], '')}</article>`
           ).join('')}</div>
         </section>` : ''}
         ${data.executiveTip ? `<p class="trend-executive-tip">${UI.escape(data.executiveTip)}</p>` : ''}
@@ -298,6 +349,7 @@ const App = (() => {
     const selector = $('trendChart');
     if (selector) selector.addEventListener('change', async event => {
       state.trendChart = event.target.value;
+      trackEvent('trend_chart_selected', { chartId: state.trendChart });
       await refreshDashboard();
     });
     Charts.mountAll(view());
@@ -305,14 +357,14 @@ const App = (() => {
 
   function issueList(rows, emptyText = 'No hay incidencias en este bloque.') {
     if (!Array.isArray(rows) || !rows.length) {
-      return `<p class="issue-list-empty">${UI.escape(emptyText)}</p>`;
+      return emptyText
+        ? `<p class="issue-list-empty">${UI.escape(emptyText)}</p>`
+        : '';
     }
     return `<div class="insight-issue-list">${rows.map(row =>
       `<article class="insight-issue-row">
-        <button class="issue-primary-link open-issue" data-uid="${UI.escape(row.issue_uid || row.issueUid || '')}" type="button">
-          <span class="issue-key-anchor-button insight-issue-key">${UI.escape(row.key)}</span>
-          <span>${UI.escape(row.summary || 'Sin resumen')}</span>
-        </button>
+        <div class="issue-primary-link">${UI.issueKey(row)}
+          <span>${UI.escape(row.summary || 'Sin resumen')}</span></div>
         <div>${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}</div>
       </article>`
     ).join('')}</div>`;
@@ -345,6 +397,57 @@ const App = (() => {
     return `<p>${UI.escape(label ? `${label}: ${value}` : value)}</p>`;
   }
 
+  function renderFunctionalityInsight(data) {
+    const topics = data.topics || [];
+    return `<section class="page-stack">
+      ${data.chart ? `<section class="surface-panel"><div class="panel-head"><div>
+        <p class="section-kicker">Vista acumulada · estados no finalistas</p>
+        <h3>${UI.escape(data.chart.title)}</h3><p>${UI.escape(data.chart.subtitle)}</p>
+      </div></div>${Charts.placeholder(data.chart.figure, 360)}</section>` : ''}
+      ${topics.map(topic => `<details class="insight-detail-block">
+        <summary>${UI.escape(topic.topic)} · ${UI.formatNumber(topic.count)} · ${Number(topic.pct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
+        <p>${UI.escape(topic.brief || '')}</p>
+        ${issueList(topic.issues || [])}
+      </details>`).join('')}
+      ${data.tip ? `<p class="inline-caption">${UI.escape(data.tip)}</p>` : ''}
+    </section>`;
+  }
+
+  function renderDuplicatesInsight(data) {
+    const groups = [...(data.titleGroups || []), ...(data.heuristicGroups || [])];
+    return `<section class="page-stack">
+      ${data.brief ? `<section class="surface-panel"><p>${UI.escape(data.brief)}</p></section>` : ''}
+      ${groups.map(group => `<details class="insight-detail-block">
+        <summary>${UI.escape(group.summary || 'Grupo duplicado')} · ${UI.formatNumber(group.count)}</summary>
+        <p>${UI.escape(group.dominantStatus || '')} · ${UI.escape(group.dominantPriority || '')}</p>
+        ${issueList(group.issues || [])}
+      </details>`).join('')}
+    </section>`;
+  }
+
+  function renderFinalistInsight(data) {
+    return `<section class="page-stack">
+      <div class="overview-kpi-grid">${(data.kpis || []).map(item => UI.kpi({
+        label: item.label, value: item.value, hint: item.detail
+      })).join('')}</div>
+      ${(data.groups || []).map(group => `<details class="insight-detail-block">
+        <summary>${group.helixUrl
+          ? `<a class="issue-inline-link" href="${UI.escape(group.helixUrl)}" target="_blank" rel="noopener noreferrer">${UI.escape(group.helixId)}</a>`
+          : UI.escape(group.helixId)} · ${UI.escape(group.helixStatus)} · ${UI.formatNumber(group.jiraCount)} JIRA</summary>
+        <p>${UI.escape(group.helixText || group.helixSummary || '')}</p>
+        ${issueList(group.issues || [])}
+      </details>`).join('')}
+    </section>`;
+  }
+
+  function renderPeopleInsight(data) {
+    return `<section class="page-stack">${(data.cards || []).map(card =>
+      `<details class="insight-detail-block"><summary>${UI.escape(card.assignee)} · ${UI.formatNumber(card.openCount)} abiertas · ${Number(card.sharePct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
+      <p>${(card.recommendations || []).map(UI.escape).join(' · ')}</p>
+      ${issueList(card.oldestIssues || [])}</details>`
+    ).join('')}</section>`;
+  }
+
   function renderInsights() {
     const data = (state.dashboard && state.dashboard.insights) || {};
     const tabs = data.tabs || [];
@@ -356,7 +459,8 @@ const App = (() => {
         <div class="period-card-grid">${data.periodSummary.cards.map(card =>
           `<article class="period-action-card" data-tone="${UI.escape(card.tone)}">
             <span>${UI.escape(card.kicker)}</span><strong>${UI.escape(card.metric)}</strong>
-            <p>${UI.escape(card.detail)}</p><div class="period-action-card-footer"><em>${UI.escape(card.label)}</em></div>
+            <p>${UI.escape(card.detail)}</p>${issueList(card.issues || [], '')}
+            <div class="period-action-card-footer"><em>${UI.escape(card.label)}</em></div>
           </article>`
         ).join('')}</div>
         ${(data.periodSummary.groups || []).map(group =>
@@ -370,7 +474,12 @@ const App = (() => {
       const selected = { ...data };
       delete selected.tabs;
       delete selected.activeTab;
-      body = renderInsightValue(selected);
+      if (data.activeTab === 'functionality') body = renderFunctionalityInsight(data.functionality || selected);
+      else if (data.activeTab === 'duplicates') body = renderDuplicatesInsight(data.duplicates || selected);
+      else if (data.activeTab === 'rootCauseEvolutives') body = renderFinalistInsight(data.rootCauseEvolutives || selected);
+      else if (data.activeTab === 'finalistDiscrepancies') body = renderFinalistInsight(data.finalistDiscrepancies || selected);
+      else if (data.activeTab === 'people') body = renderPeopleInsight(data.people || selected);
+      else body = renderInsightValue(selected);
     }
     view().innerHTML = `<section class="page-stack">
       <section class="surface-panel insights-nav">
@@ -383,6 +492,7 @@ const App = (() => {
     document.querySelectorAll('[data-insight-id]').forEach(button => {
       button.addEventListener('click', async () => {
         state.insightsId = button.dataset.insightId;
+        trackEvent('insights_section_selected', { insightsId: state.insightsId });
         await refreshDashboard();
       });
     });
@@ -404,21 +514,21 @@ const App = (() => {
     </section>`;
     const cards = `<section class="issues-card-stack">${rows.map(row =>
       `<article class="surface-card issue-card">
-        <button class="issue-card-button open-issue" data-uid="${UI.escape(row.issue_uid || row.issueUid)}" type="button">
-          <div class="issue-card-head"><span class="issue-key-anchor-button">${UI.escape(row.key)}</span><span>${UI.escape(row.source_alias || row.country)}</span></div>
+        <div class="issue-card-button">
+          <div class="issue-card-head">${UI.issueKey(row)}<span>${UI.escape(row.source_alias || row.country)}</span></div>
           <h3>${UI.escape(row.summary)}</h3>
           <p>${UI.escape(row.description || row.helix_executive_description || 'Sin descripción')}</p>
           <div class="issue-card-meta">${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}
             <span class="issue-chip issue-chip-neutral">${UI.escape(row.assignee || 'Sin asignar')}</span>
             <span class="issue-chip issue-chip-neutral">${UI.escape(row.functionality || 'Otros')}</span>
           </div>
-        </button>
+        </div>
       </article>`
     ).join('')}</section>`;
     const table = `<section class="surface-card issues-table-shell"><div class="table-wrap">
       <table class="issues-table"><thead><tr><th>Issue</th><th>Resumen</th><th>Estado</th><th>Priority</th><th>Asignado</th><th>Actualizada</th></tr></thead>
       <tbody>${rows.map(row => `<tr>
-        <td><button class="issue-inline-link issue-key-anchor-button open-issue" data-uid="${UI.escape(row.issue_uid || row.issueUid)}" type="button">${UI.escape(row.key)}</button></td>
+        <td>${UI.issueKey(row)}</td>
         <td>${UI.escape(row.summary)}</td><td>${UI.chip(row.status)}</td>
         <td>${UI.chip(row.priority, 'priority')}</td><td>${UI.escape(row.assignee || 'Sin asignar')}</td>
         <td>${UI.escape(UI.formatDate(row.updated))}</td>
@@ -434,11 +544,13 @@ const App = (() => {
     </section>`;
     $('issuesCards').addEventListener('click', () => {
       state.issuesView = 'Cards';
+      trackEvent('issues_layout_selected', { layout: 'Cards' });
       renderIssues();
       schedulePreferenceSave();
     });
     $('issuesTable').addEventListener('click', () => {
       state.issuesView = 'Table';
+      trackEvent('issues_layout_selected', { layout: 'Table' });
       renderIssues();
       schedulePreferenceSave();
     });
@@ -453,36 +565,11 @@ const App = (() => {
     bindIssueLinks();
   }
 
-  function renderKanban() {
-    const columns = (state.dashboard && state.dashboard.kanban) || [];
-    view().innerHTML = `<section class="page-stack">
-      ${columns.length ? `<section class="kanban-grid">${columns.map(column =>
-        `<article class="kanban-column">
-          <header class="kanban-column-head"><strong style="color:${UI.semanticCss(column.status)}">${UI.escape(column.status)} (${UI.formatNumber(column.count)})</strong></header>
-          <div class="kanban-stack">${(column.items || []).map(item =>
-            `<article class="kanban-card">
-              <button class="issue-primary-link kanban-card-main open-issue" data-uid="${UI.escape(item.issue_uid || item.issueUid)}" type="button">
-                <span class="kanban-card-link issue-key-anchor-button">${UI.escape(item.key)}</span>
-                <p class="kanban-card-summary">${UI.escape(item.summary || 'Sin resumen')}</p>
-              </button>
-              <div class="kanban-card-meta">${UI.chip(item.priority, 'priority')}
-                <span class="issue-chip issue-chip-neutral">${UI.escape(item.assignee || 'Sin asignar')}</span>
-                <span class="issue-chip issue-chip-neutral">${item.ageDays == null ? 'N/D' : Math.round(item.ageDays) + 'd'}</span>
-              </div>
-            </article>`
-          ).join('')}</div>
-        </article>`
-      ).join('')}</section>` : UI.empty('Sin Kanban', 'El snapshot no contiene incidencias abiertas.')}
-    </section>`;
-    bindIssueLinks();
-  }
-
   function renderCurrent() {
     if (state.panel === 'overview') renderOverview();
     else if (state.panel === 'insights') renderInsights();
     else if (state.panel === 'trends') renderTrends();
-    else if (state.panel === 'issues') renderIssues();
-    else renderKanban();
+    else renderIssues();
   }
 
   async function openIssue(issueUid) {
@@ -548,7 +635,7 @@ const App = (() => {
       const result = await deadline(
         RPC.call('sendPeriodNewsletter', job.reportId, mode),
         120000,
-        'Gemini o Gmail no respondieron en 120 segundos.'
+        'Gmail no respondió en 120 segundos.'
       );
       UI.message(
         mode === 'test'
@@ -566,6 +653,7 @@ const App = (() => {
   }
 
   async function renderReports() {
+    const epoch = state.navigationEpoch;
     view().innerHTML = `<section class="page-stack">
       <section class="surface-panel report-intro"><div>
         <p class="section-kicker">Reports</p><h3>Presentación y newsletter</h3>
@@ -575,11 +663,13 @@ const App = (() => {
     </section>`;
     try {
       const status = await RPC.call('getPeriodReportStatus', state.scopeKey);
+      if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
       state.lastPeriodReport = status.job;
       $('periodReportResult').innerHTML = reportSuccess(status.job);
       $('testPeriodNewsletter').addEventListener('click', () => deliverNewsletter('test'));
       $('sendPeriodNewsletter').addEventListener('click', () => deliverNewsletter('send'));
     } catch (error) {
+      if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
       $('periodReportResult').innerHTML = `<p class="report-error">${UI.escape(error.message)}</p>`;
     }
   }
@@ -592,6 +682,7 @@ const App = (() => {
   };
 
   async function renderImport() {
+    const epoch = state.navigationEpoch;
     const validation = state.transferValidation;
     const administration = state.bootstrap.administration || {};
     if (!administration.importReady) {
@@ -604,6 +695,7 @@ const App = (() => {
         </div></section>
       </section>`;
       $('openImportSettings').addEventListener('click', async () => {
+        state.navigationEpoch += 1;
         state.route = 'settings';
         syncNavigation();
         await renderSettings();
@@ -614,7 +706,7 @@ const App = (() => {
       <section class="surface-panel transfer-hero"><div class="transfer-hero-copy">
         <span class="transfer-eyebrow">Entrada controlada</span>
         <h2>Publicar snapshot del escritorio</h2>
-        <p>Solo se admite el traslado .brr v2 con la proyección canónica y el PPTX exacto. La activación es atómica por ámbito.</p>
+        <p>Solo se admite el traslado .brr v3 con la proyección canónica y el PPTX exacto. La activación es atómica por ámbito.</p>
       </div></section>
       <section class="surface-panel page-stack">
         <form id="transferImportForm" class="upload-zone">
@@ -680,12 +772,14 @@ const App = (() => {
     }
     try {
       const runs = await RPC.call('listImportRuns');
+      if (epoch !== state.navigationEpoch || state.route !== 'import') return;
       $('runsTable').innerHTML = runs.length
         ? `<div class="simple-table">${runs.map(run =>
           `<div class="simple-table-row"><span>${UI.escape(UI.formatDate(run.started_at))}</span><span>${UI.escape(run.file_name)}</span><span>${UI.chip(run.status)}</span></div>`
         ).join('')}</div>`
         : '<p>Sin importaciones registradas.</p>';
     } catch (error) {
+      if (epoch !== state.navigationEpoch || state.route !== 'import') return;
       $('runsTable').textContent = error.message;
     }
   }
@@ -696,97 +790,267 @@ const App = (() => {
   }
 
   async function renderSettings() {
-    let newsletter;
-    try {
-      newsletter = state.newsletterSettings || await loadNewsletterSettings();
-    } catch (error) {
-      newsletter = {
-        reports: [], users: [], recipients: [], senderReady: false, geminiConfigured: false
-      };
+    const epoch = state.navigationEpoch;
+    const tabs = [
+      ['health', 'Estado de la WebApp'],
+      ['drive', 'Carpeta de Drive'],
+      ['sources', 'Fuentes JIRA'],
+      ['newsletter', 'Newsletter'],
+      ['analytics', 'Adopción y analítica'],
+      ['summary', 'Gráficos de Resumen']
+    ];
+    const activeTab = tabs.some(tab => tab[0] === state.settingsTab)
+      ? state.settingsTab
+      : 'health';
+    state.settingsTab = activeTab;
+    if (!state.adminConsole) {
+      state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey);
     }
-    const administration = state.bootstrap.administration || {};
-    const folder = administration.reportDriveFolder || null;
-    const reports = newsletter.reports || [];
-    let selectedReport = reports.find(report => report.reportId === state.newsletterReportId);
-    if (!selectedReport) {
-      selectedReport = reports.find(report => report.scopeKey === state.scopeKey) || reports[0] || null;
-    }
-    state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
-    const recipients = (newsletter.recipients || []).filter(
-      recipient => recipient.reportId === state.newsletterReportId
-    );
-    const recipientByEmail = new Map(recipients.map(recipient => [recipient.email, recipient]));
-    const newsletterUsers = (newsletter.users || []).map(user => {
-      const recipient = recipientByEmail.get(user.email);
-      return {
-        email: user.email,
-        displayName: user.displayName,
-        role: user.role,
-        active: Boolean(recipient && recipient.active)
-      };
-    });
-    view().innerHTML = `<section class="page-stack">
-      <section class="surface-card">
-        <h3>Apariencia</h3><div class="soft-toggle-row">
-          <button id="themeLight" class="soft-toggle-button ${!state.dark ? 'soft-toggle-button-active' : ''}" type="button">Claro</button>
-          <button id="themeDark" class="soft-toggle-button ${state.dark ? 'soft-toggle-button-active' : ''}" type="button">Oscuro</button>
+    if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+    let body = '';
+    const consoleData = state.adminConsole;
+    if (activeTab === 'health') {
+      const health = consoleData.health || {};
+      body = `<section class="page-stack">
+        <div class="overview-kpi-grid">
+          ${[
+            { label: 'Estado', value: health.status, hint: health.accessPolicy },
+            { label: 'Última importación', value: UI.formatDate(health.lastImportAt), hint: `${UI.formatNumber(health.importedRecords)} registros` },
+            { label: 'Newsletter', value: UI.formatNumber(health.newsletterRecipientsSent), hint: 'destinatarios del snapshot' },
+            { label: 'Analítica', value: UI.formatNumber(health.analyticsUsers), hint: `${UI.formatNumber(health.analyticsEvents)} eventos` },
+            { label: 'Proyección', value: formatFileSize(health.projectionBytes), hint: health.dataVersion || 'Sin versión' },
+            { label: 'Presentación', value: UI.formatNumber(health.reportSlides), hint: 'diapositivas' }
+          ].map(UI.kpi).join('')}
         </div>
-      </section>
-      <section class="surface-card">
-        <h3>Carpeta de Google Drive</h3>
-        <p class="minor-copy">Destino del PPTX exacto y de su conversión a Google Slides.</p>
-        ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
-        <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
-        <button class="secondary-button" type="submit">Guardar carpeta</button></form>
-      </section>
-      <section class="surface-card">
-        <h3>Newsletter</h3>
-        <p>${newsletter.senderReady ? 'Alias remitente listo.' : 'Falta configurar el alias remitente.'}
-        ${newsletter.geminiConfigured ? ' Gemini listo.' : ' Falta GEMINI_API_KEY.'}</p>
-        <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
-          `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
-        ).join('')}</select></label>
-        <p class="minor-copy">Activa o desactiva los usuarios autorizados que recibirán este informe.</p>
-        ${selectedReport ? '' : '<p class="minor-copy">Importa un informe para poder configurar sus destinatarios.</p>'}
-        <div class="source-list">${newsletterUsers.map(user =>
-          `<article class="source-list-row"><div><strong>${UI.escape(user.displayName || user.email)}</strong><p>${UI.escape(user.email)} · ${UI.escape(user.role)}</p></div>
-          <button class="ghost-button recipient-toggle" data-email="${UI.escape(user.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${user.active ? '1' : '0'}" ${selectedReport ? '' : 'disabled'} type="button">${user.active ? 'Desactivar' : 'Activar'}</button></article>`
-        ).join('')}</div>
-      </section>
-    </section>`;
-    $('themeLight').addEventListener('click', () => setTheme(false));
-    $('themeDark').addEventListener('click', () => setTheme(true));
-    $('folderForm').addEventListener('submit', async event => {
-      event.preventDefault();
-      try {
-        const saved = await RPC.call('saveReportDriveFolder', $('folderReference').value);
-        state.bootstrap.administration.reportDriveFolder = saved;
-        state.bootstrap.administration.importReady = true;
-        UI.message('Carpeta guardada.', 'success');
-        await renderSettings();
-      } catch (error) {
-        UI.message(error.message, 'error');
+        <section class="surface-card page-stack">
+          <h3>Versiones y accesos</h3>
+          <p>Generado: ${UI.escape(UI.formatDate(health.generatedAt))}</p>
+          <a href="${UI.escape(health.versionUrl)}" target="_blank" rel="noopener">Abrir versión consultada ↗</a>
+          ${health.slidesUrl ? `<a href="${UI.escape(health.slidesUrl)}" target="_blank" rel="noopener">Abrir presentación ↗</a>` : ''}
+          <div class="soft-toggle-row">
+            <button id="themeLight" class="soft-toggle-button ${!state.dark ? 'soft-toggle-button-active' : ''}" type="button">Tema claro</button>
+            <button id="themeDark" class="soft-toggle-button ${state.dark ? 'soft-toggle-button-active' : ''}" type="button">Tema oscuro</button>
+          </div>
+        </section>
+      </section>`;
+    } else if (activeTab === 'drive') {
+      if (!state.driveBrowser) {
+        state.driveBrowser = await RPC.call('browseReportDriveFolders', {
+          category: 'my', pageToken: ''
+        });
       }
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const folder = consoleData.reportDriveFolder || null;
+      const browser = state.driveBrowser;
+      body = `<section class="page-stack">
+        <section class="surface-card page-stack">
+          <h3>Carpeta configurada</h3>
+          ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
+          <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
+          <button class="secondary-button" type="submit">Guardar referencia</button></form>
+        </section>
+        <section class="surface-card page-stack">
+          <h3>Explorar Google Drive</h3>
+          <div class="soft-toggle-row">${[
+            ['my', 'Mi unidad'], ['shared', 'Compartidas conmigo'], ['starred', 'Destacadas']
+          ].map(category => `<button class="soft-toggle-button drive-category ${browser.category === category[0] ? 'soft-toggle-button-active' : ''}" data-category="${category[0]}" type="button">${category[1]}</button>`).join('')}</div>
+          <div class="source-list">${(browser.folders || []).map(item =>
+            `<article class="source-list-row"><div><strong>${UI.escape(item.name)}</strong><p>${UI.escape(item.owner || '')} · ${UI.escape(UI.formatDate(item.modifiedAt))}</p></div>
+            <button class="ghost-button choose-folder" data-folder="${UI.escape(item.id)}" type="button">Seleccionar</button></article>`
+          ).join('') || '<p>No hay carpetas en esta categoría.</p>'}</div>
+        </section>
+      </section>`;
+    } else if (activeTab === 'sources') {
+      body = `<section class="surface-card page-stack">
+        <h3>Fuentes JIRA de la vista seleccionada</h3>
+        <p class="minor-copy">Información inmutable transportada por el snapshot activo.</p>
+        <div class="source-list">${(consoleData.jiraSources || []).map(source =>
+          `<article class="source-list-row"><div><strong>${UI.escape(source.alias)}</strong>
+          <p>${UI.escape(source.poTeamLeader || 'Sin PO / Team Leader')}</p></div>
+          ${source.dashboardUrl ? `<a class="ghost-button" href="${UI.escape(source.dashboardUrl)}" target="_blank" rel="noopener">Cuadro JIRA ↗</a>` : '<span>Sin enlace</span>'}</article>`
+        ).join('') || '<p>La vista no contiene fuentes JIRA.</p>'}</div>
+      </section>`;
+    } else if (activeTab === 'newsletter') {
+      const newsletter = state.newsletterSettings || await loadNewsletterSettings();
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const reports = newsletter.reports || [];
+      let selectedReport = reports.find(report => report.reportId === state.newsletterReportId);
+      if (!selectedReport) {
+        selectedReport = reports.find(report => report.scopeKey === state.scopeKey) || reports[0] || null;
+      }
+      state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
+      const recipients = (newsletter.recipients || []).filter(
+        recipient => recipient.reportId === state.newsletterReportId
+      );
+      const recipientByEmail = new Map(recipients.map(recipient => [recipient.email, recipient]));
+      const newsletterUsers = (newsletter.users || []).map(user => ({
+        ...user,
+        active: Boolean(recipientByEmail.get(user.email) && recipientByEmail.get(user.email).active)
+      }));
+      body = `<section class="page-stack">
+        <section class="surface-card page-stack">
+          <h3>Destinatarios</h3>
+          <p>Identidad de envío: ${UI.escape(newsletter.sender.effective)} · ${UI.escape(newsletter.sender.mode)}</p>
+          <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
+            `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
+          ).join('')}</select></label>
+          <div class="source-list">${newsletterUsers.map(user =>
+            `<article class="source-list-row"><div><strong>${UI.escape(user.displayName || user.email)}</strong><p>${UI.escape(user.email)} · ${UI.escape(user.role)}</p></div>
+            <button class="ghost-button recipient-toggle" data-email="${UI.escape(user.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${user.active ? '1' : '0'}" ${selectedReport ? '' : 'disabled'} type="button">${user.active ? 'Desactivar' : 'Activar'}</button></article>`
+          ).join('')}</div>
+        </section>
+        <section class="surface-card page-stack"><h3>Histórico de envíos</h3>
+          ${(newsletter.audit || []).map(item => `<details class="insight-detail-block">
+            <summary>${UI.escape(UI.formatDate(item.createdAt))} · ${UI.escape(item.mode)} · ${UI.escape(item.status)} · ${UI.formatNumber(item.recipientCount)} destinatarios</summary>
+            <p><strong>${UI.escape(item.subject)}</strong></p><pre class="audit-body">${UI.escape(item.bodyText)}</pre>
+            ${item.slidesUrl ? `<a href="${UI.escape(item.slidesUrl)}" target="_blank" rel="noopener">Abrir presentación ↗</a>` : ''}
+          </details>`).join('') || '<p>Sin envíos registrados.</p>'}
+        </section>
+      </section>`;
+    } else if (activeTab === 'analytics') {
+      if (!state.analyticsReport) {
+        state.analyticsReport = await RPC.call('getAnalyticsReport', {
+          userEmail: state.analyticsUserEmail, days: state.analyticsDays
+        });
+      }
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const report = state.analyticsReport;
+      body = `<section class="page-stack">
+        <section class="surface-card settings-form-grid">
+          <label class="field"><span>Usuario</span><select id="analyticsUser"><option value="">Todos</option>${(report.users || []).map(email =>
+            `<option value="${UI.escape(email)}" ${email === state.analyticsUserEmail ? 'selected' : ''}>${UI.escape(email)}</option>`
+          ).join('')}</select></label>
+          <label class="field"><span>Periodo</span><select id="analyticsDays">${[7, 30, 90, 180, 365].map(days =>
+            `<option value="${days}" ${days === state.analyticsDays ? 'selected' : ''}>${days} días</option>`
+          ).join('')}</select></label>
+          <button id="downloadAnalytics" class="secondary-button" type="button">Descargar JSON para Codex</button>
+        </section>
+        <div class="overview-kpi-grid">${[
+          { label: 'Eventos', value: UI.formatNumber(report.summary.events), hint: `${report.filters.days} días` },
+          { label: 'Usuarios', value: UI.formatNumber(report.summary.users), hint: 'usuarios únicos' },
+          { label: 'Sesiones', value: UI.formatNumber(report.summary.sessions), hint: 'sesiones únicas' },
+          { label: 'Errores', value: UI.formatNumber(report.summary.errors), hint: 'errores registrados' },
+          { label: 'WoW', value: `${report.summary.weekOverWeekPct > 0 ? '+' : ''}${report.summary.weekOverWeekPct}%`, hint: `${UI.formatNumber(report.summary.currentWeekEvents)} vs ${UI.formatNumber(report.summary.previousWeekEvents)} eventos` },
+          { label: 'Latencia media', value: `${UI.formatNumber(report.summary.averageDurationMs)} ms`, hint: 'RPC y carga' },
+          { label: 'Latencia p95', value: `${UI.formatNumber(report.summary.p95DurationMs)} ms`, hint: 'percentil 95' }
+        ].map(UI.kpi).join('')}</div>
+        <section class="surface-card"><h3>Secciones más utilizadas</h3><div class="simple-table">${(report.panels || []).map(item =>
+          `<div class="simple-table-row"><span>${UI.escape(item.label)}</span><strong>${UI.formatNumber(item.count)}</strong></div>`
+        ).join('')}</div></section>
+        <section class="surface-card"><h3>Actividad reciente</h3><div class="simple-table">${(report.rows || []).slice(0, 100).map(item =>
+          `<div class="simple-table-row"><span>${UI.escape(UI.formatDate(item.eventAt))}</span><span>${UI.escape(item.userEmail)}</span><span>${UI.escape(item.eventName)}</span><span>${UI.formatNumber(item.durationMs)} ms</span></div>`
+        ).join('')}</div></section>
+      </section>`;
+    } else {
+      const chartLabels = {
+        timeseries: 'Evolución (últimos 90 días)',
+        age_buckets: 'Distribución antigüedad (abiertas)',
+        open_status_bar: 'Issues por Estado (bar)',
+        open_priority_pie: 'Issues abiertos por prioridad (pie)',
+        resolution_hist: 'Días abiertas por prioridad'
+      };
+      const selected = consoleData.summaryCharts.selected || [];
+      body = `<section class="surface-card page-stack">
+        <h3>Tres gráficos del Resumen</h3>
+        <p class="minor-copy">La selección es global y solo cambia la presentación de vistas ya materializadas.</p>
+        ${Object.entries(chartLabels).map(([id, label]) =>
+          `<label class="checkbox-field"><input class="summary-chart-choice" type="checkbox" value="${id}" ${selected.includes(id) ? 'checked' : ''}><span>${UI.escape(label)}</span></label>`
+        ).join('')}
+        <div class="soft-toggle-row"><button id="saveSummaryCharts" class="action-button" type="button">Guardar</button>
+        <button id="resetSummaryCharts" class="secondary-button" type="button">Restaurar gráficos por defecto</button></div>
+      </section>`;
+    }
+    view().innerHTML = `<section class="page-stack">
+      <section class="surface-panel insights-nav"><div class="soft-toggle-row">${tabs.map(tab =>
+        `<button class="soft-toggle-button settings-tab ${tab[0] === activeTab ? 'soft-toggle-button-active' : ''}" data-settings-tab="${tab[0]}" type="button">${tab[1]}</button>`
+      ).join('')}</div></section>${body}</section>`;
+
+    document.querySelectorAll('.settings-tab').forEach(button => {
+      button.addEventListener('click', async () => {
+        state.navigationEpoch += 1;
+        state.settingsTab = button.dataset.settingsTab;
+        showRouteLoading('Cargando configuración…');
+        trackEvent('settings_tab_selected', { tab: state.settingsTab });
+        await renderSettings();
+      });
     });
-    $('recipientReport').addEventListener('change', async event => {
+    if ($('themeLight')) $('themeLight').addEventListener('click', () => setTheme(false));
+    if ($('themeDark')) $('themeDark').addEventListener('click', () => setTheme(true));
+    if ($('folderForm')) $('folderForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const saved = await RPC.call('saveReportDriveFolder', $('folderReference').value);
+      state.adminConsole = null;
+      state.bootstrap.administration.reportDriveFolder = saved;
+      state.bootstrap.administration.importReady = true;
+      UI.message('Carpeta guardada.', 'success');
+      await renderSettings();
+    });
+    document.querySelectorAll('.drive-category').forEach(button => {
+      button.addEventListener('click', async () => {
+        state.driveBrowser = await RPC.call('browseReportDriveFolders', {
+          category: button.dataset.category, pageToken: ''
+        });
+        await renderSettings();
+      });
+    });
+    document.querySelectorAll('.choose-folder').forEach(button => {
+      button.addEventListener('click', async () => {
+        await RPC.call('saveReportDriveFolder', button.dataset.folder);
+        state.adminConsole = null;
+        state.bootstrap.administration.importReady = true;
+        UI.message('Carpeta de Drive seleccionada.', 'success');
+        await renderSettings();
+      });
+    });
+    if ($('recipientReport')) $('recipientReport').addEventListener('change', async event => {
       state.newsletterReportId = event.target.value;
       await renderSettings();
     });
     document.querySelectorAll('.recipient-toggle').forEach(button => {
       button.addEventListener('click', async () => {
-        try {
-          button.disabled = true;
-          state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
-            reportId: button.dataset.report,
-            email: button.dataset.email,
-            active: button.dataset.active !== '1'
-          });
-          await renderSettings();
-        } catch (error) {
-          button.disabled = false;
-          UI.message(error.message, 'error');
-        }
+        button.disabled = true;
+        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+          reportId: button.dataset.report,
+          email: button.dataset.email,
+          active: button.dataset.active !== '1'
+        });
+        await renderSettings();
       });
+    });
+    const reloadAnalytics = async () => {
+      state.navigationEpoch += 1;
+      state.analyticsUserEmail = $('analyticsUser').value;
+      state.analyticsDays = Number($('analyticsDays').value || 30);
+      state.analyticsReport = null;
+      showRouteLoading('Actualizando analítica…');
+      await renderSettings();
+    };
+    if ($('analyticsUser')) $('analyticsUser').addEventListener('change', reloadAnalytics);
+    if ($('analyticsDays')) $('analyticsDays').addEventListener('change', reloadAnalytics);
+    if ($('downloadAnalytics')) $('downloadAnalytics').addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(state.analyticsReport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `bug-resolution-radar-analytics-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      trackEvent('analytics_export_downloaded', { days: state.analyticsDays });
+    });
+    const saveCharts = async chartIds => {
+      const saved = await RPC.call('saveSummaryChartIds', chartIds);
+      state.adminConsole.summaryCharts = saved;
+      state.memory.clear();
+      UI.message('Gráficos de Resumen actualizados.', 'success');
+      await renderSettings();
+    };
+    if ($('saveSummaryCharts')) $('saveSummaryCharts').addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('.summary-chart-choice:checked'))
+        .map(input => input.value);
+      await saveCharts(selected);
+    });
+    if ($('resetSummaryCharts')) $('resetSummaryCharts').addEventListener('click', async () => {
+      await saveCharts(consoleData.summaryCharts.defaults);
     });
   }
 
@@ -825,18 +1089,20 @@ const App = (() => {
     return remote;
   }
 
-  async function refreshDashboard() {
+  async function refreshDashboard(expectedEpoch = state.navigationEpoch) {
     if (!state.scopeKey) {
       view().innerHTML = UI.empty(
         'No hay snapshots publicados',
-        'Un administrador debe importar un traslado .brr v2 desde escritorio.'
+        'Un administrador debe importar un traslado .brr v3 desde escritorio.'
       );
       return;
     }
     const request = requestFor();
     try {
       setBusy(true);
-      state.dashboard = await fetchDashboard(request);
+      const dashboard = await fetchDashboard(request);
+      if (expectedEpoch !== state.navigationEpoch || state.route !== 'dashboard') return;
+      state.dashboard = dashboard;
       state.route = 'dashboard';
       syncNavigation();
       renderCurrent();
@@ -848,11 +1114,30 @@ const App = (() => {
     }
   }
 
+  function showRouteLoading(label) {
+    Charts.begin(view());
+    view().innerHTML = `<section class="surface-panel app-loading route-loading">
+      <div><div class="loading-spinner"></div><p>${UI.escape(label || 'Cargando sección…')}</p></div>
+    </section>`;
+  }
+
+  function prefetchPrimaryViews() {
+    if (!state.scopeKey) return;
+    ['overview', 'insights', 'trends', 'issues'].forEach(panel => {
+      const request = requestFor(panel);
+      fetchDashboard(request).catch(() => {});
+    });
+  }
+
   async function openPanel(panel) {
+    const epoch = ++state.navigationEpoch;
     state.route = 'dashboard';
     state.panel = panel;
     state.page = 1;
-    await refreshDashboard();
+    syncNavigation();
+    showRouteLoading(`Abriendo ${panel === 'overview' ? 'Resumen' : panel === 'insights' ? 'Insights' : panel === 'trends' ? 'Tendencias' : 'Issues'}…`);
+    trackEvent('navigation', { target: panel });
+    await refreshDashboard(epoch);
   }
 
   async function boot() {
@@ -882,7 +1167,6 @@ const App = (() => {
         isAdmin() && !isShared() ? 'is-admin' : ''
       ].filter(Boolean).join(' ');
       $('appTitle').textContent = bootstrap.app.name;
-      $('userBadge').textContent = `${initials(bootstrap.user.email)} · ${bootstrap.user.displayName || bootstrap.user.email}`;
       syncScope();
       syncNavigation();
       $('loadingView').classList.add('hidden');
@@ -898,6 +1182,12 @@ const App = (() => {
       } else {
         await refreshDashboard();
       }
+      trackEvent('app_open', {
+        role: bootstrap.user.role,
+        shared: isShared(),
+        dataVersion: bootstrap.app.dataVersion
+      });
+      window.setTimeout(prefetchPrimaryViews, 0);
       PersistentCache.prune({
         contract: bootstrap.app.contractVersion,
         cacheGeneration: bootstrap.app.cacheEpoch,
@@ -918,21 +1208,26 @@ const App = (() => {
     document.querySelectorAll('[data-route]').forEach(button => {
       button.addEventListener('click', async () => {
         if (!isAdmin() || isShared()) return;
+        state.navigationEpoch += 1;
         state.route = button.dataset.route;
         syncNavigation();
+        showRouteLoading('Abriendo sección de administración…');
+        trackEvent('admin_navigation', { target: state.route });
         if (state.route === 'reports') await renderReports();
         else if (state.route === 'import') await renderImport();
         else await renderSettings();
       });
     });
     $('workspaceCountry').addEventListener('change', async event => {
+      const epoch = ++state.navigationEpoch;
       const scopes = countryScopes(event.target.value);
       state.scopeKey = (aggregateScope(scopes) || scopes[0] || {}).scopeKey || '';
       state.page = 1;
       syncScope();
-      await refreshDashboard();
+      await refreshDashboard(epoch);
     });
     $('workspaceRollup').addEventListener('change', async event => {
+      const epoch = ++state.navigationEpoch;
       const active = currentScope();
       const scopes = countryScopes(active.country);
       const aggregate = aggregateScope(scopes);
@@ -942,13 +1237,14 @@ const App = (() => {
         : (individual && individual.scopeKey) || (aggregate && aggregate.scopeKey) || '';
       state.page = 1;
       syncScope();
-      await refreshDashboard();
+      await refreshDashboard(epoch);
     });
     $('workspaceSource').addEventListener('change', async event => {
+      const epoch = ++state.navigationEpoch;
       state.scopeKey = event.target.value;
       state.page = 1;
       syncScope();
-      await refreshDashboard();
+      await refreshDashboard(epoch);
     });
     $('themeToggle').addEventListener('click', () => setTheme(!state.dark));
     $('accessGateRetry').addEventListener('click', boot);
@@ -958,6 +1254,19 @@ const App = (() => {
   return {
     init() {
       bindShell();
+      window.addEventListener('error', event => {
+        trackEvent('client_error', {
+          message: String(event.message || 'Error de cliente'),
+          source: String(event.filename || ''),
+          line: Number(event.lineno || 0)
+        }, 0, 'error');
+      });
+      window.addEventListener('unhandledrejection', event => {
+        trackEvent('client_error', {
+          message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
+        }, 0, 'error');
+      });
+      window.addEventListener('pagehide', flushAnalytics);
       boot();
     }
   };

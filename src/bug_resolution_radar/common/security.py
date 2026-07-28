@@ -80,6 +80,35 @@ def validate_service_base_url(raw_url: str, *, service_name: str) -> str:
     return urlunparse(cleaned).rstrip("/")
 
 
+def validate_navigation_url(raw_url: str, *, field_name: str) -> str:
+    """Validate an optional HTTPS link that will be rendered as user navigation."""
+    value = (raw_url or "").strip()
+    if not value:
+        return ""
+    if "\r" in value or "\n" in value:
+        raise ValueError(f"{field_name}: URL inválida.")
+    parsed = urlparse(value)
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        raise ValueError(f"{field_name}: solo se permiten URLs HTTPS.")
+    if parsed.username or parsed.password:
+        raise ValueError(f"{field_name}: no incluyas credenciales en la URL.")
+    sensitive_names = {
+        "access_token",
+        "refresh_token",
+        "api_key",
+        "apikey",
+        "token",
+        "authorization",
+        "password",
+        "passwd",
+        "secret",
+    }
+    query_names = {name.casefold() for name in re.findall(r"(?:^|[&;])([^=&;]+)=", parsed.query)}
+    if query_names & sensitive_names:
+        raise ValueError(f"{field_name}: la URL contiene parámetros sensibles.")
+    return value[:2048]
+
+
 def sanitize_cookie_header(raw_cookie: Optional[str]) -> Optional[str]:
     """
     Best-effort sanitizer for manual/browser cookie headers.

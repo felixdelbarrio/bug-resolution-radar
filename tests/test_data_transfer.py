@@ -61,7 +61,20 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
             "agedOpen": 1,
             "resolutionCurrent": "3.0d",
         },
-        "facts": [{"id": "backlog", "statement": "El backlog contiene 3 incidencias."}],
+        "previousOpen": 2,
+        "backlogDelta": 1,
+        "criticalOpen": 2,
+        "responsibleRollups": [],
+        "draft": {
+            "subject": "Seguimiento quincenal",
+            "greeting": "Buenos días,",
+            "intro": "Adjunto el informe.",
+            "reportLinkLabel": "Enlace a la presentación",
+            "summary": "El backlog aumenta.",
+            "responsibleIntro": "Datos por responsable:",
+            "responsibleParagraphs": [],
+            "closing": "Esperamos que esta información os sea de utilidad.",
+        },
     }
     report_hash = hashlib.sha256(report_content).hexdigest()
     scope = {
@@ -76,15 +89,49 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
     }
     projection = {
         "schema": "bug-resolution-radar-cloud-projection",
-        "schemaVersion": 1,
-        "semanticContract": "desktop-authoritative-v1",
+        "schemaVersion": 2,
+        "semanticContract": "desktop-authoritative-v2",
         "generatedAt": "2026-07-23T10:00:00+00:00",
         "scope": scope,
         "semantics": {"sourceOfTruth": "desktop"},
+        "administration": {"jiraSources": []},
         "views": {
-            "overview": {"stats": {"issues_total": 3}},
+            "overview": {
+                "stats": {"issues_total": 3},
+                "charts": [
+                    {"id": chart_id}
+                    for chart_id in (
+                        "timeseries",
+                        "age_buckets",
+                        "open_status_bar",
+                        "open_priority_pie",
+                        "resolution_hist",
+                    )
+                ],
+            },
             "insights": {"catalog": [], "byId": {}},
-            "trends": {"catalog": [], "byId": {}},
+            "trends": {
+                "catalog": [
+                    {"id": chart_id}
+                    for chart_id in (
+                        "timeseries",
+                        "age_buckets",
+                        "open_status_bar",
+                        "open_priority_pie",
+                        "resolution_hist",
+                    )
+                ],
+                "byId": {
+                    chart_id: {}
+                    for chart_id in (
+                        "timeseries",
+                        "age_buckets",
+                        "open_status_bar",
+                        "open_priority_pie",
+                        "resolution_hist",
+                    )
+                },
+            },
             "issues": {
                 "total": 1,
                 "rows": [
@@ -94,7 +141,6 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
                     }
                 ],
             },
-            "kanban": [],
         },
         "newsletterFacts": newsletter,
         "report": {
@@ -113,7 +159,7 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
     )
 
 
-def test_export_v2_contains_only_projection_and_exact_local_pptx(
+def test_export_v3_contains_only_projection_and_exact_local_pptx(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(tmp_path)
@@ -142,8 +188,8 @@ def test_export_v2_contains_only_projection_and_exact_local_pptx(
         projection_bytes = archive.read("data/projection.json")
         packaged_report = archive.read("artifacts/period_followup.pptx")
 
-    assert manifest["version"] == 2
-    assert manifest["semanticContract"] == "desktop-authoritative-v1"
+    assert manifest["version"] == 3
+    assert manifest["semanticContract"] == "desktop-authoritative-v2"
     assert set(manifest["datasets"]) == {"projection", "report"}
     for descriptor in manifest["datasets"].values():
         assert set(descriptor) == {"path", "sha256", "bytes", "records"}
@@ -201,10 +247,10 @@ def test_validation_rejects_report_whose_bytes_do_not_match_manifest(
         _decode_archive(path)
 
 
-def test_v1_and_fake_desktop_import_contract_are_not_exposed() -> None:
+def test_legacy_and_fake_desktop_import_contracts_are_not_exposed() -> None:
     import bug_resolution_radar.services.data_transfer as transfer
 
-    assert transfer.TRANSFER_VERSION == 2
+    assert transfer.TRANSFER_VERSION == 3
     assert not hasattr(transfer, "import_transfer_package")
     assert not hasattr(transfer, "list_transfer_packages")
     assert not hasattr(transfer, "optimize_transfer_archive")

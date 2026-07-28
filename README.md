@@ -52,7 +52,7 @@ Resumen de capas:
 - `src/bug_resolution_radar/analytics/`: KPIs, semántica de estado y ventana de análisis.
 - `src/bug_resolution_radar/reports/executive_ppt.py`: export ejecutivo PPT alineado con filtros y scope.
 - `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, merge/mapeo de ingesta, exportes e ingesta asíncrona.
-- `src/bug_resolution_radar/services/data_transfer.py`: handoff `.brr` v2, compacto y verificable, desde escritorio hacia GPC.
+- `src/bug_resolution_radar/services/data_transfer.py`: handoff `.brr` v3, compacto y verificable, desde escritorio hacia GPC.
 - El runtime de presentación es 100% React/FastAPI; no queda shell Python legacy ni dependencia de UI obsoleta en el paquete.
 
 Flujo cloud:
@@ -60,7 +60,8 @@ Flujo cloud:
 - El handoff solo contiene `projection.json` y ese PPTX, ambos con SHA-256.
 - GPC publica un snapshot estático por geografía/vista, convierte el PPTX a Google Slides
   y sirve la WebApp sin filtros ni recálculos de negocio.
-- La newsletter usa los hechos del mismo snapshot, enlaza Slides y adjunta el PPTX exacto.
+- La newsletter usa el texto y las agrupaciones calculadas localmente en el mismo
+  snapshot, enlaza Slides y adjunta el PPTX exacto sin servicios generativos.
 
 Flujo clave de estados finalistas:
 - El lookup ARSQL solo toma referencias `INC...` desde la descripción de Jira y descarta Jira ya finalistas (`Accepted`, `Ready to deploy`, `Deployed`/`Acepted`) antes de deduplicar por país/`Servicio Origen BU/UG`.
@@ -76,6 +77,7 @@ Guía detallada por tema:
 - [Motor de Insights](docs/INSIGHTS_ENGINE.md)
 - [Theming y reglas visuales](docs/THEMING.md)
 - [Handoff de escritorio a GPC](docs/CLOUD_HANDOFF.md)
+- [WoW de cambios y promociones](docs/GPC_WOW.md)
 - [Calidad y CI](docs/QUALITY.md)
 
 ## Desktop Runtime
