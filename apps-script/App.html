@@ -79,6 +79,25 @@ const App = (() => {
   };
 
   const $ = id => document.getElementById(id);
+  const REQUIRED_SHELL_IDS = Object.freeze([
+    'accessGateMessage',
+    'accessGateRetry',
+    'app',
+    'appTitle',
+    'dataVersion',
+    'errorView',
+    'loadingView',
+    'retryButton',
+    'routeView',
+    'scopeBar',
+    'scopeDescription',
+    'sharedScopeBanner',
+    'themeToggle',
+    'workspaceCountry',
+    'workspaceRollup',
+    'workspaceRollupCaption',
+    'workspaceSource'
+  ]);
   const view = () => $('routeView');
   const isShared = () => Boolean(state.sharedToken);
   const isAdmin = () => Boolean(
@@ -87,6 +106,31 @@ const App = (() => {
   const currentScope = () => (state.bootstrap.scopes || []).find(
     scope => scope.scopeKey === state.scopeKey
   ) || null;
+
+  function assertShellContract() {
+    const missing = REQUIRED_SHELL_IDS.filter(id => !$(id));
+    if (!missing.length) return;
+    const error = new Error(
+      `Despliegue GPC incompleto: faltan ${missing.map(id => `#${id}`).join(', ')}. ` +
+      'Publica una versión nueva incluyendo todos los archivos HTML.'
+    );
+    error.code = 'WEBAPP_SHELL_MISMATCH';
+    throw error;
+  }
+
+  function showAccessError(error) {
+    document.body.className = 'auth-denied';
+    const message = $('accessGateMessage');
+    const retry = $('accessGateRetry');
+    if (message) {
+      message.textContent = error && error.message
+        ? error.message
+        : 'No se pudo iniciar la WebApp.';
+    }
+    if (retry) retry.classList.remove('hidden');
+    console.error('WebApp startup failure', error);
+  }
+
   function flushAnalytics() {
     window.clearTimeout(state.analyticsTimer);
     const events = state.analyticsQueue.splice(0, 20);
@@ -780,7 +824,8 @@ const App = (() => {
         : '<p>Sin importaciones registradas.</p>';
     } catch (error) {
       if (epoch !== state.navigationEpoch || state.route !== 'import') return;
-      $('runsTable').textContent = error.message;
+      const table = $('runsTable');
+      if (table) table.textContent = error.message;
     }
   }
 
@@ -1195,9 +1240,7 @@ const App = (() => {
         scopeVersions: bootstrap.app.scopeVersions
       }).catch(() => {});
     } catch (error) {
-      document.body.className = 'auth-denied';
-      $('accessGateMessage').textContent = error.message;
-      $('accessGateRetry').classList.remove('hidden');
+      showAccessError(error);
     }
   }
 
@@ -1253,21 +1296,26 @@ const App = (() => {
 
   return {
     init() {
-      bindShell();
-      window.addEventListener('error', event => {
-        trackEvent('client_error', {
-          message: String(event.message || 'Error de cliente'),
-          source: String(event.filename || ''),
-          line: Number(event.lineno || 0)
-        }, 0, 'error');
-      });
-      window.addEventListener('unhandledrejection', event => {
-        trackEvent('client_error', {
-          message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
-        }, 0, 'error');
-      });
-      window.addEventListener('pagehide', flushAnalytics);
-      boot();
+      try {
+        assertShellContract();
+        bindShell();
+        window.addEventListener('error', event => {
+          trackEvent('client_error', {
+            message: String(event.message || 'Error de cliente'),
+            source: String(event.filename || ''),
+            line: Number(event.lineno || 0)
+          }, 0, 'error');
+        });
+        window.addEventListener('unhandledrejection', event => {
+          trackEvent('client_error', {
+            message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
+          }, 0, 'error');
+        });
+        window.addEventListener('pagehide', flushAnalytics);
+        boot();
+      } catch (error) {
+        showAccessError(error);
+      }
     }
   };
 })();
