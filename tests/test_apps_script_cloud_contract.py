@@ -267,7 +267,8 @@ def test_newsletter_attaches_the_canonical_pptx() -> None:
     newsletter = _source("56_Newsletter.gs")
     report_storage = _source("55_PeriodReport.gs")
 
-    assert re.search(r"\battachments\s*:", newsletter)
+    assert "Content-Disposition: attachment" in newsletter
+    assert "_newsletterMimeBytes_(attachment.getBytes())" in newsletter
     assert re.search(r"pptx", newsletter, re.IGNORECASE)
     assert "_exactReportBlob_" in newsletter
     assert re.search(r"getBlob\s*\(", report_storage)
@@ -387,15 +388,19 @@ def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_persona
     app = _source("App.html")
 
     assert "corporateBrand: 'BBVA Banca de Empresas e Instituciones'" in config
-    assert "effective: usesAlias ? requested : ''" in identity
-    assert "ready: usesAlias" in identity
-    assert "'NEWSLETTER_SENDER_ALIAS_REQUIRED'" in sender
-    assert "from: sender.effective" in sender
-    assert "name: RADAR.corporateBrand" in sender
-    assert sender.index("_newsletterSenderIdentity_(user.email)") < sender.index("_exactReportBlob_(")
+    assert "newsletterFrom: 'bug-resolution-radar.group@bbva.com'" in config
+    assert "Gmail.Users.Settings.SendAs.list('me')" in identity
+    assert "verificationStatus === 'accepted'" in identity
+    assert "'NEWSLETTER_SENDER_UNAVAILABLE'" in sender
+    assert sender.index("_newsletterSenderIdentity_()") < sender.index("_exactReportBlob_(")
+    assert "_newsletterDeliver_(pendingRecipients, subject, rendered, attachment, sender)" in sender
+    assert "_newsletterPreviouslyDeliveredRecipients_" in newsletter
+    assert "deliveries.length ? 'partial' : 'failed'" in sender
     assert "newsletterSenderReady" in app
-    assert "La WebApp no utilizará tu identidad personal" in app
-    assert "cuenta administradora con reply-to del grupo" not in newsletter
+    assert "La WebApp no utilizará la identidad del visitante" in app
+    assert "GmailApp" not in newsletter
+    assert "MailApp" not in newsletter
+    assert "bug-resolution-radar.group@bbva.com" not in newsletter + config
 
 
 def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarchy() -> None:
@@ -424,11 +429,19 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
     assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
 
 
-def test_newsletter_manifest_declares_mailapp_quota_scope() -> None:
+def test_newsletter_uses_the_market_pulse_gmail_api_delivery_contract() -> None:
     manifest = json.loads(_source("appsscript.json"))
+    newsletter = _source("56_Newsletter.gs")
 
-    assert "https://www.googleapis.com/auth/script.send_mail" in manifest["oauthScopes"]
-    assert "stage = 'comprobación de cuota'" in _source("56_Newsletter.gs")
+    services = manifest["dependencies"]["enabledAdvancedServices"]
+    assert {"userSymbol": "Gmail", "version": "v1", "serviceId": "gmail"} in services
+    assert "https://www.googleapis.com/auth/gmail.send" in manifest["oauthScopes"]
+    assert "https://www.googleapis.com/auth/gmail.settings.basic" in manifest["oauthScopes"]
+    assert "https://www.googleapis.com/auth/script.send_mail" not in manifest["oauthScopes"]
+    assert "https://mail.google.com/" not in manifest["oauthScopes"]
+    assert "Gmail.Users.Messages.send({ raw: message.raw }, 'me')" in newsletter
+    assert "multipart/mixed" in newsletter
+    assert "Content-Disposition: attachment" in newsletter
 
 
 def test_materialized_insight_variants_keep_the_desktop_payload_shape() -> None:
@@ -543,7 +556,7 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     index = _source("Index.html")
     design = _source("DesignSystem.html")
 
-    assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_ACCESSING"}
+    assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_DEPLOYING"}
     assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_requireUser_")
     assert "role: 'viewer'" in _function_body(main, "_requireUser_")
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")

@@ -81,11 +81,13 @@ hasta disponer de identidad de despliegue automatizada:
    API key restringida a `*.google.com` y `*.googleusercontent.com`. La API key y
    el número de proyecto se guardan una sola vez desde **Configuración → Carpeta
    de Drive**; ya no hace falta ejecutar una función manual.
-4. Crear una nueva versión y desplegar la WebApp para el dominio.
-5. Añadir `bug-resolution-radar.group@bbva.com` en Gmail como dirección corporativa
-   verificada en **Configuración → Cuentas → Enviar correo como** para la identidad
-   que ejecuta la WebApp. La aplicación bloquea la newsletter si falta este alias:
-   nunca degrada el remitente a la cuenta personal del administrador.
+4. Crear una nueva versión y desplegar la WebApp para el dominio con **Ejecutar como:
+   yo**. El manifiesto usa `USER_DEPLOYING`, igual que Market Pulse, mientras
+   `Session.getActiveUser()` conserva la autorización funcional del visitante.
+5. Mantener `bug-resolution-radar.group@bbva.com` aceptado en **Configuración → Cuentas →
+   Enviar correo como** para el propietario del despliegue. Autorizar los scopes
+   `gmail.send` y `gmail.settings.basic`. La WebApp valida ese `sendAs` mediante
+   Gmail API y nunca utiliza la identidad de la persona que pulsa el botón.
 6. Exportar desde escritorio e importar un snapshot `.brr` v3 por cada ámbito.
 7. Verificar Resumen, Insights, Tendencias, Issues, Settings y una prueba de
    newsletter al administrador.

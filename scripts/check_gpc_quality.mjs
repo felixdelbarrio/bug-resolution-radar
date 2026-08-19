@@ -40,8 +40,8 @@ for (const name of htmlFiles) {
 }
 
 const manifest = JSON.parse(source("appsscript.json"));
-if (manifest.webapp?.access !== "DOMAIN" || manifest.webapp?.executeAs !== "USER_ACCESSING") {
-  throw new Error("appsscript.json debe conservar acceso DOMAIN y ejecución USER_ACCESSING.");
+if (manifest.webapp?.access !== "DOMAIN" || manifest.webapp?.executeAs !== "USER_DEPLOYING") {
+  throw new Error("appsscript.json debe conservar acceso DOMAIN y ejecución USER_DEPLOYING.");
 }
 if (manifest.runtimeVersion !== "V8") {
   throw new Error("Apps Script debe usar runtime V8.");

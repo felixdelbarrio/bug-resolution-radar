@@ -17,22 +17,33 @@ function _newsletterReports_() {
   }).filter(Boolean);
 }
 
-function _newsletterSenderIdentity_(userEmail) {
+function _newsletterSenderIdentity_() {
   const requested = _canonicalEmail_(RADAR.newsletterFrom);
-  let aliases = [];
+  let response = null;
   try {
-    aliases = GmailApp.getAliases().map(_canonicalEmail_);
+    response = Gmail.Users.Settings.SendAs.list('me');
   } catch (err) {
-    aliases = [];
+    return {
+      requested: requested,
+      effective: '',
+      ready: false,
+      verificationStatus: 'unavailable',
+      mode: 'Gmail API · remitente corporativo no disponible',
+      error: _sanitizeText_(err && err.message, 500)
+    };
   }
-  const usesAlias = aliases.indexOf(requested) >= 0;
+  const sendAs = ((response && response.sendAs) || []).find(function (item) {
+    return _canonicalEmail_(item.sendAsEmail) === requested;
+  });
+  const verificationStatus = _text_(sendAs && sendAs.verificationStatus).toLowerCase() || 'unknown';
+  const ready = Boolean(sendAs) && verificationStatus === 'accepted';
   return {
     requested: requested,
-    effective: usesAlias ? requested : '',
-    usesAlias: usesAlias,
-    ready: usesAlias,
-    mode: usesAlias ? 'buzón corporativo verificado' : 'buzón corporativo no disponible como alias',
-    administrator: _canonicalEmail_(userEmail)
+    effective: ready ? requested : '',
+    ready: ready,
+    verificationStatus: verificationStatus,
+    mode: ready ? 'Gmail API · remitente corporativo verificado' : 'Gmail API · remitente pendiente',
+    error: ''
   };
 }
 
@@ -74,7 +85,7 @@ function _newsletterAuditPayload_() {
   });
 }
 
-function _newsletterSettingsPayload_(userEmail) {
+function _newsletterSettingsPayload_() {
   const reports = _newsletterReports_();
   const activeReportIds = new Set(reports.map(function (report) { return report.reportId; }));
   const recipients = _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
@@ -97,7 +108,7 @@ function _newsletterSettingsPayload_(userEmail) {
       left.email.localeCompare(right.email);
   });
   return {
-    sender: _newsletterSenderIdentity_(userEmail),
+    sender: _newsletterSenderIdentity_(),
     reports: reports,
     users: _newsletterUsers_(),
     recipients: recipients,
@@ -107,8 +118,8 @@ function _newsletterSettingsPayload_(userEmail) {
 
 function getNewsletterSettings() {
   return _rpc_(function () {
-    const user = _requireAdmin_();
-    return _newsletterSettingsPayload_(user.email);
+    _requireAdmin_();
+    return _newsletterSettingsPayload_();
   });
 }
 
@@ -150,7 +161,7 @@ function saveNewsletterRecipient(payload) {
         updated_by: user.email
       });
     });
-    return _newsletterSettingsPayload_(user.email);
+    return _newsletterSettingsPayload_();
   });
 }
 
@@ -199,6 +210,100 @@ function _newsletterEmailFont_(value) {
   return String(value || '')
     .split(String.fromCharCode(34))
     .join(String.fromCharCode(39));
+}
+
+function _newsletterEncodedHeader_(value) {
+  return '=?UTF-8?B?' +
+    Utilities.base64Encode(_text_(value), Utilities.Charset.UTF_8) + '?=';
+}
+
+function _newsletterWrapBase64_(value) {
+  return (String(value || '').match(/.{1,76}/g) || ['']).join('\r\n');
+}
+
+function _newsletterMimeText_(value) {
+  return _newsletterWrapBase64_(
+    Utilities.base64Encode(String(value || ''), Utilities.Charset.UTF_8)
+  );
+}
+
+function _newsletterMimeBytes_(bytes) {
+  return _newsletterWrapBase64_(Utilities.base64Encode(bytes));
+}
+
+function _newsletterMimeMessage_(recipient, subject, rendered, attachment, sender) {
+  const normalizedRecipient = _canonicalEmail_(recipient);
+  _assert_(normalizedRecipient, 'El destinatario de la newsletter no es válido.', 'VALIDATION_ERROR');
+  const token = Utilities.getUuid().replace(/-/g, '');
+  const mixedBoundary = 'radar_mixed_' + token;
+  const alternativeBoundary = 'radar_alternative_' + token;
+  const fileName = _text_(attachment.getName()) || 'bug-resolution-radar.pptx';
+  const crlf = '\r\n';
+  const mime = [
+    'From: ' + _newsletterEncodedHeader_(RADAR.corporateBrand) + ' <' + sender.effective + '>',
+    'Reply-To: ' + sender.effective,
+    'To: ' + normalizedRecipient,
+    'Subject: ' + _newsletterEncodedHeader_(subject),
+    'Date: ' + new Date().toUTCString(),
+    'Message-ID: <' + token + '@voc-commercial.bbva.com>',
+    'X-Bug-Resolution-Radar-Version: ' + RADAR.appVersion,
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="' + mixedBoundary + '"',
+    '',
+    '--' + mixedBoundary,
+    'Content-Type: multipart/alternative; boundary="' + alternativeBoundary + '"',
+    '',
+    '--' + alternativeBoundary,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    _newsletterMimeText_(rendered.plain),
+    '--' + alternativeBoundary,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    _newsletterMimeText_(rendered.html),
+    '--' + alternativeBoundary + '--',
+    '',
+    '--' + mixedBoundary,
+    'Content-Type: application/vnd.openxmlformats-officedocument.presentationml.presentation; name="' +
+      _newsletterEncodedHeader_(fileName) + '"',
+    'Content-Transfer-Encoding: base64',
+    'Content-Disposition: attachment; filename="' + _newsletterEncodedHeader_(fileName) + '"',
+    '',
+    _newsletterMimeBytes_(attachment.getBytes()),
+    '--' + mixedBoundary + '--',
+    ''
+  ].join(crlf);
+  return {
+    raw: Utilities.base64EncodeWebSafe(mime, Utilities.Charset.UTF_8).replace(/=+$/g, ''),
+    recipient: normalizedRecipient
+  };
+}
+
+function _newsletterDeliver_(recipients, subject, rendered, attachment, sender) {
+  const deliveries = [];
+  const failures = [];
+  recipients.forEach(function (recipient) {
+    try {
+      const message = _newsletterMimeMessage_(recipient, subject, rendered, attachment, sender);
+      const accepted = Gmail.Users.Messages.send({ raw: message.raw }, 'me');
+      if (!accepted || !_text_(accepted.id)) {
+        throw new Error('Gmail API no ha devuelto un identificador de mensaje.');
+      }
+      deliveries.push({
+        recipient: message.recipient,
+        messageId: _text_(accepted.id),
+        threadId: _text_(accepted.threadId)
+      });
+    } catch (err) {
+      failures.push({
+        recipient: _canonicalEmail_(recipient),
+        error: _sanitizeText_(err && err.message, 500) || 'Gmail API no ha aceptado el mensaje.'
+      });
+    }
+  });
+  return { deliveries: deliveries, failures: failures };
 }
 
 function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
@@ -344,6 +449,22 @@ function _newsletterTestWasSentBy_(reportId, email) {
   });
 }
 
+function _newsletterPreviouslyDeliveredRecipients_(reportId, mode) {
+  const delivered = new Set();
+  _readRecords_(RADAR.sheets.newsletterAudit).filter(function (row) {
+    return _text_(row.report_id) === _text_(reportId) &&
+      _text_(row.mode) === _text_(mode) &&
+      _text_(row.status) === 'partial';
+  }).forEach(function (row) {
+    const details = _safeJsonParse_(row.details, {});
+    (details.deliveredRecipients || []).forEach(function (recipient) {
+      const email = _canonicalEmail_(recipient);
+      if (email) delivered.add(email);
+    });
+  });
+  return delivered;
+}
+
 function _newsletterAuditRecord_(
   newsletterId, reportId, mode, context, recipients, subject,
   bodyText, sender, status, details, user
@@ -385,10 +506,10 @@ function sendPeriodNewsletter(reportId, mode) {
       : _newsletterRecipientsForReport_(reportId);
     _assert_(recipients.length,
       'No hay destinatarios activos para esta vista.', 'NEWSLETTER_NO_RECIPIENTS');
-    const sender = _newsletterSenderIdentity_(user.email);
+    const sender = _newsletterSenderIdentity_();
     _assert_(sender.ready,
-      'El buzón ' + sender.requested + ' debe estar configurado en Gmail como alias de envío antes de probar la newsletter. No se utilizará tu cuenta personal.',
-      'NEWSLETTER_SENDER_ALIAS_REQUIRED');
+      'El remitente corporativo ' + sender.requested + ' no está aceptado para el propietario del despliegue (' + sender.verificationStatus + '). Reautoriza Gmail API desde Apps Script.',
+      'NEWSLETTER_SENDER_UNAVAILABLE');
     const attachment = _exactReportBlob_(
       context.record.pptx_file_id,
       context.record.pptx_sha256,
@@ -400,6 +521,8 @@ function sendPeriodNewsletter(reportId, mode) {
     const newsletterId = _uuid_();
     let reportShare = null;
     let rendered = null;
+    let deliveries = [];
+    let deliveryFailures = [];
     let stage = 'preparación';
 
     try {
@@ -434,32 +557,42 @@ function sendPeriodNewsletter(reportId, mode) {
         'NEWSLETTER_ALREADY_SENT');
         _appendRecords_(RADAR.sheets.newsletterAudit, [baseAudit]);
       });
-      const options = {
-        htmlBody: rendered.html,
-        name: RADAR.corporateBrand,
-        replyTo: RADAR.newsletterFrom,
-        from: sender.effective,
-        attachments: [attachment]
-      };
-      stage = 'comprobación de cuota';
-      _assert_(MailApp.getRemainingDailyQuota() >= recipients.length,
-        'La cuota diaria de correo no permite completar este envío.', 'NEWSLETTER_SEND_FAILED');
-      stage = 'Gmail';
-      GmailApp.sendEmail(recipients.join(','), subject, rendered.plain, options);
+      stage = 'Gmail API';
+      const previouslyDelivered = deliveryMode === 'send'
+        ? _newsletterPreviouslyDeliveredRecipients_(reportId, deliveryMode)
+        : new Set();
+      const pendingRecipients = recipients.filter(function (recipient) {
+        return !previouslyDelivered.has(_canonicalEmail_(recipient));
+      });
+      const outcome = _newsletterDeliver_(pendingRecipients, subject, rendered, attachment, sender);
+      deliveries = outcome.deliveries;
+      deliveryFailures = outcome.failures;
+      _assert_(!deliveryFailures.length,
+        'Gmail API no ha aceptado ' + deliveryFailures.length + ' mensaje(s): ' +
+          deliveryFailures.map(function (item) { return item.recipient; }).join(', '),
+        'NEWSLETTER_SEND_FAILED');
       stage = 'auditoría final';
       _upsertRecord_(RADAR.sheets.newsletterAudit, Object.assign({}, baseAudit, {
         status: 'sent',
         details: deliveryMode === 'test'
-          ? 'Prueba enviada al administrador con el PPTX exacto adjunto.'
-          : 'Newsletter enviada con el PPTX exacto adjunto.'
+          ? 'Prueba aceptada por Gmail API con el PPTX exacto adjunto. Message ID: ' + deliveries[0].messageId
+          : 'Newsletter aceptada por Gmail API para ' + deliveries.length + ' destinatarios con el PPTX exacto adjunto.'
       }));
     } catch (err) {
-      if (reportShare) _deactivateReportShare_(reportShare.shareId);
+      if (reportShare && !deliveries.length) _deactivateReportShare_(reportShare.shareId);
       const technicalDetail = _sanitizeText_(err && err.message, 600) || 'Error no detallado por Google Workspace.';
       const failed = _newsletterAuditRecord_(
         newsletterId, _text_(reportId), deliveryMode, context, recipients, subject,
-        rendered ? rendered.plain : 'No se llegó a generar el cuerpo de la newsletter.', sender, 'failed',
-        'Fallo en ' + stage + ': ' + technicalDetail, user
+        rendered ? rendered.plain : 'No se llegó a generar el cuerpo de la newsletter.', sender,
+        deliveries.length ? 'partial' : 'failed',
+        deliveries.length ? _safeJsonStringify_({
+          stage: stage,
+          error: technicalDetail,
+          deliveredRecipients: deliveries.map(function (item) { return item.recipient; }),
+          messageIds: deliveries.map(function (item) { return item.messageId; }),
+          failures: deliveryFailures
+        }) : 'Fallo en ' + stage + ': ' + technicalDetail,
+        user
       );
       try { _upsertRecord_(RADAR.sheets.newsletterAudit, failed); } catch (auditError) {
         console.error('newsletter_failure_audit_error', {
@@ -481,6 +614,7 @@ function sendPeriodNewsletter(reportId, mode) {
       testRecipient: deliveryMode === 'test' ? user.email : '',
       sender: sender.effective,
       senderMode: sender.mode,
+      messageIds: deliveries.map(function (item) { return item.messageId; }),
       reportUrl: context.record.slides_url,
       applicationUrl: reportShare.url,
       pptxSha256: context.record.pptx_sha256,

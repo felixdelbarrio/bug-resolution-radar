@@ -24,7 +24,7 @@ function getPeriodReportStatus(scopeKey) {
     const record = _activeSnapshotRecordForScope_(key, true);
     _snapshotHeader_(record);
     const newsletter = _periodNewsletterState_(record.report_id, user.email);
-    const sender = _newsletterSenderIdentity_(user.email);
+    const sender = _newsletterSenderIdentity_();
     return {
       scopeKey: key,
       job: {
