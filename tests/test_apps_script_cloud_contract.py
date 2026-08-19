@@ -406,7 +406,9 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
     assert "dataset.sending" in app
 
 
-def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_personal_identity() -> None:
+def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_personal_identity() -> (
+    None
+):
     config = _source("00_Config.gs")
     newsletter = _source("56_Newsletter.gs")
     identity = _function_body(newsletter, "_newsletterSenderIdentity_")
@@ -710,7 +712,9 @@ def test_telemetry_warning_and_report_are_admin_only() -> None:
 
     assert "_requireAdmin_();" in administration
     assert "if (!isAdmin() || isShared())" in render_settings
-    assert render_settings.index("if (!isAdmin() || isShared())") < render_settings.index("analyticsWarning")
+    assert render_settings.index("if (!isAdmin() || isShared())") < render_settings.index(
+        "analyticsWarning"
+    )
     assert "admin-telemetry-only" in render_settings
     assert ".admin-telemetry-only { display: none !important; }" in design
     assert ".is-admin .admin-telemetry-only { display: grid !important; }" in design
