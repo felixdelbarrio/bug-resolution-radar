@@ -6,8 +6,13 @@ const RPC = (() => {
       .withSuccessHandler(response => {
         if (response && response.ok) {
           if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+            const app = response.data && response.data.app ? response.data.app : {};
             window.__RADAR_TELEMETRY__('rpc', {
-              name: name
+              name: name,
+              _telemetry: {
+                appVersion: String(app.version || ''),
+                contractVersion: String(app.contractVersion || '')
+              }
             }, Math.round(performance.now() - startedAt), 'success');
           }
           resolve(response.data);
@@ -158,6 +163,7 @@ const App = (() => {
   function trackEvent(eventName, details = {}, durationMs = 0, status = 'success') {
     if (isShared()) return;
     const app = state.bootstrap && state.bootstrap.app ? state.bootstrap.app : {};
+    const suppliedTelemetry = details && details._telemetry ? details._telemetry : {};
     state.analyticsQueue.push({
       eventAt: new Date().toISOString(),
       sessionId: state.sessionId,
@@ -170,8 +176,8 @@ const App = (() => {
       details: {
         ...details,
         _telemetry: {
-          appVersion: String(app.version || ''),
-          contractVersion: String(app.contractVersion || '')
+          appVersion: String(suppliedTelemetry.appVersion || app.version || ''),
+          contractVersion: String(suppliedTelemetry.contractVersion || app.contractVersion || '')
         }
       },
       userAgent: navigator.userAgent
@@ -253,7 +259,6 @@ const App = (() => {
     if (isShared()) return;
     try {
       window.localStorage.setItem(`bug-resolution-radar:preferences:${state.bootstrap.app.contractVersion}`, JSON.stringify({
-        panel: state.panel,
         scopeKey: state.scopeKey,
         trendChart: state.trendChart,
         insightsId: state.insightsId,
@@ -1389,11 +1394,12 @@ const App = (() => {
       const initial = bootstrap.initialState || {};
       const local = readLocalPreferences();
       const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
-      const validPanels = new Set(['overview', 'insights', 'trends', 'issues']);
       state.scopeKey = validScopeKeys.has(local.scopeKey)
         ? local.scopeKey
         : initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
-      state.panel = validPanels.has(local.panel) ? local.panel : initial.panel || 'overview';
+      state.route = 'dashboard';
+      state.panel = 'overview';
+      state.page = 1;
       state.trendChart = local.trendChart || initial.trendChart || 'open_status_bar';
       state.insightsId = local.insightsId || initial.insightsId || 'summary';
       state.issuesView = local.issuesView === 'Table' ? 'Table' : 'Cards';

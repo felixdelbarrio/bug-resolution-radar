@@ -311,7 +311,7 @@ function localRuntimeMarkup() {
       updatedAt: new Date().toISOString()
     }),
     getAnalyticsReport: ({ userEmail = "", days = 30, captureMode = "preview" } = {}) => ({
-      schemaVersion: "2.1",
+      schemaVersion: "2.2",
       export: {
         captureMode,
         generatedAt: "2026-07-28T12:01:00Z",
@@ -323,7 +323,7 @@ function localRuntimeMarkup() {
         sourceRowsAvailable: 1,
         matchingRows: 1,
         includedRows: 1,
-        detailLimit: 2000,
+        detailLimit: captureMode === "export" ? 2000 : 100,
         sourceRetentionLimit: 50000
       },
       filters: { userEmail, days },

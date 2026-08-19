@@ -352,6 +352,18 @@ def test_report_folder_is_global_and_blocks_validation_when_missing() -> None:
     assert "window.localStorage" in _source("App.html")
 
 
+def test_every_boot_starts_on_overview_without_persisting_last_panel() -> None:
+    app = _source("App.html")
+    boot = _function_body(app, "boot")
+    preferences = _function_body(app, "schedulePreferenceSave")
+
+    assert "state.panel = 'overview';" in boot
+    assert "state.route = 'dashboard';" in boot
+    assert "state.page = 1;" in boot
+    assert "local.panel" not in boot
+    assert "panel: state.panel" not in preferences
+
+
 def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
     config = _source("00_Config.gs")
     newsletter = _source("56_Newsletter.gs")
@@ -666,7 +678,7 @@ def test_analytics_export_flushes_pending_events_and_is_self_describing() -> Non
     assert "captureMode: 'export'" in app
     assert app.index("await deadline(flushAnalytics()") < app.index("captureMode: 'export'")
     for field in (
-        "schemaVersion: '2.1'",
+        "schemaVersion: '2.2'",
         "generatedAt: generatedAt",
         "queryStartAt:",
         "queryEndAt:",
@@ -683,6 +695,8 @@ def test_analytics_export_flushes_pending_events_and_is_self_describing() -> Non
     assert "summary: 'Calculado con todos los eventos conservados" in administration
     assert "duration: 'averageDurationMs y p95DurationMs excluyen" in administration
     assert "_analyticsCanonicalJson_(report)" in administration
+    assert "item instanceof Date" in _source("58_Administration.gs")
+    assert "captureMode === 'export' ? 2000 : 100" in administration
     assert "unversionedEvents" in administration
     assert "versionAttribution" in administration
     assert "legacy-unknown" in administration

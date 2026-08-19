@@ -182,6 +182,9 @@ function _analyticsPercentile_(values, percentile) {
 
 function _analyticsCanonicalJson_(value) {
   const normalize = function (item) {
+    if (item instanceof Date || Object.prototype.toString.call(item) === '[object Date]') {
+      return item.toISOString();
+    }
     if (Array.isArray(item)) return item.map(normalize);
     if (item && typeof item === 'object') {
       const out = {};
@@ -272,7 +275,7 @@ function getAnalyticsReport(request) {
         return right.count - left.count || left.label.localeCompare(right.label);
       });
     };
-    const detailLimit = 2000;
+    const detailLimit = captureMode === 'export' ? 2000 : 100;
     const detailRows = rows.slice(-detailLimit).reverse().map(function (row) {
       const details = _safeJsonParse_(row.details_json, {});
       return {
@@ -290,7 +293,7 @@ function getAnalyticsReport(request) {
       };
     });
     const report = {
-      schemaVersion: '2.1',
+      schemaVersion: '2.2',
       export: {
         captureMode: captureMode,
         generatedAt: generatedAt,
