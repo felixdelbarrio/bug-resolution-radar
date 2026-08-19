@@ -699,7 +699,8 @@ const App = (() => {
   }
 
   function reportSuccess(job) {
-    const canSend = job.newsletterTested && !job.newsletterSent;
+    const senderReady = job.newsletterSenderReady !== false;
+    const canSend = senderReady && job.newsletterTested && !job.newsletterSent;
     const sendLabel = job.newsletterSent
       ? 'Newsletter enviada ✓'
       : 'Enviar newsletter';
@@ -707,8 +708,9 @@ const App = (() => {
       <strong>Presentación exacta publicada</strong>
       <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
       <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
+      ${senderReady ? `<div class="newsletter-sender-ready"><strong>Remitente corporativo</strong><span>${UI.escape(job.newsletterSender || '')}</span></div>` : `<div class="newsletter-sender-blocked" role="alert"><strong>Configura el buzón corporativo</strong><span>${UI.escape(job.newsletterSender || '')} debe aparecer en Gmail como alias de envío. La WebApp no utilizará tu identidad personal.</span></div>`}
       <div class="newsletter-report-actions">
-        <button id="testPeriodNewsletter" class="secondary-button" type="button">Probar newsletter</button>
+        <button id="testPeriodNewsletter" class="secondary-button" ${senderReady ? '' : 'disabled'} type="button">Probar newsletter</button>
         <button id="sendPeriodNewsletter" class="action-button" ${canSend ? '' : 'disabled'} type="button">${sendLabel}</button>
       </div>
       <small>${UI.formatNumber(job.recipientCount)} destinatarios activos. El envío final se habilita tras una prueba correcta al administrador conectado.</small>
@@ -1061,7 +1063,11 @@ const App = (() => {
       body = `<section class="page-stack">
         <section class="surface-card page-stack">
           <h3>Destinatarios</h3>
-          <p>Identidad de envío: ${UI.escape(newsletter.sender.effective)} · ${UI.escape(newsletter.sender.mode)}</p>
+          <div class="${newsletter.sender.ready ? 'newsletter-sender-ready' : 'newsletter-sender-blocked'}">
+            <strong>${newsletter.sender.ready ? 'Buzón corporativo preparado' : 'Buzón corporativo pendiente'}</strong>
+            <span>${UI.escape(newsletter.sender.effective || newsletter.sender.requested)} · ${UI.escape(newsletter.sender.mode)}</span>
+            ${newsletter.sender.ready ? '' : '<small>Configúralo en Gmail → Configuración → Cuentas → Enviar correo como. Hasta entonces el envío permanece bloqueado.</small>'}
+          </div>
           <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
           ).join('')}</select></label>

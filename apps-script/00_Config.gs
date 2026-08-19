@@ -1,8 +1,9 @@
 /** Configuration and immutable contracts. No secrets belong in this file. */
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
-  appVersion: '2026.08.19.2',
-  contractVersion: '5.0.2',
+  corporateBrand: 'BBVA Banca de Empresas e Instituciones',
+  appVersion: '2026.08.19.3',
+  contractVersion: '5.0.3',
   projectionContract: 'bug-resolution-radar-cloud-projection',
   projectionVersion: 2,
   semanticContract: 'desktop-authoritative-v2',

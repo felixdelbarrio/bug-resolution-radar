@@ -28,9 +28,11 @@ function _newsletterSenderIdentity_(userEmail) {
   const usesAlias = aliases.indexOf(requested) >= 0;
   return {
     requested: requested,
-    effective: usesAlias ? requested : _canonicalEmail_(userEmail),
+    effective: usesAlias ? requested : '',
     usesAlias: usesAlias,
-    mode: usesAlias ? 'alias' : 'cuenta administradora con reply-to del grupo'
+    ready: usesAlias,
+    mode: usesAlias ? 'buzón corporativo verificado' : 'buzón corporativo no disponible como alias',
+    administrator: _canonicalEmail_(userEmail)
   };
 }
 
@@ -193,42 +195,118 @@ function _newsletterEscapeHtml_(value) {
     .replace(/'/g, '&#39;');
 }
 
+function _newsletterEmailFont_(value) {
+  return String(value || '')
+    .split(String.fromCharCode(34))
+    .join(String.fromCharCode(39));
+}
+
 function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
   const draft = newsletter.draft || {};
   const reportLink = _sanitizeUrl_(reportUrl);
   const appLink = _sanitizeUrl_(applicationUrl);
+  const metrics = newsletter.metrics || {};
+  const backlogDelta = Number(newsletter.backlogDelta || 0);
   const rollups = newsletter.responsibleRollups || [];
-  const paragraphs = rollups.map(function (row, index) {
-    const text = (draft.responsibleParagraphs || [])[index] || '';
+  const color = DESIGN_TOKENS.color;
+  // Email styles live inside double-quoted HTML attributes. Use single quotes
+  // around family names so the generated markup remains valid in Gmail.
+  const font = _newsletterEmailFont_(DESIGN_TOKENS.font.webBody);
+  const headline = _newsletterEmailFont_(DESIGN_TOKENS.font.webHeadline);
+  const movementColor = backlogDelta <= 0 ? color.success : color.warningStrong;
+  const movementBackground = backlogDelta <= 0 ? color.successSoft : color.warningSoft;
+  const movementLabel = backlogDelta < 0
+    ? 'Backlog reducido en ' + Math.abs(backlogDelta)
+    : backlogDelta > 0
+      ? 'Backlog incrementado en ' + backlogDelta
+      : 'Backlog estable';
+
+  function metricCell_(label, value, caption) {
+    return '<td class="metric-cell" width="25%" valign="top" style="padding:0 6px 12px">' +
+      '<div style="min-height:104px;padding:16px;background:' + color.grey200 +
+      ';border:1px solid ' + color.grey300 + ';border-radius:' + DESIGN_TOKENS.radius.component + '">' +
+      '<span style="display:block;margin-bottom:8px;color:' + color.grey600 +
+      ';font-size:12px;line-height:16px;font-weight:500;text-transform:uppercase;letter-spacing:.04em">' +
+      _newsletterEscapeHtml_(label) + '</span>' +
+      '<strong style="display:block;color:' + color.midnight + ';font-family:' + headline +
+      ';font-size:32px;line-height:40px">' + _newsletterEscapeHtml_(value) + '</strong>' +
+      '<small style="display:block;margin-top:4px;color:' + color.grey600 +
+      ';font-size:12px;line-height:16px">' + _newsletterEscapeHtml_(caption) + '</small></div></td>';
+  }
+
+  const responsibleRows = rollups.map(function (row) {
     const name = _newsletterEscapeHtml_(row.name);
     const linkedName = _text_(row.dashboardUrl)
       ? '<a href="' + _newsletterEscapeHtml_(_sanitizeUrl_(row.dashboardUrl)) +
-        '" style="color:' + DESIGN_TOKENS.color.electric + ';font-weight:700">' + name + '</a>'
+        '" style="color:' + color.electric + ';font-weight:700;text-decoration:none">' + name + '</a>'
       : '<strong>' + name + '</strong>';
-    return '<p style="margin:0 0 12px;color:' + DESIGN_TOKENS.color.grey800 + '">' +
-      linkedName + _newsletterEscapeHtml_(text).replace(_newsletterEscapeHtml_(row.name), '') +
-      '</p>';
+    const dashboardAction = _text_(row.dashboardUrl)
+      ? '<a href="' + _newsletterEscapeHtml_(_sanitizeUrl_(row.dashboardUrl)) +
+        '" style="color:' + color.electric + ';font-size:12px;line-height:16px;font-weight:700;text-decoration:none">Abrir cuadro JIRA&nbsp;↗</a>'
+      : '';
+    return '<tr><td style="padding:0 0 12px"><table role="presentation" width="100%" style="border-collapse:separate;background:' +
+      color.white + ';border:1px solid ' + color.grey300 + ';border-radius:' +
+      DESIGN_TOKENS.radius.component + '"><tr><td style="padding:16px 20px">' +
+      '<table role="presentation" width="100%"><tr><td style="color:' + color.midnight +
+      ';font-size:15px;line-height:24px">' + linkedName + '</td><td align="right">' + dashboardAction + '</td></tr></table>' +
+      '<table role="presentation" width="100%" style="margin-top:12px;border-collapse:collapse"><tr>' +
+      '<td width="33%" style="padding-right:8px;color:' + color.grey600 + ';font-size:12px;line-height:16px">Abiertas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.openIssues) + '</strong></td>' +
+      '<td width="33%" style="padding:0 8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Causas raíz<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.rootCauseEvolutives) + '</strong></td>' +
+      '<td width="34%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Discrepancias<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.finalistDiscrepancies) + '</strong></td>' +
+      '</tr></table></td></tr></table></td></tr>';
   }).join('');
+
+  const preheader = 'Seguimiento quincenal de incidencias · ' + _text_(newsletter.periodLabel);
   const html =
-    '<div style="margin:0;background:' + DESIGN_TOKENS.color.grey200 + ';padding:24px">' +
-    '<table role="presentation" width="100%" style="max-width:720px;margin:auto;background:' +
-    DESIGN_TOKENS.color.white + ';border-radius:' + DESIGN_TOKENS.radius.container +
-    ';box-shadow:' + DESIGN_TOKENS.effect.emailShadow + ';border-collapse:separate">' +
-    '<tr><td style="padding:28px;font-family:' + DESIGN_TOKENS.font.webBody + '">' +
-    '<p style="margin:0 0 16px">' + _newsletterEscapeHtml_(draft.greeting) + '</p>' +
-    '<p style="margin:0 0 12px">' + _newsletterEscapeHtml_(draft.intro) + '</p>' +
-    '<p style="margin:0 0 20px"><a href="' + _newsletterEscapeHtml_(reportLink) +
-    '" style="color:' + DESIGN_TOKENS.color.electric + ';font-weight:700">' +
-    _newsletterEscapeHtml_(draft.reportLinkLabel) + ' ↗</a></p>' +
-    '<p style="margin:0 0 20px;color:' + DESIGN_TOKENS.color.grey800 + '">' +
-    _newsletterEscapeHtml_(draft.summary) + '</p>' +
-    '<p style="margin:0 0 16px;color:' + DESIGN_TOKENS.color.grey800 + '">' +
-    _newsletterEscapeHtml_(draft.responsibleIntro) + '</p>' + paragraphs +
-    '<p style="margin:20px 0 0">' + _newsletterEscapeHtml_(draft.closing) + '</p>' +
-    '<p style="margin:24px 0 0;font-size:12px"><a href="' +
-    _newsletterEscapeHtml_(appLink) + '" style="color:' + DESIGN_TOKENS.color.electric +
-    '">Abrir snapshot publicado ↗</a></p></td></tr></table></div>';
+    '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">' +
+    _newsletterEscapeHtml_(preheader) + '</div>' +
+    '<div style="margin:0;background:' + color.grey200 + ';padding:24px 16px">' +
+    '<style>@media only screen and (max-width:620px){.email-shell{width:100%!important}.email-pad{padding:24px 16px!important}.metric-cell{display:block!important;width:100%!important}.brand-division{display:block!important;margin:8px 0 0!important;padding:0!important;border:0!important}.email-actions td{display:block!important;width:100%!important;padding:0 0 8px!important}}</style>' +
+    '<table class="email-shell" role="presentation" width="100%" style="max-width:720px;margin:auto;border-collapse:separate;background:' +
+    color.white + ';border-radius:' + DESIGN_TOKENS.radius.container + ';overflow:hidden;box-shadow:' +
+    DESIGN_TOKENS.effect.emailShadow + '">' +
+    '<tr><td style="padding:24px 32px;background:' + color.midnight + ';font-family:' + font + ';color:' + color.white + '">' +
+    '<table role="presentation" width="100%" style="font-family:' + font + ';color:' + color.white + '"><tr><td valign="middle"><strong style="color:' + color.white + ';font-size:24px;line-height:32px;letter-spacing:-.04em">BBVA</strong>' +
+    '<span class="brand-division" style="display:inline-block;margin-left:12px;padding-left:12px;border-left:1px solid ' +
+    color.serene + ';color:' + color.blueLight + ';font-size:10px;line-height:12px;font-weight:500">Banca de Empresas<br>e Instituciones</span></td>' +
+    '<td align="right" valign="middle" style="color:' + color.serene + ';font-size:12px;line-height:16px;font-weight:500">BUG RESOLUTION RADAR</td></tr></table></td></tr>' +
+    '<tr><td class="email-pad" style="padding:32px;font-family:' + font + ';font-size:15px;line-height:24px;color:' + color.grey800 + '">' +
+    '<p style="margin:0 0 8px;color:' + color.royalDark + ';font-size:12px;line-height:16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">Seguimiento quincenal</p>' +
+    '<h1 style="margin:0;color:' + color.midnight + ';font-family:' + headline + ';font-size:32px;line-height:40px">Decisiones claras sobre el backlog</h1>' +
+    '<p style="margin:8px 0 24px;color:' + color.grey600 + '">' + _newsletterEscapeHtml_(newsletter.periodLabel) + '</p>' +
+    '<p style="margin:0 0 24px">' + _newsletterEscapeHtml_(draft.greeting) + ' ' + _newsletterEscapeHtml_(draft.intro) + '</p>' +
+    '<table role="presentation" width="100%" style="margin:0 -6px 12px;border-collapse:separate"><tr>' +
+    metricCell_('Backlog abierto', metrics.currentOpen, 'Antes: ' + _text_(newsletter.previousOpen)) +
+    metricCell_('Creadas', metrics.createdCurrent, 'Quincena actual') +
+    metricCell_('Cerradas', metrics.closedCurrent, 'Quincena actual') +
+    metricCell_('Resolución', metrics.resolutionCurrent, 'Tiempo medio') +
+    '</tr></table>' +
+    '<div style="margin:0 0 24px;padding:16px 20px;border-left:4px solid ' + movementColor + ';border-radius:' +
+    DESIGN_TOKENS.radius.component + ';background:' + movementBackground + '">' +
+    '<strong style="display:block;color:' + movementColor + ';font-size:20px;line-height:24px">' +
+    _newsletterEscapeHtml_(movementLabel) + '</strong><span style="display:block;margin-top:4px;color:' +
+    color.grey700 + '">' + _newsletterEscapeHtml_(draft.summary) + '</span></div>' +
+    '<table class="email-actions" role="presentation" style="margin-bottom:32px"><tr>' +
+    '<td style="padding-right:8px"><a href="' + _newsletterEscapeHtml_(reportLink) +
+    '" style="display:inline-block;padding:12px 20px;border-radius:' + DESIGN_TOKENS.radius.component + ';background:' +
+    color.electric + ';color:' + color.white + ';font-weight:700;text-decoration:none">Abrir presentación&nbsp;↗</a></td>' +
+    '<td><a href="' + _newsletterEscapeHtml_(appLink) + '" style="display:inline-block;padding:11px 20px;border:1px solid ' +
+    color.electric + ';border-radius:' + DESIGN_TOKENS.radius.component + ';color:' + color.electric +
+    ';font-weight:700;text-decoration:none">Abrir Radar&nbsp;↗</a></td></tr></table>' +
+    '<div style="margin:0 0 16px"><p style="margin:0;color:' + color.midnight + ';font-family:' + headline +
+    ';font-size:24px;line-height:32px">Responsables y focos de actuación</p><p style="margin:4px 0 0;color:' +
+    color.grey600 + '">' + _newsletterEscapeHtml_(draft.responsibleIntro) + '</p></div>' +
+    '<table role="presentation" width="100%" style="border-collapse:collapse">' + responsibleRows + '</table>' +
+    '<p style="margin:20px 0 0;color:' + color.grey700 + '">' + _newsletterEscapeHtml_(draft.closing) + '</p>' +
+    '</td></tr><tr><td style="padding:20px 32px;border-top:1px solid ' + color.grey300 + ';background:' + color.grey200 +
+    ';font-family:' + font + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">' +
+    '<strong style="color:' + color.midnight + '">BBVA Banca de Empresas e Instituciones</strong><br>' +
+    'Información generada desde un snapshot publicado y trazable. El PPTX adjunto es la copia autoritativa del periodo.</td></tr></table></div>';
   const plain = [
+    RADAR.corporateBrand,
+    'Bug Resolution Radar',
+    newsletter.periodLabel,
+    '',
     draft.greeting,
     '',
     draft.intro,
@@ -307,13 +385,16 @@ function sendPeriodNewsletter(reportId, mode) {
       : _newsletterRecipientsForReport_(reportId);
     _assert_(recipients.length,
       'No hay destinatarios activos para esta vista.', 'NEWSLETTER_NO_RECIPIENTS');
+    const sender = _newsletterSenderIdentity_(user.email);
+    _assert_(sender.ready,
+      'El buzón ' + sender.requested + ' debe estar configurado en Gmail como alias de envío antes de probar la newsletter. No se utilizará tu cuenta personal.',
+      'NEWSLETTER_SENDER_ALIAS_REQUIRED');
     const attachment = _exactReportBlob_(
       context.record.pptx_file_id,
       context.record.pptx_sha256,
       context.record.pptx_bytes,
       context.record.report_name
     );
-    const sender = _newsletterSenderIdentity_(user.email);
     const authoredSubject = _sanitizeText_(context.newsletter.draft.subject, 220);
     const subject = deliveryMode === 'test' ? '[PRUEBA] ' + authoredSubject : authoredSubject;
     const newsletterId = _uuid_();
@@ -355,11 +436,11 @@ function sendPeriodNewsletter(reportId, mode) {
       });
       const options = {
         htmlBody: rendered.html,
-        name: 'BBVA · Bug Resolution Radar',
+        name: RADAR.corporateBrand,
         replyTo: RADAR.newsletterFrom,
+        from: sender.effective,
         attachments: [attachment]
       };
-      if (sender.usesAlias) options.from = RADAR.newsletterFrom;
       stage = 'comprobación de cuota';
       _assert_(MailApp.getRemainingDailyQuota() >= recipients.length,
         'La cuota diaria de correo no permite completar este envío.', 'NEWSLETTER_SEND_FAILED');

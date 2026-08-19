@@ -82,10 +82,14 @@ hasta disponer de identidad de despliegue automatizada:
    el número de proyecto se guardan una sola vez desde **Configuración → Carpeta
    de Drive**; ya no hace falta ejecutar una función manual.
 4. Crear una nueva versión y desplegar la WebApp para el dominio.
-5. Exportar desde escritorio e importar un snapshot `.brr` v3 por cada ámbito.
-6. Verificar Resumen, Insights, Tendencias, Issues, Settings y una prueba de
+5. Añadir `bug-resolution-radar.group@bbva.com` en Gmail como dirección corporativa
+   verificada en **Configuración → Cuentas → Enviar correo como** para la identidad
+   que ejecuta la WebApp. La aplicación bloquea la newsletter si falta este alias:
+   nunca degrada el remitente a la cuenta personal del administrador.
+6. Exportar desde escritorio e importar un snapshot `.brr` v3 por cada ámbito.
+7. Verificar Resumen, Insights, Tendencias, Issues, Settings y una prueba de
    newsletter al administrador.
-7. La primera apertura de un administrador registra automáticamente `APP_VERSION`
+8. La primera apertura de un administrador registra automáticamente `APP_VERSION`
    en `_CONFIG`, con fecha y usuario. Registrar en el PR o release esa versión,
    `dataVersion` y resultado del smoke test.
 

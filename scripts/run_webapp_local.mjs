@@ -192,11 +192,11 @@ function localRuntimeMarkup() {
   const bootstrap = {
     app: {
       name: "Bug Resolution Radar · WebApp local",
-      version: "2026.08.19.2",
-      contractVersion: "5.0.2",
+      version: "2026.08.19.3",
+      contractVersion: "5.0.3",
       semanticContract: "desktop-authoritative-v2",
       dataVersion: scope.dataVersion,
-      cacheEpoch: "local-20260819-2",
+      cacheEpoch: "local-20260819-3",
       maxTransferBytes: 33554432,
       scopeVersions: { [scope.scopeKey]: scope.dataVersion },
       materializedOnly: true,
@@ -238,6 +238,9 @@ function localRuntimeMarkup() {
         rowCount: 13,
         newsletterTested: true,
         newsletterSent: false,
+        newsletterSenderReady: true,
+        newsletterSender: "bug-resolution-radar.group@bbva.com",
+        newsletterSenderMode: "buzón corporativo verificado",
         recipientCount: 2
       },
       folder: bootstrap.administration.reportDriveFolder
@@ -254,8 +257,8 @@ function localRuntimeMarkup() {
     getAdminConsole: () => ({
       health: {
         status: "Operativa (simulada)",
-        appVersion: "2026.08.19.2",
-        contractVersion: "5.0.2",
+        appVersion: "2026.08.19.3",
+        contractVersion: "5.0.3",
         accessPolicy: "Dominio @bbva.com",
         lastImportAt: scope.activatedAt,
         importedRecords: 13,
@@ -286,8 +289,11 @@ function localRuntimeMarkup() {
     saveReportDriveFolder: () => bootstrap.administration.reportDriveFolder,
     getNewsletterSettings: () => ({
       sender: {
-        effective: "admin.local@bbva.com",
-        mode: "cuenta administradora con reply-to del grupo"
+        requested: "bug-resolution-radar.group@bbva.com",
+        effective: "bug-resolution-radar.group@bbva.com",
+        ready: true,
+        usesAlias: true,
+        mode: "buzón corporativo verificado"
       },
       reports: [{
         reportId: "local-report",

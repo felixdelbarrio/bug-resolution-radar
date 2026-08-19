@@ -379,6 +379,51 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
     assert "dataset.sending" in app
 
 
+def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_personal_identity() -> None:
+    config = _source("00_Config.gs")
+    newsletter = _source("56_Newsletter.gs")
+    identity = _function_body(newsletter, "_newsletterSenderIdentity_")
+    sender = _function_body(newsletter, "sendPeriodNewsletter")
+    app = _source("App.html")
+
+    assert "corporateBrand: 'BBVA Banca de Empresas e Instituciones'" in config
+    assert "effective: usesAlias ? requested : ''" in identity
+    assert "ready: usesAlias" in identity
+    assert "'NEWSLETTER_SENDER_ALIAS_REQUIRED'" in sender
+    assert "from: sender.effective" in sender
+    assert "name: RADAR.corporateBrand" in sender
+    assert sender.index("_newsletterSenderIdentity_(user.email)") < sender.index("_exactReportBlob_(")
+    assert "newsletterSenderReady" in app
+    assert "La WebApp no utilizará tu identidad personal" in app
+    assert "cuenta administradora con reply-to del grupo" not in newsletter
+
+
+def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarchy() -> None:
+    newsletter = _function_body(_source("56_Newsletter.gs"), "_newsletterRender_")
+    index = _source("Index.html")
+    design = _source("DesignSystem.html")
+
+    assert index.count("BBVA Banca de Empresas e Instituciones") >= 2
+    assert index.count("corporate-lockup") >= 2
+    assert ".corporate-lockup" in design
+    for expected in (
+        "Decisiones claras sobre el backlog",
+        "Backlog abierto",
+        "Creadas",
+        "Cerradas",
+        "Resolución",
+        "Abrir presentación",
+        "Abrir Radar",
+        "Abrir cuadro JIRA",
+        "BBVA Banca de Empresas e Instituciones",
+        "@media only screen and (max-width:620px)",
+    ):
+        assert expected in newsletter
+    assert "newsletter.responsibleRollups" in newsletter
+    assert "DESIGN_TOKENS.radius.container" in newsletter
+    assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
+
+
 def test_newsletter_manifest_declares_mailapp_quota_scope() -> None:
     manifest = json.loads(_source("appsscript.json"))
 
@@ -530,7 +575,7 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
     assert "body_text" in _source("00_Config.gs")
     assert "slides_url" in _source("00_Config.gs")
     assert "_newsletterSenderIdentity_" in newsletter
-    assert "sender.usesAlias" in newsletter
+    assert "sender.ready" in newsletter
     assert "context.newsletter.draft.subject" in newsletter
     for label in (
         "Estado de la WebApp",

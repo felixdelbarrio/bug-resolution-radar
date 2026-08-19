@@ -24,6 +24,7 @@ function getPeriodReportStatus(scopeKey) {
     const record = _activeSnapshotRecordForScope_(key, true);
     _snapshotHeader_(record);
     const newsletter = _periodNewsletterState_(record.report_id, user.email);
+    const sender = _newsletterSenderIdentity_(user.email);
     return {
       scopeKey: key,
       job: {
@@ -43,6 +44,9 @@ function getPeriodReportStatus(scopeKey) {
         details: 'PPTX exacto importado desde escritorio y convertido a Google Slides.',
         newsletterTested: newsletter.testSent,
         newsletterSent: newsletter.newsletterSent,
+        newsletterSenderReady: sender.ready,
+        newsletterSender: sender.effective || sender.requested,
+        newsletterSenderMode: sender.mode,
         recipientCount: _newsletterRecipientsForReport_(record.report_id).length,
         projectionSha256: _text_(record.projection_sha256),
         pptxSha256: _text_(record.pptx_sha256)

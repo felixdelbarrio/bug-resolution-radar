@@ -79,14 +79,22 @@ h4 { font-size: 15px; line-height: 24px; }
   color: var(--bbva-midnight);
   box-shadow: var(--bbva-shadow-gate);
 }
-.access-gate-brand {
-  display: inline-block;
-  margin-bottom: 32px;
-  color: var(--bbva-electric);
+.corporate-lockup { display: inline-flex; align-items: center; gap: 12px; }
+.corporate-lockup strong {
   font-size: 24px;
+  line-height: 32px;
   font-weight: 700;
   letter-spacing: -0.04em;
 }
+.corporate-lockup span {
+  padding-left: 12px;
+  border-left: 1px solid currentColor;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+.corporate-lockup-gate { margin-bottom: 32px; color: var(--bbva-electric); }
 .access-gate-kicker {
   margin: 0 0 8px;
   color: var(--bbva-grey-600);
@@ -140,6 +148,8 @@ h4 { font-size: 15px; line-height: 24px; }
   border-radius: 50%;
 }
 .bbva-hero-copy { position: relative; z-index: 1; min-width: 0; }
+.corporate-lockup-hero { margin-bottom: 16px; color: var(--bbva-white); }
+.corporate-lockup-hero span { color: var(--bbva-blue-light); }
 .bbva-hero-title { color: var(--bbva-white); font-size: 40px; line-height: 48px; }
 .bbva-hero-sub { margin: 4px 0 0; color: var(--bbva-blue-light); font-size: 15px; line-height: 24px; }
 
@@ -689,6 +699,16 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 .report-success a { color: var(--bbva-success); font-weight: 700; }
 .report-success small { color: var(--bbva-text-muted); }
 .newsletter-report-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.newsletter-sender-ready, .newsletter-sender-blocked {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 8px;
+}
+.newsletter-sender-ready { border: 1px solid var(--bbva-success); background: var(--bbva-success-soft); color: var(--bbva-success); }
+.newsletter-sender-blocked { border: 1px solid var(--bbva-warning); background: var(--bbva-warning-soft); color: var(--bbva-warning-strong); }
+.newsletter-sender-ready span, .newsletter-sender-blocked span, .newsletter-sender-blocked small { color: var(--bbva-text-muted); }
 .report-error { display: grid; gap: 4px; margin: 0; padding: 12px 16px; border-radius: 8px; background: var(--bbva-danger-soft); color: var(--bbva-danger); }
 .report-error span, .report-error small { color: var(--bbva-text-muted); }
 .report-folder-setting { display: grid; gap: 16px; }
