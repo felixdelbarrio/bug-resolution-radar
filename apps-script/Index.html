@@ -4,6 +4,7 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script src="https://apis.google.com/js/api.js"></script>
   <?!= _clientBootstrapMarkup_(sharedToken || '') ?>
   <?!= _include_('BrandAssets'); ?>
   <?!= _include_('DesignSystem'); ?>
@@ -59,7 +60,7 @@
         <button class="workspace-tab" data-panel="issues" type="button">Issues</button>
       </nav>
       <div class="workspace-nav-actions">
-        <button class="workspace-action admin-only" data-route="reports" type="button" title="Probar o enviar newsletter" aria-label="Probar o enviar newsletter"></button>
+        <button class="workspace-action admin-only" data-route="reports" type="button" title="Newsletter" aria-label="Probar o enviar newsletter"></button>
         <button class="workspace-action admin-only" data-route="import" type="button" title="Importar datos" aria-label="Importar datos"></button>
         <button id="themeToggle" class="workspace-action" type="button" title="Cambiar tema" aria-label="Cambiar tema"></button>
         <button class="workspace-action admin-only" data-route="settings" type="button" title="Configuración" aria-label="Configuración"></button>

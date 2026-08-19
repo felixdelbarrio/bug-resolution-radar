@@ -115,6 +115,38 @@ function queryDashboard(request) {
   });
 }
 
+/** Hydrates every immutable primary variant in one background RPC. */
+function getDashboardViewBundle(scopeKey) {
+  return _rpc_(function () {
+    _requireUser_();
+    const record = _activeSnapshotRecordForScope_(_text_(scopeKey), true);
+    const requests = [
+      { view: 'overview' },
+      { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }
+    ];
+    const insights = _loadSnapshotPart_(record, 'insights/catalog');
+    const trends = _loadSnapshotPart_(record, 'trends/catalog');
+    (insights || []).forEach(function (item) {
+      requests.push({ view: 'insights', insightsId: _text_(item.id) });
+    });
+    (trends || []).forEach(function (item) {
+      requests.push({ view: 'trends', chartId: _text_(item.id) });
+    });
+    return requests.map(function (request) {
+      const normalized = _normalizeMaterializedRequest_(Object.assign({
+        scopeKey: _text_(record.scope_key),
+        page: 1,
+        pageSize: RADAR.defaultPageSize,
+        sortId: 'default'
+      }, request));
+      return {
+        request: normalized,
+        payload: _materializedViewPayload_(record, normalized)
+      };
+    });
+  });
+}
+
 function getIssueDetail(request) {
   return _rpc_(function () {
     _requireUser_();

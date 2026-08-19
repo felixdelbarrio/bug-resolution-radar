@@ -98,33 +98,61 @@ function localRuntimeMarkup() {
   };
   const dashboard = (request = {}) => {
     if (request.view === "insights") {
+      const activeTab = request.insightsId || "summary";
+      const insights = {
+        tabs: [
+          { id: "summary", label: "Resumen" },
+          { id: "functionality", label: "Funcionalidad" },
+          { id: "duplicates", label: "Duplicados" },
+          { id: "rootCauseEvolutives", label: "Evolutivos causas raíces" },
+          { id: "finalistDiscrepancies", label: "Discrepancias finalistas" },
+          { id: "people", label: "Personas" }
+        ],
+        activeTab
+      };
+      if (activeTab === "summary") insights.periodSummary = {
+        caption: "España · Periodo 15/07 - 28/07/2026",
+        cards: [{
+          cardId: "open_total", kicker: "Insights · Abiertas totales", metric: "8",
+          detail: "Backlog abierto en el scope actual", label: "Abiertas", tone: "warning",
+          issues: [issue]
+        }],
+        groups: [], showOpenSplit: false, sourceBreakdown: []
+      };
+      if (activeTab === "functionality") insights.functionality = {
+        chart: { title: "Incidencias por funcionalidad", subtitle: "Vista acumulada", figure },
+        topics: [{
+          topic: "Pagos", color: "#0C6DFF", count: 1, pct: 12.5,
+          dominantStatus: "Open", dominantPriority: "High",
+          brief: "Concentración operativa localizada.",
+          flow: { createdCount: 2, resolvedCount: 1, pctDelta: 0.1, direction: "worsening", windowDays: 30 },
+          rootCauses: [{ label: "Integración", count: 1 }], issues: [issue]
+        }],
+        tip: "Contenido materializado por escritorio."
+      };
+      if (activeTab === "duplicates") insights.duplicates = {
+        brief: "Posibles duplicados del snapshot.",
+        titleGroups: [{ summary: "Error al confirmar operación", count: 1, issues: [issue] }],
+        heuristicGroups: [{ summary: "Coincidencia semántica", count: 1, dominantStatus: "Open", dominantPriority: "High", issues: [issue] }]
+      };
+      if (["rootCauseEvolutives", "finalistDiscrepancies"].includes(activeTab)) insights[activeTab] = {
+        kpis: [{ label: "JIRA pendientes", value: "1", detail: "Snapshot local" }],
+        groups: [{
+          helixId: "INC0001", helixUrl: "https://example.com/helix/INC0001", helixStatus: "Closed",
+          helixText: "Incidencia Helix de ejemplo", jiraCount: 1,
+          issues: [{ ...issue, openDays: 18, matchedLabels: ["causa-raiz"], note: "Seguimiento local" }]
+        }], totalRows: 1, truncated: false
+      };
+      if (activeTab === "people") insights.people = { cards: [{
+        assignee: "Equipo Radar", openCount: 1, sharePct: 12.5,
+        statusBreakdown: [{ status: "Open", count: 1 }],
+        risk: { label: "Alto", flowRiskPct: 75, criticalRiskPct: 50 },
+        pushPct: 42, blockedCount: 1, aging: { value: "18d", caption: "Issue más antigua" },
+        recommendations: ["Priorizar desbloqueo"], oldestIssues: [issue]
+      }] };
       return {
         ...common,
-        insights: {
-          tabs: [
-            { id: "summary", label: "Resumen" },
-            { id: "functionality", label: "Funcionalidad" },
-            { id: "duplicates", label: "Duplicados" },
-            { id: "rootCauseEvolutives", label: "Evolutivos causas raíces" },
-            { id: "finalistDiscrepancies", label: "Discrepancias finalistas" },
-            { id: "people", label: "Personas" }
-          ],
-          activeTab: request.insightsId || "summary",
-          periodSummary: {
-            caption: "España · Periodo 15/07 - 28/07/2026",
-            cards: [{
-              cardId: "open_total",
-              kicker: "Insights · Abiertas totales",
-              metric: "8",
-              detail: "Backlog abierto en el scope actual",
-              label: "Abiertas",
-              tone: "warning",
-              issues: [issue]
-            }],
-            groups: [],
-            showOpenSplit: false
-          }
-        }
+        insights
       };
     }
     if (request.view === "trends") {
@@ -149,7 +177,7 @@ function localRuntimeMarkup() {
   const bootstrap = {
     app: {
       name: "Bug Resolution Radar · WebApp local",
-      contractVersion: "5.0.0",
+      contractVersion: "5.0.1",
       semanticContract: "desktop-authoritative-v2",
       dataVersion: scope.dataVersion,
       cacheEpoch: "local",
@@ -181,6 +209,7 @@ function localRuntimeMarkup() {
   const mocks = {
     getBootstrap: () => bootstrap,
     queryDashboard: (request) => dashboard(request),
+    getDashboardViewBundle: () => [],
     savePreference: () => ({ saved: true }),
     recordAnalyticsEvents: (events) => ({ accepted: Array.isArray(events) ? events.length : 0 }),
     getIssueDetail: () => issue,
@@ -234,19 +263,7 @@ function localRuntimeMarkup() {
         dashboardUrl: "https://jira.example.com/dashboard/42"
       }]
     }),
-    browseReportDriveFolders: ({ category }) => ({
-      category: category || "my",
-      nextPageToken: "",
-      folders: [{
-        id: "local-folder",
-        name: "Informes locales",
-        url: "https://drive.google.com/",
-        modifiedAt: scope.activatedAt,
-        starred: true,
-        shared: false,
-        owner: "Admin local"
-      }]
-    }),
+    getDrivePickerConfig: () => ({ configured: false, message: "Picker simulado localmente." }),
     saveReportDriveFolder: () => bootstrap.administration.reportDriveFolder,
     getNewsletterSettings: () => ({
       sender: {

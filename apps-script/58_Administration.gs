@@ -110,45 +110,39 @@ function getAdminConsole(scopeKey) {
   });
 }
 
-function browseReportDriveFolders(request) {
+function getDrivePickerConfig() {
   return _rpc_(function () {
     _requireAdmin_();
-    const input = request || {};
-    _assertExactFields_(input, ['category', 'pageToken'], 'driveFolderBrowser');
-    const category = _text_(input.category) || 'my';
-    const categoryQueries = {
-      my: "'me' in owners",
-      shared: 'sharedWithMe = true',
-      starred: 'starred = true'
-    };
-    _assert_(Object.prototype.hasOwnProperty.call(categoryQueries, category),
-      'La categoría de Drive no es válida.', 'VALIDATION_ERROR');
-    const response = Drive.Files.list({
-      q: "mimeType = 'application/vnd.google-apps.folder' and trashed = false and " +
-        categoryQueries[category],
-      corpora: 'user',
-      pageSize: 100,
-      pageToken: _text_(input.pageToken) || undefined,
-      orderBy: 'name',
-      fields: 'nextPageToken,files(id,name,webViewLink,modifiedTime,starred,shared,owners(displayName,emailAddress))'
-    });
+    const properties = PropertiesService.getScriptProperties();
+    const developerKey = _text_(properties.getProperty('RADAR_PICKER_API_KEY'));
+    const appId = _text_(properties.getProperty('RADAR_PICKER_APP_ID'));
+    const configured = /^AIza[A-Za-z0-9_-]{20,}$/.test(developerKey) && /^\d{6,30}$/.test(appId);
     return {
-      category: category,
-      nextPageToken: _text_(response.nextPageToken),
-      folders: (response.files || []).map(function (file) {
-        return {
-          id: _text_(file.id),
-          name: _text_(file.name),
-          url: _sanitizeUrl_(file.webViewLink),
-          modifiedAt: file.modifiedTime || null,
-          starred: file.starred === true,
-          shared: file.shared === true,
-          owner: file.owners && file.owners.length
-            ? _text_(file.owners[0].displayName || file.owners[0].emailAddress)
-            : ''
-        };
-      })
+      configured: configured,
+      developerKey: configured ? developerKey : '',
+      appId: configured ? appId : '',
+      oauthToken: configured ? ScriptApp.getOAuthToken() : '',
+      message: configured ? '' :
+        'Google Drive Picker requiere RADAR_PICKER_API_KEY y RADAR_PICKER_APP_ID en las propiedades del script.'
     };
+  });
+}
+
+/** Configuración operativa única; no se expone en la interfaz ni se persiste en Sheets. */
+function configureDrivePicker(apiKey, cloudProjectNumber) {
+  return _rpc_(function () {
+    _requireAdmin_();
+    const developerKey = _text_(apiKey);
+    const appId = _text_(cloudProjectNumber);
+    _assert_(/^AIza[A-Za-z0-9_-]{20,}$/.test(developerKey),
+      'La API key de Google Picker no es válida.', 'VALIDATION_ERROR');
+    _assert_(/^\d{6,30}$/.test(appId),
+      'El número del proyecto de Google Cloud no es válido.', 'VALIDATION_ERROR');
+    PropertiesService.getScriptProperties().setProperties({
+      RADAR_PICKER_API_KEY: developerKey,
+      RADAR_PICKER_APP_ID: appId
+    });
+    return { configured: true, appId: appId };
   });
 }
 

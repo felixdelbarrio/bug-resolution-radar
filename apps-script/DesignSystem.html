@@ -176,6 +176,7 @@ h4 { font-size: 15px; line-height: 24px; }
 .scope-admin-control { display: none !important; }
 .is-admin .scope-admin-control { display: flex !important; }
 .is-admin .workspace-country-field.scope-admin-control { display: grid !important; }
+.is-admin .scope-admin-control.hidden { display: none !important; }
 .shared-view .workspace-country-field select,
 .shared-view .workspace-source-field select { color: var(--bbva-text); opacity: 1; }
 .workspace-scope-detail {
@@ -912,6 +913,58 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 }
 .route-enter { animation: route-in 140ms ease-out; }
 
+/* Materialized Insights mirrors the desktop composition, without exposing
+   filters or recalculating any business rule in the WebApp. */
+.issue-stack { display: grid; gap: 8px; }
+.insight-issue-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bbva-border);
+}
+.insight-issue-card:last-child { border-bottom: 0; }
+.insight-issue-copy { display: grid; gap: 8px; }
+.issue-primary-link-title { color: var(--bbva-text); }
+.issue-card-badges, .insight-issue-chip-row, .people-state-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.topic-summary-copy { display: flex; flex-wrap: wrap; gap: 4px; }
+.topic-summary-label { font-weight: 700; }
+.topic-summary-meta { color: var(--bbva-text-muted); }
+.signal-list { margin: 0; padding-left: 20px; color: var(--bbva-text-muted); }
+.recommendation-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-left: 4px solid var(--bbva-electric);
+  border-radius: 8px;
+  background: var(--bbva-blue-light);
+}
+.ops-kpi-grid-react, .people-kpi-grid-react {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.finalist-hero-panel { display: flex; justify-content: space-between; align-items: center; }
+.finalist-summary-main { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finalist-summary-side { margin-left: auto; }
+.finalist-helix-description { display: grid; gap: 4px; }
+.finalist-helix-description > span { color: var(--bbva-text-muted); font-size: 12px; }
+.finalist-helix-description p { margin: 0; }
+.finalist-issues-table .simple-table-head,
+.finalist-issues-table .simple-table-row {
+  grid-template-columns: minmax(100px, .8fr) minmax(260px, 2fr) repeat(4, minmax(100px, 1fr));
+  min-width: 980px;
+}
+.finalist-label-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.root-cause-label-chip { padding: 2px 6px; border-radius: 999px; background: var(--bbva-blue-light); color: var(--bbva-electric); }
+.finalist-note-cell { grid-column: 2 / -1; display: grid; gap: 2px; color: var(--bbva-text-muted); }
+.manual-folder-fallback { border-top: 1px solid var(--bbva-border); padding-top: 12px; }
+.manual-folder-fallback summary { color: var(--bbva-text-muted); cursor: pointer; }
+.manual-folder-fallback form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; margin-top: 12px; }
+.drive-picker-button { justify-self: start; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes route-in { from { opacity: 0; transform: translateY(4px); } }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: 0.5; } }
@@ -935,6 +988,7 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
   .dashboard-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .insights-filter-grid { grid-template-columns: 1fr; }
   .overview-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ops-kpi-grid-react, .people-kpi-grid-react { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-grid, .period-card-grid, .report-grid { grid-template-columns: 1fr; }
   .notes-editor-shell { grid-template-columns: 1fr 1fr; }
   .notes-editor-shell .action-button { grid-column: 1 / -1; }
@@ -954,6 +1008,7 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
   .folder-jump-form, .folder-current, .newsletter-recipient-form, .newsletter-recipient-row {
     grid-template-columns: 1fr;
   }
+  .ops-kpi-grid-react, .manual-folder-fallback form { grid-template-columns: 1fr; }
   .folder-current .action-button { grid-column: 1; grid-row: auto; }
   .workspace-rollup-slot, .workspace-source-slot, .workspace-scope-status { min-height: auto; }
   .workspace-nav-bar { top: 0; margin-inline: -16px; border-radius: 0; border-inline: 0; }

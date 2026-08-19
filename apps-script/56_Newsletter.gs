@@ -314,25 +314,17 @@ function sendPeriodNewsletter(reportId, mode) {
       context.record.report_name
     );
     const sender = _newsletterSenderIdentity_(user.email);
-    const subject = _sanitizeText_(context.newsletter.draft.subject, 240);
+    const authoredSubject = _sanitizeText_(context.newsletter.draft.subject, 220);
+    const subject = deliveryMode === 'test' ? '[PRUEBA] ' + authoredSubject : authoredSubject;
     const newsletterId = _uuid_();
     let reportShare = null;
     let rendered = null;
-    const existing = _readRecords_(RADAR.sheets.newsletterAudit).filter(function (row) {
-      return _text_(row.report_id) === _text_(reportId) && _text_(row.mode) === deliveryMode;
-    });
-    _assert_(!existing.some(function (row) {
-      const created = _date_(row.created_at);
-      return _text_(row.status) === 'processing' &&
-        created && Date.now() - created.getTime() < 10 * 60 * 1000;
-    }), 'Ya hay una newsletter de esta presentación en proceso.', 'NEWSLETTER_IN_PROGRESS');
-    _assert_(!(deliveryMode === 'send' && existing.some(function (row) {
-      return _text_(row.status) === 'sent';
-    })), 'Esta presentación ya fue enviada. Importa una nueva versión para volver a enviar.',
-    'NEWSLETTER_ALREADY_SENT');
+    let stage = 'preparación';
 
     try {
+      stage = 'enlace seguro';
       reportShare = _createReportShare_(context, user);
+      stage = 'renderizado';
       rendered = _newsletterRender_(
         context.newsletter,
         context.record.slides_url,
@@ -342,7 +334,25 @@ function sendPeriodNewsletter(reportId, mode) {
         newsletterId, _text_(reportId), deliveryMode, context, recipients, subject,
         rendered.plain, sender, 'processing', 'Newsletter local validada y preparada.', user
       );
-      _appendRecords_(RADAR.sheets.newsletterAudit, [baseAudit]);
+      stage = 'reserva de envío';
+      _withApplicationLock_(function () {
+        // A second click must observe the processing row written by the first
+        // execution, even when this execution had memoized a previous audit.
+        _forgetSheet_(RADAR.sheets.newsletterAudit);
+        const existing = _readRecords_(RADAR.sheets.newsletterAudit).filter(function (row) {
+          return _text_(row.report_id) === _text_(reportId) && _text_(row.mode) === deliveryMode;
+        });
+        _assert_(!existing.some(function (row) {
+          const created = _date_(row.created_at);
+          return _text_(row.status) === 'processing' &&
+            created && Date.now() - created.getTime() < 10 * 60 * 1000;
+        }), 'Ya hay una newsletter de esta presentación en proceso.', 'NEWSLETTER_IN_PROGRESS');
+        _assert_(!(deliveryMode === 'send' && existing.some(function (row) {
+          return _text_(row.status) === 'sent';
+        })), 'Esta presentación ya fue enviada. Importa una nueva versión para volver a enviar.',
+        'NEWSLETTER_ALREADY_SENT');
+        _appendRecords_(RADAR.sheets.newsletterAudit, [baseAudit]);
+      });
       const options = {
         htmlBody: rendered.html,
         name: 'BBVA · Bug Resolution Radar',
@@ -350,7 +360,11 @@ function sendPeriodNewsletter(reportId, mode) {
         attachments: [attachment]
       };
       if (sender.usesAlias) options.from = RADAR.newsletterFrom;
+      _assert_(MailApp.getRemainingDailyQuota() >= recipients.length,
+        'La cuota diaria de correo no permite completar este envío.', 'NEWSLETTER_SEND_FAILED');
+      stage = 'Gmail';
       GmailApp.sendEmail(recipients.join(','), subject, rendered.plain, options);
+      stage = 'auditoría final';
       _upsertRecord_(RADAR.sheets.newsletterAudit, Object.assign({}, baseAudit, {
         status: 'sent',
         details: deliveryMode === 'test'
@@ -359,14 +373,21 @@ function sendPeriodNewsletter(reportId, mode) {
       }));
     } catch (err) {
       if (reportShare) _deactivateReportShare_(reportShare.shareId);
+      const technicalDetail = _sanitizeText_(err && err.message, 600) || 'Error no detallado por Google Workspace.';
       const failed = _newsletterAuditRecord_(
         newsletterId, _text_(reportId), deliveryMode, context, recipients, subject,
-        rendered ? rendered.plain : '', sender, 'failed',
-        'No se pudo completar el envío con el PPTX exacto.', user
+        rendered ? rendered.plain : 'No se llegó a generar el cuerpo de la newsletter.', sender, 'failed',
+        'Fallo en ' + stage + ': ' + technicalDetail, user
       );
-      _upsertRecord_(RADAR.sheets.newsletterAudit, failed);
+      try { _upsertRecord_(RADAR.sheets.newsletterAudit, failed); } catch (auditError) {
+        console.error('newsletter_failure_audit_error', {
+          stage: stage, message: auditError && auditError.message
+        });
+      }
       if (err && err.code) throw err;
-      const failure = new Error('Gmail no ha podido completar el envío de la newsletter.');
+      const failure = new Error(
+        'No se pudo completar la newsletter durante ' + stage + ': ' + technicalDetail
+      );
       failure.code = 'NEWSLETTER_SEND_FAILED';
       throw failure;
     }

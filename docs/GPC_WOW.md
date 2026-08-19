@@ -77,11 +77,15 @@ hasta disponer de identidad de despliegue automatizada:
 1. Sincronizar el directorio `apps-script/` con el proyecto corporativo.
 2. Ejecutar `setupApplication()` con el administrador inicial cuando cambie el
    contrato de Sheets.
-3. Crear una nueva versión y desplegar la WebApp para el dominio.
-4. Exportar desde escritorio e importar un snapshot `.brr` v3 por cada ámbito.
-5. Verificar Resumen, Insights, Tendencias, Issues, Settings y una prueba de
+3. Activar Google Picker API en el proyecto estándar de Google Cloud, crear una
+   API key restringida a `*.google.com` y `*.googleusercontent.com`, y ejecutar
+   una vez `configureDrivePicker(apiKey, cloudProjectNumber)`. El segundo valor
+   es el número del proyecto, no su nombre ni su ID alfanumérico.
+4. Crear una nueva versión y desplegar la WebApp para el dominio.
+5. Exportar desde escritorio e importar un snapshot `.brr` v3 por cada ámbito.
+6. Verificar Resumen, Insights, Tendencias, Issues, Settings y una prueba de
    newsletter al administrador.
-6. Registrar en el PR o release la versión de Apps Script, fecha, responsable,
+7. Registrar en el PR o release la versión de Apps Script, fecha, responsable,
    `dataVersion` y resultado del smoke test.
 
 Un snapshot de contrato anterior no se sirve. El rollback consiste en restaurar la

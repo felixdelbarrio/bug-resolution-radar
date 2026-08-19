@@ -1,7 +1,7 @@
 /** Configuration and immutable contracts. No secrets belong in this file. */
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
-  contractVersion: '5.0.0',
+  contractVersion: '5.0.1',
   projectionContract: 'bug-resolution-radar-cloud-projection',
   projectionVersion: 2,
   semanticContract: 'desktop-authoritative-v2',

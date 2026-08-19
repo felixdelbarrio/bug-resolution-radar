@@ -374,6 +374,56 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
     assert "'NEWSLETTER_TEST_REQUIRED'" in sender
     assert "newsletterTested" in status
     assert "job.newsletterTested && !job.newsletterSent" in app
+    assert ": 'Enviar newsletter';" in app
+    assert "Envía primero una prueba" not in app
+    assert "dataset.sending" in app
+
+
+def test_materialized_insight_variants_keep_the_desktop_payload_shape() -> None:
+    materialized = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_materializedViewPayload_"
+    )
+    app = _source("App.html")
+
+    assert "insights[activeId] = selected" in materialized
+    assert "else insights[activeId]" in materialized
+    for expected in (
+        "renderFunctionalityInsight",
+        "renderDuplicatesInsight",
+        "renderFinalistInsight",
+        "renderPeopleInsight",
+        "Corte por origen seleccionado",
+    ):
+        assert expected in app
+    for forbidden in (
+        "insightsStatus",
+        "insightsPriority",
+        "insightsFunctionality",
+    ):
+        assert forbidden not in app
+
+
+def test_aggregate_scope_really_hides_origin_for_admins() -> None:
+    app = _source("App.html")
+    design = _source("DesignSystem.html")
+
+    assert "sourceSlot.classList.toggle('hidden', rollup)" in app
+    assert "sourceSlot.setAttribute('aria-hidden', String(rollup))" in app
+    assert ".is-admin .scope-admin-control.hidden { display: none !important; }" in design
+
+
+def test_dashboard_cache_hydrates_variants_without_repeated_rpcs() -> None:
+    main = _source("10_Main.gs")
+    app = _source("App.html")
+    sheets = _source("40_Sheets.gs")
+    cache = _source("Cache.html")
+
+    assert "function getDashboardViewBundle" in main
+    assert "RPC.call('getDashboardViewBundle'" in app
+    assert "state.memory.set(key, entry.payload)" in app
+    assert "const operationBudgetMs = 500" in cache
+    assert "_recordsCacheEnabled_" in sheets
+    assert "RADAR.sheets.snapshotParts" in _function_body(sheets, "_recordsCacheEnabled_")
 
 
 def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
@@ -430,12 +480,16 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
 
     for rpc in (
         "getAdminConsole",
-        "browseReportDriveFolders",
+        "getDrivePickerConfig",
         "recordAnalyticsEvents",
         "getAnalyticsReport",
         "saveSummaryChartIds",
     ):
         assert f"function {rpc}" in administration
+    assert "browseReportDriveFolders" not in administration
+    assert "ScriptApp.getOAuthToken()" in administration
+    assert "google.picker.PickerBuilder" in app
+    assert ".setOrigin(google.script.host.origin)" in app
     assert "weekOverWeekPct" in administration
     assert "body_text" in _source("00_Config.gs")
     assert "slides_url" in _source("00_Config.gs")

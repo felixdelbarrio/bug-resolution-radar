@@ -91,6 +91,13 @@ function _cachePutJson_(cache, key, value, ttlSeconds) {
   for (let i = 0; i < parts; i += 1) entries[key + ':part:' + i] = encoded.slice(i * chunkSize, (i + 1) * chunkSize);
   cache.putAll(entries, ttlSeconds); return true;
 }
+function _cacheDeleteJson_(cache, key) {
+  const manifest = _safeJsonParse_(cache.get(key + ':manifest'), null);
+  const keys = [key + ':manifest'];
+  const parts = manifest && Number(manifest.parts) > 0 ? Math.min(40, Number(manifest.parts)) : 0;
+  for (let i = 0; i < parts; i += 1) keys.push(key + ':part:' + i);
+  cache.removeAll(keys);
+}
 function _withApplicationLock_(callback) {
   const lock = LockService.getScriptLock();
   _assert_(lock.tryLock(20000), 'Hay otra actualización en curso. Reinténtalo en unos segundos.', 'LOCK_TIMEOUT');
