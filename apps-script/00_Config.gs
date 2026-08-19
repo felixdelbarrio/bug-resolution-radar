@@ -1,7 +1,9 @@
 /** Configuration and immutable contracts. No secrets belong in this file. */
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
-  contractVersion: '5.0.0',
+  corporateBrand: 'BBVA Banca de Empresas e Instituciones',
+  appVersion: '2026.08.19.11',
+  contractVersion: '5.1.0',
   projectionContract: 'bug-resolution-radar-cloud-projection',
   projectionVersion: 2,
   semanticContract: 'desktop-authoritative-v2',
@@ -25,7 +27,6 @@ const RADAR = Object.freeze({
     config: '_CONFIG',
     users: 'AUTH_USERS',
     importRuns: 'IMPORT_RUNS',
-    preferences: 'USER_PREFS',
     snapshots: 'MATERIALIZED_SNAPSHOTS',
     snapshotParts: 'MATERIALIZED_PARTS',
     snapshotChunks: 'MATERIALIZED_CHUNKS',
@@ -75,25 +76,27 @@ const DESIGN_TOKENS = (function () {
     neutral: '#E2E6EE'
   });
   const dark = Object.freeze({
-    midnight: '#F7F8F8',
+    midnight: '#FFFFFF',
     electric: '#85C8FF',
     black: '#FFFFFF',
     grey900: '#F7F8F8',
-    grey800: '#E2E6EA',
-    grey700: '#CAD1D8',
-    grey600: '#ADB8C2',
+    grey800: '#F7F8F8',
+    grey700: '#F7F8F8',
+    grey600: '#CAD1D8',
     grey500: '#46536D',
     grey400: '#334056',
     grey300: '#222C42',
     grey200: '#11192D',
-    white: '#000519',
-    primaryStrong: '#D6E9F8',
+    blueLight: '#222C42',
+    white: '#070E46',
+    primaryStrong: '#F7F8F8',
     success: '#9CE67E',
-    successSoft: '#14331D',
+    successSoft: '#334056',
     warning: '#FFC553',
-    warningSoft: '#382B12',
-    danger: '#FF8585',
-    dangerSoft: '#3D191B'
+    warningStrong: '#FFC553',
+    warningSoft: '#334056',
+    danger: '#FF5252',
+    dangerSoft: '#334056'
   });
   const font = Object.freeze({
     webBody: '"BentonSans", Arial, sans-serif',
@@ -173,6 +176,13 @@ const DESIGN_TOKENS = (function () {
     '--bbva-tab-active-bg': 'var(--bbva-electric)',
     '--bbva-tab-active-text': 'var(--bbva-white)',
     '--bbva-tab-active-border': 'var(--bbva-electric)',
+    '--bbva-inverse-surface': 'var(--bbva-midnight)',
+    '--bbva-on-inverse': 'var(--bbva-white)',
+    '--bbva-brand-midnight': color.midnight,
+    '--bbva-brand-electric': color.electric,
+    '--bbva-brand-royal-dark': color.royalDark,
+    '--bbva-brand-on-hero': color.white,
+    '--bbva-brand-on-hero-muted': color.blueLight,
     '--bbva-shadow': effect.shadow,
     '--bbva-shadow-soft': effect.shadowSoft,
     '--bbva-shadow-panel': effect.shadowPanel,
@@ -197,20 +207,22 @@ const DESIGN_TOKENS = (function () {
     '--bbva-primary': 'var(--bbva-electric)',
     '--bbva-primary-strong': dark.primaryStrong,
     '--bbva-surface': 'var(--bbva-grey-200)',
-    '--bbva-surface-2': 'var(--bbva-white)',
-    '--bbva-surface-elevated': 'var(--bbva-grey-200)',
-    '--bbva-border': 'var(--bbva-grey-300)',
-    '--bbva-border-strong': 'var(--bbva-grey-400)',
+    '--bbva-surface-2': color.black,
+    '--bbva-surface-elevated': 'var(--bbva-grey-300)',
+    '--bbva-border': 'var(--bbva-grey-500)',
+    '--bbva-border-strong': 'var(--bbva-grey-500)',
     '--bbva-text': 'var(--bbva-midnight)',
     '--bbva-text-muted': 'var(--bbva-grey-700)',
     '--bbva-on-primary': color.midnight,
-    '--bbva-accent-bg': 'var(--bbva-grey-300)',
+    '--bbva-accent-bg': 'var(--bbva-grey-400)',
     '--bbva-action-bg': 'var(--bbva-grey-200)',
-    '--bbva-action-border': 'var(--bbva-grey-400)',
+    '--bbva-action-border': 'var(--bbva-grey-500)',
     '--bbva-tab-soft-text': 'var(--bbva-grey-700)',
     '--bbva-tab-active-bg': 'var(--bbva-electric)',
     '--bbva-tab-active-text': color.midnight,
     '--bbva-tab-active-border': 'var(--bbva-electric)',
+    '--bbva-inverse-surface': 'var(--bbva-grey-400)',
+    '--bbva-on-inverse': color.white,
     '--bbva-shadow': effect.darkShadow,
     '--bbva-shadow-soft': effect.darkShadowSoft
   });
@@ -251,13 +263,6 @@ const CONTRACTS = Object.freeze({
       ['started_at', 'datetime', true], ['finished_at', 'datetime', false], ['new_records', 'number', true],
       ['updated_records', 'number', true], ['unchanged_records', 'number', true], ['data_version', 'string', false],
       ['requested_by', 'email', true], ['details', 'string', false], ['snapshot_id', 'string', false]
-    ])
-  }),
-  USER_PREFS: Object.freeze({
-    key: 'pref_uid', version: '5.0.0', unique: ['pref_uid'],
-    columns: Object.freeze([
-      ['pref_uid', 'string', true], ['email', 'email', true], ['preference_key', 'string', true],
-      ['value_json', 'json', true], ['updated_at', 'datetime', true]
     ])
   }),
   MATERIALIZED_SNAPSHOTS: Object.freeze({
@@ -340,7 +345,7 @@ const CONTRACTS = Object.freeze({
       ['body_text', 'string', true], ['slides_url', 'url', true],
       ['recipient_count', 'number', true], ['effective_sender', 'email', true],
       ['created_at', 'datetime', true], ['created_by', 'email', true],
-      ['status', 'enum', true, ['processing', 'sent', 'failed']], ['details', 'string', false]
+      ['status', 'enum', true, ['processing', 'sent', 'partial', 'failed']], ['details', 'string', false]
     ])
   }),
   ANALYTICS_EVENTS: Object.freeze({

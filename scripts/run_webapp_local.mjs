@@ -98,33 +98,76 @@ function localRuntimeMarkup() {
   };
   const dashboard = (request = {}) => {
     if (request.view === "insights") {
+      const activeTab = request.insightsId || "summary";
+      const insights = {
+        tabs: [
+          { id: "summary", label: "Resumen" },
+          { id: "functionality", label: "Funcionalidad" },
+          { id: "duplicates", label: "Duplicados" },
+          { id: "rootCauseEvolutives", label: "Evolutivos causas raíces" },
+          { id: "finalistDiscrepancies", label: "Discrepancias finalistas" },
+          { id: "people", label: "Personas" }
+        ],
+        activeTab
+      };
+      if (activeTab === "summary") insights.periodSummary = {
+        caption: "España · Periodo 15/07 - 28/07/2026",
+        cards: [
+          {
+            cardId: "new_now", kicker: "Insights · Creadas", metric: "64",
+            detail: "Δ +6,7% vs quincena previa", label: "Creadas en la quincena actual",
+            tone: "flow", delta: { displayKind: "improving" }, issues: [issue]
+          },
+          {
+            cardId: "closed_now", kicker: "Insights · Cerradas", metric: "71",
+            detail: "Δ -13,4% vs quincena previa", label: "Cerradas en la quincena",
+            tone: "warning", delta: { displayKind: "worsening" }, issues: [issue]
+          },
+          {
+            cardId: "resolution_now", kicker: "Insights · Resolución", metric: "16.1d",
+            detail: "Δ -37,1% vs quincena previa", label: "Resolución de cerradas",
+            tone: "flow", delta: { displayKind: "improving" }, issues: [issue]
+          }
+        ],
+        groups: [{
+          label: "Creadas en la quincena actual", count: 64, helpText: "quincena actual",
+          tone: "flow", items: [issue]
+        }], showOpenSplit: false, sourceBreakdown: []
+      };
+      if (activeTab === "functionality") insights.functionality = {
+        chart: { title: "Incidencias por funcionalidad", subtitle: "Vista acumulada", figure },
+        topics: [{
+          topic: "Pagos", color: "#0C6DFF", count: 1, pct: 12.5,
+          dominantStatus: "Open", dominantPriority: "High",
+          brief: "Concentración operativa localizada.",
+          flow: { createdCount: 2, resolvedCount: 1, pctDelta: 0.1, direction: "worsening", windowDays: 30 },
+          rootCauses: [{ label: "Integración", count: 1 }], issues: [issue]
+        }],
+        tip: "Contenido materializado por escritorio."
+      };
+      if (activeTab === "duplicates") insights.duplicates = {
+        brief: "Posibles duplicados del snapshot.",
+        titleGroups: [{ summary: "Error al confirmar operación", count: 1, issues: [issue] }],
+        heuristicGroups: [{ summary: "Coincidencia semántica", count: 1, dominantStatus: "Open", dominantPriority: "High", issues: [issue] }]
+      };
+      if (["rootCauseEvolutives", "finalistDiscrepancies"].includes(activeTab)) insights[activeTab] = {
+        kpis: [{ label: "JIRA pendientes", value: "1", detail: "Snapshot local" }],
+        groups: [{
+          helixId: "INC0001", helixUrl: "https://example.com/helix/INC0001", helixStatus: "Closed",
+          helixText: "Incidencia Helix de ejemplo", jiraCount: 1,
+          issues: [{ ...issue, openDays: 18, matchedLabels: ["causa-raiz"], note: "Seguimiento local" }]
+        }], totalRows: 1, truncated: false
+      };
+      if (activeTab === "people") insights.people = { cards: [{
+        assignee: "Equipo Radar", openCount: 1, sharePct: 12.5,
+        statusBreakdown: [{ status: "Open", count: 1 }],
+        risk: { label: "Alto", flowRiskPct: 75, criticalRiskPct: 50 },
+        pushPct: 42, blockedCount: 1, aging: { value: "18d", caption: "Issue más antigua" },
+        recommendations: ["Priorizar desbloqueo"], oldestIssues: [issue]
+      }] };
       return {
         ...common,
-        insights: {
-          tabs: [
-            { id: "summary", label: "Resumen" },
-            { id: "functionality", label: "Funcionalidad" },
-            { id: "duplicates", label: "Duplicados" },
-            { id: "rootCauseEvolutives", label: "Evolutivos causas raíces" },
-            { id: "finalistDiscrepancies", label: "Discrepancias finalistas" },
-            { id: "people", label: "Personas" }
-          ],
-          activeTab: request.insightsId || "summary",
-          periodSummary: {
-            caption: "España · Periodo 15/07 - 28/07/2026",
-            cards: [{
-              cardId: "open_total",
-              kicker: "Insights · Abiertas totales",
-              metric: "8",
-              detail: "Backlog abierto en el scope actual",
-              label: "Abiertas",
-              tone: "warning",
-              issues: [issue]
-            }],
-            groups: [],
-            showOpenSplit: false
-          }
-        }
+        insights
       };
     }
     if (request.view === "trends") {
@@ -149,10 +192,11 @@ function localRuntimeMarkup() {
   const bootstrap = {
     app: {
       name: "Bug Resolution Radar · WebApp local",
-      contractVersion: "5.0.0",
+      version: "2026.08.19.6",
+      contractVersion: "5.1.0",
       semanticContract: "desktop-authoritative-v2",
       dataVersion: scope.dataVersion,
-      cacheEpoch: "local",
+      cacheEpoch: "local-20260819-4",
       maxTransferBytes: 33554432,
       scopeVersions: { [scope.scopeKey]: scope.dataVersion },
       materializedOnly: true,
@@ -162,7 +206,6 @@ function localRuntimeMarkup() {
     scopes: [scope],
     countries: ["España"],
     sources: [{ source_id: "jira:espana:core", source_type: "materialized", alias: "Core", country: "España" }],
-    preferences: { theme: "light" },
     administration: {
       reportDriveFolder: { id: "local-folder", name: "Informes locales", url: "https://drive.google.com/" },
       importReady: true
@@ -181,7 +224,7 @@ function localRuntimeMarkup() {
   const mocks = {
     getBootstrap: () => bootstrap,
     queryDashboard: (request) => dashboard(request),
-    savePreference: () => ({ saved: true }),
+    getDashboardViewBundle: () => [],
     recordAnalyticsEvents: (events) => ({ accepted: Array.isArray(events) ? events.length : 0 }),
     getIssueDetail: () => issue,
     getPeriodReportStatus: () => ({
@@ -193,6 +236,9 @@ function localRuntimeMarkup() {
         rowCount: 13,
         newsletterTested: true,
         newsletterSent: false,
+        newsletterSenderReady: true,
+        newsletterSender: "bug-resolution-radar.group@bbva.com",
+        newsletterSenderMode: "Gmail API · remitente corporativo verificado",
         recipientCount: 2
       },
       folder: bootstrap.administration.reportDriveFolder
@@ -209,6 +255,8 @@ function localRuntimeMarkup() {
     getAdminConsole: () => ({
       health: {
         status: "Operativa (simulada)",
+        appVersion: "2026.08.19.6",
+        contractVersion: "5.1.0",
         accessPolicy: "Dominio @bbva.com",
         lastImportAt: scope.activatedAt,
         importedRecords: 13,
@@ -234,24 +282,14 @@ function localRuntimeMarkup() {
         dashboardUrl: "https://jira.example.com/dashboard/42"
       }]
     }),
-    browseReportDriveFolders: ({ category }) => ({
-      category: category || "my",
-      nextPageToken: "",
-      folders: [{
-        id: "local-folder",
-        name: "Informes locales",
-        url: "https://drive.google.com/",
-        modifiedAt: scope.activatedAt,
-        starred: true,
-        shared: false,
-        owner: "Admin local"
-      }]
-    }),
     saveReportDriveFolder: () => bootstrap.administration.reportDriveFolder,
     getNewsletterSettings: () => ({
       sender: {
-        effective: "admin.local@bbva.com",
-        mode: "cuenta administradora con reply-to del grupo"
+        requested: "bug-resolution-radar.group@bbva.com",
+        effective: "bug-resolution-radar.group@bbva.com",
+        ready: true,
+        verificationStatus: "accepted",
+        mode: "Gmail API · remitente corporativo verificado"
       },
       reports: [{
         reportId: "local-report",
@@ -259,38 +297,68 @@ function localRuntimeMarkup() {
         label: scope.scopeLabel,
         createdAt: scope.activatedAt
       }],
-      users: [{
-        email: "admin.local@bbva.com",
-        displayName: "Admin local",
-        role: "admin"
-      }],
       recipients: [],
       audit: []
     }),
-    saveNewsletterRecipient: () => mocks.getNewsletterSettings(),
-    getAnalyticsReport: ({ userEmail = "", days = 30 } = {}) => ({
+    saveNewsletterRecipient: ({ reportId, email, active }) => ({
+      recipientUid: `${reportId}::${email}`,
+      reportId,
+      snapshotId: scope.snapshotId,
+      scopeKey: scope.scopeKey,
+      scopeLabel: scope.scopeLabel,
+      email,
+      active,
+      updatedAt: new Date().toISOString()
+    }),
+    getAnalyticsReport: ({ userEmail = "", days = 30, captureMode = "preview" } = {}) => ({
+      schemaVersion: "2.2",
+      export: {
+        captureMode,
+        generatedAt: "2026-07-28T12:01:00Z",
+        appVersion: "local",
+        contractVersion: "5.1.0",
+        queryStartAt: "2026-06-28T12:01:00Z",
+        queryEndAt: "2026-07-28T12:01:00Z",
+        dataAsOf: scope.activatedAt,
+        sourceRowsAvailable: 1,
+        matchingRows: 1,
+        includedRows: 1,
+        detailLimit: captureMode === "export" ? 2000 : 100,
+        sourceRetentionLimit: 50000
+      },
       filters: { userEmail, days },
       summary: {
-        events: 48,
-        users: 3,
-        sessions: 7,
+        events: 1,
+        users: 1,
+        sessions: 1,
         errors: 0,
-        currentWeekEvents: 28,
-        previousWeekEvents: 20,
-        weekOverWeekPct: 40,
+        currentWeekEvents: 1,
+        previousWeekEvents: 0,
+        weekOverWeekPct: 100,
         averageDurationMs: 112,
         p95DurationMs: 240
       },
       users: ["admin.local@bbva.com"],
-      events: [{ label: "navigation", count: 18 }],
-      panels: [{ label: "overview", count: 16 }, { label: "insights", count: 12 }],
-      timeline: [{ day: "2026-07-28", count: 8 }],
+      events: [{ label: "navigation", count: 1 }],
+      panels: [{ label: "overview", count: 1 }],
+      timeline: [{ day: "2026-07-28", count: 1 }],
       rows: [{
         eventAt: scope.activatedAt,
         userEmail: "admin.local@bbva.com",
         eventName: "navigation",
         durationMs: 84
-      }]
+      }],
+      quality: {
+        summaryCompleteForWindow: true,
+        rowsTruncated: false,
+        invalidTimestampRows: 0,
+        futureTimestampRowsExcluded: 0,
+        sourceAtRetentionLimit: false,
+        unversionedEvents: 0
+      },
+      versions: [{ appVersion: "local", count: 1 }],
+      semantics: {},
+      integrity: { algorithm: "SHA-256", sha256: "local" }
     }),
     saveSummaryChartIds: (chartIds) => ({
       chartIds,

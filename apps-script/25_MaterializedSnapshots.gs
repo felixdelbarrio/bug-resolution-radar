@@ -187,20 +187,13 @@ function _snapshotPartDescriptor_(record, partKey, required) {
     }
     return memoized;
   }
-  _validateSheetContract_(RADAR.sheets.snapshotParts);
-  const sheet = _sheet_(RADAR.sheets.snapshotParts);
-  const headers = _headersFor_(RADAR.sheets.snapshotParts);
-  const uidColumn = headers.indexOf('part_uid') + 1;
-  const matches = sheet.getLastRow() < 2 ? [] :
-    sheet.getRange(2, uidColumn, sheet.getLastRow() - 1, 1)
-      .createTextFinder(partUid)
-      .matchEntireCell(true)
-      .findAll();
+  const matches = _readRecords_(RADAR.sheets.snapshotParts).filter(function (row) {
+    return _text_(row.part_uid) === partUid;
+  });
   _assert_(matches.length <= 1, 'El índice durable contiene partes duplicadas.', 'SNAPSHOT_CORRUPT');
   let descriptor = null;
   if (matches.length === 1) {
-    const row = sheet.getRange(matches[0].getRow(), 1, 1, headers.length).getValues()[0];
-    const stored = _rowToRecord_(headers, row);
+    const stored = matches[0];
     _assert_(
       _text_(stored.snapshot_id) === _text_(record.snapshot_id) &&
       _text_(stored.part_key) === key,
@@ -421,15 +414,10 @@ function _materializedViewPayload_(record, input) {
     const selected = _loadSnapshotPart_(record, 'insights/' + activeId);
     const insights = {
       tabs: catalog,
-      activeTab: activeId,
-      periodSummary: { caption: '', cards: [], groups: [], showOpenSplit: false, sourceBreakdown: [] },
-      functionality: { combo: {}, chart: null, topics: [], tip: '' },
-      duplicates: { brief: '', titleGroups: [], heuristicGroups: [] },
-      rootCauseEvolutives: [],
-      finalistDiscrepancies: [],
-      people: []
+      activeTab: activeId
     };
-    Object.keys(selected || {}).forEach(function (key) { insights[key] = selected[key]; });
+    if (activeId === 'summary') insights.periodSummary = selected.periodSummary || selected;
+    else insights[activeId] = selected || {};
     return Object.assign({}, common, { insights: insights });
   }
   if (input.view === 'trends') {
@@ -463,7 +451,13 @@ function _dashboardPayloadFromSnapshot_(snapshotId, request, fixedScopeKey) {
 function _dashboardPayload_(request) {
   const input = _normalizeMaterializedRequest_(request);
   const record = _activeSnapshotRecordForScope_(input.scopeKey, true);
-  return _materializedViewPayload_(record, input);
+  const cache = CacheService.getScriptCache();
+  const cacheKey = _cacheKey_('dashboard-view:' + _text_(record.snapshot_id), input);
+  const cached = _cacheGetJson_(cache, cacheKey);
+  if (cached != null) return cached;
+  const payload = _materializedViewPayload_(record, input);
+  _cachePutJson_(cache, cacheKey, payload, RADAR.cacheSeconds);
+  return payload;
 }
 
 function _warmSnapshotViews_(record) {

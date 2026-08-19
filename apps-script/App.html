@@ -6,8 +6,13 @@ const RPC = (() => {
       .withSuccessHandler(response => {
         if (response && response.ok) {
           if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
+            const app = response.data && response.data.app ? response.data.app : {};
             window.__RADAR_TELEMETRY__('rpc', {
-              name: name
+              name: name,
+              _telemetry: {
+                appVersion: String(app.version || ''),
+                contractVersion: String(app.contractVersion || '')
+              }
             }, Math.round(performance.now() - startedAt), 'success');
           }
           resolve(response.data);
@@ -59,7 +64,6 @@ const App = (() => {
     pending: 0,
     memory: new Map(),
     inFlight: new Map(),
-    preferenceTimer: null,
     transferValidation: null,
     lastPeriodReport: null,
     newsletterSettings: null,
@@ -69,9 +73,10 @@ const App = (() => {
     analyticsReport: null,
     analyticsUserEmail: '',
     analyticsDays: 30,
-    driveBrowser: null,
+    duplicateMode: 'title',
     analyticsQueue: [],
     analyticsTimer: null,
+    analyticsFlushPromise: null,
     navigationEpoch: 0,
     sessionId: window.crypto && window.crypto.randomUUID
       ? window.crypto.randomUUID()
@@ -79,6 +84,25 @@ const App = (() => {
   };
 
   const $ = id => document.getElementById(id);
+  const REQUIRED_SHELL_IDS = Object.freeze([
+    'accessGateMessage',
+    'accessGateRetry',
+    'app',
+    'appTitle',
+    'dataVersion',
+    'errorView',
+    'loadingView',
+    'retryButton',
+    'routeView',
+    'scopeBar',
+    'scopeDescription',
+    'sharedScopeBanner',
+    'themeToggle',
+    'workspaceCountry',
+    'workspaceRollup',
+    'workspaceRollupCaption',
+    'workspaceSource'
+  ]);
   const view = () => $('routeView');
   const isShared = () => Boolean(state.sharedToken);
   const isAdmin = () => Boolean(
@@ -87,18 +111,59 @@ const App = (() => {
   const currentScope = () => (state.bootstrap.scopes || []).find(
     scope => scope.scopeKey === state.scopeKey
   ) || null;
+
+  function assertShellContract() {
+    const missing = REQUIRED_SHELL_IDS.filter(id => !$(id));
+    if (!missing.length) return;
+    const error = new Error(
+      `Despliegue GPC incompleto: faltan ${missing.map(id => `#${id}`).join(', ')}. ` +
+      'Publica una versión nueva incluyendo todos los archivos HTML.'
+    );
+    error.code = 'WEBAPP_SHELL_MISMATCH';
+    throw error;
+  }
+
+  function showAccessError(error) {
+    document.body.className = 'auth-denied';
+    const message = $('accessGateMessage');
+    const retry = $('accessGateRetry');
+    if (message) {
+      message.textContent = error && error.message
+        ? error.message
+        : 'No se pudo iniciar la WebApp.';
+    }
+    if (retry) retry.classList.remove('hidden');
+    console.error('WebApp startup failure', error);
+  }
+
   function flushAnalytics() {
     window.clearTimeout(state.analyticsTimer);
-    const events = state.analyticsQueue.splice(0, 20);
-    if (!events.length || isShared() || !state.bootstrap) return;
-    RPC.call('recordAnalyticsEvents', events).catch(() => {});
-    if (state.analyticsQueue.length) {
-      state.analyticsTimer = window.setTimeout(flushAnalytics, 1200);
-    }
+    if (isShared() || !state.bootstrap) return Promise.resolve({ accepted: 0 });
+    if (state.analyticsFlushPromise) return state.analyticsFlushPromise;
+    const operation = (async () => {
+      let accepted = 0;
+      while (state.analyticsQueue.length) {
+        const events = state.analyticsQueue.splice(0, 20);
+        try {
+          const result = await RPC.call('recordAnalyticsEvents', events);
+          accepted += Number(result.accepted || 0);
+        } catch (error) {
+          state.analyticsQueue.unshift(...events);
+          throw error;
+        }
+      }
+      return { accepted };
+    })();
+    state.analyticsFlushPromise = operation.finally(() => {
+      state.analyticsFlushPromise = null;
+    });
+    return state.analyticsFlushPromise;
   }
 
   function trackEvent(eventName, details = {}, durationMs = 0, status = 'success') {
     if (isShared()) return;
+    const app = state.bootstrap && state.bootstrap.app ? state.bootstrap.app : {};
+    const suppliedTelemetry = details && details._telemetry ? details._telemetry : {};
     state.analyticsQueue.push({
       eventAt: new Date().toISOString(),
       sessionId: state.sessionId,
@@ -108,13 +173,19 @@ const App = (() => {
       scopeKey: state.scopeKey,
       durationMs: Number(durationMs || 0),
       status: status,
-      details: details,
+      details: {
+        ...details,
+        _telemetry: {
+          appVersion: String(suppliedTelemetry.appVersion || app.version || ''),
+          contractVersion: String(suppliedTelemetry.contractVersion || app.contractVersion || '')
+        }
+      },
       userAgent: navigator.userAgent
     });
-    if (state.analyticsQueue.length >= 10) flushAnalytics();
+    if (state.analyticsQueue.length >= 10) flushAnalytics().catch(() => {});
     else {
       window.clearTimeout(state.analyticsTimer);
-      state.analyticsTimer = window.setTimeout(flushAnalytics, 5000);
+      state.analyticsTimer = window.setTimeout(() => flushAnalytics().catch(() => {}), 5000);
     }
   }
   window.__RADAR_TELEMETRY__ = trackEvent;
@@ -171,18 +242,30 @@ const App = (() => {
     return `dashboard:${requestKey(request)}`;
   }
 
+  function readLocalPreferences() {
+    if (isShared()) return {};
+    try {
+      const contract = state.bootstrap && state.bootstrap.app
+        ? state.bootstrap.app.contractVersion
+        : 'current';
+      const value = JSON.parse(window.localStorage.getItem(`bug-resolution-radar:preferences:${contract}`) || '{}');
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
   function schedulePreferenceSave() {
     if (isShared()) return;
-    window.clearTimeout(state.preferenceTimer);
-    state.preferenceTimer = window.setTimeout(() => {
-      RPC.call('savePreference', 'dashboard_state', {
-        panel: state.panel,
+    try {
+      window.localStorage.setItem(`bug-resolution-radar:preferences:${state.bootstrap.app.contractVersion}`, JSON.stringify({
         scopeKey: state.scopeKey,
         trendChart: state.trendChart,
         insightsId: state.insightsId,
-        issuesView: state.issuesView
-      }).catch(() => {});
-    }, 400);
+        issuesView: state.issuesView,
+        theme: state.dark ? 'dark' : 'light'
+      }));
+    } catch (_) {}
   }
 
   function setActionIcons() {
@@ -241,7 +324,9 @@ const App = (() => {
     )).join('') || '<option value="">Sin vista por origen</option>';
     $('workspaceSource').disabled = !isAdmin() || isShared() || rollup || !individual.length;
     $('workspaceCountry').disabled = !isAdmin() || isShared();
-    document.querySelector('.workspace-source-slot').classList.toggle('hidden', rollup);
+    const sourceSlot = document.querySelector('.workspace-source-slot');
+    sourceSlot.classList.toggle('hidden', rollup);
+    sourceSlot.setAttribute('aria-hidden', String(rollup));
     $('workspaceRollupCaption').classList.toggle('hidden', !rollup);
     $('workspaceRollupCaption').textContent = rollup ? (active.scopeLabel || active.country) : '';
     const banner = $('sharedScopeBanner');
@@ -329,6 +414,7 @@ const App = (() => {
             `${UI.escape(item.title || item.label || item.id)}</option>`
           ).join('')}</select>
         </label>
+        ${data.adaptedForTerminal ? '<p class="trend-inline-caption">Vista adaptada al estado finalista seleccionado: el gráfico conserva incidencias finalizadas para no perder señal.</p>' : ''}
         <section class="trend-chart-block">
           <div class="trend-chart-head"><div><p class="eyebrow">${UI.escape(chart.group)}</p>
           <h4>${UI.escape(chart.title)}</h4><p>${UI.escape(chart.subtitle)}</p></div></div>
@@ -337,8 +423,9 @@ const App = (() => {
           ).join('')}</div>` : ''}
           <div class="trend-figure-shell">${Charts.placeholder(chart.figure, 380)}</div>
         </section>
+        ${(data.sessionDelta || []).length ? `<section class="trend-copy-section"><h4>Qué cambió desde tu última sesión</h4><ul class="trend-delta-list">${data.sessionDelta.map(line => `<li>${UI.escape(line)}</li>`).join('')}</ul></section>` : ''}
         ${(data.cards || []).length ? `<section class="trend-copy-section">
-          <h4>Racional del escritorio</h4>
+          <h4>Insights accionables</h4>
           <div class="trend-action-grid">${data.cards.map(card =>
             `<article class="trend-action-card"><strong>${UI.escape(card.title)}</strong><span>${UI.escape(card.body)}</span>${issueList(card.issues || [], '')}</article>`
           ).join('')}</div>
@@ -361,11 +448,14 @@ const App = (() => {
         ? `<p class="issue-list-empty">${UI.escape(emptyText)}</p>`
         : '';
     }
-    return `<div class="insight-issue-list">${rows.map(row =>
-      `<article class="insight-issue-row">
-        <div class="issue-primary-link">${UI.issueKey(row)}
-          <span>${UI.escape(row.summary || 'Sin resumen')}</span></div>
-        <div>${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}</div>
+    return `<div class="issue-stack">${rows.map(row =>
+      `<article class="insight-issue-card">
+        <div class="insight-issue-copy"><div class="issue-primary-link">${UI.issueKey(row)}
+          <span class="issue-primary-link-title">${UI.escape(row.summary || 'Sin resumen')}</span></div>
+        <div class="issue-card-badges insight-issue-chip-row">${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}
+          ${row.assignee ? `<span class="issue-chip issue-chip-neutral">${UI.escape(row.assignee)}</span>` : ''}
+          ${Number.isFinite(Number(row.ageDays)) ? `<span class="issue-chip issue-chip-neutral">${UI.formatNumber(Math.round(row.ageDays))}d</span>` : ''}
+        </div></div>
       </article>`
     ).join('')}</div>`;
   }
@@ -399,14 +489,25 @@ const App = (() => {
 
   function renderFunctionalityInsight(data) {
     const topics = data.topics || [];
+    const tone = topic => {
+      const priority = String(topic.dominantPriority || '').toLowerCase();
+      if (priority === 'highest' || priority === 'high' || priority.includes('imped')) return 'risk';
+      if (priority === 'medium') return 'warning';
+      if (priority === 'low' || priority === 'lowest') return 'flow';
+      return 'quality';
+    };
+    const flowLabel = direction => direction === 'improving' ? 'Mejorando' :
+      direction === 'worsening' ? 'Empeorando' : 'Estable';
     return `<section class="page-stack">
-      ${data.chart ? `<section class="surface-panel"><div class="panel-head"><div>
-        <p class="section-kicker">Vista acumulada · estados no finalistas</p>
-        <h3>${UI.escape(data.chart.title)}</h3><p>${UI.escape(data.chart.subtitle)}</p>
-      </div></div>${Charts.placeholder(data.chart.figure, 360)}</section>` : ''}
-      ${topics.map(topic => `<details class="insight-detail-block">
-        <summary>${UI.escape(topic.topic)} · ${UI.formatNumber(topic.count)} · ${Number(topic.pct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
-        <p>${UI.escape(topic.brief || '')}</p>
+      ${data.chart ? `<article class="chart-card trend-chart-card"><div class="chart-copy"><div>
+        <p class="eyebrow">Insights</p><h4>${UI.escape(data.chart.title)}</h4><p>${UI.escape(data.chart.subtitle)}</p>
+      </div></div>${data.chart.figure ? Charts.placeholder(data.chart.figure, 380) : '<p class="issue-list-empty">No hay histórico suficiente para construir la tendencia seleccionada.</p>'}</article>` : UI.empty('Sin tendencia disponible', 'No hay histórico suficiente para construir la tendencia seleccionada.')}
+      ${topics.map(topic => `<details class="insight-detail-block topic-detail-block" data-tone="${tone(topic)}" style="--insight-accent:${UI.safeColor(topic.color)}">
+        <summary><span class="topic-summary-copy"><span class="topic-summary-label">${UI.escape(topic.topic)}</span><span class="topic-summary-separator">:</span><span class="topic-summary-meta">${UI.formatNumber(topic.count)} ${Number(topic.count) === 1 ? 'incidencia' : 'incidencias'} - ${Number(topic.pct || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span></span></summary>
+        <div class="topic-meta-row">${UI.chip(topic.dominantStatus)} ${UI.chip(topic.dominantPriority, 'priority')}</div>
+        <p class="topic-brief">${UI.escape(topic.brief || '')}</p>
+        ${topic.flow ? `<div class="flow-summary-card" data-tone="${tone(topic)}"><strong>${flowLabel(topic.flow.direction)}</strong><span>${UI.formatNumber(topic.flow.createdCount)} creadas · ${UI.formatNumber(topic.flow.resolvedCount)} resueltas · ${(Number(topic.flow.pctDelta || 0) * 100).toLocaleString('es-ES', { maximumFractionDigits: 1 })}% en ${UI.formatNumber(topic.flow.windowDays)} días</span></div>` : ''}
+        ${(topic.rootCauses || []).length ? `<ul class="signal-list">${topic.rootCauses.map(cause => `<li>${UI.escape(cause.label)} · ${UI.formatNumber(cause.count)}</li>`).join('')}</ul>` : ''}
         ${issueList(topic.issues || [])}
       </details>`).join('')}
       ${data.tip ? `<p class="inline-caption">${UI.escape(data.tip)}</p>` : ''}
@@ -414,38 +515,56 @@ const App = (() => {
   }
 
   function renderDuplicatesInsight(data) {
-    const groups = [...(data.titleGroups || []), ...(data.heuristicGroups || [])];
+    const heuristic = state.duplicateMode === 'heuristic';
+    const groups = heuristic ? (data.heuristicGroups || []) : (data.titleGroups || []);
     return `<section class="page-stack">
-      ${data.brief ? `<section class="surface-panel"><p>${UI.escape(data.brief)}</p></section>` : ''}
-      ${groups.map(group => `<details class="insight-detail-block">
-        <summary>${UI.escape(group.summary || 'Grupo duplicado')} · ${UI.formatNumber(group.count)}</summary>
-        <p>${UI.escape(group.dominantStatus || '')} · ${UI.escape(group.dominantPriority || '')}</p>
+      ${data.brief ? `<p class="inline-caption">${UI.escape(data.brief)}</p>` : ''}
+      <div class="soft-toggle-row"><button class="soft-toggle-button ${!heuristic ? 'soft-toggle-button-active' : ''}" data-duplicate-mode="title" type="button">Por título</button><button class="soft-toggle-button ${heuristic ? 'soft-toggle-button-active' : ''}" data-duplicate-mode="heuristic" type="button">Por heurística</button></div>
+      ${groups.map(group => `<details class="insight-detail-block" data-tone="neutral">
+        <summary><span>${UI.escape(group.summary || 'Grupo duplicado')}</span><strong>${UI.formatNumber(group.count)}</strong></summary>
+        ${heuristic ? `<div class="topic-meta-row">${UI.chip(group.dominantStatus)} ${UI.chip(group.dominantPriority, 'priority')}</div>` : ''}
         ${issueList(group.issues || [])}
       </details>`).join('')}
     </section>`;
   }
 
-  function renderFinalistInsight(data) {
+  function renderFinalistInsight(data, rootCause) {
     return `<section class="page-stack">
-      <div class="overview-kpi-grid">${(data.kpis || []).map(item => UI.kpi({
-        label: item.label, value: item.value, hint: item.detail
-      })).join('')}</div>
-      ${(data.groups || []).map(group => `<details class="insight-detail-block">
-        <summary>${group.helixUrl
+      <section class="surface-panel finalist-hero-panel"><div><p class="section-kicker">${rootCause ? 'Labels JIRA / causa raíz' : 'Helix cerrado / JIRA pendiente'}</p><h3>${rootCause ? 'Evolutivos para solucionar causas raíces' : 'Impacto en backlog por estados finalistas'}</h3></div></section>
+      <div class="ops-kpi-grid-react">${(data.kpis || []).map(item => `<article class="mini-kpi-card" data-tone="risk"><span>${UI.escape(item.label)}</span><strong>${UI.escape(item.value)}</strong><small>${UI.escape(item.detail)}</small></article>`).join('')}</div>
+      ${(data.groups || []).map(group => `<details class="insight-detail-block finalist-discrepancy-block" data-tone="flow">
+        <summary><span class="finalist-summary-main"><span class="finalist-summary-title">${group.helixUrl
           ? `<a class="issue-inline-link" href="${UI.escape(group.helixUrl)}" target="_blank" rel="noopener noreferrer">${UI.escape(group.helixId)}</a>`
-          : UI.escape(group.helixId)} · ${UI.escape(group.helixStatus)} · ${UI.formatNumber(group.jiraCount)} JIRA</summary>
-        <p>${UI.escape(group.helixText || group.helixSummary || '')}</p>
-        ${issueList(group.issues || [])}
+          : UI.escape(group.helixId)}</span><span class="issue-chip finalist-helix-chip">Helix: ${UI.escape(group.helixStatus || '—')}</span></span><span class="finalist-summary-side"><strong>${UI.formatNumber(group.jiraCount)} JIRA</strong></span></summary>
+        <div class="finalist-helix-description"><span>Helix</span><p>${UI.escape(group.helixText || group.helixSummary || 'Sin descripción Helix')}</p></div>
+        <div class="simple-table finalist-issues-table"><div class="simple-table-head"><span>JIRA</span><span>Resumen</span><span>Estado</span><span>Prioridad</span><span>Responsable</span><span>Días</span></div>${(group.issues || []).map(issue => `<div class="simple-table-row"><span>${UI.issueKey(issue)}</span><span>${UI.escape(issue.summary || 'Sin título')}${rootCause && (issue.matchedLabels || []).length ? `<span class="finalist-label-row">${issue.matchedLabels.map(label => `<small class="root-cause-label-chip">${UI.escape(label)}</small>`).join('')}</span>` : ''}</span><span>${UI.chip(issue.status)}</span><span>${UI.chip(issue.priority, 'priority')}</span><span>${UI.escape(issue.assignee || '—')}</span><span>${UI.formatNumber(Math.round(issue.openDays || 0))}d</span></div>${issue.note ? `<div class="simple-table-row finalist-note-row"><span></span><span class="finalist-note-cell"><strong>Comentario registrado</strong>${UI.escape(issue.note)}</span></div>` : ''}`).join('')}</div>
       </details>`).join('')}
+      ${!(data.groups || []).length ? UI.empty(rootCause ? 'Sin evolutivos de causa raíz' : 'Sin discrepancias finalistas', 'El escritorio no publicó incidencias para esta sección.') : ''}
     </section>`;
   }
 
   function renderPeopleInsight(data) {
     return `<section class="page-stack">${(data.cards || []).map(card =>
-      `<details class="insight-detail-block"><summary>${UI.escape(card.assignee)} · ${UI.formatNumber(card.openCount)} abiertas · ${Number(card.sharePct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
-      <p>${(card.recommendations || []).map(UI.escape).join(' · ')}</p>
+      `<details class="insight-detail-block" data-tone="neutral"><summary>${UI.escape(card.assignee)} · ${UI.formatNumber(card.openCount)} abiertas · ${Number(card.sharePct || 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%</summary>
+      <div class="people-state-chip-grid">${(card.statusBreakdown || []).map(bucket => `<div class="people-state-chip-row">${UI.chip(bucket.status)}<span class="issue-chip issue-chip-neutral">${UI.formatNumber(bucket.count)}</span></div>`).join('')}</div>
+      <div class="people-kpi-grid-react"><article class="mini-kpi-card mini-kpi-card-neutral"><span>Riesgo operativo</span><strong>${UI.escape(card.risk && card.risk.label)}</strong><small>Flujo ${Number(card.risk && card.risk.flowRiskPct || 0).toFixed(0)}% · Criticidad ${Number(card.risk && card.risk.criticalRiskPct || 0).toFixed(0)}%</small></article><article class="mini-kpi-card mini-kpi-card-neutral"><span>Empuje a salida</span><strong>${Number(card.pushPct || 0).toFixed(0)}%</strong><small>Cuanto más alto, mejor ritmo</small></article><article class="mini-kpi-card mini-kpi-card-neutral"><span>Bloqueadas</span><strong>${UI.formatNumber(card.blockedCount)}</strong><small>Prioridad alta para desbloqueo</small></article><article class="mini-kpi-card mini-kpi-card-neutral"><span>Antigüedad crítica</span><strong>${UI.escape(card.aging && card.aging.value)}</strong><small>${UI.escape(card.aging && card.aging.caption)}</small></article></div>
+      <div class="recommendation-card"><strong>Plan recomendado</strong><ul class="signal-list">${(card.recommendations || []).map(item => `<li>${UI.escape(item)}</li>`).join('')}</ul></div>
+      <p class="inline-caption">Top 3 más antiguas</p>
       ${issueList(card.oldestIssues || [])}</details>`
     ).join('')}</section>`;
+  }
+
+  async function openInsight(insightsId) {
+    if (!insightsId || insightsId === state.insightsId) return;
+    const epoch = ++state.navigationEpoch;
+    state.insightsId = insightsId;
+    document.querySelectorAll('[data-insight-id]').forEach(button => {
+      button.classList.toggle('subtab-button-active', button.dataset.insightId === insightsId);
+      button.disabled = true;
+    });
+    trackEvent('insights_section_selected', { insightsId: insightsId });
+    await refreshDashboard(epoch);
+    schedulePreferenceSave();
   }
 
   function renderInsights() {
@@ -457,18 +576,20 @@ const App = (() => {
       body = `<section class="page-stack">
         <p class="inline-caption">${UI.escape(data.periodSummary.caption)}</p>
         <div class="period-card-grid">${data.periodSummary.cards.map(card =>
-          `<article class="period-action-card" data-tone="${UI.escape(card.tone)}">
+          `<article class="period-action-card" data-tone="${UI.escape(card.tone)}" data-delta-kind="${UI.escape(card.delta && card.delta.displayKind || 'none')}">
             <span>${UI.escape(card.kicker)}</span><strong>${UI.escape(card.metric)}</strong>
-            <p>${UI.escape(card.detail)}</p>${issueList(card.issues || [], '')}
+            <p>${UI.escape(card.detail)}</p>
             <div class="period-action-card-footer"><em>${UI.escape(card.label)}</em></div>
           </article>`
         ).join('')}</div>
         ${(data.periodSummary.groups || []).map(group =>
           `<details class="insight-detail-block" data-tone="${UI.escape(group.tone)}">
             <summary>${UI.escape(group.label)}: ${UI.formatNumber(group.count)}</summary>
+            ${group.helpText ? `<p class="inline-caption">${UI.escape(group.helpText)}</p>` : ''}
             ${issueList(group.rows || group.items || [])}
           </details>`
         ).join('')}
+        ${(data.periodSummary.sourceBreakdown || []).length ? `<section class="page-stack"><div class="panel-head"><div><p class="section-kicker">Resumen</p><h3>Corte por origen seleccionado</h3></div></div><div class="simple-table period-source-table"><div class="simple-table-head"><span>Origen</span><span>Abiertas</span><span>${UI.escape(data.periodSummary.sourceBreakdown[0].focus.label)}</span><span>${UI.escape(data.periodSummary.sourceBreakdown[0].other.label)}</span><span>Nuevas ahora</span><span>Cerradas ahora</span><span>Resolución</span></div>${data.periodSummary.sourceBreakdown.map(row => `<div class="simple-table-row"><span>${UI.escape(row.source)}</span><span>${UI.formatNumber(row.abiertas)}</span><span>${UI.formatNumber(row.focus.value)}</span><span>${UI.formatNumber(row.other.value)}</span><span>${UI.formatNumber(row.nuevasAhora)}</span><span>${UI.formatNumber(row.cerradasAhora)}</span><span>${UI.escape(row.resolucionAhora)}</span></div>`).join('')}</div></section>` : ''}
       </section>`;
     } else {
       const selected = { ...data };
@@ -476,24 +597,26 @@ const App = (() => {
       delete selected.activeTab;
       if (data.activeTab === 'functionality') body = renderFunctionalityInsight(data.functionality || selected);
       else if (data.activeTab === 'duplicates') body = renderDuplicatesInsight(data.duplicates || selected);
-      else if (data.activeTab === 'rootCauseEvolutives') body = renderFinalistInsight(data.rootCauseEvolutives || selected);
-      else if (data.activeTab === 'finalistDiscrepancies') body = renderFinalistInsight(data.finalistDiscrepancies || selected);
+      else if (data.activeTab === 'rootCauseEvolutives') body = renderFinalistInsight(data.rootCauseEvolutives || selected, true);
+      else if (data.activeTab === 'finalistDiscrepancies') body = renderFinalistInsight(data.finalistDiscrepancies || selected, false);
       else if (data.activeTab === 'people') body = renderPeopleInsight(data.people || selected);
       else body = renderInsightValue(selected);
     }
     view().innerHTML = `<section class="page-stack">
-      <section class="surface-panel insights-nav">
-        <div class="soft-toggle-row">${tabs.map(tab =>
-          `<button class="soft-toggle-button ${tab.id === (data.activeTab || state.insightsId) ? 'soft-toggle-button-active' : ''}" data-insight-id="${UI.escape(tab.id)}" type="button">${UI.escape(tab.label || tab.id)}</button>`
-        ).join('')}</div>
+      <section class="surface-panel insights-tabs-shell">
+        <nav class="subtab-strip" aria-label="Navegación de insights">${tabs.map(tab =>
+          `<button class="subtab-button ${tab.id === (data.activeTab || state.insightsId) ? 'subtab-button-active' : ''}" data-insight-id="${UI.escape(tab.id)}" type="button">${UI.escape(tab.label || tab.id)}</button>`
+        ).join('')}</nav>
       </section>
       ${body || UI.empty('Sin racional materializado', 'El escritorio no publicó contenido para esta sección.')}
     </section>`;
     document.querySelectorAll('[data-insight-id]').forEach(button => {
-      button.addEventListener('click', async () => {
-        state.insightsId = button.dataset.insightId;
-        trackEvent('insights_section_selected', { insightsId: state.insightsId });
-        await refreshDashboard();
+      button.addEventListener('click', () => openInsight(button.dataset.insightId));
+    });
+    document.querySelectorAll('[data-duplicate-mode]').forEach(button => {
+      button.addEventListener('click', () => {
+        state.duplicateMode = button.dataset.duplicateMode;
+        renderInsights();
       });
     });
     bindIssueLinks();
@@ -608,16 +731,18 @@ const App = (() => {
   }
 
   function reportSuccess(job) {
-    const canSend = job.newsletterTested && !job.newsletterSent;
+    const senderReady = job.newsletterSenderReady !== false;
+    const canSend = senderReady && job.newsletterTested && !job.newsletterSent;
     const sendLabel = job.newsletterSent
       ? 'Newsletter enviada ✓'
-      : (job.newsletterTested ? 'Enviar newsletter' : 'Envía primero una prueba');
+      : 'Enviar newsletter';
     return `<div class="report-success">
       <strong>Presentación exacta publicada</strong>
       <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
       <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
+      ${senderReady ? `<div class="newsletter-sender-ready"><strong>Remitente corporativo</strong><span>${UI.escape(job.newsletterSender || '')}</span></div>` : `<div class="newsletter-sender-blocked" role="alert"><strong>Canal corporativo no disponible</strong><span>${UI.escape(job.newsletterSender || '')} no está aceptado en «Enviar correo como» para ${UI.escape(job.newsletterSenderExecutor || 'el propietario del despliegue')}. Estado: ${UI.escape(job.newsletterSenderStatus || 'no disponible')}.</span><button id="revalidateNewsletterSenderReport" class="ghost-button" type="button">Revalidar buzón</button></div>`}
       <div class="newsletter-report-actions">
-        <button id="testPeriodNewsletter" class="secondary-button" type="button">Probar newsletter</button>
+        <button id="testPeriodNewsletter" class="secondary-button" ${senderReady ? '' : 'disabled'} type="button">Probar newsletter</button>
         <button id="sendPeriodNewsletter" class="action-button" ${canSend ? '' : 'disabled'} type="button">${sendLabel}</button>
       </div>
       <small>${UI.formatNumber(job.recipientCount)} destinatarios activos. El envío final se habilita tras una prueba correcta al administrador conectado.</small>
@@ -630,6 +755,14 @@ const App = (() => {
     if (mode === 'send' && !window.confirm(
       'Se enviará la newsletter a todos los destinatarios activos de este ámbito. ¿Continuar?'
     )) return;
+    const testButton = $('testPeriodNewsletter');
+    const sendButton = $('sendPeriodNewsletter');
+    if ((testButton && testButton.dataset.sending === '1') ||
+        (sendButton && sendButton.dataset.sending === '1')) return;
+    [testButton, sendButton].filter(Boolean).forEach(button => {
+      button.disabled = true;
+      button.dataset.sending = '1';
+    });
     try {
       setBusy(true);
       const result = await deadline(
@@ -645,6 +778,28 @@ const App = (() => {
       );
       if (mode === 'send') job.newsletterSent = true;
       await renderReports();
+    } catch (error) {
+      UI.message(error.message, 'error');
+    } finally {
+      setBusy(false);
+      [testButton, sendButton].filter(Boolean).forEach(button => {
+        delete button.dataset.sending;
+      });
+    }
+  }
+
+  async function revalidateCorporateSender(onReady) {
+    try {
+      setBusy(true);
+      const sender = await RPC.call('revalidateNewsletterSender');
+      state.newsletterSettings = null;
+      UI.message(
+        sender.ready
+          ? `Buzón corporativo verificado: ${sender.effective}.`
+          : `${sender.requested} sigue sin estar aceptado para ${sender.executor || 'el propietario del despliegue'}.`,
+        sender.ready ? 'success' : 'warning'
+      );
+      await onReady();
     } catch (error) {
       UI.message(error.message, 'error');
     } finally {
@@ -668,6 +823,8 @@ const App = (() => {
       $('periodReportResult').innerHTML = reportSuccess(status.job);
       $('testPeriodNewsletter').addEventListener('click', () => deliverNewsletter('test'));
       $('sendPeriodNewsletter').addEventListener('click', () => deliverNewsletter('send'));
+      const revalidate = $('revalidateNewsletterSenderReport');
+      if (revalidate) revalidate.addEventListener('click', () => revalidateCorporateSender(renderReports));
     } catch (error) {
       if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
       $('periodReportResult').innerHTML = `<p class="report-error">${UI.escape(error.message)}</p>`;
@@ -780,7 +937,8 @@ const App = (() => {
         : '<p>Sin importaciones registradas.</p>';
     } catch (error) {
       if (epoch !== state.navigationEpoch || state.route !== 'import') return;
-      $('runsTable').textContent = error.message;
+      const table = $('runsTable');
+      if (table) table.textContent = error.message;
     }
   }
 
@@ -789,7 +947,21 @@ const App = (() => {
     return state.newsletterSettings;
   }
 
+  function applyNewsletterRecipient(recipient) {
+    if (!state.newsletterSettings) return;
+    const recipients = state.newsletterSettings.recipients || [];
+    const index = recipients.findIndex(item => item.recipientUid === recipient.recipientUid);
+    if (index >= 0) recipients[index] = recipient;
+    else recipients.push(recipient);
+    state.newsletterSettings.recipients = recipients;
+  }
+
   async function renderSettings() {
+    if (!isAdmin() || isShared()) {
+      state.route = 'dashboard';
+      await openPanel(state.panel);
+      return;
+    }
     const epoch = state.navigationEpoch;
     const tabs = [
       ['health', 'Estado de la WebApp'],
@@ -803,12 +975,13 @@ const App = (() => {
       ? state.settingsTab
       : 'health';
     state.settingsTab = activeTab;
-    if (!state.adminConsole) {
+    const needsAdminConsole = ['health', 'drive', 'sources', 'summary'].includes(activeTab);
+    if (needsAdminConsole && !state.adminConsole) {
       state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey);
     }
     if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
     let body = '';
-    const consoleData = state.adminConsole;
+    const consoleData = state.adminConsole || {};
     if (activeTab === 'health') {
       const health = consoleData.health || {};
       body = `<section class="page-stack">
@@ -824,6 +997,7 @@ const App = (() => {
         </div>
         <section class="surface-card page-stack">
           <h3>Versiones y accesos</h3>
+          <p><strong>WebApp ${UI.escape(health.appVersion || state.bootstrap.app.version || '—')}</strong> · contrato ${UI.escape(health.contractVersion || state.bootstrap.app.contractVersion)}</p>
           <p>Generado: ${UI.escape(UI.formatDate(health.generatedAt))}</p>
           <a href="${UI.escape(health.versionUrl)}" target="_blank" rel="noopener">Abrir versión consultada ↗</a>
           ${health.slidesUrl ? `<a href="${UI.escape(health.slidesUrl)}" target="_blank" rel="noopener">Abrir presentación ↗</a>` : ''}
@@ -834,30 +1008,14 @@ const App = (() => {
         </section>
       </section>`;
     } else if (activeTab === 'drive') {
-      if (!state.driveBrowser) {
-        state.driveBrowser = await RPC.call('browseReportDriveFolders', {
-          category: 'my', pageToken: ''
-        });
-      }
-      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
       const folder = consoleData.reportDriveFolder || null;
-      const browser = state.driveBrowser;
       body = `<section class="page-stack">
         <section class="surface-card page-stack">
-          <h3>Carpeta configurada</h3>
+          <h3>Carpeta de informes</h3>
+          <p class="minor-copy">Introduce el ID de la carpeta de Google Drive o pega su URL completa.</p>
           ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
-          <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
-          <button class="secondary-button" type="submit">Guardar referencia</button></form>
-        </section>
-        <section class="surface-card page-stack">
-          <h3>Explorar Google Drive</h3>
-          <div class="soft-toggle-row">${[
-            ['my', 'Mi unidad'], ['shared', 'Compartidas conmigo'], ['starred', 'Destacadas']
-          ].map(category => `<button class="soft-toggle-button drive-category ${browser.category === category[0] ? 'soft-toggle-button-active' : ''}" data-category="${category[0]}" type="button">${category[1]}</button>`).join('')}</div>
-          <div class="source-list">${(browser.folders || []).map(item =>
-            `<article class="source-list-row"><div><strong>${UI.escape(item.name)}</strong><p>${UI.escape(item.owner || '')} · ${UI.escape(UI.formatDate(item.modifiedAt))}</p></div>
-            <button class="ghost-button choose-folder" data-folder="${UI.escape(item.id)}" type="button">Seleccionar</button></article>`
-          ).join('') || '<p>No hay carpetas en esta categoría.</p>'}</div>
+          <form id="folderForm" class="folder-reference-form"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" autocomplete="off" required></label>
+          <button class="action-button" type="submit">Guardar carpeta</button></form>
         </section>
       </section>`;
     } else if (activeTab === 'sources') {
@@ -882,22 +1040,27 @@ const App = (() => {
       const recipients = (newsletter.recipients || []).filter(
         recipient => recipient.reportId === state.newsletterReportId
       );
-      const recipientByEmail = new Map(recipients.map(recipient => [recipient.email, recipient]));
-      const newsletterUsers = (newsletter.users || []).map(user => ({
-        ...user,
-        active: Boolean(recipientByEmail.get(user.email) && recipientByEmail.get(user.email).active)
-      }));
+      const activeRecipients = recipients.filter(recipient => recipient.active).length;
       body = `<section class="page-stack">
         <section class="surface-card page-stack">
           <h3>Destinatarios</h3>
-          <p>Identidad de envío: ${UI.escape(newsletter.sender.effective)} · ${UI.escape(newsletter.sender.mode)}</p>
+          <div class="${newsletter.sender.ready ? 'newsletter-sender-ready' : 'newsletter-sender-blocked'}">
+            <strong>${newsletter.sender.ready ? 'Buzón corporativo preparado' : 'Buzón corporativo pendiente'}</strong>
+            <span>${UI.escape(newsletter.sender.effective || newsletter.sender.requested)} · ${UI.escape(newsletter.sender.mode)}</span>
+            ${newsletter.sender.ready ? '' : `<small>${UI.escape(newsletter.sender.executor || 'El propietario de la WebApp')} debe tener aceptado este remitente en «Enviar correo como». Hasta entonces el envío permanece bloqueado.</small><button id="revalidateNewsletterSenderSettings" class="ghost-button" type="button">Revalidar buzón</button>`}
+          </div>
           <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
           ).join('')}</select></label>
-          <div class="source-list">${newsletterUsers.map(user =>
-            `<article class="source-list-row"><div><strong>${UI.escape(user.displayName || user.email)}</strong><p>${UI.escape(user.email)} · ${UI.escape(user.role)}</p></div>
-            <button class="ghost-button recipient-toggle" data-email="${UI.escape(user.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${user.active ? '1' : '0'}" ${selectedReport ? '' : 'disabled'} type="button">${user.active ? 'Desactivar' : 'Activar'}</button></article>`
-          ).join('')}</div>
+          <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} configurados para este informe</span></div>
+          <form id="recipientForm" class="newsletter-recipient-form">
+            <label class="field"><span>Correo BBVA</span><input id="recipientEmail" type="email" autocomplete="email" placeholder="nombre@bbva.com" required></label>
+            <button class="action-button" type="submit" ${selectedReport ? '' : 'disabled'}>Añadir destinatario</button>
+          </form>
+          <div class="newsletter-recipient-list">${recipients.map(recipient =>
+            `<article class="newsletter-recipient-row ${recipient.active ? '' : 'newsletter-recipient-inactive'}"><div><strong>${UI.escape(recipient.email)}</strong><p>${recipient.active ? 'Activo' : 'Inactivo'}</p></div>
+            <button class="ghost-button recipient-toggle" data-email="${UI.escape(recipient.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${recipient.active ? '1' : '0'}" type="button">${recipient.active ? 'Desactivar' : 'Activar'}</button></article>`
+          ).join('') || '<p class="minor-copy">Todavía no hay destinatarios. Añade el primero para habilitar el envío final.</p>'}</div>
         </section>
         <section class="surface-card page-stack"><h3>Histórico de envíos</h3>
           ${(newsletter.audit || []).map(item => `<details class="insight-detail-block">
@@ -910,11 +1073,16 @@ const App = (() => {
     } else if (activeTab === 'analytics') {
       if (!state.analyticsReport) {
         state.analyticsReport = await RPC.call('getAnalyticsReport', {
-          userEmail: state.analyticsUserEmail, days: state.analyticsDays
+          userEmail: state.analyticsUserEmail, days: state.analyticsDays, captureMode: 'preview'
         });
       }
       if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
       const report = state.analyticsReport;
+      const analyticsWarning = report.quality.rowsTruncated ||
+        report.quality.sourceAtRetentionLimit ||
+        report.quality.invalidTimestampRows > 0 ||
+        report.quality.futureTimestampRowsExcluded > 0 ||
+        report.quality.unversionedEvents > 0;
       body = `<section class="page-stack">
         <section class="surface-card settings-form-grid">
           <label class="field"><span>Usuario</span><select id="analyticsUser"><option value="">Todos</option>${(report.users || []).map(email =>
@@ -923,7 +1091,15 @@ const App = (() => {
           <label class="field"><span>Periodo</span><select id="analyticsDays">${[7, 30, 90, 180, 365].map(days =>
             `<option value="${days}" ${days === state.analyticsDays ? 'selected' : ''}>${days} días</option>`
           ).join('')}</select></label>
-          <button id="downloadAnalytics" class="secondary-button" type="button">Descargar JSON para Codex</button>
+          <button id="downloadAnalytics" class="secondary-button" type="button">Actualizar y descargar JSON para Codex</button>
+        </section>
+        <section class="analytics-freshness admin-telemetry-only ${analyticsWarning ? 'analytics-freshness-warning' : ''}">
+          <strong>Datos consultados ${UI.escape(UI.formatDate(report.export.generatedAt))}</strong>
+          <span>Último evento: ${report.export.dataAsOf ? UI.escape(UI.formatDate(report.export.dataAsOf)) : 'sin eventos'} · ${UI.formatNumber(report.export.includedRows)} de ${UI.formatNumber(report.export.matchingRows)} filas incluidas en el detalle.</span>
+          ${report.quality.rowsTruncated ? '<small>El resumen es completo para el periodo, pero el detalle está truncado. Codex debe usar summary para totales.</small>' : ''}
+          ${report.quality.sourceAtRetentionLimit ? '<small>La fuente alcanzó su límite de retención: los totales anteriores conservados podrían no cubrir todo el periodo solicitado.</small>' : ''}
+          ${report.quality.invalidTimestampRows || report.quality.futureTimestampRowsExcluded ? `<small>Se excluyeron ${UI.formatNumber(report.quality.invalidTimestampRows)} fechas inválidas y ${UI.formatNumber(report.quality.futureTimestampRowsExcluded)} fechas futuras.</small>` : ''}
+          ${report.quality.unversionedEvents ? `<small>${UI.formatNumber(report.quality.unversionedEvents)} eventos históricos no declaran versión. No deben atribuirse automáticamente al código actual.</small>` : ''}
         </section>
         <div class="overview-kpi-grid">${[
           { label: 'Eventos', value: UI.formatNumber(report.summary.events), hint: `${report.filters.days} días` },
@@ -976,6 +1152,11 @@ const App = (() => {
     });
     if ($('themeLight')) $('themeLight').addEventListener('click', () => setTheme(false));
     if ($('themeDark')) $('themeDark').addEventListener('click', () => setTheme(true));
+    if ($('revalidateNewsletterSenderSettings')) {
+      $('revalidateNewsletterSenderSettings').addEventListener('click', () =>
+        revalidateCorporateSender(() => renderSettings('newsletter'))
+      );
+    }
     if ($('folderForm')) $('folderForm').addEventListener('submit', async event => {
       event.preventDefault();
       const saved = await RPC.call('saveReportDriveFolder', $('folderReference').value);
@@ -985,35 +1166,37 @@ const App = (() => {
       UI.message('Carpeta guardada.', 'success');
       await renderSettings();
     });
-    document.querySelectorAll('.drive-category').forEach(button => {
-      button.addEventListener('click', async () => {
-        state.driveBrowser = await RPC.call('browseReportDriveFolders', {
-          category: button.dataset.category, pageToken: ''
-        });
-        await renderSettings();
-      });
-    });
-    document.querySelectorAll('.choose-folder').forEach(button => {
-      button.addEventListener('click', async () => {
-        await RPC.call('saveReportDriveFolder', button.dataset.folder);
-        state.adminConsole = null;
-        state.bootstrap.administration.importReady = true;
-        UI.message('Carpeta de Drive seleccionada.', 'success');
-        await renderSettings();
-      });
-    });
     if ($('recipientReport')) $('recipientReport').addEventListener('change', async event => {
       state.newsletterReportId = event.target.value;
       await renderSettings();
     });
+    if ($('recipientForm')) $('recipientForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.currentTarget.querySelector('button[type="submit"]');
+      if (button) button.disabled = true;
+      try {
+        const recipient = await RPC.call('saveNewsletterRecipient', {
+          reportId: state.newsletterReportId,
+          email: $('recipientEmail').value,
+          active: true
+        });
+        applyNewsletterRecipient(recipient);
+        UI.message('Destinatario añadido y activado.', 'success');
+        await renderSettings();
+      } catch (error) {
+        UI.message(error.message, 'error');
+        if (button) button.disabled = false;
+      }
+    });
     document.querySelectorAll('.recipient-toggle').forEach(button => {
       button.addEventListener('click', async () => {
         button.disabled = true;
-        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+        const recipient = await RPC.call('saveNewsletterRecipient', {
           reportId: button.dataset.report,
           email: button.dataset.email,
           active: button.dataset.active !== '1'
         });
+        applyNewsletterRecipient(recipient);
         await renderSettings();
       });
     });
@@ -1027,15 +1210,41 @@ const App = (() => {
     };
     if ($('analyticsUser')) $('analyticsUser').addEventListener('change', reloadAnalytics);
     if ($('analyticsDays')) $('analyticsDays').addEventListener('change', reloadAnalytics);
-    if ($('downloadAnalytics')) $('downloadAnalytics').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(state.analyticsReport, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `bug-resolution-radar-analytics-${new Date().toISOString().slice(0, 10)}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      trackEvent('analytics_export_downloaded', { days: state.analyticsDays });
+    if ($('downloadAnalytics')) $('downloadAnalytics').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        setBusy(true);
+        trackEvent('analytics_export_requested', { days: state.analyticsDays });
+        await deadline(flushAnalytics(), 30000, 'No se pudo consolidar la telemetría pendiente.');
+        const freshReport = await deadline(RPC.call('getAnalyticsReport', {
+          userEmail: state.analyticsUserEmail,
+          days: state.analyticsDays,
+          captureMode: 'export'
+        }), 30000, 'No se pudo obtener una captura actualizada de la telemetría.');
+        state.analyticsReport = freshReport;
+        const blob = new Blob([JSON.stringify(freshReport, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        const stamp = String(freshReport.export.generatedAt || new Date().toISOString())
+          .replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+        anchor.download = `bug-resolution-radar-analytics-${stamp}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        UI.message('Telemetría consolidada y descargada con sello de frescura.', 'success');
+        trackEvent('analytics_export_downloaded', {
+          days: state.analyticsDays,
+          matchingRows: freshReport.export.matchingRows,
+          rowsTruncated: freshReport.quality.rowsTruncated
+        });
+        await renderSettings();
+      } catch (error) {
+        UI.message(error.message, 'error');
+      } finally {
+        setBusy(false);
+        button.disabled = false;
+      }
     });
     const saveCharts = async chartIds => {
       const saved = await RPC.call('saveSummaryChartIds', chartIds);
@@ -1060,9 +1269,7 @@ const App = (() => {
     setActionIcons();
     if (state.route === 'dashboard') renderCurrent();
     else if (state.route === 'settings') await renderSettings();
-    if (!isShared()) {
-      await RPC.call('savePreference', 'theme', state.dark ? 'dark' : 'light');
-    }
+    schedulePreferenceSave();
   }
 
   async function fetchDashboard(request) {
@@ -1106,7 +1313,6 @@ const App = (() => {
       state.route = 'dashboard';
       syncNavigation();
       renderCurrent();
-      schedulePreferenceSave();
     } catch (error) {
       view().innerHTML = UI.empty('No se pudo cargar el snapshot', error.message);
     } finally {
@@ -1122,11 +1328,30 @@ const App = (() => {
   }
 
   function prefetchPrimaryViews() {
-    if (!state.scopeKey) return;
-    ['overview', 'insights', 'trends', 'issues'].forEach(panel => {
-      const request = requestFor(panel);
-      fetchDashboard(request).catch(() => {});
-    });
+    if (!state.scopeKey || state.route !== 'dashboard') return;
+    if (isShared()) {
+      ['overview', 'insights', 'trends', 'issues'].forEach(panel => {
+        fetchDashboard(requestFor(panel)).catch(() => {});
+      });
+      return;
+    }
+    const scopeAtStart = state.scopeKey;
+    RPC.call('getDashboardViewBundle', scopeAtStart).then(entries => {
+      if (scopeAtStart !== state.scopeKey) return;
+      (entries || []).forEach(entry => {
+        const request = entry.request || {};
+        const key = requestKey(request);
+        state.memory.set(key, entry.payload);
+        PersistentCache.write(cacheKey(request), entry.payload).catch(() => {});
+      });
+    }).catch(() => {});
+  }
+
+  function runIdleMaintenance() {
+    prefetchPrimaryViews();
+    if (isAdmin() && !isShared()) {
+      RPC.call('registerAppVersion').catch(() => {});
+    }
   }
 
   async function openPanel(panel) {
@@ -1135,9 +1360,23 @@ const App = (() => {
     state.panel = panel;
     state.page = 1;
     syncNavigation();
-    showRouteLoading(`Abriendo ${panel === 'overview' ? 'Resumen' : panel === 'insights' ? 'Insights' : panel === 'trends' ? 'Tendencias' : 'Issues'}…`);
+    const request = requestFor();
+    const key = requestKey(request);
+    let cached = state.memory.get(key);
+    if (!cached) {
+      cached = await PersistentCache.read(cacheKey(request));
+      if (cached) state.memory.set(key, cached);
+    }
+    if (epoch !== state.navigationEpoch) return;
+    if (cached) {
+      state.dashboard = cached;
+      renderCurrent();
+    } else {
+      showRouteLoading(`Abriendo ${panel === 'overview' ? 'Resumen' : panel === 'insights' ? 'Insights' : panel === 'trends' ? 'Tendencias' : 'Issues'}…`);
+    }
     trackEvent('navigation', { target: panel });
     await refreshDashboard(epoch);
+    schedulePreferenceSave();
   }
 
   async function boot() {
@@ -1153,13 +1392,19 @@ const App = (() => {
       );
       state.bootstrap = bootstrap;
       const initial = bootstrap.initialState || {};
-      state.scopeKey = initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
-      state.panel = initial.panel || 'overview';
-      state.trendChart = initial.trendChart || 'open_status_bar';
-      state.insightsId = initial.insightsId || 'summary';
-      state.issuesView = initial.issuesView === 'Table' ? 'Table' : 'Cards';
+      const local = readLocalPreferences();
+      const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
+      state.scopeKey = validScopeKeys.has(local.scopeKey)
+        ? local.scopeKey
+        : initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
+      state.route = 'dashboard';
+      state.panel = 'overview';
+      state.page = 1;
+      state.trendChart = local.trendChart || initial.trendChart || 'open_status_bar';
+      state.insightsId = local.insightsId || initial.insightsId || 'summary';
+      state.issuesView = local.issuesView === 'Table' ? 'Table' : 'Cards';
       state.pageSize = Number(initial.pageSize || 50);
-      state.dark = (bootstrap.preferences.theme || 'light') === 'dark';
+      state.dark = local.theme === 'dark';
       document.documentElement.dataset.theme = state.dark ? 'dark' : 'light';
       document.body.className = [
         'auth-ready',
@@ -1187,7 +1432,11 @@ const App = (() => {
         shared: isShared(),
         dataVersion: bootstrap.app.dataVersion
       });
-      window.setTimeout(prefetchPrimaryViews, 0);
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(runIdleMaintenance, { timeout: 5000 });
+      } else {
+        window.setTimeout(runIdleMaintenance, 2500);
+      }
       PersistentCache.prune({
         contract: bootstrap.app.contractVersion,
         cacheGeneration: bootstrap.app.cacheEpoch,
@@ -1195,9 +1444,7 @@ const App = (() => {
         scopeVersions: bootstrap.app.scopeVersions
       }).catch(() => {});
     } catch (error) {
-      document.body.className = 'auth-denied';
-      $('accessGateMessage').textContent = error.message;
-      $('accessGateRetry').classList.remove('hidden');
+      showAccessError(error);
     }
   }
 
@@ -1225,6 +1472,7 @@ const App = (() => {
       state.page = 1;
       syncScope();
       await refreshDashboard(epoch);
+      schedulePreferenceSave();
     });
     $('workspaceRollup').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;
@@ -1238,6 +1486,7 @@ const App = (() => {
       state.page = 1;
       syncScope();
       await refreshDashboard(epoch);
+      schedulePreferenceSave();
     });
     $('workspaceSource').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;
@@ -1245,6 +1494,7 @@ const App = (() => {
       state.page = 1;
       syncScope();
       await refreshDashboard(epoch);
+      schedulePreferenceSave();
     });
     $('themeToggle').addEventListener('click', () => setTheme(!state.dark));
     $('accessGateRetry').addEventListener('click', boot);
@@ -1253,21 +1503,26 @@ const App = (() => {
 
   return {
     init() {
-      bindShell();
-      window.addEventListener('error', event => {
-        trackEvent('client_error', {
-          message: String(event.message || 'Error de cliente'),
-          source: String(event.filename || ''),
-          line: Number(event.lineno || 0)
-        }, 0, 'error');
-      });
-      window.addEventListener('unhandledrejection', event => {
-        trackEvent('client_error', {
-          message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
-        }, 0, 'error');
-      });
-      window.addEventListener('pagehide', flushAnalytics);
-      boot();
+      try {
+        assertShellContract();
+        bindShell();
+        window.addEventListener('error', event => {
+          trackEvent('client_error', {
+            message: String(event.message || 'Error de cliente'),
+            source: String(event.filename || ''),
+            line: Number(event.lineno || 0)
+          }, 0, 'error');
+        });
+        window.addEventListener('unhandledrejection', event => {
+          trackEvent('client_error', {
+            message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
+          }, 0, 'error');
+        });
+        window.addEventListener('pagehide', flushAnalytics);
+        boot();
+      } catch (error) {
+        showAccessError(error);
+      }
     }
   };
 })();

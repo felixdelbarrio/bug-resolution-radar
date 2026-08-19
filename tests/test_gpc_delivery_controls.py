@@ -21,6 +21,17 @@ def test_gpc_quality_script_validates_the_real_local_webapp() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "GPC quality gate OK" in result.stdout
+    assert "17 nodos de arranque" in result.stdout
+
+
+def test_webapp_reports_incomplete_html_deployments_without_null_errors() -> None:
+    app = _text("apps-script/App.html")
+
+    assert "const REQUIRED_SHELL_IDS = Object.freeze([" in app
+    assert "WEBAPP_SHELL_MISMATCH" in app
+    assert "Publica una versión nueva incluyendo todos los archivos HTML." in app
+    assert "showAccessError(error);" in app
+    assert "const table = $('runsTable');" in app
 
 
 def test_makefile_exposes_local_webapp_and_gpc_gate() -> None:

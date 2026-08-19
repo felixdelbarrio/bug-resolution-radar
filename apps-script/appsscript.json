@@ -6,6 +6,11 @@
         "userSymbol": "Drive",
         "version": "v3",
         "serviceId": "drive"
+      },
+      {
+        "userSymbol": "Gmail",
+        "version": "v1",
+        "serviceId": "gmail"
       }
     ]
   },
@@ -17,11 +22,11 @@
     "https://www.googleapis.com/auth/presentations",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/script.scriptapp",
-    "https://www.googleapis.com/auth/script.external_request",
-    "https://mail.google.com/"
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.settings.basic"
   ],
   "webapp": {
     "access": "DOMAIN",
-    "executeAs": "USER_ACCESSING"
+    "executeAs": "USER_DEPLOYING"
   }
 }

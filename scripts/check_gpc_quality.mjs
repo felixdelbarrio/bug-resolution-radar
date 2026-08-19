@@ -40,8 +40,8 @@ for (const name of htmlFiles) {
 }
 
 const manifest = JSON.parse(source("appsscript.json"));
-if (manifest.webapp?.access !== "DOMAIN" || manifest.webapp?.executeAs !== "USER_ACCESSING") {
-  throw new Error("appsscript.json debe conservar acceso DOMAIN y ejecución USER_ACCESSING.");
+if (manifest.webapp?.access !== "DOMAIN" || manifest.webapp?.executeAs !== "USER_DEPLOYING") {
+  throw new Error("appsscript.json debe conservar acceso DOMAIN y ejecución USER_DEPLOYING.");
 }
 if (manifest.runtimeVersion !== "V8") {
   throw new Error("Apps Script debe usar runtime V8.");
@@ -68,7 +68,30 @@ if (newsletter.includes("urlfetchapp")) {
   throw new Error("La newsletter no puede invocar servicios generativos o HTTP externos.");
 }
 
-validateRenderedWebapp(renderWebapp());
+const shellSource = source("Index.html");
+const appSource = source("App.html");
+const shellContract = appSource.match(
+  /const REQUIRED_SHELL_IDS = Object\.freeze\(\[([\s\S]*?)\]\);/
+);
+if (!shellContract) {
+  throw new Error("App.html debe declarar el contrato REQUIRED_SHELL_IDS.");
+}
+const requiredShellIds = [...shellContract[1].matchAll(/'([^']+)'/g)].map(
+  (match) => match[1]
+);
+const declaredShellIds = new Set(
+  [...shellSource.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1])
+);
+const missingShellIds = requiredShellIds.filter((id) => !declaredShellIds.has(id));
+if (missingShellIds.length) {
+  throw new Error(
+    `Index.html no satisface el contrato de arranque: ${missingShellIds.join(", ")}`
+  );
+}
+
+const renderedWebapp = renderWebapp();
+validateRenderedWebapp(renderedWebapp);
 console.log(
-  `GPC quality gate OK: ${gsFiles.length} archivos GS, ${htmlFiles.length} HTML y WebApp local v3.`
+  `GPC quality gate OK: ${gsFiles.length} archivos GS, ${htmlFiles.length} HTML, ` +
+  `${requiredShellIds.length} nodos de arranque y WebApp local v3.`
 );
