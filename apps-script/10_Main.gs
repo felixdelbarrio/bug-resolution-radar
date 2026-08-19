@@ -34,29 +34,14 @@ function _requireAdmin_() {
   return user;
 }
 
-function _preferenceMap_(email) {
-  const out = {};
-  _readRecords_(RADAR.sheets.preferences).filter(function (row) {
-    return _canonicalEmail_(row.email) === email;
-  }).forEach(function (row) {
-    out[_text_(row.preference_key)] = _safeJsonParse_(row.value_json, null);
-  });
-  return out;
-}
-
-function _initialDashboardState_(preferences, manifest) {
+function _initialDashboardState_(manifest) {
   const scopes = (manifest && manifest.scopes) || [];
-  const saved = (preferences || {}).dashboard_state || {};
-  const validScopeKeys = new Set(scopes.map(function (scope) { return _text_(scope.scopeKey); }));
-  let scopeKey = _text_(saved.scopeKey);
-  if (!validScopeKeys.has(scopeKey)) scopeKey = scopes.length ? _text_(scopes[0].scopeKey) : '';
-  const panels = ['overview', 'insights', 'trends', 'issues'];
   return {
-    panel: panels.indexOf(_text_(saved.panel)) >= 0 ? _text_(saved.panel) : 'overview',
-    scopeKey: scopeKey,
-    trendChart: _text_(saved.trendChart) || 'open_status_bar',
-    insightsId: _text_(saved.insightsId || saved.insightsTab) || 'summary',
-    issuesView: _text_(saved.issuesView) === 'Table' ? 'Table' : 'Cards',
+    panel: 'overview',
+    scopeKey: scopes.length ? _text_(scopes[0].scopeKey) : '',
+    trendChart: 'open_status_bar',
+    insightsId: 'summary',
+    issuesView: 'Cards',
     page: 1,
     pageSize: RADAR.defaultPageSize
   };
@@ -67,9 +52,8 @@ function getBootstrap() {
     const user = _requireUser_();
     if (user.role === 'admin') _registerAppVersion_(user.email);
     const manifest = _workspaceManifest_();
-    const preferences = _preferenceMap_(user.email);
     const reportDriveFolder = user.role === 'admin' ? _reportDriveFolderSetting_() : null;
-    const initialState = _initialDashboardState_(preferences, manifest);
+    const initialState = _initialDashboardState_(manifest);
     let dashboard = null;
     if (initialState.scopeKey) {
       dashboard = _dashboardPayload_({
@@ -99,7 +83,6 @@ function getBootstrap() {
       scopes: manifest.scopes,
       countries: manifest.countries,
       sources: manifest.sources,
-      preferences: preferences,
       administration: user.role === 'admin' ? {
         reportDriveFolder: reportDriveFolder,
         importReady: Boolean(reportDriveFolder)
@@ -173,48 +156,6 @@ function saveNote() { return _rpc_(_readOnlySnapshotError_); }
 function deleteNote() { return _rpc_(_readOnlySnapshotError_); }
 function listNotes() { return _rpc_(_readOnlySnapshotError_); }
 function deleteIssueNotes() { return _rpc_(_readOnlySnapshotError_); }
-
-function _sanitizeDashboardPreference_(value) {
-  const input = value || {};
-  const allowed = new Set(['panel', 'scopeKey', 'trendChart', 'insightsId', 'issuesView']);
-  Object.keys(input).forEach(function (key) {
-    _assert_(allowed.has(key),
-      'La WebApp no guarda filtros ni variantes no materializadas.', 'VIEW_NOT_MATERIALIZED');
-  });
-  const panels = ['overview', 'insights', 'trends', 'issues'];
-  const panel = _text_(input.panel) || 'overview';
-  _assert_(panels.indexOf(panel) >= 0, 'La vista indicada no está disponible.', 'VIEW_NOT_MATERIALIZED');
-  const scopeKey = _text_(input.scopeKey);
-  if (scopeKey) _activeSnapshotRecordForScope_(scopeKey, true);
-  return {
-    panel: panel,
-    scopeKey: scopeKey,
-    trendChart: _sanitizeText_(input.trendChart, 100),
-    insightsId: _sanitizeText_(input.insightsId, 100),
-    issuesView: _text_(input.issuesView) === 'Table' ? 'Table' : 'Cards'
-  };
-}
-
-function savePreference(key, value) {
-  return _rpc_(function () {
-    const user = _requireUser_();
-    const preferenceKey = _text_(key);
-    _assert_(['theme', 'dashboard_state'].indexOf(preferenceKey) >= 0,
-      'Esa preferencia no está permitida.', 'VALIDATION_ERROR');
-    let cleanValue = value;
-    if (preferenceKey === 'dashboard_state') cleanValue = _sanitizeDashboardPreference_(value);
-    if (preferenceKey === 'theme') {
-      cleanValue = _text_(value) === 'dark' ? 'dark' : 'light';
-    }
-    return _upsertRecord_(RADAR.sheets.preferences, {
-      pref_uid: user.email + '::' + preferenceKey,
-      email: user.email,
-      preference_key: preferenceKey,
-      value_json: _safeJsonStringify_(cleanValue),
-      updated_at: _nowIso_()
-    });
-  });
-}
 
 function _temporaryTransferFile_(blob, token, kind, ownerEmail, expiresAt) {
   const safeKind = _text_(kind);

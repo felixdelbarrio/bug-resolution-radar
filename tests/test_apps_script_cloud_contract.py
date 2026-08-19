@@ -177,7 +177,7 @@ def test_setup_removes_only_known_legacy_storage_after_contract_creation() -> No
         setup_application.index("Object.keys(CONTRACTS).forEach")
     )
     assert "_seedDefaultNewsletterRecipients_" not in setup
-    assert "report_drive_folder" in remove_obsolete
+    assert "report_drive_folder" not in remove_obsolete
 
 
 def test_setup_keeps_the_control_sheet_visible() -> None:
@@ -347,7 +347,9 @@ def test_report_folder_is_global_and_blocks_validation_when_missing() -> None:
     assert "_setConfig_(" in _function_body(report, "saveReportDriveFolder")
     assert "'REPORT_DRIVE_FOLDER'" in _function_body(report, "saveReportDriveFolder")
     assert "_preferenceMap_" not in _function_body(main, "_publishDecodedTransfer_")
-    assert "report_drive_folder" not in _function_body(main, "savePreference")
+    assert "function savePreference" not in main
+    assert "USER_PREFS" not in _source("00_Config.gs")
+    assert "window.localStorage" in _source("App.html")
 
 
 def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
@@ -360,8 +362,8 @@ def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
     assert "reportId" in save_recipient
     assert "report_id: report.reportId" in save_recipient
     assert "snapshot_id: report.snapshotId" in save_recipient
-    assert "_newsletterUsers_().find" in save_recipient
-    assert "usuario activo y autorizado" in save_recipient
+    assert "email.endsWith('@' + RADAR.allowedDomain)" in save_recipient
+    assert "displayName" in save_recipient
     assert "_newsletterRecipientsForReport_" in newsletter
 
 
@@ -400,7 +402,7 @@ def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_persona
     assert "La WebApp no utilizará la identidad del visitante" in app
     assert "GmailApp" not in newsletter
     assert "MailApp" not in newsletter
-    assert "bug-resolution-radar.group@bbva.com" not in newsletter + config
+    assert "voc-commercial.group@bbva.com" not in newsletter + config
 
 
 def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarchy() -> None:
@@ -412,7 +414,10 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
     assert index.count("corporate-lockup") >= 2
     assert ".corporate-lockup" in design
     for expected in (
-        "Decisiones claras sobre el backlog",
+        "scopeLabel",
+        "Resultado correspondiente al seguimiento de incidencias de la última quincena:",
+        "Discrepancias estados finalistas",
+        "Información generada a ",
         "Backlog abierto",
         "Creadas",
         "Cerradas",
@@ -572,18 +577,15 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
 
     for rpc in (
         "getAdminConsole",
-        "getDrivePickerConfig",
         "recordAnalyticsEvents",
         "getAnalyticsReport",
         "saveSummaryChartIds",
     ):
         assert f"function {rpc}" in administration
-    assert "browseReportDriveFolders" not in administration
-    assert "ScriptApp.getOAuthToken()" in administration
-    assert "google.picker.PickerBuilder" in app
-    assert ".setOrigin(google.script.host.origin)" in app
-    assert "pickerConfigForm" in app
-    assert "configureDrivePicker" in app
+    assert "Picker" not in administration + app
+    assert "folderReference" in app
+    assert "recipientForm" in app
+    assert "Añadir destinatario" in app
     assert "weekOverWeekPct" in administration
     assert "body_text" in _source("00_Config.gs")
     assert "slides_url" in _source("00_Config.gs")

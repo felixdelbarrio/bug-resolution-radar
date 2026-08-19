@@ -64,11 +64,6 @@ function _removeObsoleteStorage_(ss) {
   OBSOLETE_SCRIPT_PROPERTIES.forEach(function (key) {
     properties.deleteProperty(key);
   });
-  _readRecords_(RADAR.sheets.preferences).filter(function (row) {
-    return _text_(row.preference_key) === 'report_drive_folder';
-  }).forEach(function (row) {
-    _deleteRecord_(RADAR.sheets.preferences, row.pref_uid);
-  });
   _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
     return !_text_(row.report_id) || !_text_(row.snapshot_id);
   }).forEach(function (row) {

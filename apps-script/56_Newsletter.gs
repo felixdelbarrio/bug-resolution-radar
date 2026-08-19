@@ -47,23 +47,6 @@ function _newsletterSenderIdentity_() {
   };
 }
 
-function _newsletterUsers_() {
-  return _readRecords_(RADAR.sheets.users).filter(function (row) {
-    return row.active === true;
-  }).map(function (row) {
-    return {
-      email: _canonicalEmail_(row.email),
-      displayName: _text_(row.display_name),
-      role: _text_(row.role)
-    };
-  }).filter(function (user) {
-    return Boolean(user.email);
-  }).sort(function (left, right) {
-    return left.displayName.localeCompare(right.displayName, 'es', { sensitivity: 'base' }) ||
-      left.email.localeCompare(right.email);
-  });
-}
-
 function _newsletterAuditPayload_() {
   return _readRecords_(RADAR.sheets.newsletterAudit).slice(-100).reverse().map(function (row) {
     return {
@@ -110,7 +93,6 @@ function _newsletterSettingsPayload_() {
   return {
     sender: _newsletterSenderIdentity_(),
     reports: reports,
-    users: _newsletterUsers_(),
     recipients: recipients,
     audit: _newsletterAuditPayload_()
   };
@@ -127,18 +109,18 @@ function saveNewsletterRecipient(payload) {
   return _rpc_(function () {
     const user = _requireAdmin_();
     const input = payload || {};
-    _assertExactFields_(input, ['reportId', 'email', 'active'], 'newsletterRecipient');
+    _assertExactFields_(input, ['reportId', 'email', 'displayName', 'active'], 'newsletterRecipient');
     const report = _newsletterReports_().find(function (item) {
       return item.reportId === _text_(input.reportId);
     });
     _assert_(report, 'El informe seleccionado no existe o ya no está activo.', 'SNAPSHOT_NOT_FOUND');
     const email = _canonicalEmail_(input.email);
-    const recipientUser = _newsletterUsers_().find(function (candidate) {
-      return candidate.email === email;
-    });
-    _assert_(recipientUser,
-      'El destinatario debe ser un usuario activo y autorizado de la aplicación.',
+    _assert_(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email),
+      'Introduce un correo válido.', 'VALIDATION_ERROR');
+    _assert_(email.endsWith('@' + RADAR.allowedDomain),
+      'El destinatario debe pertenecer al dominio @' + RADAR.allowedDomain + '.',
       'VALIDATION_ERROR');
+    const displayName = _sanitizeText_(input.displayName, 200) || email.split('@')[0];
     const uid = report.reportId + '::' + email;
     _withApplicationLock_(function () {
       const current = _readRecords_(RADAR.sheets.newsletterRecipients).find(function (row) {
@@ -153,7 +135,7 @@ function saveNewsletterRecipient(payload) {
         scope_key: report.scopeKey,
         scope_label: report.label,
         email: email,
-        display_name: recipientUser.displayName,
+        display_name: displayName,
         active: input.active === true,
         created_at: createdAt,
         created_by: createdBy,
@@ -306,13 +288,29 @@ function _newsletterDeliver_(recipients, subject, rendered, attachment, sender) 
   return { deliveries: deliveries, failures: failures };
 }
 
-function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
+function _newsletterPeriodOnly_(value) {
+  const label = _text_(value);
+  const match = label.match(/(?:^|·\s*)(Periodo\s+.+)$/i);
+  return match ? match[1].replace(/^periodo/i, 'Periodo') : label;
+}
+
+function _newsletterSnapshotTimestamp_(value) {
+  const stamp = _date_(value);
+  return stamp
+    ? Utilities.formatDate(stamp, Session.getScriptTimeZone() || 'Europe/Madrid', 'dd/MM/yyyy HH:mm')
+    : 'fecha no disponible';
+}
+
+function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) {
   const draft = newsletter.draft || {};
   const reportLink = _sanitizeUrl_(reportUrl);
   const appLink = _sanitizeUrl_(applicationUrl);
   const metrics = newsletter.metrics || {};
   const backlogDelta = Number(newsletter.backlogDelta || 0);
   const rollups = newsletter.responsibleRollups || [];
+  const scopeLabel = _text_(publication && publication.scopeLabel);
+  const periodLabel = _newsletterPeriodOnly_(newsletter.periodLabel);
+  const snapshotTimestamp = _newsletterSnapshotTimestamp_(publication && publication.generatedAt);
   const color = DESIGN_TOKENS.color;
   // Email styles live inside double-quoted HTML attributes. Use single quotes
   // around family names so the generated markup remains valid in Gmail.
@@ -357,11 +355,11 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
       '<table role="presentation" width="100%" style="margin-top:12px;border-collapse:collapse"><tr>' +
       '<td width="33%" style="padding-right:8px;color:' + color.grey600 + ';font-size:12px;line-height:16px">Abiertas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.openIssues) + '</strong></td>' +
       '<td width="33%" style="padding:0 8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Causas raíz<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.rootCauseEvolutives) + '</strong></td>' +
-      '<td width="34%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Discrepancias<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.finalistDiscrepancies) + '</strong></td>' +
+      '<td width="34%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Discrepancias estados finalistas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.finalistDiscrepancies) + '</strong></td>' +
       '</tr></table></td></tr></table></td></tr>';
   }).join('');
 
-  const preheader = 'Seguimiento quincenal de incidencias · ' + _text_(newsletter.periodLabel);
+  const preheader = 'Seguimiento quincenal de incidencias · ' + periodLabel;
   const html =
     '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">' +
     _newsletterEscapeHtml_(preheader) + '</div>' +
@@ -377,9 +375,9 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
     '<td align="right" valign="middle" style="color:' + color.serene + ';font-size:12px;line-height:16px;font-weight:500">BUG RESOLUTION RADAR</td></tr></table></td></tr>' +
     '<tr><td class="email-pad" style="padding:32px;font-family:' + font + ';font-size:15px;line-height:24px;color:' + color.grey800 + '">' +
     '<p style="margin:0 0 8px;color:' + color.royalDark + ';font-size:12px;line-height:16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">Seguimiento quincenal</p>' +
-    '<h1 style="margin:0;color:' + color.midnight + ';font-family:' + headline + ';font-size:32px;line-height:40px">Decisiones claras sobre el backlog</h1>' +
-    '<p style="margin:8px 0 24px;color:' + color.grey600 + '">' + _newsletterEscapeHtml_(newsletter.periodLabel) + '</p>' +
-    '<p style="margin:0 0 24px">' + _newsletterEscapeHtml_(draft.greeting) + ' ' + _newsletterEscapeHtml_(draft.intro) + '</p>' +
+    '<h1 style="margin:0;color:' + color.midnight + ';font-family:' + headline + ';font-size:32px;line-height:40px">' + _newsletterEscapeHtml_(scopeLabel) + '</h1>' +
+    '<p style="margin:8px 0 24px;color:' + color.grey600 + '">' + _newsletterEscapeHtml_(periodLabel) + '</p>' +
+    '<p style="margin:0 0 24px">Resultado correspondiente al seguimiento de incidencias de la última quincena:</p>' +
     '<table role="presentation" width="100%" style="margin:0 -6px 12px;border-collapse:separate"><tr>' +
     metricCell_('Backlog abierto', metrics.currentOpen, 'Antes: ' + _text_(newsletter.previousOpen)) +
     metricCell_('Creadas', metrics.createdCurrent, 'Quincena actual') +
@@ -406,15 +404,14 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
     '</td></tr><tr><td style="padding:20px 32px;border-top:1px solid ' + color.grey300 + ';background:' + color.grey200 +
     ';font-family:' + font + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">' +
     '<strong style="color:' + color.midnight + '">BBVA Banca de Empresas e Instituciones</strong><br>' +
-    'Información generada desde un snapshot publicado y trazable. El PPTX adjunto es la copia autoritativa del periodo.</td></tr></table></div>';
+    'Información generada a ' + _newsletterEscapeHtml_(snapshotTimestamp) + '</td></tr></table></div>';
   const plain = [
     RADAR.corporateBrand,
     'Bug Resolution Radar',
-    newsletter.periodLabel,
+    scopeLabel,
+    periodLabel,
     '',
-    draft.greeting,
-    '',
-    draft.intro,
+    'Resultado correspondiente al seguimiento de incidencias de la última quincena:',
     reportLink,
     '',
     draft.summary,
@@ -424,7 +421,9 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl) {
     '',
     draft.closing,
     '',
-    appLink
+    appLink,
+    '',
+    'Información generada a ' + snapshotTimestamp
   ].join('\n');
   return { html: html, plain: plain };
 }
@@ -532,7 +531,11 @@ function sendPeriodNewsletter(reportId, mode) {
       rendered = _newsletterRender_(
         context.newsletter,
         context.record.slides_url,
-        reportShare.url
+        reportShare.url,
+        {
+          scopeLabel: context.record.scope_label,
+          generatedAt: context.header.generatedAt || context.record.created_at
+        }
       );
       const baseAudit = _newsletterAuditRecord_(
         newsletterId, _text_(reportId), deliveryMode, context, recipients, subject,

@@ -77,10 +77,7 @@ hasta disponer de identidad de despliegue automatizada:
 1. Sincronizar el directorio `apps-script/` con el proyecto corporativo.
 2. Ejecutar `setupApplication()` con el administrador inicial cuando cambie el
    contrato de Sheets.
-3. Activar Google Picker API en el proyecto estándar de Google Cloud y crear una
-   API key restringida a `*.google.com` y `*.googleusercontent.com`. La API key y
-   el número de proyecto se guardan una sola vez desde **Configuración → Carpeta
-   de Drive**; ya no hace falta ejecutar una función manual.
+3. Configurar el ID o la URL de la carpeta desde **Configuración → Carpeta de Drive**.
 4. Crear una nueva versión y desplegar la WebApp para el dominio con **Ejecutar como:
    yo**. El manifiesto usa `USER_DEPLOYING`, igual que Market Pulse, mientras
    `Session.getActiveUser()` conserva la autorización funcional del visitante.

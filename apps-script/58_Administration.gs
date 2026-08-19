@@ -87,10 +87,13 @@ function getAdminConsole(scopeKey) {
     const folder = _reportDriveFolderSetting_();
     const header = record ? _snapshotHeader_(record) : null;
     const administration = record ? _snapshotAdministration_(record) : { jiraSources: [] };
-    const eventRows = _readRecords_(RADAR.sheets.analyticsEvents);
-    const uniqueUsers = new Set(eventRows.map(function (row) {
-      return _canonicalEmail_(row.user_email);
-    }).filter(Boolean));
+    const analyticsSheet = _sheet_(RADAR.sheets.analyticsEvents);
+    const analyticsEvents = Math.max(0, analyticsSheet.getLastRow() - 1);
+    const analyticsUserColumn = _headersFor_(RADAR.sheets.analyticsEvents).indexOf('user_email') + 1;
+    const analyticsUsers = analyticsEvents
+      ? new Set(analyticsSheet.getRange(2, analyticsUserColumn, analyticsEvents, 1)
+        .getDisplayValues().map(function (row) { return _canonicalEmail_(row[0]); }).filter(Boolean)).size
+      : 0;
     return {
       health: {
         status: record ? 'Operativa' : 'Sin snapshot',
@@ -112,8 +115,8 @@ function getAdminConsole(scopeKey) {
         slidesUrl: record ? _text_(record.slides_url) : '',
         generatedAt: header ? header.generatedAt : null,
         accessPolicy: 'Dominio @' + RADAR.allowedDomain,
-        analyticsUsers: uniqueUsers.size,
-        analyticsEvents: eventRows.length
+        analyticsUsers: analyticsUsers,
+        analyticsEvents: analyticsEvents
       },
       reportDriveFolder: folder,
       summaryCharts: {
@@ -122,42 +125,6 @@ function getAdminConsole(scopeKey) {
       },
       jiraSources: administration.jiraSources || []
     };
-  });
-}
-
-function getDrivePickerConfig() {
-  return _rpc_(function () {
-    _requireAdmin_();
-    const properties = PropertiesService.getScriptProperties();
-    const developerKey = _text_(properties.getProperty('RADAR_PICKER_API_KEY'));
-    const appId = _text_(properties.getProperty('RADAR_PICKER_APP_ID'));
-    const configured = /^AIza[A-Za-z0-9_-]{20,}$/.test(developerKey) && /^\d{6,30}$/.test(appId);
-    return {
-      configured: configured,
-      developerKey: configured ? developerKey : '',
-      appId: appId,
-      oauthToken: configured ? ScriptApp.getOAuthToken() : '',
-      message: configured ? '' :
-        'Google Drive Picker requiere RADAR_PICKER_API_KEY y RADAR_PICKER_APP_ID en las propiedades del script.'
-    };
-  });
-}
-
-/** Configuración operativa única, administrable desde la propia WebApp. */
-function configureDrivePicker(apiKey, cloudProjectNumber) {
-  return _rpc_(function () {
-    _requireAdmin_();
-    const developerKey = _text_(apiKey);
-    const appId = _text_(cloudProjectNumber);
-    _assert_(/^AIza[A-Za-z0-9_-]{20,}$/.test(developerKey),
-      'La API key de Google Picker no es válida.', 'VALIDATION_ERROR');
-    _assert_(/^\d{6,30}$/.test(appId),
-      'El número del proyecto de Google Cloud no es válido.', 'VALIDATION_ERROR');
-    PropertiesService.getScriptProperties().setProperties({
-      RADAR_PICKER_API_KEY: developerKey,
-      RADAR_PICKER_APP_ID: appId
-    });
-    return { configured: true, appId: appId };
   });
 }
 

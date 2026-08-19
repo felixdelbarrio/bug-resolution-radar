@@ -192,8 +192,8 @@ function localRuntimeMarkup() {
   const bootstrap = {
     app: {
       name: "Bug Resolution Radar · WebApp local",
-      version: "2026.08.19.4",
-      contractVersion: "5.0.4",
+      version: "2026.08.19.6",
+      contractVersion: "5.1.0",
       semanticContract: "desktop-authoritative-v2",
       dataVersion: scope.dataVersion,
       cacheEpoch: "local-20260819-4",
@@ -206,7 +206,6 @@ function localRuntimeMarkup() {
     scopes: [scope],
     countries: ["España"],
     sources: [{ source_id: "jira:espana:core", source_type: "materialized", alias: "Core", country: "España" }],
-    preferences: { theme: "light" },
     administration: {
       reportDriveFolder: { id: "local-folder", name: "Informes locales", url: "https://drive.google.com/" },
       importReady: true
@@ -226,7 +225,6 @@ function localRuntimeMarkup() {
     getBootstrap: () => bootstrap,
     queryDashboard: (request) => dashboard(request),
     getDashboardViewBundle: () => [],
-    savePreference: () => ({ saved: true }),
     recordAnalyticsEvents: (events) => ({ accepted: Array.isArray(events) ? events.length : 0 }),
     getIssueDetail: () => issue,
     getPeriodReportStatus: () => ({
@@ -257,8 +255,8 @@ function localRuntimeMarkup() {
     getAdminConsole: () => ({
       health: {
         status: "Operativa (simulada)",
-        appVersion: "2026.08.19.4",
-        contractVersion: "5.0.4",
+        appVersion: "2026.08.19.6",
+        contractVersion: "5.1.0",
         accessPolicy: "Dominio @bbva.com",
         lastImportAt: scope.activatedAt,
         importedRecords: 13,
@@ -284,8 +282,6 @@ function localRuntimeMarkup() {
         dashboardUrl: "https://jira.example.com/dashboard/42"
       }]
     }),
-    getDrivePickerConfig: () => ({ configured: false, message: "Picker simulado localmente." }),
-    configureDrivePicker: (_apiKey, appId) => ({ configured: true, appId }),
     saveReportDriveFolder: () => bootstrap.administration.reportDriveFolder,
     getNewsletterSettings: () => ({
       sender: {
@@ -300,11 +296,6 @@ function localRuntimeMarkup() {
         scopeKey: scope.scopeKey,
         label: scope.scopeLabel,
         createdAt: scope.activatedAt
-      }],
-      users: [{
-        email: "admin.local@bbva.com",
-        displayName: "Admin local",
-        role: "admin"
       }],
       recipients: [],
       audit: []

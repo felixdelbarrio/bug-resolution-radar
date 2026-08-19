@@ -59,8 +59,6 @@ const App = (() => {
     pending: 0,
     memory: new Map(),
     inFlight: new Map(),
-    preferenceTimer: null,
-    lastPreferenceSignature: '',
     transferValidation: null,
     lastPeriodReport: null,
     newsletterSettings: null,
@@ -70,7 +68,6 @@ const App = (() => {
     analyticsReport: null,
     analyticsUserEmail: '',
     analyticsDays: 30,
-    drivePickerConfig: null,
     duplicateMode: 'title',
     analyticsQueue: [],
     analyticsTimer: null,
@@ -217,23 +214,31 @@ const App = (() => {
     return `dashboard:${requestKey(request)}`;
   }
 
+  function readLocalPreferences() {
+    if (isShared()) return {};
+    try {
+      const contract = state.bootstrap && state.bootstrap.app
+        ? state.bootstrap.app.contractVersion
+        : 'current';
+      const value = JSON.parse(window.localStorage.getItem(`bug-resolution-radar:preferences:${contract}`) || '{}');
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
   function schedulePreferenceSave() {
     if (isShared()) return;
-    window.clearTimeout(state.preferenceTimer);
-    const preference = {
-      panel: state.panel,
-      scopeKey: state.scopeKey,
-      trendChart: state.trendChart,
-      insightsId: state.insightsId,
-      issuesView: state.issuesView
-    };
-    const signature = JSON.stringify(preference);
-    if (signature === state.lastPreferenceSignature) return;
-    state.preferenceTimer = window.setTimeout(() => {
-      RPC.call('savePreference', 'dashboard_state', preference).then(() => {
-        state.lastPreferenceSignature = signature;
-      }).catch(() => {});
-    }, 1500);
+    try {
+      window.localStorage.setItem(`bug-resolution-radar:preferences:${state.bootstrap.app.contractVersion}`, JSON.stringify({
+        panel: state.panel,
+        scopeKey: state.scopeKey,
+        trendChart: state.trendChart,
+        insightsId: state.insightsId,
+        issuesView: state.issuesView,
+        theme: state.dark ? 'dark' : 'light'
+      }));
+    } catch (_) {}
   }
 
   function setActionIcons() {
@@ -894,69 +899,6 @@ const App = (() => {
     return state.newsletterSettings;
   }
 
-  function loadPickerLibrary() {
-    return new Promise((resolve, reject) => {
-      if (window.google && google.picker) return resolve();
-      if (!window.gapi || typeof gapi.load !== 'function') {
-        reject(new Error('Google Drive Picker no ha podido cargarse.'));
-        return;
-      }
-      gapi.load('picker', {
-        callback: resolve,
-        onerror: () => reject(new Error('Google Drive Picker no ha podido cargarse.')),
-        timeout: 10000,
-        ontimeout: () => reject(new Error('Google Drive Picker ha agotado el tiempo de carga.'))
-      });
-    });
-  }
-
-  async function openDriveFolderPicker() {
-    const button = $('openDrivePicker');
-    if (button) {
-      button.disabled = true;
-      button.textContent = 'Abriendo Google Drive…';
-    }
-    try {
-      const config = state.drivePickerConfig || await RPC.call('getDrivePickerConfig');
-      state.drivePickerConfig = config;
-      if (!config.configured) throw new Error(config.message);
-      await loadPickerLibrary();
-      const folderView = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(true)
-        .setMode(google.picker.DocsViewMode.LIST);
-      const picker = new google.picker.PickerBuilder()
-        .addView(folderView)
-        .setOAuthToken(config.oauthToken)
-        .setDeveloperKey(config.developerKey)
-        .setAppId(config.appId)
-        .setOrigin(google.script.host.origin)
-        .setTitle('Selecciona la carpeta de informes')
-        .setCallback(async data => {
-          if (data.action !== google.picker.Action.PICKED || !data.docs || !data.docs[0]) return;
-          try {
-            const saved = await RPC.call('saveReportDriveFolder', data.docs[0].id);
-            state.adminConsole = null;
-            state.bootstrap.administration.reportDriveFolder = saved;
-            state.bootstrap.administration.importReady = true;
-            UI.message(`Carpeta «${saved.name}» seleccionada.`, 'success');
-            await renderSettings();
-          } catch (error) {
-            UI.message(error.message, 'error');
-          }
-        })
-        .build();
-      picker.setVisible(true);
-    } catch (error) {
-      UI.message(error.message, 'error');
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.textContent = 'Seleccionar en Google Drive';
-      }
-    }
-  }
-
   async function renderSettings() {
     const epoch = state.navigationEpoch;
     const tabs = [
@@ -971,12 +913,13 @@ const App = (() => {
       ? state.settingsTab
       : 'health';
     state.settingsTab = activeTab;
-    if (!state.adminConsole) {
+    const needsAdminConsole = ['health', 'drive', 'sources', 'summary'].includes(activeTab);
+    if (needsAdminConsole && !state.adminConsole) {
       state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey);
     }
     if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
     let body = '';
-    const consoleData = state.adminConsole;
+    const consoleData = state.adminConsole || {};
     if (activeTab === 'health') {
       const health = consoleData.health || {};
       body = `<section class="page-stack">
@@ -1004,33 +947,13 @@ const App = (() => {
       </section>`;
     } else if (activeTab === 'drive') {
       const folder = consoleData.reportDriveFolder || null;
-      if (!state.drivePickerConfig) {
-        state.drivePickerConfig = await RPC.call('getDrivePickerConfig');
-      }
-      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
-      const pickerConfig = state.drivePickerConfig || { configured: false };
       body = `<section class="page-stack">
         <section class="surface-card page-stack">
-          <h3>Carpeta configurada</h3>
+          <h3>Carpeta de informes</h3>
+          <p class="minor-copy">Introduce el ID de la carpeta de Google Drive o pega su URL completa.</p>
           ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
-          ${pickerConfig.configured ? `
-            <button id="openDrivePicker" class="action-button drive-picker-button" type="button">Seleccionar en Google Drive</button>
-            <p class="minor-copy">Google Picker configurado para el proyecto ${UI.escape(pickerConfig.appId)}.</p>
-          ` : `
-            <section class="picker-setup-card">
-              <div><strong>Activa el selector nativo una sola vez</strong><p>Introduce la API key de Google Picker y el número del proyecto estándar de Google Cloud.</p></div>
-              <form id="pickerConfigForm" class="settings-form-grid">
-                <label class="field"><span>API key de Google Picker</span><input id="pickerApiKey" type="password" autocomplete="off" placeholder="AIza…" required></label>
-                <label class="field"><span>Número del proyecto Cloud</span><input id="pickerAppId" inputmode="numeric" pattern="[0-9]{6,30}" value="${UI.escape(pickerConfig.appId || '')}" placeholder="123456789012" required></label>
-                <button class="action-button" type="submit">Guardar y activar Picker</button>
-              </form>
-            </section>
-          `}
-          <p class="minor-copy">Se abrirá el selector nativo de tu cuenta, con Mi unidad y unidades compartidas.</p>
-          <details class="manual-folder-fallback"><summary>Usar ID o URL manualmente</summary>
-            <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
-            <button class="secondary-button" type="submit">Guardar referencia</button></form>
-          </details>
+          <form id="folderForm" class="folder-reference-form"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" autocomplete="off" required></label>
+          <button class="action-button" type="submit">Guardar carpeta</button></form>
         </section>
       </section>`;
     } else if (activeTab === 'sources') {
@@ -1055,11 +978,7 @@ const App = (() => {
       const recipients = (newsletter.recipients || []).filter(
         recipient => recipient.reportId === state.newsletterReportId
       );
-      const recipientByEmail = new Map(recipients.map(recipient => [recipient.email, recipient]));
-      const newsletterUsers = (newsletter.users || []).map(user => ({
-        ...user,
-        active: Boolean(recipientByEmail.get(user.email) && recipientByEmail.get(user.email).active)
-      }));
+      const activeRecipients = recipients.filter(recipient => recipient.active).length;
       body = `<section class="page-stack">
         <section class="surface-card page-stack">
           <h3>Destinatarios</h3>
@@ -1071,10 +990,16 @@ const App = (() => {
           <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
           ).join('')}</select></label>
-          <div class="source-list">${newsletterUsers.map(user =>
-            `<article class="source-list-row"><div><strong>${UI.escape(user.displayName || user.email)}</strong><p>${UI.escape(user.email)} · ${UI.escape(user.role)}</p></div>
-            <button class="ghost-button recipient-toggle" data-email="${UI.escape(user.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${user.active ? '1' : '0'}" ${selectedReport ? '' : 'disabled'} type="button">${user.active ? 'Desactivar' : 'Activar'}</button></article>`
-          ).join('')}</div>
+          <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} configurados para este informe</span></div>
+          <form id="recipientForm" class="newsletter-recipient-form">
+            <label class="field"><span>Correo BBVA</span><input id="recipientEmail" type="email" autocomplete="email" placeholder="nombre@bbva.com" required></label>
+            <label class="field"><span>Nombre visible (opcional)</span><input id="recipientDisplayName" autocomplete="name" maxlength="200" placeholder="Nombre y apellidos"></label>
+            <button class="action-button" type="submit" ${selectedReport ? '' : 'disabled'}>Añadir destinatario</button>
+          </form>
+          <div class="newsletter-recipient-list">${recipients.map(recipient =>
+            `<article class="newsletter-recipient-row ${recipient.active ? '' : 'newsletter-recipient-inactive'}"><div><strong>${UI.escape(recipient.displayName || recipient.email)}</strong><p>${UI.escape(recipient.email)} · ${recipient.active ? 'Activo' : 'Inactivo'}</p></div>
+            <button class="ghost-button recipient-toggle" data-email="${UI.escape(recipient.email)}" data-display-name="${UI.escape(recipient.displayName || '')}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${recipient.active ? '1' : '0'}" type="button">${recipient.active ? 'Desactivar' : 'Activar'}</button></article>`
+          ).join('') || '<p class="minor-copy">Todavía no hay destinatarios. Añade el primero para habilitar el envío final.</p>'}</div>
         </section>
         <section class="surface-card page-stack"><h3>Histórico de envíos</h3>
           ${(newsletter.audit || []).map(item => `<details class="insight-detail-block">
@@ -1162,28 +1087,27 @@ const App = (() => {
       UI.message('Carpeta guardada.', 'success');
       await renderSettings();
     });
-    if ($('openDrivePicker')) $('openDrivePicker').addEventListener('click', openDriveFolderPicker);
-    if ($('pickerConfigForm')) $('pickerConfigForm').addEventListener('submit', async event => {
-      event.preventDefault();
-      const submit = event.currentTarget.querySelector('button[type="submit"]');
-      if (submit) submit.disabled = true;
-      try {
-        state.drivePickerConfig = await RPC.call(
-          'configureDrivePicker',
-          $('pickerApiKey').value,
-          $('pickerAppId').value
-        );
-        state.drivePickerConfig = null;
-        UI.message('Google Picker configurado. Ya puedes seleccionar la carpeta.', 'success');
-        await renderSettings();
-      } catch (error) {
-        UI.message(error.message, 'error');
-        if (submit) submit.disabled = false;
-      }
-    });
     if ($('recipientReport')) $('recipientReport').addEventListener('change', async event => {
       state.newsletterReportId = event.target.value;
       await renderSettings();
+    });
+    if ($('recipientForm')) $('recipientForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.currentTarget.querySelector('button[type="submit"]');
+      if (button) button.disabled = true;
+      try {
+        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+          reportId: state.newsletterReportId,
+          email: $('recipientEmail').value,
+          displayName: $('recipientDisplayName').value,
+          active: true
+        });
+        UI.message('Destinatario añadido y activado.', 'success');
+        await renderSettings();
+      } catch (error) {
+        UI.message(error.message, 'error');
+        if (button) button.disabled = false;
+      }
     });
     document.querySelectorAll('.recipient-toggle').forEach(button => {
       button.addEventListener('click', async () => {
@@ -1191,6 +1115,7 @@ const App = (() => {
         state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
           reportId: button.dataset.report,
           email: button.dataset.email,
+          displayName: button.dataset.displayName,
           active: button.dataset.active !== '1'
         });
         await renderSettings();
@@ -1239,9 +1164,7 @@ const App = (() => {
     setActionIcons();
     if (state.route === 'dashboard') renderCurrent();
     else if (state.route === 'settings') await renderSettings();
-    if (!isShared()) {
-      await RPC.call('savePreference', 'theme', state.dark ? 'dark' : 'light');
-    }
+    schedulePreferenceSave();
   }
 
   async function fetchDashboard(request) {
@@ -1300,7 +1223,7 @@ const App = (() => {
   }
 
   function prefetchPrimaryViews() {
-    if (!state.scopeKey) return;
+    if (!state.scopeKey || state.route !== 'dashboard') return;
     if (isShared()) {
       ['overview', 'insights', 'trends', 'issues'].forEach(panel => {
         fetchDashboard(requestFor(panel)).catch(() => {});
@@ -1357,20 +1280,18 @@ const App = (() => {
       );
       state.bootstrap = bootstrap;
       const initial = bootstrap.initialState || {};
-      state.scopeKey = initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
-      state.panel = initial.panel || 'overview';
-      state.trendChart = initial.trendChart || 'open_status_bar';
-      state.insightsId = initial.insightsId || 'summary';
-      state.issuesView = initial.issuesView === 'Table' ? 'Table' : 'Cards';
+      const local = readLocalPreferences();
+      const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
+      const validPanels = new Set(['overview', 'insights', 'trends', 'issues']);
+      state.scopeKey = validScopeKeys.has(local.scopeKey)
+        ? local.scopeKey
+        : initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
+      state.panel = validPanels.has(local.panel) ? local.panel : initial.panel || 'overview';
+      state.trendChart = local.trendChart || initial.trendChart || 'open_status_bar';
+      state.insightsId = local.insightsId || initial.insightsId || 'summary';
+      state.issuesView = local.issuesView === 'Table' ? 'Table' : 'Cards';
       state.pageSize = Number(initial.pageSize || 50);
-      state.dark = (bootstrap.preferences.theme || 'light') === 'dark';
-      state.lastPreferenceSignature = JSON.stringify({
-        panel: state.panel,
-        scopeKey: state.scopeKey,
-        trendChart: state.trendChart,
-        insightsId: state.insightsId,
-        issuesView: state.issuesView
-      });
+      state.dark = local.theme === 'dark';
       document.documentElement.dataset.theme = state.dark ? 'dark' : 'light';
       document.body.className = [
         'auth-ready',
@@ -1398,7 +1319,11 @@ const App = (() => {
         shared: isShared(),
         dataVersion: bootstrap.app.dataVersion
       });
-      window.setTimeout(prefetchPrimaryViews, 0);
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(prefetchPrimaryViews, { timeout: 5000 });
+      } else {
+        window.setTimeout(prefetchPrimaryViews, 2500);
+      }
       PersistentCache.prune({
         contract: bootstrap.app.contractVersion,
         cacheGeneration: bootstrap.app.cacheEpoch,

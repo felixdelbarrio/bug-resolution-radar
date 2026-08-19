@@ -10,7 +10,6 @@ function _recordsCacheEnabled_(sheetName) {
     RADAR.sheets.config,
     RADAR.sheets.users,
     RADAR.sheets.importRuns,
-    RADAR.sheets.preferences,
     RADAR.sheets.snapshots,
     RADAR.sheets.snapshotParts,
     RADAR.sheets.snapshotPointers,

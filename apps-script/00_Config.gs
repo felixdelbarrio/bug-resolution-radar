@@ -2,8 +2,8 @@
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
   corporateBrand: 'BBVA Banca de Empresas e Instituciones',
-  appVersion: '2026.08.19.4',
-  contractVersion: '5.0.4',
+  appVersion: '2026.08.19.6',
+  contractVersion: '5.1.0',
   projectionContract: 'bug-resolution-radar-cloud-projection',
   projectionVersion: 2,
   semanticContract: 'desktop-authoritative-v2',
@@ -27,7 +27,6 @@ const RADAR = Object.freeze({
     config: '_CONFIG',
     users: 'AUTH_USERS',
     importRuns: 'IMPORT_RUNS',
-    preferences: 'USER_PREFS',
     snapshots: 'MATERIALIZED_SNAPSHOTS',
     snapshotParts: 'MATERIALIZED_PARTS',
     snapshotChunks: 'MATERIALIZED_CHUNKS',
@@ -255,13 +254,6 @@ const CONTRACTS = Object.freeze({
       ['requested_by', 'email', true], ['details', 'string', false], ['snapshot_id', 'string', false]
     ])
   }),
-  USER_PREFS: Object.freeze({
-    key: 'pref_uid', version: '5.0.0', unique: ['pref_uid'],
-    columns: Object.freeze([
-      ['pref_uid', 'string', true], ['email', 'email', true], ['preference_key', 'string', true],
-      ['value_json', 'json', true], ['updated_at', 'datetime', true]
-    ])
-  }),
   MATERIALIZED_SNAPSHOTS: Object.freeze({
     key: 'snapshot_id', version: '5.0.0', unique: ['snapshot_id'],
     columns: Object.freeze([
@@ -342,7 +334,7 @@ const CONTRACTS = Object.freeze({
       ['body_text', 'string', true], ['slides_url', 'url', true],
       ['recipient_count', 'number', true], ['effective_sender', 'email', true],
       ['created_at', 'datetime', true], ['created_by', 'email', true],
-      ['status', 'enum', true, ['processing', 'sent', 'failed']], ['details', 'string', false]
+      ['status', 'enum', true, ['processing', 'sent', 'partial', 'failed']], ['details', 'string', false]
     ])
   }),
   ANALYTICS_EVENTS: Object.freeze({
