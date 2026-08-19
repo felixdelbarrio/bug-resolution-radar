@@ -112,12 +112,27 @@ function localRuntimeMarkup() {
       };
       if (activeTab === "summary") insights.periodSummary = {
         caption: "España · Periodo 15/07 - 28/07/2026",
-        cards: [{
-          cardId: "open_total", kicker: "Insights · Abiertas totales", metric: "8",
-          detail: "Backlog abierto en el scope actual", label: "Abiertas", tone: "warning",
-          issues: [issue]
-        }],
-        groups: [], showOpenSplit: false, sourceBreakdown: []
+        cards: [
+          {
+            cardId: "new_now", kicker: "Insights · Creadas", metric: "64",
+            detail: "Δ +6,7% vs quincena previa", label: "Creadas en la quincena actual",
+            tone: "flow", delta: { displayKind: "improving" }, issues: [issue]
+          },
+          {
+            cardId: "closed_now", kicker: "Insights · Cerradas", metric: "71",
+            detail: "Δ -13,4% vs quincena previa", label: "Cerradas en la quincena",
+            tone: "warning", delta: { displayKind: "worsening" }, issues: [issue]
+          },
+          {
+            cardId: "resolution_now", kicker: "Insights · Resolución", metric: "16.1d",
+            detail: "Δ -37,1% vs quincena previa", label: "Resolución de cerradas",
+            tone: "flow", delta: { displayKind: "improving" }, issues: [issue]
+          }
+        ],
+        groups: [{
+          label: "Creadas en la quincena actual", count: 64, helpText: "quincena actual",
+          tone: "flow", items: [issue]
+        }], showOpenSplit: false, sourceBreakdown: []
       };
       if (activeTab === "functionality") insights.functionality = {
         chart: { title: "Incidencias por funcionalidad", subtitle: "Vista acumulada", figure },
@@ -177,10 +192,11 @@ function localRuntimeMarkup() {
   const bootstrap = {
     app: {
       name: "Bug Resolution Radar · WebApp local",
-      contractVersion: "5.0.1",
+      version: "2026.08.19.2",
+      contractVersion: "5.0.2",
       semanticContract: "desktop-authoritative-v2",
       dataVersion: scope.dataVersion,
-      cacheEpoch: "local",
+      cacheEpoch: "local-20260819-2",
       maxTransferBytes: 33554432,
       scopeVersions: { [scope.scopeKey]: scope.dataVersion },
       materializedOnly: true,
@@ -238,6 +254,8 @@ function localRuntimeMarkup() {
     getAdminConsole: () => ({
       health: {
         status: "Operativa (simulada)",
+        appVersion: "2026.08.19.2",
+        contractVersion: "5.0.2",
         accessPolicy: "Dominio @bbva.com",
         lastImportAt: scope.activatedAt,
         importedRecords: 13,
@@ -264,6 +282,7 @@ function localRuntimeMarkup() {
       }]
     }),
     getDrivePickerConfig: () => ({ configured: false, message: "Picker simulado localmente." }),
+    configureDrivePicker: (_apiKey, appId) => ({ configured: true, appId }),
     saveReportDriveFolder: () => bootstrap.administration.reportDriveFolder,
     getNewsletterSettings: () => ({
       sender: {

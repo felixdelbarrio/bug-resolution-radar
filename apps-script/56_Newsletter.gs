@@ -360,6 +360,7 @@ function sendPeriodNewsletter(reportId, mode) {
         attachments: [attachment]
       };
       if (sender.usesAlias) options.from = RADAR.newsletterFrom;
+      stage = 'comprobación de cuota';
       _assert_(MailApp.getRemainingDailyQuota() >= recipients.length,
         'La cuota diaria de correo no permite completar este envío.', 'NEWSLETTER_SEND_FAILED');
       stage = 'Gmail';

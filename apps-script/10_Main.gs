@@ -65,6 +65,7 @@ function _initialDashboardState_(preferences, manifest) {
 function getBootstrap() {
   return _rpc_(function () {
     const user = _requireUser_();
+    if (user.role === 'admin') _registerAppVersion_(user.email);
     const manifest = _workspaceManifest_();
     const preferences = _preferenceMap_(user.email);
     const reportDriveFolder = user.role === 'admin' ? _reportDriveFolderSetting_() : null;
@@ -84,6 +85,7 @@ function getBootstrap() {
     return {
       app: {
         name: RADAR.appName,
+        version: RADAR.appVersion,
         contractVersion: RADAR.contractVersion,
         semanticContract: RADAR.semanticContract,
         dataVersion: _dataVersion_(),

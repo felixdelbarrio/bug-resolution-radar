@@ -379,6 +379,13 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
     assert "dataset.sending" in app
 
 
+def test_newsletter_manifest_declares_mailapp_quota_scope() -> None:
+    manifest = json.loads(_source("appsscript.json"))
+
+    assert "https://www.googleapis.com/auth/script.send_mail" in manifest["oauthScopes"]
+    assert "stage = 'comprobación de cuota'" in _source("56_Newsletter.gs")
+
+
 def test_materialized_insight_variants_keep_the_desktop_payload_shape() -> None:
     materialized = _function_body(
         _source("25_MaterializedSnapshots.gs"), "_materializedViewPayload_"
@@ -401,6 +408,33 @@ def test_materialized_insight_variants_keep_the_desktop_payload_shape() -> None:
         "insightsFunctionality",
     ):
         assert forbidden not in app
+
+
+def test_period_summary_keeps_kpis_separate_from_issue_lists_and_insight_click_is_atomic() -> None:
+    app = _source("App.html")
+    summary = app[
+        app.index("data.periodSummary.cards.map") : app.index("data.periodSummary.groups || []")
+    ]
+    open_insight = _function_body(app, "openInsight")
+
+    assert "issueList(" not in summary
+    assert "data-delta-kind" in summary
+    assert "const epoch = ++state.navigationEpoch" in open_insight
+    assert "await refreshDashboard(epoch)" in open_insight
+    assert "button.disabled = true" in open_insight
+
+
+def test_webapp_version_is_explicit_and_registered_automatically() -> None:
+    config = _source("00_Config.gs")
+    administration = _source("58_Administration.gs")
+    main = _source("10_Main.gs")
+    setup = _source("90_Setup.gs")
+
+    assert re.search(r"appVersion:\s*'\d{4}\.\d{2}\.\d{2}\.\d+'", config)
+    assert "_registerAppVersion_(user.email)" in _function_body(main, "getBootstrap")
+    assert "'APP_VERSION'" in _function_body(administration, "_registerAppVersion_")
+    assert "RADAR.appVersion" in _function_body(setup, "setupApplication")
+    assert "version: RADAR.appVersion" in _function_body(main, "getBootstrap")
 
 
 def test_aggregate_scope_really_hides_origin_for_admins() -> None:
@@ -490,6 +524,8 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
     assert "ScriptApp.getOAuthToken()" in administration
     assert "google.picker.PickerBuilder" in app
     assert ".setOrigin(google.script.host.origin)" in app
+    assert "pickerConfigForm" in app
+    assert "configureDrivePicker" in app
     assert "weekOverWeekPct" in administration
     assert "body_text" in _source("00_Config.gs")
     assert "slides_url" in _source("00_Config.gs")

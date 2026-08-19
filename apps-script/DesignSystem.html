@@ -554,6 +554,8 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 .insight-issue-row .issue-primary-link { display: grid; gap: 4px; }
 .topic-brief { color: var(--bbva-text-muted); }
 .period-action-card { --insight-accent: var(--bbva-primary); border-top: 4px solid var(--insight-accent); }
+.period-action-card { align-content: start; min-height: 190px; }
+.period-action-card-footer { align-self: end; margin-top: auto; padding-top: 12px; }
 .period-action-card span { color: var(--insight-accent); font-weight: 700; }
 .period-action-card p { color: var(--bbva-text-muted); }
 .period-action-card strong { color: color-mix(in srgb, var(--insight-accent) 74%, var(--bbva-text) 26%); font-family: var(--bbva-font-headline); font-size: 32px; line-height: 40px; }
@@ -796,6 +798,17 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 .shared-readonly-note p { margin: 4px 0 0; color: var(--bbva-text-muted); }
 .subtab-strip { overflow-x: auto; padding-bottom: 4px; }
 .settings-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.picker-setup-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--bbva-border);
+  border-left: 4px solid var(--bbva-electric);
+  border-radius: 8px;
+  background: var(--bbva-blue-light);
+}
+.picker-setup-card p { margin: 4px 0 0; color: var(--bbva-text-muted); }
+.picker-setup-card .action-button { align-self: end; }
 .source-list { display: grid; gap: 8px; }
 .source-list-row {
   display: grid;

@@ -5,6 +5,19 @@ const SUMMARY_CHART_DEFAULTS = Object.freeze([
   'resolution_hist'
 ]);
 
+/** Registra automáticamente la versión servida la primera vez que la abre un admin. */
+function _registerAppVersion_(email) {
+  const config = _getConfigMap_();
+  if (_text_(config.APP_VERSION) === RADAR.appVersion) return;
+  _setConfig_(
+    'APP_VERSION',
+    RADAR.appVersion,
+    'string',
+    'Versión de código de la WebApp desplegada',
+    _canonicalEmail_(email) || RADAR.initialAdmin
+  );
+}
+
 function _configuredSummaryChartIds_() {
   const allowed = new Set([
     'timeseries',
@@ -81,6 +94,8 @@ function getAdminConsole(scopeKey) {
     return {
       health: {
         status: record ? 'Operativa' : 'Sin snapshot',
+        appVersion: RADAR.appVersion,
+        contractVersion: RADAR.contractVersion,
         lastImportAt: latestImport ? latestImport.finished_at : null,
         importedRecords: record ? Number(record.row_count || 0) : 0,
         newsletterRecipientsSent: record
@@ -120,7 +135,7 @@ function getDrivePickerConfig() {
     return {
       configured: configured,
       developerKey: configured ? developerKey : '',
-      appId: configured ? appId : '',
+      appId: appId,
       oauthToken: configured ? ScriptApp.getOAuthToken() : '',
       message: configured ? '' :
         'Google Drive Picker requiere RADAR_PICKER_API_KEY y RADAR_PICKER_APP_ID en las propiedades del script.'
@@ -128,7 +143,7 @@ function getDrivePickerConfig() {
   });
 }
 
-/** Configuración operativa única; no se expone en la interfaz ni se persiste en Sheets. */
+/** Configuración operativa única, administrable desde la propia WebApp. */
 function configureDrivePicker(apiKey, cloudProjectNumber) {
   return _rpc_(function () {
     _requireAdmin_();

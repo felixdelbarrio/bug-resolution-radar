@@ -522,6 +522,19 @@ const App = (() => {
     ).join('')}</section>`;
   }
 
+  async function openInsight(insightsId) {
+    if (!insightsId || insightsId === state.insightsId) return;
+    const epoch = ++state.navigationEpoch;
+    state.insightsId = insightsId;
+    document.querySelectorAll('[data-insight-id]').forEach(button => {
+      button.classList.toggle('subtab-button-active', button.dataset.insightId === insightsId);
+      button.disabled = true;
+    });
+    trackEvent('insights_section_selected', { insightsId: insightsId });
+    await refreshDashboard(epoch);
+    schedulePreferenceSave();
+  }
+
   function renderInsights() {
     const data = (state.dashboard && state.dashboard.insights) || {};
     const tabs = data.tabs || [];
@@ -531,15 +544,16 @@ const App = (() => {
       body = `<section class="page-stack">
         <p class="inline-caption">${UI.escape(data.periodSummary.caption)}</p>
         <div class="period-card-grid">${data.periodSummary.cards.map(card =>
-          `<article class="period-action-card" data-tone="${UI.escape(card.tone)}">
+          `<article class="period-action-card" data-tone="${UI.escape(card.tone)}" data-delta-kind="${UI.escape(card.delta && card.delta.displayKind || 'none')}">
             <span>${UI.escape(card.kicker)}</span><strong>${UI.escape(card.metric)}</strong>
-            <p>${UI.escape(card.detail)}</p>${issueList(card.issues || [], '')}
+            <p>${UI.escape(card.detail)}</p>
             <div class="period-action-card-footer"><em>${UI.escape(card.label)}</em></div>
           </article>`
         ).join('')}</div>
         ${(data.periodSummary.groups || []).map(group =>
           `<details class="insight-detail-block" data-tone="${UI.escape(group.tone)}">
             <summary>${UI.escape(group.label)}: ${UI.formatNumber(group.count)}</summary>
+            ${group.helpText ? `<p class="inline-caption">${UI.escape(group.helpText)}</p>` : ''}
             ${issueList(group.rows || group.items || [])}
           </details>`
         ).join('')}
@@ -565,11 +579,7 @@ const App = (() => {
       ${body || UI.empty('Sin racional materializado', 'El escritorio no publicó contenido para esta sección.')}
     </section>`;
     document.querySelectorAll('[data-insight-id]').forEach(button => {
-      button.addEventListener('click', async () => {
-        state.insightsId = button.dataset.insightId;
-        trackEvent('insights_section_selected', { insightsId: state.insightsId });
-        await refreshDashboard();
-      });
+      button.addEventListener('click', () => openInsight(button.dataset.insightId));
     });
     document.querySelectorAll('[data-duplicate-mode]').forEach(button => {
       button.addEventListener('click', () => {
@@ -980,6 +990,7 @@ const App = (() => {
         </div>
         <section class="surface-card page-stack">
           <h3>Versiones y accesos</h3>
+          <p><strong>WebApp ${UI.escape(health.appVersion || state.bootstrap.app.version || '—')}</strong> · contrato ${UI.escape(health.contractVersion || state.bootstrap.app.contractVersion)}</p>
           <p>Generado: ${UI.escape(UI.formatDate(health.generatedAt))}</p>
           <a href="${UI.escape(health.versionUrl)}" target="_blank" rel="noopener">Abrir versión consultada ↗</a>
           ${health.slidesUrl ? `<a href="${UI.escape(health.slidesUrl)}" target="_blank" rel="noopener">Abrir presentación ↗</a>` : ''}
@@ -991,11 +1002,28 @@ const App = (() => {
       </section>`;
     } else if (activeTab === 'drive') {
       const folder = consoleData.reportDriveFolder || null;
+      if (!state.drivePickerConfig) {
+        state.drivePickerConfig = await RPC.call('getDrivePickerConfig');
+      }
+      if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
+      const pickerConfig = state.drivePickerConfig || { configured: false };
       body = `<section class="page-stack">
         <section class="surface-card page-stack">
           <h3>Carpeta configurada</h3>
           ${folder ? `<a href="${UI.escape(folder.url)}" target="_blank" rel="noopener">${UI.escape(folder.name)} ↗</a>` : '<p>Sin carpeta configurada.</p>'}
-          <button id="openDrivePicker" class="action-button drive-picker-button" type="button">Seleccionar en Google Drive</button>
+          ${pickerConfig.configured ? `
+            <button id="openDrivePicker" class="action-button drive-picker-button" type="button">Seleccionar en Google Drive</button>
+            <p class="minor-copy">Google Picker configurado para el proyecto ${UI.escape(pickerConfig.appId)}.</p>
+          ` : `
+            <section class="picker-setup-card">
+              <div><strong>Activa el selector nativo una sola vez</strong><p>Introduce la API key de Google Picker y el número del proyecto estándar de Google Cloud.</p></div>
+              <form id="pickerConfigForm" class="settings-form-grid">
+                <label class="field"><span>API key de Google Picker</span><input id="pickerApiKey" type="password" autocomplete="off" placeholder="AIza…" required></label>
+                <label class="field"><span>Número del proyecto Cloud</span><input id="pickerAppId" inputmode="numeric" pattern="[0-9]{6,30}" value="${UI.escape(pickerConfig.appId || '')}" placeholder="123456789012" required></label>
+                <button class="action-button" type="submit">Guardar y activar Picker</button>
+              </form>
+            </section>
+          `}
           <p class="minor-copy">Se abrirá el selector nativo de tu cuenta, con Mi unidad y unidades compartidas.</p>
           <details class="manual-folder-fallback"><summary>Usar ID o URL manualmente</summary>
             <form id="folderForm"><label class="field"><span>ID o URL de carpeta</span><input id="folderReference" value="${UI.escape(folder ? folder.id : '')}" required></label>
@@ -1129,6 +1157,24 @@ const App = (() => {
       await renderSettings();
     });
     if ($('openDrivePicker')) $('openDrivePicker').addEventListener('click', openDriveFolderPicker);
+    if ($('pickerConfigForm')) $('pickerConfigForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const submit = event.currentTarget.querySelector('button[type="submit"]');
+      if (submit) submit.disabled = true;
+      try {
+        state.drivePickerConfig = await RPC.call(
+          'configureDrivePicker',
+          $('pickerApiKey').value,
+          $('pickerAppId').value
+        );
+        state.drivePickerConfig = null;
+        UI.message('Google Picker configurado. Ya puedes seleccionar la carpeta.', 'success');
+        await renderSettings();
+      } catch (error) {
+        UI.message(error.message, 'error');
+        if (submit) submit.disabled = false;
+      }
+    });
     if ($('recipientReport')) $('recipientReport').addEventListener('change', async event => {
       state.newsletterReportId = event.target.value;
       await renderSettings();
