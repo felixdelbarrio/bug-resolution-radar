@@ -300,30 +300,65 @@ function localRuntimeMarkup() {
       recipients: [],
       audit: []
     }),
-    saveNewsletterRecipient: () => mocks.getNewsletterSettings(),
-    getAnalyticsReport: ({ userEmail = "", days = 30 } = {}) => ({
+    saveNewsletterRecipient: ({ reportId, email, active }) => ({
+      recipientUid: `${reportId}::${email}`,
+      reportId,
+      snapshotId: scope.snapshotId,
+      scopeKey: scope.scopeKey,
+      scopeLabel: scope.scopeLabel,
+      email,
+      active,
+      updatedAt: new Date().toISOString()
+    }),
+    getAnalyticsReport: ({ userEmail = "", days = 30, captureMode = "preview" } = {}) => ({
+      schemaVersion: "2.1",
+      export: {
+        captureMode,
+        generatedAt: "2026-07-28T12:01:00Z",
+        appVersion: "local",
+        contractVersion: "5.1.0",
+        queryStartAt: "2026-06-28T12:01:00Z",
+        queryEndAt: "2026-07-28T12:01:00Z",
+        dataAsOf: scope.activatedAt,
+        sourceRowsAvailable: 1,
+        matchingRows: 1,
+        includedRows: 1,
+        detailLimit: 2000,
+        sourceRetentionLimit: 50000
+      },
       filters: { userEmail, days },
       summary: {
-        events: 48,
-        users: 3,
-        sessions: 7,
+        events: 1,
+        users: 1,
+        sessions: 1,
         errors: 0,
-        currentWeekEvents: 28,
-        previousWeekEvents: 20,
-        weekOverWeekPct: 40,
+        currentWeekEvents: 1,
+        previousWeekEvents: 0,
+        weekOverWeekPct: 100,
         averageDurationMs: 112,
         p95DurationMs: 240
       },
       users: ["admin.local@bbva.com"],
-      events: [{ label: "navigation", count: 18 }],
-      panels: [{ label: "overview", count: 16 }, { label: "insights", count: 12 }],
-      timeline: [{ day: "2026-07-28", count: 8 }],
+      events: [{ label: "navigation", count: 1 }],
+      panels: [{ label: "overview", count: 1 }],
+      timeline: [{ day: "2026-07-28", count: 1 }],
       rows: [{
         eventAt: scope.activatedAt,
         userEmail: "admin.local@bbva.com",
         eventName: "navigation",
         durationMs: 84
-      }]
+      }],
+      quality: {
+        summaryCompleteForWindow: true,
+        rowsTruncated: false,
+        invalidTimestampRows: 0,
+        futureTimestampRowsExcluded: 0,
+        sourceAtRetentionLimit: false,
+        unversionedEvents: 0
+      },
+      versions: [{ appVersion: "local", count: 1 }],
+      semantics: {},
+      integrity: { algorithm: "SHA-256", sha256: "local" }
     }),
     saveSummaryChartIds: (chartIds) => ({
       chartIds,

@@ -50,7 +50,6 @@ function _initialDashboardState_(manifest) {
 function getBootstrap() {
   return _rpc_(function () {
     const user = _requireUser_();
-    if (user.role === 'admin') _registerAppVersion_(user.email);
     const manifest = _workspaceManifest_();
     const reportDriveFolder = user.role === 'admin' ? _reportDriveFolderSetting_() : null;
     const initialState = _initialDashboardState_(manifest);
@@ -100,23 +99,17 @@ function queryDashboard(request) {
   });
 }
 
-/** Hydrates every immutable primary variant in one background RPC. */
+/** Hydrates only the four primary screens; secondary variants remain lazy. */
 function getDashboardViewBundle(scopeKey) {
   return _rpc_(function () {
     _requireUser_();
     const record = _activeSnapshotRecordForScope_(_text_(scopeKey), true);
     const requests = [
       { view: 'overview' },
+      { view: 'insights', insightsId: 'summary' },
+      { view: 'trends', chartId: 'open_status_bar' },
       { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }
     ];
-    const insights = _loadSnapshotPart_(record, 'insights/catalog');
-    const trends = _loadSnapshotPart_(record, 'trends/catalog');
-    (insights || []).forEach(function (item) {
-      requests.push({ view: 'insights', insightsId: _text_(item.id) });
-    });
-    (trends || []).forEach(function (item) {
-      requests.push({ view: 'trends', chartId: _text_(item.id) });
-    });
     return requests.map(function (request) {
       const normalized = _normalizeMaterializedRequest_(Object.assign({
         scopeKey: _text_(record.scope_key),

@@ -18,6 +18,14 @@ function _registerAppVersion_(email) {
   );
 }
 
+function registerAppVersion() {
+  return _rpc_(function () {
+    const user = _requireAdmin_();
+    _registerAppVersion_(user.email);
+    return { version: RADAR.appVersion };
+  });
+}
+
 function _configuredSummaryChartIds_() {
   const allowed = new Set([
     'timeseries',
@@ -172,28 +180,55 @@ function _analyticsPercentile_(values, percentile) {
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * percentile))];
 }
 
+function _analyticsCanonicalJson_(value) {
+  const normalize = function (item) {
+    if (Array.isArray(item)) return item.map(normalize);
+    if (item && typeof item === 'object') {
+      const out = {};
+      Object.keys(item).sort().forEach(function (key) {
+        out[key] = normalize(item[key]);
+      });
+      return out;
+    }
+    return item;
+  };
+  return JSON.stringify(normalize(value));
+}
+
 function getAnalyticsReport(request) {
   return _rpc_(function () {
     _requireAdmin_();
     const input = request || {};
-    _assertExactFields_(input, ['userEmail', 'days'], 'analyticsReport');
+    _assertExactFields_(input, ['userEmail', 'days', 'captureMode'], 'analyticsReport');
     const days = Math.max(1, Math.min(365, Math.floor(Number(input.days || 30))));
     const userEmail = _canonicalEmail_(input.userEmail);
+    const captureMode = _text_(input.captureMode) === 'export' ? 'export' : 'preview';
+    const allRows = _readRecords_(RADAR.sheets.analyticsEvents);
     const now = Date.now();
+    const generatedAt = new Date(now).toISOString();
     const dayMs = 24 * 60 * 60 * 1000;
     const cutoff = now - days * dayMs;
-    const selectedUserRows = _readRecords_(RADAR.sheets.analyticsEvents).filter(function (row) {
+    const selectedUserRows = allRows.filter(function (row) {
       return !userEmail || _canonicalEmail_(row.user_email) === userEmail;
+    });
+    let invalidTimestampRows = 0;
+    let futureTimestampRows = 0;
+    selectedUserRows.forEach(function (row) {
+      const stamp = _date_(row.event_at);
+      if (!stamp) invalidTimestampRows += 1;
+      else if (stamp.getTime() > now) futureTimestampRows += 1;
     });
     const rows = selectedUserRows.filter(function (row) {
       const stamp = _date_(row.event_at);
-      return stamp && stamp.getTime() >= cutoff;
+      return stamp && stamp.getTime() >= cutoff && stamp.getTime() <= now;
+    }).sort(function (left, right) {
+      return _date_(left.event_at).getTime() - _date_(right.event_at).getTime();
     });
     const currentWeekStart = now - 7 * dayMs;
     const previousWeekStart = now - 14 * dayMs;
     const currentWeekEvents = selectedUserRows.filter(function (row) {
       const stamp = _date_(row.event_at);
-      return stamp && stamp.getTime() >= currentWeekStart;
+      return stamp && stamp.getTime() >= currentWeekStart && stamp.getTime() <= now;
     }).length;
     const previousWeekEvents = selectedUserRows.filter(function (row) {
       const stamp = _date_(row.event_at);
@@ -206,17 +241,24 @@ function getAnalyticsReport(request) {
     const byEvent = {};
     const byPanel = {};
     const byDay = {};
+    const byVersion = {};
     const users = new Set();
     const sessions = new Set();
     const durations = [];
     let errors = 0;
+    let unversionedEvents = 0;
     rows.forEach(function (row) {
       const eventName = _text_(row.event_name);
+      const details = _safeJsonParse_(row.details_json, {});
+      const appVersion = _text_(details && details._telemetry && details._telemetry.appVersion);
+      const versionLabel = appVersion || 'legacy-unknown';
       const panel = _text_(row.panel || row.route) || 'sin-sección';
       const day = _dayKey_(row.event_at);
       byEvent[eventName] = Number(byEvent[eventName] || 0) + 1;
       byPanel[panel] = Number(byPanel[panel] || 0) + 1;
       byDay[day] = Number(byDay[day] || 0) + 1;
+      byVersion[versionLabel] = Number(byVersion[versionLabel] || 0) + 1;
+      if (!appVersion) unversionedEvents += 1;
       users.add(_canonicalEmail_(row.user_email));
       sessions.add(_text_(row.session_id));
       const duration = Number(row.duration_ms || 0);
@@ -230,7 +272,39 @@ function getAnalyticsReport(request) {
         return right.count - left.count || left.label.localeCompare(right.label);
       });
     };
-    return {
+    const detailLimit = 2000;
+    const detailRows = rows.slice(-detailLimit).reverse().map(function (row) {
+      const details = _safeJsonParse_(row.details_json, {});
+      return {
+        eventAt: row.event_at,
+        userEmail: _canonicalEmail_(row.user_email),
+        sessionId: _text_(row.session_id),
+        eventName: _text_(row.event_name),
+        route: _text_(row.route),
+        panel: _text_(row.panel),
+        scopeKey: _text_(row.scope_key),
+        durationMs: Number(row.duration_ms || 0),
+        status: _text_(row.status),
+        appVersion: _text_(details && details._telemetry && details._telemetry.appVersion) || 'legacy-unknown',
+        details: details
+      };
+    });
+    const report = {
+      schemaVersion: '2.1',
+      export: {
+        captureMode: captureMode,
+        generatedAt: generatedAt,
+        appVersion: RADAR.appVersion,
+        contractVersion: RADAR.contractVersion,
+        queryStartAt: new Date(cutoff).toISOString(),
+        queryEndAt: generatedAt,
+        dataAsOf: rows.length ? _date_(rows[rows.length - 1].event_at).toISOString() : null,
+        sourceRowsAvailable: allRows.length,
+        matchingRows: rows.length,
+        includedRows: detailRows.length,
+        detailLimit: detailLimit,
+        sourceRetentionLimit: 50000
+      },
       filters: { userEmail: userEmail, days: days },
       summary: {
         events: rows.length,
@@ -248,23 +322,39 @@ function getAnalyticsReport(request) {
       users: Array.from(users).filter(Boolean).sort(),
       events: descendingEntries(byEvent),
       panels: descendingEntries(byPanel),
+      versions: descendingEntries(byVersion).map(function (item) {
+        return { appVersion: item.label, count: item.count };
+      }),
       timeline: Object.keys(byDay).sort().map(function (day) {
         return { day: day, count: byDay[day] };
       }),
-      rows: rows.slice(-2000).reverse().map(function (row) {
-        return {
-          eventAt: row.event_at,
-          userEmail: _canonicalEmail_(row.user_email),
-          sessionId: _text_(row.session_id),
-          eventName: _text_(row.event_name),
-          route: _text_(row.route),
-          panel: _text_(row.panel),
-          scopeKey: _text_(row.scope_key),
-          durationMs: Number(row.duration_ms || 0),
-          status: _text_(row.status),
-          details: _safeJsonParse_(row.details_json, {})
-        };
-      })
+      rows: detailRows,
+      quality: {
+        summaryCompleteForWindow: allRows.length < 50000,
+        rowsTruncated: rows.length > detailLimit,
+        invalidTimestampRows: invalidTimestampRows,
+        futureTimestampRowsExcluded: futureTimestampRows,
+        sourceAtRetentionLimit: allRows.length >= 50000,
+        unversionedEvents: unversionedEvents
+      },
+      semantics: {
+        summary: 'Calculado con todos los eventos conservados que coinciden con filtros y ventana, aunque rows esté truncado. Consulta quality.summaryCompleteForWindow.',
+        rows: 'Detalle de los eventos más recientes, limitado por export.detailLimit y ordenado de más reciente a más antiguo.',
+        duration: 'averageDurationMs y p95DurationMs excluyen duraciones iguales a cero.',
+        errors: 'status=error o eventName=client_error.',
+        weekOverWeek: 'Últimos 7 días móviles frente a los 7 días móviles inmediatamente anteriores; no son semanas naturales.',
+        freshness: 'generatedAt identifica la captura del servidor; dataAsOf identifica el evento incluido más reciente.',
+        versionAttribution: 'Usa versions y rows[].appVersion para atribuir rendimiento. legacy-unknown puede mezclar código ya eliminado y no debe justificar cambios en la versión actual.',
+        exportProtocol: captureMode === 'export'
+          ? 'La WebApp vació y confirmó su cola local antes de solicitar esta captura al servidor. La propia RPC de captura y el evento posterior de descarga quedan fuera por definición.'
+          : 'Vista previa del servidor; utiliza una descarga con captureMode=export para análisis externo.'
+      }
     };
+    report.integrity = {
+      algorithm: 'SHA-256',
+      canonicalization: 'JSON con claves de objeto ordenadas alfabéticamente, sin integrity',
+      sha256: _hash_(_analyticsCanonicalJson_(report))
+    };
+    return report;
   });
 }

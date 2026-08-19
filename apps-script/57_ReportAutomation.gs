@@ -47,6 +47,8 @@ function getPeriodReportStatus(scopeKey) {
         newsletterSenderReady: sender.ready,
         newsletterSender: sender.effective || sender.requested,
         newsletterSenderMode: sender.mode,
+        newsletterSenderStatus: sender.verificationStatus,
+        newsletterSenderExecutor: sender.executor,
         recipientCount: _newsletterRecipientsForReport_(record.report_id).length,
         projectionSha256: _text_(record.projection_sha256),
         pptxSha256: _text_(record.pptx_sha256)

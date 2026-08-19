@@ -17,34 +17,55 @@ function _newsletterReports_() {
   }).filter(Boolean);
 }
 
-function _newsletterSenderIdentity_() {
+function _newsletterSenderCacheKey_() {
+  return _cacheKey_('newsletter-sender', { requested: _canonicalEmail_(RADAR.newsletterFrom) });
+}
+
+function _newsletterSenderIdentity_(forceRefresh) {
   const requested = _canonicalEmail_(RADAR.newsletterFrom);
+  const executor = _canonicalEmail_(Session.getEffectiveUser().getEmail());
+  const cache = CacheService.getScriptCache();
+  const cacheKey = _newsletterSenderCacheKey_();
+  if (forceRefresh === true) {
+    _cacheDeleteJson_(cache, cacheKey);
+  } else {
+    const cached = _cacheGetJson_(cache, cacheKey);
+    if (cached) return cached;
+  }
   let response = null;
   try {
     response = Gmail.Users.Settings.SendAs.list('me');
   } catch (err) {
-    return {
+    const unavailable = {
       requested: requested,
       effective: '',
+      executor: executor,
       ready: false,
       verificationStatus: 'unavailable',
       mode: 'Gmail API · remitente corporativo no disponible',
       error: _sanitizeText_(err && err.message, 500)
     };
+    _cachePutJson_(cache, cacheKey, unavailable, 15);
+    return unavailable;
   }
   const sendAs = ((response && response.sendAs) || []).find(function (item) {
     return _canonicalEmail_(item.sendAsEmail) === requested;
   });
   const verificationStatus = _text_(sendAs && sendAs.verificationStatus).toLowerCase() || 'unknown';
   const ready = Boolean(sendAs) && verificationStatus === 'accepted';
-  return {
+  const identity = {
     requested: requested,
     effective: ready ? requested : '',
+    executor: executor,
     ready: ready,
     verificationStatus: verificationStatus,
-    mode: ready ? 'Gmail API · remitente corporativo verificado' : 'Gmail API · remitente pendiente',
+    mode: ready
+      ? 'Gmail API · remitente corporativo verificado'
+      : (sendAs ? 'Gmail API · remitente pendiente de aceptación' : 'Gmail API · remitente no configurado'),
     error: ''
   };
+  _cachePutJson_(cache, cacheKey, identity, ready ? 300 : 15);
+  return identity;
 }
 
 function _newsletterAuditPayload_() {
@@ -81,13 +102,11 @@ function _newsletterSettingsPayload_() {
       scopeKey: _text_(row.scope_key),
       scopeLabel: _text_(row.scope_label),
       email: _canonicalEmail_(row.email),
-      displayName: _text_(row.display_name),
       active: row.active === true,
       updatedAt: row.updated_at
     };
   }).sort(function (left, right) {
     return left.scopeLabel.localeCompare(right.scopeLabel, 'es', { sensitivity: 'base' }) ||
-      left.displayName.localeCompare(right.displayName, 'es', { sensitivity: 'base' }) ||
       left.email.localeCompare(right.email);
   });
   return {
@@ -105,11 +124,28 @@ function getNewsletterSettings() {
   });
 }
 
+function revalidateNewsletterSender() {
+  return _rpc_(function () {
+    _requireAdmin_();
+    return _newsletterSenderIdentity_(true);
+  });
+}
+
+function _newsletterSenderAction_(sender) {
+  if (sender.verificationStatus === 'pending') {
+    return 'Confirma el mensaje de verificación recibido por el grupo y pulsa «Revalidar buzón».';
+  }
+  if (sender.verificationStatus === 'unavailable') {
+    return 'Autoriza el servicio avanzado de Gmail para el propietario del despliegue y vuelve a validar.';
+  }
+  return 'Añade y verifica este buzón en Gmail > Configuración > Cuentas > Enviar correo como para el propietario del despliegue.';
+}
+
 function saveNewsletterRecipient(payload) {
   return _rpc_(function () {
     const user = _requireAdmin_();
     const input = payload || {};
-    _assertExactFields_(input, ['reportId', 'email', 'displayName', 'active'], 'newsletterRecipient');
+    _assertExactFields_(input, ['reportId', 'email', 'active'], 'newsletterRecipient');
     const report = _newsletterReports_().find(function (item) {
       return item.reportId === _text_(input.reportId);
     });
@@ -120,8 +156,8 @@ function saveNewsletterRecipient(payload) {
     _assert_(email.endsWith('@' + RADAR.allowedDomain),
       'El destinatario debe pertenecer al dominio @' + RADAR.allowedDomain + '.',
       'VALIDATION_ERROR');
-    const displayName = _sanitizeText_(input.displayName, 200) || email.split('@')[0];
     const uid = report.reportId + '::' + email;
+    const updatedAt = _nowIso_();
     _withApplicationLock_(function () {
       const current = _readRecords_(RADAR.sheets.newsletterRecipients).find(function (row) {
         return _text_(row.recipient_uid) === uid;
@@ -135,15 +171,24 @@ function saveNewsletterRecipient(payload) {
         scope_key: report.scopeKey,
         scope_label: report.label,
         email: email,
-        display_name: displayName,
+        display_name: '',
         active: input.active === true,
         created_at: createdAt,
         created_by: createdBy,
-        updated_at: _nowIso_(),
+        updated_at: updatedAt,
         updated_by: user.email
       });
     });
-    return _newsletterSettingsPayload_();
+    return {
+      recipientUid: uid,
+      reportId: report.reportId,
+      snapshotId: report.snapshotId,
+      scopeKey: report.scopeKey,
+      scopeLabel: report.label,
+      email: email,
+      active: input.active === true,
+      updatedAt: updatedAt
+    };
   });
 }
 
@@ -227,7 +272,7 @@ function _newsletterMimeMessage_(recipient, subject, rendered, attachment, sende
     'To: ' + normalizedRecipient,
     'Subject: ' + _newsletterEncodedHeader_(subject),
     'Date: ' + new Date().toUTCString(),
-    'Message-ID: <' + token + '@voc-commercial.bbva.com>',
+    'Message-ID: <' + token + '@bug-resolution-radar.bbva.com>',
     'X-Bug-Resolution-Radar-Version: ' + RADAR.appVersion,
     'MIME-Version: 1.0',
     'Content-Type: multipart/mixed; boundary="' + mixedBoundary + '"',
@@ -505,9 +550,11 @@ function sendPeriodNewsletter(reportId, mode) {
       : _newsletterRecipientsForReport_(reportId);
     _assert_(recipients.length,
       'No hay destinatarios activos para esta vista.', 'NEWSLETTER_NO_RECIPIENTS');
-    const sender = _newsletterSenderIdentity_();
+    const sender = _newsletterSenderIdentity_(true);
     _assert_(sender.ready,
-      'El remitente corporativo ' + sender.requested + ' no está aceptado para el propietario del despliegue (' + sender.verificationStatus + '). Reautoriza Gmail API desde Apps Script.',
+      'El remitente corporativo ' + sender.requested + ' no está aceptado para ' +
+        (sender.executor || 'el propietario del despliegue') + ' (' + sender.verificationStatus + '). ' +
+        _newsletterSenderAction_(sender),
       'NEWSLETTER_SENDER_UNAVAILABLE');
     const attachment = _exactReportBlob_(
       context.record.pptx_file_id,

@@ -71,6 +71,7 @@ const App = (() => {
     duplicateMode: 'title',
     analyticsQueue: [],
     analyticsTimer: null,
+    analyticsFlushPromise: null,
     navigationEpoch: 0,
     sessionId: window.crypto && window.crypto.randomUUID
       ? window.crypto.randomUUID()
@@ -132,16 +133,31 @@ const App = (() => {
 
   function flushAnalytics() {
     window.clearTimeout(state.analyticsTimer);
-    const events = state.analyticsQueue.splice(0, 20);
-    if (!events.length || isShared() || !state.bootstrap) return;
-    RPC.call('recordAnalyticsEvents', events).catch(() => {});
-    if (state.analyticsQueue.length) {
-      state.analyticsTimer = window.setTimeout(flushAnalytics, 1200);
-    }
+    if (isShared() || !state.bootstrap) return Promise.resolve({ accepted: 0 });
+    if (state.analyticsFlushPromise) return state.analyticsFlushPromise;
+    const operation = (async () => {
+      let accepted = 0;
+      while (state.analyticsQueue.length) {
+        const events = state.analyticsQueue.splice(0, 20);
+        try {
+          const result = await RPC.call('recordAnalyticsEvents', events);
+          accepted += Number(result.accepted || 0);
+        } catch (error) {
+          state.analyticsQueue.unshift(...events);
+          throw error;
+        }
+      }
+      return { accepted };
+    })();
+    state.analyticsFlushPromise = operation.finally(() => {
+      state.analyticsFlushPromise = null;
+    });
+    return state.analyticsFlushPromise;
   }
 
   function trackEvent(eventName, details = {}, durationMs = 0, status = 'success') {
     if (isShared()) return;
+    const app = state.bootstrap && state.bootstrap.app ? state.bootstrap.app : {};
     state.analyticsQueue.push({
       eventAt: new Date().toISOString(),
       sessionId: state.sessionId,
@@ -151,13 +167,19 @@ const App = (() => {
       scopeKey: state.scopeKey,
       durationMs: Number(durationMs || 0),
       status: status,
-      details: details,
+      details: {
+        ...details,
+        _telemetry: {
+          appVersion: String(app.version || ''),
+          contractVersion: String(app.contractVersion || '')
+        }
+      },
       userAgent: navigator.userAgent
     });
-    if (state.analyticsQueue.length >= 10) flushAnalytics();
+    if (state.analyticsQueue.length >= 10) flushAnalytics().catch(() => {});
     else {
       window.clearTimeout(state.analyticsTimer);
-      state.analyticsTimer = window.setTimeout(flushAnalytics, 5000);
+      state.analyticsTimer = window.setTimeout(() => flushAnalytics().catch(() => {}), 5000);
     }
   }
   window.__RADAR_TELEMETRY__ = trackEvent;
@@ -713,7 +735,7 @@ const App = (() => {
       <strong>Presentación exacta publicada</strong>
       <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
       <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
-      ${senderReady ? `<div class="newsletter-sender-ready"><strong>Remitente corporativo</strong><span>${UI.escape(job.newsletterSender || '')}</span></div>` : `<div class="newsletter-sender-blocked" role="alert"><strong>Canal corporativo no disponible</strong><span>${UI.escape(job.newsletterSender || '')} no está habilitado para el propietario del despliegue. La WebApp no utilizará la identidad del visitante.</span></div>`}
+      ${senderReady ? `<div class="newsletter-sender-ready"><strong>Remitente corporativo</strong><span>${UI.escape(job.newsletterSender || '')}</span></div>` : `<div class="newsletter-sender-blocked" role="alert"><strong>Canal corporativo no disponible</strong><span>${UI.escape(job.newsletterSender || '')} no está aceptado en «Enviar correo como» para ${UI.escape(job.newsletterSenderExecutor || 'el propietario del despliegue')}. Estado: ${UI.escape(job.newsletterSenderStatus || 'no disponible')}.</span><button id="revalidateNewsletterSenderReport" class="ghost-button" type="button">Revalidar buzón</button></div>`}
       <div class="newsletter-report-actions">
         <button id="testPeriodNewsletter" class="secondary-button" ${senderReady ? '' : 'disabled'} type="button">Probar newsletter</button>
         <button id="sendPeriodNewsletter" class="action-button" ${canSend ? '' : 'disabled'} type="button">${sendLabel}</button>
@@ -761,6 +783,25 @@ const App = (() => {
     }
   }
 
+  async function revalidateCorporateSender(onReady) {
+    try {
+      setBusy(true);
+      const sender = await RPC.call('revalidateNewsletterSender');
+      state.newsletterSettings = null;
+      UI.message(
+        sender.ready
+          ? `Buzón corporativo verificado: ${sender.effective}.`
+          : `${sender.requested} sigue sin estar aceptado para ${sender.executor || 'el propietario del despliegue'}.`,
+        sender.ready ? 'success' : 'warning'
+      );
+      await onReady();
+    } catch (error) {
+      UI.message(error.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function renderReports() {
     const epoch = state.navigationEpoch;
     view().innerHTML = `<section class="page-stack">
@@ -777,6 +818,8 @@ const App = (() => {
       $('periodReportResult').innerHTML = reportSuccess(status.job);
       $('testPeriodNewsletter').addEventListener('click', () => deliverNewsletter('test'));
       $('sendPeriodNewsletter').addEventListener('click', () => deliverNewsletter('send'));
+      const revalidate = $('revalidateNewsletterSenderReport');
+      if (revalidate) revalidate.addEventListener('click', () => revalidateCorporateSender(renderReports));
     } catch (error) {
       if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
       $('periodReportResult').innerHTML = `<p class="report-error">${UI.escape(error.message)}</p>`;
@@ -899,7 +942,21 @@ const App = (() => {
     return state.newsletterSettings;
   }
 
+  function applyNewsletterRecipient(recipient) {
+    if (!state.newsletterSettings) return;
+    const recipients = state.newsletterSettings.recipients || [];
+    const index = recipients.findIndex(item => item.recipientUid === recipient.recipientUid);
+    if (index >= 0) recipients[index] = recipient;
+    else recipients.push(recipient);
+    state.newsletterSettings.recipients = recipients;
+  }
+
   async function renderSettings() {
+    if (!isAdmin() || isShared()) {
+      state.route = 'dashboard';
+      await openPanel(state.panel);
+      return;
+    }
     const epoch = state.navigationEpoch;
     const tabs = [
       ['health', 'Estado de la WebApp'],
@@ -985,7 +1042,7 @@ const App = (() => {
           <div class="${newsletter.sender.ready ? 'newsletter-sender-ready' : 'newsletter-sender-blocked'}">
             <strong>${newsletter.sender.ready ? 'Buzón corporativo preparado' : 'Buzón corporativo pendiente'}</strong>
             <span>${UI.escape(newsletter.sender.effective || newsletter.sender.requested)} · ${UI.escape(newsletter.sender.mode)}</span>
-            ${newsletter.sender.ready ? '' : '<small>El propietario de la WebApp debe autorizar Gmail API y tener aceptado este remitente en Enviar correo como. Hasta entonces el envío permanece bloqueado.</small>'}
+            ${newsletter.sender.ready ? '' : `<small>${UI.escape(newsletter.sender.executor || 'El propietario de la WebApp')} debe tener aceptado este remitente en «Enviar correo como». Hasta entonces el envío permanece bloqueado.</small><button id="revalidateNewsletterSenderSettings" class="ghost-button" type="button">Revalidar buzón</button>`}
           </div>
           <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
@@ -993,12 +1050,11 @@ const App = (() => {
           <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} configurados para este informe</span></div>
           <form id="recipientForm" class="newsletter-recipient-form">
             <label class="field"><span>Correo BBVA</span><input id="recipientEmail" type="email" autocomplete="email" placeholder="nombre@bbva.com" required></label>
-            <label class="field"><span>Nombre visible (opcional)</span><input id="recipientDisplayName" autocomplete="name" maxlength="200" placeholder="Nombre y apellidos"></label>
             <button class="action-button" type="submit" ${selectedReport ? '' : 'disabled'}>Añadir destinatario</button>
           </form>
           <div class="newsletter-recipient-list">${recipients.map(recipient =>
-            `<article class="newsletter-recipient-row ${recipient.active ? '' : 'newsletter-recipient-inactive'}"><div><strong>${UI.escape(recipient.displayName || recipient.email)}</strong><p>${UI.escape(recipient.email)} · ${recipient.active ? 'Activo' : 'Inactivo'}</p></div>
-            <button class="ghost-button recipient-toggle" data-email="${UI.escape(recipient.email)}" data-display-name="${UI.escape(recipient.displayName || '')}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${recipient.active ? '1' : '0'}" type="button">${recipient.active ? 'Desactivar' : 'Activar'}</button></article>`
+            `<article class="newsletter-recipient-row ${recipient.active ? '' : 'newsletter-recipient-inactive'}"><div><strong>${UI.escape(recipient.email)}</strong><p>${recipient.active ? 'Activo' : 'Inactivo'}</p></div>
+            <button class="ghost-button recipient-toggle" data-email="${UI.escape(recipient.email)}" data-report="${UI.escape(state.newsletterReportId)}" data-active="${recipient.active ? '1' : '0'}" type="button">${recipient.active ? 'Desactivar' : 'Activar'}</button></article>`
           ).join('') || '<p class="minor-copy">Todavía no hay destinatarios. Añade el primero para habilitar el envío final.</p>'}</div>
         </section>
         <section class="surface-card page-stack"><h3>Histórico de envíos</h3>
@@ -1012,11 +1068,16 @@ const App = (() => {
     } else if (activeTab === 'analytics') {
       if (!state.analyticsReport) {
         state.analyticsReport = await RPC.call('getAnalyticsReport', {
-          userEmail: state.analyticsUserEmail, days: state.analyticsDays
+          userEmail: state.analyticsUserEmail, days: state.analyticsDays, captureMode: 'preview'
         });
       }
       if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
       const report = state.analyticsReport;
+      const analyticsWarning = report.quality.rowsTruncated ||
+        report.quality.sourceAtRetentionLimit ||
+        report.quality.invalidTimestampRows > 0 ||
+        report.quality.futureTimestampRowsExcluded > 0 ||
+        report.quality.unversionedEvents > 0;
       body = `<section class="page-stack">
         <section class="surface-card settings-form-grid">
           <label class="field"><span>Usuario</span><select id="analyticsUser"><option value="">Todos</option>${(report.users || []).map(email =>
@@ -1025,7 +1086,15 @@ const App = (() => {
           <label class="field"><span>Periodo</span><select id="analyticsDays">${[7, 30, 90, 180, 365].map(days =>
             `<option value="${days}" ${days === state.analyticsDays ? 'selected' : ''}>${days} días</option>`
           ).join('')}</select></label>
-          <button id="downloadAnalytics" class="secondary-button" type="button">Descargar JSON para Codex</button>
+          <button id="downloadAnalytics" class="secondary-button" type="button">Actualizar y descargar JSON para Codex</button>
+        </section>
+        <section class="analytics-freshness admin-telemetry-only ${analyticsWarning ? 'analytics-freshness-warning' : ''}">
+          <strong>Datos consultados ${UI.escape(UI.formatDate(report.export.generatedAt))}</strong>
+          <span>Último evento: ${report.export.dataAsOf ? UI.escape(UI.formatDate(report.export.dataAsOf)) : 'sin eventos'} · ${UI.formatNumber(report.export.includedRows)} de ${UI.formatNumber(report.export.matchingRows)} filas incluidas en el detalle.</span>
+          ${report.quality.rowsTruncated ? '<small>El resumen es completo para el periodo, pero el detalle está truncado. Codex debe usar summary para totales.</small>' : ''}
+          ${report.quality.sourceAtRetentionLimit ? '<small>La fuente alcanzó su límite de retención: los totales anteriores conservados podrían no cubrir todo el periodo solicitado.</small>' : ''}
+          ${report.quality.invalidTimestampRows || report.quality.futureTimestampRowsExcluded ? `<small>Se excluyeron ${UI.formatNumber(report.quality.invalidTimestampRows)} fechas inválidas y ${UI.formatNumber(report.quality.futureTimestampRowsExcluded)} fechas futuras.</small>` : ''}
+          ${report.quality.unversionedEvents ? `<small>${UI.formatNumber(report.quality.unversionedEvents)} eventos históricos no declaran versión. No deben atribuirse automáticamente al código actual.</small>` : ''}
         </section>
         <div class="overview-kpi-grid">${[
           { label: 'Eventos', value: UI.formatNumber(report.summary.events), hint: `${report.filters.days} días` },
@@ -1078,6 +1147,11 @@ const App = (() => {
     });
     if ($('themeLight')) $('themeLight').addEventListener('click', () => setTheme(false));
     if ($('themeDark')) $('themeDark').addEventListener('click', () => setTheme(true));
+    if ($('revalidateNewsletterSenderSettings')) {
+      $('revalidateNewsletterSenderSettings').addEventListener('click', () =>
+        revalidateCorporateSender(() => renderSettings('newsletter'))
+      );
+    }
     if ($('folderForm')) $('folderForm').addEventListener('submit', async event => {
       event.preventDefault();
       const saved = await RPC.call('saveReportDriveFolder', $('folderReference').value);
@@ -1096,12 +1170,12 @@ const App = (() => {
       const button = event.currentTarget.querySelector('button[type="submit"]');
       if (button) button.disabled = true;
       try {
-        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+        const recipient = await RPC.call('saveNewsletterRecipient', {
           reportId: state.newsletterReportId,
           email: $('recipientEmail').value,
-          displayName: $('recipientDisplayName').value,
           active: true
         });
+        applyNewsletterRecipient(recipient);
         UI.message('Destinatario añadido y activado.', 'success');
         await renderSettings();
       } catch (error) {
@@ -1112,12 +1186,12 @@ const App = (() => {
     document.querySelectorAll('.recipient-toggle').forEach(button => {
       button.addEventListener('click', async () => {
         button.disabled = true;
-        state.newsletterSettings = await RPC.call('saveNewsletterRecipient', {
+        const recipient = await RPC.call('saveNewsletterRecipient', {
           reportId: button.dataset.report,
           email: button.dataset.email,
-          displayName: button.dataset.displayName,
           active: button.dataset.active !== '1'
         });
+        applyNewsletterRecipient(recipient);
         await renderSettings();
       });
     });
@@ -1131,15 +1205,41 @@ const App = (() => {
     };
     if ($('analyticsUser')) $('analyticsUser').addEventListener('change', reloadAnalytics);
     if ($('analyticsDays')) $('analyticsDays').addEventListener('change', reloadAnalytics);
-    if ($('downloadAnalytics')) $('downloadAnalytics').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(state.analyticsReport, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `bug-resolution-radar-analytics-${new Date().toISOString().slice(0, 10)}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      trackEvent('analytics_export_downloaded', { days: state.analyticsDays });
+    if ($('downloadAnalytics')) $('downloadAnalytics').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        setBusy(true);
+        trackEvent('analytics_export_requested', { days: state.analyticsDays });
+        await deadline(flushAnalytics(), 30000, 'No se pudo consolidar la telemetría pendiente.');
+        const freshReport = await deadline(RPC.call('getAnalyticsReport', {
+          userEmail: state.analyticsUserEmail,
+          days: state.analyticsDays,
+          captureMode: 'export'
+        }), 30000, 'No se pudo obtener una captura actualizada de la telemetría.');
+        state.analyticsReport = freshReport;
+        const blob = new Blob([JSON.stringify(freshReport, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        const stamp = String(freshReport.export.generatedAt || new Date().toISOString())
+          .replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+        anchor.download = `bug-resolution-radar-analytics-${stamp}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        UI.message('Telemetría consolidada y descargada con sello de frescura.', 'success');
+        trackEvent('analytics_export_downloaded', {
+          days: state.analyticsDays,
+          matchingRows: freshReport.export.matchingRows,
+          rowsTruncated: freshReport.quality.rowsTruncated
+        });
+        await renderSettings();
+      } catch (error) {
+        UI.message(error.message, 'error');
+      } finally {
+        setBusy(false);
+        button.disabled = false;
+      }
     });
     const saveCharts = async chartIds => {
       const saved = await RPC.call('saveSummaryChartIds', chartIds);
@@ -1242,6 +1342,13 @@ const App = (() => {
     }).catch(() => {});
   }
 
+  function runIdleMaintenance() {
+    prefetchPrimaryViews();
+    if (isAdmin() && !isShared()) {
+      RPC.call('registerAppVersion').catch(() => {});
+    }
+  }
+
   async function openPanel(panel) {
     const epoch = ++state.navigationEpoch;
     state.route = 'dashboard';
@@ -1320,9 +1427,9 @@ const App = (() => {
         dataVersion: bootstrap.app.dataVersion
       });
       if (window.requestIdleCallback) {
-        window.requestIdleCallback(prefetchPrimaryViews, { timeout: 5000 });
+        window.requestIdleCallback(runIdleMaintenance, { timeout: 5000 });
       } else {
-        window.setTimeout(prefetchPrimaryViews, 2500);
+        window.setTimeout(runIdleMaintenance, 2500);
       }
       PersistentCache.prune({
         contract: bootstrap.app.contractVersion,

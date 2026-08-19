@@ -363,8 +363,20 @@ def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
     assert "report_id: report.reportId" in save_recipient
     assert "snapshot_id: report.snapshotId" in save_recipient
     assert "email.endsWith('@' + RADAR.allowedDomain)" in save_recipient
-    assert "displayName" in save_recipient
+    assert "displayName" not in save_recipient
+    assert "_assertExactFields_(input, ['reportId', 'email', 'active']" in save_recipient
+    assert "return _newsletterSettingsPayload_()" not in save_recipient
     assert "_newsletterRecipientsForReport_" in newsletter
+
+
+def test_newsletter_recipient_ui_is_email_only() -> None:
+    app = _source("App.html")
+
+    assert "recipientEmail" in app
+    assert "recipientDisplayName" not in app
+    assert "Nombre visible" not in app
+    assert "Nombre y apellidos" not in app
+    assert "data-display-name" not in app
 
 
 def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> None:
@@ -394,12 +406,16 @@ def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_persona
     assert "Gmail.Users.Settings.SendAs.list('me')" in identity
     assert "verificationStatus === 'accepted'" in identity
     assert "'NEWSLETTER_SENDER_UNAVAILABLE'" in sender
-    assert sender.index("_newsletterSenderIdentity_()") < sender.index("_exactReportBlob_(")
+    assert sender.index("_newsletterSenderIdentity_(true)") < sender.index("_exactReportBlob_(")
+    assert "function revalidateNewsletterSender" in newsletter
+    assert "_cachePutJson_" in identity
+    assert "@bug-resolution-radar.bbva.com" in newsletter
     assert "_newsletterDeliver_(pendingRecipients, subject, rendered, attachment, sender)" in sender
     assert "_newsletterPreviouslyDeliveredRecipients_" in newsletter
     assert "deliveries.length ? 'partial' : 'failed'" in sender
     assert "newsletterSenderReady" in app
-    assert "La WebApp no utilizará la identidad del visitante" in app
+    assert "Revalidar buzón" in app
+    assert "NEWSLETTER_SENDER_UNAVAILABLE" in _source("99_Core.gs")
     assert "GmailApp" not in newsletter
     assert "MailApp" not in newsletter
     assert "voc-commercial.group@bbva.com" not in newsletter + config
@@ -494,7 +510,10 @@ def test_webapp_version_is_explicit_and_registered_automatically() -> None:
     setup = _source("90_Setup.gs")
 
     assert re.search(r"appVersion:\s*'\d{4}\.\d{2}\.\d{2}\.\d+'", config)
-    assert "_registerAppVersion_(user.email)" in _function_body(main, "getBootstrap")
+    register = _function_body(administration, "registerAppVersion")
+    assert "_registerAppVersion_(user.email)" in register
+    assert "RPC.call('registerAppVersion')" in _source("App.html")
+    assert "_registerAppVersion_" not in _function_body(main, "getBootstrap")
     assert "'APP_VERSION'" in _function_body(administration, "_registerAppVersion_")
     assert "RADAR.appVersion" in _function_body(setup, "setupApplication")
     assert "version: RADAR.appVersion" in _function_body(main, "getBootstrap")
@@ -521,6 +540,41 @@ def test_dashboard_cache_hydrates_variants_without_repeated_rpcs() -> None:
     assert "const operationBudgetMs = 500" in cache
     assert "_recordsCacheEnabled_" in sheets
     assert "RADAR.sheets.snapshotParts" in _function_body(sheets, "_recordsCacheEnabled_")
+
+
+def test_dashboard_bundle_prefetches_only_primary_views() -> None:
+    bundle = _function_body(_source("10_Main.gs"), "getDashboardViewBundle")
+
+    for primary in (
+        "{ view: 'overview' }",
+        "{ view: 'insights', insightsId: 'summary' }",
+        "{ view: 'trends', chartId: 'open_status_bar' }",
+        "{ view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }",
+    ):
+        assert primary in bundle
+    assert "insights/catalog" not in bundle
+    assert "trends/catalog" not in bundle
+
+
+def test_webapp_dark_mode_uses_bbva_dark_surfaces_and_preserves_brand_hero() -> None:
+    config = _source("00_Config.gs")
+    design = _source("DesignSystem.html")
+
+    for expected in (
+        "grey200: '#11192D'",
+        "grey300: '#222C42'",
+        "grey400: '#334056'",
+        "grey500: '#46536D'",
+        "electric: '#85C8FF'",
+        "success: '#9CE67E'",
+        "warning: '#FFC553'",
+        "danger: '#FF5252'",
+    ):
+        assert expected in config
+    assert "'--bbva-brand-midnight': color.midnight" in config
+    assert "'--bbva-inverse-surface': 'var(--bbva-grey-400)'" in config
+    assert "var(--bbva-brand-midnight)" in design
+    assert "background: var(--bbva-inverse-surface)" in design
 
 
 def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
@@ -599,9 +653,53 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
         "Newsletter",
         "Adopción y analítica",
         "Gráficos de Resumen",
-        "Descargar JSON para Codex",
+        "Actualizar y descargar JSON para Codex",
     ):
         assert label in app
+
+
+def test_analytics_export_flushes_pending_events_and_is_self_describing() -> None:
+    administration = _function_body(_source("58_Administration.gs"), "getAnalyticsReport")
+    app = _source("App.html")
+
+    assert "await deadline(flushAnalytics()" in app
+    assert "captureMode: 'export'" in app
+    assert app.index("await deadline(flushAnalytics()") < app.index("captureMode: 'export'")
+    for field in (
+        "schemaVersion: '2.1'",
+        "generatedAt: generatedAt",
+        "queryStartAt:",
+        "queryEndAt:",
+        "dataAsOf:",
+        "matchingRows: rows.length",
+        "includedRows: detailRows.length",
+        "rowsTruncated: rows.length > detailLimit",
+        "invalidTimestampRows:",
+        "futureTimestampRowsExcluded:",
+        "summaryCompleteForWindow: allRows.length < 50000",
+        "canonicalization: 'JSON con claves de objeto ordenadas alfabéticamente, sin integrity'",
+    ):
+        assert field in administration
+    assert "summary: 'Calculado con todos los eventos conservados" in administration
+    assert "duration: 'averageDurationMs y p95DurationMs excluyen" in administration
+    assert "_analyticsCanonicalJson_(report)" in administration
+    assert "unversionedEvents" in administration
+    assert "versionAttribution" in administration
+    assert "legacy-unknown" in administration
+    assert "_telemetry" in app
+
+
+def test_telemetry_warning_and_report_are_admin_only() -> None:
+    administration = _function_body(_source("58_Administration.gs"), "getAnalyticsReport")
+    render_settings = _function_body(_source("App.html"), "renderSettings")
+    design = _source("DesignSystem.html")
+
+    assert "_requireAdmin_();" in administration
+    assert "if (!isAdmin() || isShared())" in render_settings
+    assert render_settings.index("if (!isAdmin() || isShared())") < render_settings.index("analyticsWarning")
+    assert "admin-telemetry-only" in render_settings
+    assert ".admin-telemetry-only { display: none !important; }" in design
+    assert ".is-admin .admin-telemetry-only { display: grid !important; }" in design
 
 
 def test_plotly_is_loaded_on_demand_and_navigation_discards_stale_responses() -> None:
