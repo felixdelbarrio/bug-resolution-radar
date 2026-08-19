@@ -177,7 +177,7 @@ def test_setup_removes_only_known_legacy_storage_after_contract_creation() -> No
         setup_application.index("Object.keys(CONTRACTS).forEach")
     )
     assert "_seedDefaultNewsletterRecipients_" not in setup
-    assert "report_drive_folder" in remove_obsolete
+    assert "report_drive_folder" not in remove_obsolete
 
 
 def test_setup_keeps_the_control_sheet_visible() -> None:
@@ -267,7 +267,8 @@ def test_newsletter_attaches_the_canonical_pptx() -> None:
     newsletter = _source("56_Newsletter.gs")
     report_storage = _source("55_PeriodReport.gs")
 
-    assert re.search(r"\battachments\s*:", newsletter)
+    assert "Content-Disposition: attachment" in newsletter
+    assert "_newsletterMimeBytes_(attachment.getBytes())" in newsletter
     assert re.search(r"pptx", newsletter, re.IGNORECASE)
     assert "_exactReportBlob_" in newsletter
     assert re.search(r"getBlob\s*\(", report_storage)
@@ -346,7 +347,21 @@ def test_report_folder_is_global_and_blocks_validation_when_missing() -> None:
     assert "_setConfig_(" in _function_body(report, "saveReportDriveFolder")
     assert "'REPORT_DRIVE_FOLDER'" in _function_body(report, "saveReportDriveFolder")
     assert "_preferenceMap_" not in _function_body(main, "_publishDecodedTransfer_")
-    assert "report_drive_folder" not in _function_body(main, "savePreference")
+    assert "function savePreference" not in main
+    assert "USER_PREFS" not in _source("00_Config.gs")
+    assert "window.localStorage" in _source("App.html")
+
+
+def test_every_boot_starts_on_overview_without_persisting_last_panel() -> None:
+    app = _source("App.html")
+    boot = _function_body(app, "boot")
+    preferences = _function_body(app, "schedulePreferenceSave")
+
+    assert "state.panel = 'overview';" in boot
+    assert "state.route = 'dashboard';" in boot
+    assert "state.page = 1;" in boot
+    assert "local.panel" not in boot
+    assert "panel: state.panel" not in preferences
 
 
 def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
@@ -359,9 +374,21 @@ def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
     assert "reportId" in save_recipient
     assert "report_id: report.reportId" in save_recipient
     assert "snapshot_id: report.snapshotId" in save_recipient
-    assert "_newsletterUsers_().find" in save_recipient
-    assert "usuario activo y autorizado" in save_recipient
+    assert "email.endsWith('@' + RADAR.allowedDomain)" in save_recipient
+    assert "displayName" not in save_recipient
+    assert "_assertExactFields_(input, ['reportId', 'email', 'active']" in save_recipient
+    assert "return _newsletterSettingsPayload_()" not in save_recipient
     assert "_newsletterRecipientsForReport_" in newsletter
+
+
+def test_newsletter_recipient_ui_is_email_only() -> None:
+    app = _source("App.html")
+
+    assert "recipientEmail" in app
+    assert "recipientDisplayName" not in app
+    assert "Nombre visible" not in app
+    assert "Nombre y apellidos" not in app
+    assert "data-display-name" not in app
 
 
 def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> None:
@@ -374,6 +401,194 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
     assert "'NEWSLETTER_TEST_REQUIRED'" in sender
     assert "newsletterTested" in status
     assert "job.newsletterTested && !job.newsletterSent" in app
+    assert ": 'Enviar newsletter';" in app
+    assert "Envía primero una prueba" not in app
+    assert "dataset.sending" in app
+
+
+def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_personal_identity() -> (
+    None
+):
+    config = _source("00_Config.gs")
+    newsletter = _source("56_Newsletter.gs")
+    identity = _function_body(newsletter, "_newsletterSenderIdentity_")
+    sender = _function_body(newsletter, "sendPeriodNewsletter")
+    app = _source("App.html")
+
+    assert "corporateBrand: 'BBVA Banca de Empresas e Instituciones'" in config
+    assert "newsletterFrom: 'bug-resolution-radar.group@bbva.com'" in config
+    assert "Gmail.Users.Settings.SendAs.list('me')" in identity
+    assert "verificationStatus === 'accepted'" in identity
+    assert "'NEWSLETTER_SENDER_UNAVAILABLE'" in sender
+    assert sender.index("_newsletterSenderIdentity_(true)") < sender.index("_exactReportBlob_(")
+    assert "function revalidateNewsletterSender" in newsletter
+    assert "_cachePutJson_" in identity
+    assert "@bug-resolution-radar.bbva.com" in newsletter
+    assert "_newsletterDeliver_(pendingRecipients, subject, rendered, attachment, sender)" in sender
+    assert "_newsletterPreviouslyDeliveredRecipients_" in newsletter
+    assert "deliveries.length ? 'partial' : 'failed'" in sender
+    assert "newsletterSenderReady" in app
+    assert "Revalidar buzón" in app
+    assert "NEWSLETTER_SENDER_UNAVAILABLE" in _source("99_Core.gs")
+    assert "GmailApp" not in newsletter
+    assert "MailApp" not in newsletter
+    assert "voc-commercial.group@bbva.com" not in newsletter + config
+
+
+def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarchy() -> None:
+    newsletter = _function_body(_source("56_Newsletter.gs"), "_newsletterRender_")
+    index = _source("Index.html")
+    design = _source("DesignSystem.html")
+
+    assert index.count("BBVA Banca de Empresas e Instituciones") >= 2
+    assert index.count("corporate-lockup") >= 2
+    assert ".corporate-lockup" in design
+    for expected in (
+        "scopeLabel",
+        "Resultado correspondiente al seguimiento de incidencias de la última quincena:",
+        "Discrepancias estados finalistas",
+        "Información generada a ",
+        "Backlog abierto",
+        "Creadas",
+        "Cerradas",
+        "Resolución",
+        "Abrir presentación",
+        "Abrir Radar",
+        "Abrir cuadro JIRA",
+        "BBVA Banca de Empresas e Instituciones",
+        "@media only screen and (max-width:620px)",
+    ):
+        assert expected in newsletter
+    assert "newsletter.responsibleRollups" in newsletter
+    assert "DESIGN_TOKENS.radius.container" in newsletter
+    assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
+
+
+def test_newsletter_uses_the_market_pulse_gmail_api_delivery_contract() -> None:
+    manifest = json.loads(_source("appsscript.json"))
+    newsletter = _source("56_Newsletter.gs")
+
+    services = manifest["dependencies"]["enabledAdvancedServices"]
+    assert {"userSymbol": "Gmail", "version": "v1", "serviceId": "gmail"} in services
+    assert "https://www.googleapis.com/auth/gmail.send" in manifest["oauthScopes"]
+    assert "https://www.googleapis.com/auth/gmail.settings.basic" in manifest["oauthScopes"]
+    assert "https://www.googleapis.com/auth/script.send_mail" not in manifest["oauthScopes"]
+    assert "https://mail.google.com/" not in manifest["oauthScopes"]
+    assert "Gmail.Users.Messages.send({ raw: message.raw }, 'me')" in newsletter
+    assert "multipart/mixed" in newsletter
+    assert "Content-Disposition: attachment" in newsletter
+
+
+def test_materialized_insight_variants_keep_the_desktop_payload_shape() -> None:
+    materialized = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_materializedViewPayload_"
+    )
+    app = _source("App.html")
+
+    assert "insights[activeId] = selected" in materialized
+    assert "else insights[activeId]" in materialized
+    for expected in (
+        "renderFunctionalityInsight",
+        "renderDuplicatesInsight",
+        "renderFinalistInsight",
+        "renderPeopleInsight",
+        "Corte por origen seleccionado",
+    ):
+        assert expected in app
+    for forbidden in (
+        "insightsStatus",
+        "insightsPriority",
+        "insightsFunctionality",
+    ):
+        assert forbidden not in app
+
+
+def test_period_summary_keeps_kpis_separate_from_issue_lists_and_insight_click_is_atomic() -> None:
+    app = _source("App.html")
+    summary = app[
+        app.index("data.periodSummary.cards.map") : app.index("data.periodSummary.groups || []")
+    ]
+    open_insight = _function_body(app, "openInsight")
+
+    assert "issueList(" not in summary
+    assert "data-delta-kind" in summary
+    assert "const epoch = ++state.navigationEpoch" in open_insight
+    assert "await refreshDashboard(epoch)" in open_insight
+    assert "button.disabled = true" in open_insight
+
+
+def test_webapp_version_is_explicit_and_registered_automatically() -> None:
+    config = _source("00_Config.gs")
+    administration = _source("58_Administration.gs")
+    main = _source("10_Main.gs")
+    setup = _source("90_Setup.gs")
+
+    assert re.search(r"appVersion:\s*'\d{4}\.\d{2}\.\d{2}\.\d+'", config)
+    register = _function_body(administration, "registerAppVersion")
+    assert "_registerAppVersion_(user.email)" in register
+    assert "RPC.call('registerAppVersion')" in _source("App.html")
+    assert "_registerAppVersion_" not in _function_body(main, "getBootstrap")
+    assert "'APP_VERSION'" in _function_body(administration, "_registerAppVersion_")
+    assert "RADAR.appVersion" in _function_body(setup, "setupApplication")
+    assert "version: RADAR.appVersion" in _function_body(main, "getBootstrap")
+
+
+def test_aggregate_scope_really_hides_origin_for_admins() -> None:
+    app = _source("App.html")
+    design = _source("DesignSystem.html")
+
+    assert "sourceSlot.classList.toggle('hidden', rollup)" in app
+    assert "sourceSlot.setAttribute('aria-hidden', String(rollup))" in app
+    assert ".is-admin .scope-admin-control.hidden { display: none !important; }" in design
+
+
+def test_dashboard_cache_hydrates_variants_without_repeated_rpcs() -> None:
+    main = _source("10_Main.gs")
+    app = _source("App.html")
+    sheets = _source("40_Sheets.gs")
+    cache = _source("Cache.html")
+
+    assert "function getDashboardViewBundle" in main
+    assert "RPC.call('getDashboardViewBundle'" in app
+    assert "state.memory.set(key, entry.payload)" in app
+    assert "const operationBudgetMs = 500" in cache
+    assert "_recordsCacheEnabled_" in sheets
+    assert "RADAR.sheets.snapshotParts" in _function_body(sheets, "_recordsCacheEnabled_")
+
+
+def test_dashboard_bundle_prefetches_only_primary_views() -> None:
+    bundle = _function_body(_source("10_Main.gs"), "getDashboardViewBundle")
+
+    for primary in (
+        "{ view: 'overview' }",
+        "{ view: 'insights', insightsId: 'summary' }",
+        "{ view: 'trends', chartId: 'open_status_bar' }",
+        "{ view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }",
+    ):
+        assert primary in bundle
+    assert "insights/catalog" not in bundle
+    assert "trends/catalog" not in bundle
+
+
+def test_webapp_dark_mode_uses_bbva_dark_surfaces_and_preserves_brand_hero() -> None:
+    config = _source("00_Config.gs")
+    design = _source("DesignSystem.html")
+
+    for expected in (
+        "grey200: '#11192D'",
+        "grey300: '#222C42'",
+        "grey400: '#334056'",
+        "grey500: '#46536D'",
+        "electric: '#85C8FF'",
+        "success: '#9CE67E'",
+        "warning: '#FFC553'",
+        "danger: '#FF5252'",
+    ):
+        assert expected in config
+    assert "'--bbva-brand-midnight': color.midnight" in config
+    assert "'--bbva-inverse-surface': 'var(--bbva-grey-400)'" in config
+    assert "var(--bbva-brand-midnight)" in design
+    assert "background: var(--bbva-inverse-surface)" in design
 
 
 def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
@@ -414,7 +629,7 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     index = _source("Index.html")
     design = _source("DesignSystem.html")
 
-    assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_ACCESSING"}
+    assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_DEPLOYING"}
     assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_requireUser_")
     assert "role: 'viewer'" in _function_body(main, "_requireUser_")
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
@@ -430,17 +645,20 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
 
     for rpc in (
         "getAdminConsole",
-        "browseReportDriveFolders",
         "recordAnalyticsEvents",
         "getAnalyticsReport",
         "saveSummaryChartIds",
     ):
         assert f"function {rpc}" in administration
+    assert "Picker" not in administration + app
+    assert "folderReference" in app
+    assert "recipientForm" in app
+    assert "Añadir destinatario" in app
     assert "weekOverWeekPct" in administration
     assert "body_text" in _source("00_Config.gs")
     assert "slides_url" in _source("00_Config.gs")
     assert "_newsletterSenderIdentity_" in newsletter
-    assert "sender.usesAlias" in newsletter
+    assert "sender.ready" in newsletter
     assert "context.newsletter.draft.subject" in newsletter
     for label in (
         "Estado de la WebApp",
@@ -449,9 +667,57 @@ def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_char
         "Newsletter",
         "Adopción y analítica",
         "Gráficos de Resumen",
-        "Descargar JSON para Codex",
+        "Actualizar y descargar JSON para Codex",
     ):
         assert label in app
+
+
+def test_analytics_export_flushes_pending_events_and_is_self_describing() -> None:
+    administration = _function_body(_source("58_Administration.gs"), "getAnalyticsReport")
+    app = _source("App.html")
+
+    assert "await deadline(flushAnalytics()" in app
+    assert "captureMode: 'export'" in app
+    assert app.index("await deadline(flushAnalytics()") < app.index("captureMode: 'export'")
+    for field in (
+        "schemaVersion: '2.2'",
+        "generatedAt: generatedAt",
+        "queryStartAt:",
+        "queryEndAt:",
+        "dataAsOf:",
+        "matchingRows: rows.length",
+        "includedRows: detailRows.length",
+        "rowsTruncated: rows.length > detailLimit",
+        "invalidTimestampRows:",
+        "futureTimestampRowsExcluded:",
+        "summaryCompleteForWindow: allRows.length < 50000",
+        "canonicalization: 'JSON con claves de objeto ordenadas alfabéticamente, sin integrity'",
+    ):
+        assert field in administration
+    assert "summary: 'Calculado con todos los eventos conservados" in administration
+    assert "duration: 'averageDurationMs y p95DurationMs excluyen" in administration
+    assert "_analyticsCanonicalJson_(report)" in administration
+    assert "item instanceof Date" in _source("58_Administration.gs")
+    assert "captureMode === 'export' ? 2000 : 100" in administration
+    assert "unversionedEvents" in administration
+    assert "versionAttribution" in administration
+    assert "legacy-unknown" in administration
+    assert "_telemetry" in app
+
+
+def test_telemetry_warning_and_report_are_admin_only() -> None:
+    administration = _function_body(_source("58_Administration.gs"), "getAnalyticsReport")
+    render_settings = _function_body(_source("App.html"), "renderSettings")
+    design = _source("DesignSystem.html")
+
+    assert "_requireAdmin_();" in administration
+    assert "if (!isAdmin() || isShared())" in render_settings
+    assert render_settings.index("if (!isAdmin() || isShared())") < render_settings.index(
+        "analyticsWarning"
+    )
+    assert "admin-telemetry-only" in render_settings
+    assert ".admin-telemetry-only { display: none !important; }" in design
+    assert ".is-admin .admin-telemetry-only { display: grid !important; }" in design
 
 
 def test_plotly_is_loaded_on_demand_and_navigation_discards_stale_responses() -> None:

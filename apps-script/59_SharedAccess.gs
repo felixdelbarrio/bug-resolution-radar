@@ -173,7 +173,6 @@ function getSharedBootstrap(token) {
           country: scope.country
         };
       }),
-      preferences: { theme: 'light' },
       initialState: initialState,
       dashboard: _dashboardPayloadFromSnapshot_(
         context.record.snapshot_id,

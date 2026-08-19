@@ -3,7 +3,9 @@ const PersistentCache = (() => {
   const databaseName = 'bug-resolution-radar';
   const storeName = 'dashboard-views';
   const databaseVersion = 1;
-  const operationBudgetMs = 80;
+  // A cold IndexedDB open commonly exceeds 80 ms inside the Apps Script iframe.
+  // Give the durable cache time to answer so a valid hit is not treated as a miss.
+  const operationBudgetMs = 500;
   let databasePromise = null;
 
   function withinBudget(promise, milliseconds, fallback) {

@@ -47,12 +47,18 @@ const UI = (() => {
     const name = semanticToken(value, kind);
     return name ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() : '';
   };
+  const safeColor = value => {
+    const color = String(value || '').trim();
+    return /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%]+\))$/i.test(color)
+      ? color
+      : 'var(--bbva-primary)';
+  };
   const chip = (value, kind = 'status') => `<span class="issue-chip" style="--chip-color:${semanticCss(value, kind)}">${escape(value || 'N/D')}</span>`;
   const message = (text, kind = 'info') => {
     const node = document.getElementById('globalMessage');
     node.textContent = text; node.dataset.kind = kind; node.classList.remove('hidden');
     window.clearTimeout(message.timer); message.timer = window.setTimeout(() => node.classList.add('hidden'), 6000);
   };
-  return { escape, formatNumber, formatDays, formatDate, icon, empty, kpi, issueKey, chip, semanticCss, semanticColor, message };
+  return { escape, formatNumber, formatDays, formatDate, icon, empty, kpi, issueKey, chip, semanticCss, semanticColor, safeColor, message };
 })();
 </script>

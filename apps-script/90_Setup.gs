@@ -64,11 +64,6 @@ function _removeObsoleteStorage_(ss) {
   OBSOLETE_SCRIPT_PROPERTIES.forEach(function (key) {
     properties.deleteProperty(key);
   });
-  _readRecords_(RADAR.sheets.preferences).filter(function (row) {
-    return _text_(row.preference_key) === 'report_drive_folder';
-  }).forEach(function (row) {
-    _deleteRecord_(RADAR.sheets.preferences, row.pref_uid);
-  });
   _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
     return !_text_(row.report_id) || !_text_(row.snapshot_id);
   }).forEach(function (row) {
@@ -127,6 +122,7 @@ function setupApplication() {
       _validateSheetContract_(name); sheet.setFrozenRows(1); sheet.getRange(1, 1, 1, headers.length).setBackground(DESIGN_TOKENS.color.midnight).setFontColor(DESIGN_TOKENS.color.white).setFontWeight('bold');
     });
     _upsertRecord_(RADAR.sheets.users, { email: RADAR.initialAdmin, role: 'admin', active: true, display_name: 'Félix del Barrio', updated_at: _nowIso_(), updated_by: email });
+    _setConfig_('APP_VERSION', RADAR.appVersion, 'string', 'Versión de código de la WebApp desplegada', email);
     _setConfig_('CONTRACT_VERSION', RADAR.contractVersion, 'string', 'Versión estricta de contratos', email);
     const config = _getConfigMap_();
     if (!config.SUMMARY_CHART_IDS) {

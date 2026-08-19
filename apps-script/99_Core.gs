@@ -91,6 +91,13 @@ function _cachePutJson_(cache, key, value, ttlSeconds) {
   for (let i = 0; i < parts; i += 1) entries[key + ':part:' + i] = encoded.slice(i * chunkSize, (i + 1) * chunkSize);
   cache.putAll(entries, ttlSeconds); return true;
 }
+function _cacheDeleteJson_(cache, key) {
+  const manifest = _safeJsonParse_(cache.get(key + ':manifest'), null);
+  const keys = [key + ':manifest'];
+  const parts = manifest && Number(manifest.parts) > 0 ? Math.min(40, Number(manifest.parts)) : 0;
+  for (let i = 0; i < parts; i += 1) keys.push(key + ':part:' + i);
+  cache.removeAll(keys);
+}
 function _withApplicationLock_(callback) {
   const lock = LockService.getScriptLock();
   _assert_(lock.tryLock(20000), 'Hay otra actualización en curso. Reinténtalo en unos segundos.', 'LOCK_TIMEOUT');
@@ -98,7 +105,7 @@ function _withApplicationLock_(callback) {
 }
 function _publicError_(err) {
   const code = _text_(err && err.code) || 'INTERNAL_ERROR';
-  const safeCodes = ['AUTH_REQUIRED', 'FORBIDDEN', 'CONTRACT_ERROR', 'VALIDATION_ERROR', 'INVALID_URL', 'INVALID_KEY', 'NOT_FOUND', 'LOCK_TIMEOUT', 'UPLOAD_EXPIRED', 'SECRET_FIELD_REJECTED', 'TRANSFER_INVALID', 'TRANSFER_TOO_LARGE', 'TRANSFER_STAGING_FAILED', 'DRIVE_FOLDER_INVALID', 'REPORT_GENERATION_FAILED', 'APP_URL_INVALID', 'SHARE_INVALID', 'SNAPSHOT_NOT_FOUND', 'SNAPSHOT_CORRUPT', 'VIEW_NOT_MATERIALIZED', 'READ_ONLY_SNAPSHOT', 'ATTACHMENT_TOO_LARGE', 'NEWSLETTER_VALIDATION_FAILED', 'NEWSLETTER_STALE', 'NEWSLETTER_NO_RECIPIENTS', 'NEWSLETTER_SEND_FAILED', 'NEWSLETTER_IN_PROGRESS', 'NEWSLETTER_ALREADY_SENT', 'NEWSLETTER_TEST_REQUIRED'];
+  const safeCodes = ['AUTH_REQUIRED', 'FORBIDDEN', 'CONTRACT_ERROR', 'VALIDATION_ERROR', 'INVALID_URL', 'INVALID_KEY', 'NOT_FOUND', 'LOCK_TIMEOUT', 'UPLOAD_EXPIRED', 'SECRET_FIELD_REJECTED', 'TRANSFER_INVALID', 'TRANSFER_TOO_LARGE', 'TRANSFER_STAGING_FAILED', 'DRIVE_FOLDER_INVALID', 'REPORT_GENERATION_FAILED', 'APP_URL_INVALID', 'SHARE_INVALID', 'SNAPSHOT_NOT_FOUND', 'SNAPSHOT_CORRUPT', 'VIEW_NOT_MATERIALIZED', 'READ_ONLY_SNAPSHOT', 'ATTACHMENT_TOO_LARGE', 'NEWSLETTER_VALIDATION_FAILED', 'NEWSLETTER_STALE', 'NEWSLETTER_NO_RECIPIENTS', 'NEWSLETTER_SEND_FAILED', 'NEWSLETTER_IN_PROGRESS', 'NEWSLETTER_ALREADY_SENT', 'NEWSLETTER_TEST_REQUIRED', 'NEWSLETTER_SENDER_UNAVAILABLE'];
   return { ok: false, error: { code: safeCodes.indexOf(code) >= 0 ? code : 'INTERNAL_ERROR', message: safeCodes.indexOf(code) >= 0 ? _text_(err.message) : 'No se pudo completar la operación.' } };
 }
 function _webSafe_(value) {

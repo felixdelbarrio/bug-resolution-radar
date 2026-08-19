@@ -5,9 +5,29 @@ function _runtimeMemo_() {
   return RADAR_RUNTIME_MEMO;
 }
 function _resetRuntimeMemo_() { RADAR_RUNTIME_MEMO = { sheets: {}, contracts: {}, records: {}, values: {} }; }
+function _recordsCacheEnabled_(sheetName) {
+  return [
+    RADAR.sheets.config,
+    RADAR.sheets.users,
+    RADAR.sheets.importRuns,
+    RADAR.sheets.snapshots,
+    RADAR.sheets.snapshotParts,
+    RADAR.sheets.snapshotPointers,
+    RADAR.sheets.reportAudit,
+    RADAR.sheets.reportShares,
+    RADAR.sheets.newsletterRecipients,
+    RADAR.sheets.newsletterAudit
+  ].indexOf(sheetName) >= 0;
+}
+function _recordsCacheKey_(sheetName) {
+  return _cacheKey_('records:' + sheetName, { epoch: _cacheEpoch_() });
+}
 function _forgetSheet_(sheetName) {
   const memo = _runtimeMemo_();
   delete memo.records[sheetName];
+  if (_recordsCacheEnabled_(sheetName)) {
+    _cacheDeleteJson_(CacheService.getScriptCache(), _recordsCacheKey_(sheetName));
+  }
   if (sheetName === RADAR.sheets.config) {
     delete memo.values.config;
     delete memo.values.dataVersion;
@@ -45,10 +65,25 @@ function _rowToRecord_(headers, row) { const out = {}; headers.forEach(function 
 function _readRecords_(sheetName) {
   const memo = _runtimeMemo_();
   if (Object.prototype.hasOwnProperty.call(memo.records, sheetName)) return memo.records[sheetName];
+  if (_recordsCacheEnabled_(sheetName)) {
+    const cached = _cacheGetJson_(CacheService.getScriptCache(), _recordsCacheKey_(sheetName));
+    if (cached != null && Array.isArray(cached)) {
+      memo.records[sheetName] = cached;
+      return memo.records[sheetName];
+    }
+  }
   _validateSheetContract_(sheetName); const sheet = _sheet_(sheetName); const lastRow = sheet.getLastRow();
   if (lastRow < 2) { memo.records[sheetName] = []; return memo.records[sheetName]; }
   const headers = _headersFor_(sheetName); const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
   memo.records[sheetName] = values.map(function (row) { return _rowToRecord_(headers, row); });
+  if (_recordsCacheEnabled_(sheetName)) {
+    _cachePutJson_(
+      CacheService.getScriptCache(),
+      _recordsCacheKey_(sheetName),
+      memo.records[sheetName],
+      RADAR.cacheSeconds
+    );
+  }
   return memo.records[sheetName];
 }
 function _recordToRow_(sheetName, record) {
