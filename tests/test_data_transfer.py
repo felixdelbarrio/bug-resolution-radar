@@ -64,6 +64,14 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
         "previousOpen": 2,
         "backlogDelta": 1,
         "criticalOpen": 2,
+        "evolution": {
+            "tone": "negative",
+            "title": "Backlog incrementado en 1",
+            "summary": "El backlog pasa de 2 a 3.",
+            "focus": ["Reducir la cola envejecida."],
+            "yearLabel": "Evolución 2026",
+            "fortnightLabel": "01-14 JUL",
+        },
         "responsibleRollups": [],
         "draft": {
             "subject": "Seguimiento quincenal",
@@ -89,8 +97,8 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
     }
     projection = {
         "schema": "bug-resolution-radar-cloud-projection",
-        "schemaVersion": 2,
-        "semanticContract": "desktop-authoritative-v2",
+        "schemaVersion": 3,
+        "semanticContract": "desktop-authoritative-v3",
         "generatedAt": "2026-07-23T10:00:00+00:00",
         "scope": scope,
         "semantics": {"sourceOfTruth": "desktop"},
@@ -189,7 +197,7 @@ def test_export_v3_contains_only_projection_and_exact_local_pptx(
         packaged_report = archive.read("artifacts/period_followup.pptx")
 
     assert manifest["version"] == 3
-    assert manifest["semanticContract"] == "desktop-authoritative-v2"
+    assert manifest["semanticContract"] == "desktop-authoritative-v3"
     assert set(manifest["datasets"]) == {"projection", "report"}
     for descriptor in manifest["datasets"].values():
         assert set(descriptor) == {"path", "sha256", "bytes", "records"}

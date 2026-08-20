@@ -8,6 +8,10 @@ from typing import Sequence
 import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.backlog_evolution import (
+    build_evolution_insight,
+    build_operational_snapshot,
+)
 from bug_resolution_radar.analytics.finalist_discrepancies import (
     apply_effective_finalist_lookup_state_for_scope,
 )
@@ -41,6 +45,7 @@ from bug_resolution_radar.services.downloads import (
 from bug_resolution_radar.services.downloads import (
     unique_download_path as unique_report_export_path,
 )
+from bug_resolution_radar.services.insights_history import record_scope_measurement
 
 __all__ = (
     "ExecutiveReportResult",
@@ -324,6 +329,17 @@ def generate_period_followup_report_artifact(
     if context.dff.empty:
         raise ValueError("No hay incidencias en la ventana temporal y filtros seleccionados.")
 
+    current_snapshot = build_operational_snapshot(
+        dff=context.scoped_df,
+        reference_day=reference_day,
+    )
+    baseline_snapshot = record_scope_measurement(
+        settings,
+        country=country,
+        source_ids=source_ids,
+        snapshot=current_snapshot,
+    )
+
     return generate_country_period_followup_ppt(
         settings,
         country=country,
@@ -337,4 +353,5 @@ def generate_period_followup_report_artifact(
         functionality_priority_filters=functionality_priority_filters,
         functionality_filters=functionality_filters,
         reference_day=reference_day,
+        evolution_insight=build_evolution_insight(current_snapshot, baseline_snapshot),
     )

@@ -17,13 +17,19 @@ import {
   type WorkspaceSource
 } from "../lib/api";
 import { cn } from "../lib/cn";
+import {
+  flushTelemetry,
+  trackTelemetry,
+  type TelemetrySummary
+} from "../lib/telemetry";
 
 type SettingsTabId =
   | "preferences"
   | "jira"
   | "helix"
   | "rollups"
-  | "cache";
+  | "cache"
+  | "telemetry";
 
 type SourceDraftRow = WorkspaceSource & {
   draftKey: string;
@@ -35,7 +41,8 @@ const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "jira", label: "Jira" },
   { id: "helix", label: "Helix" },
   { id: "rollups", label: "Agregados" },
-  { id: "cache", label: "Cache" }
+  { id: "cache", label: "Cache" },
+  { id: "telemetry", label: "Telemetría" }
 ];
 
 const trendChartCatalog = [
@@ -388,6 +395,14 @@ export function SettingsPage() {
     queryKey: ["download-target"],
     queryFn: () => fetchJson<DownloadTargetPayload>("/api/downloads/target")
   });
+  const [telemetryDays, setTelemetryDays] = useState<number>(30);
+  const telemetrySummary = useQuery({
+    queryKey: ["telemetry-summary", telemetryDays],
+    queryFn: () =>
+      fetchJson<TelemetrySummary>("/api/telemetry/summary", { days: telemetryDays }),
+    enabled: activeTab === "telemetry",
+    staleTime: 10_000
+  });
 
   const [draft, setDraft] = useState<SettingsPayload | null>(null);
   const [savedPayload, setSavedPayload] = useState<SettingsPayload | null>(null);
@@ -399,6 +414,7 @@ export function SettingsPage() {
   const [helixExcelBusy, setHelixExcelBusy] = useState<boolean>(false);
   const [helixExcelInputKey, setHelixExcelInputKey] = useState<number>(0);
   const [downloadsPromptDismissed, setDownloadsPromptDismissed] = useState<boolean>(false);
+  const [telemetryExportBusy, setTelemetryExportBusy] = useState<boolean>(false);
 
   useEffect(() => {
     if (!settings.data) {
@@ -760,6 +776,23 @@ export function SettingsPage() {
   async function handleRestore() {
     const restored = await restoreSettings.mutateAsync();
     syncFromSaved(restored.settings, "Configuración restaurada desde la plantilla base.");
+  }
+
+  async function downloadTelemetryExport() {
+    setTelemetryExportBusy(true);
+    trackTelemetry("telemetry_export_requested");
+    try {
+      await flushTelemetry();
+      const saved = await postJson<SavedFilePayload>("/api/telemetry/export/save", {
+        days: telemetryDays
+      });
+      setFlashMessage(`Telemetría guardada en ${saved.savedPath}`);
+      await telemetrySummary.refetch();
+    } catch (error) {
+      setFlashMessage(error instanceof Error ? error.message : "No se pudo descargar la telemetría.");
+    } finally {
+      setTelemetryExportBusy(false);
+    }
   }
 
   function setFavorite(index: number, nextValue: string) {
@@ -1319,6 +1352,106 @@ export function SettingsPage() {
                 </article>
               ))}
             </div>
+          </section>
+        </section>
+      ) : null}
+
+      {activeTab === "telemetry" ? (
+        <section className="page-stack">
+          <section className="surface-card page-stack">
+            <div className="section-head">
+              <div>
+                <h3>Diagnóstico de rendimiento</h3>
+                <p>
+                  Métricas locales de tiempos y errores del backend y del navegador durante los
+                  el periodo seleccionado.
+                </p>
+              </div>
+              <div className="settings-actions-row">
+                <label className="field">
+                  <span>Periodo</span>
+                  <select
+                    value={telemetryDays}
+                    onChange={(event) => setTelemetryDays(Number(event.target.value))}
+                  >
+                    <option value={7}>7 días</option>
+                    <option value={30}>30 días</option>
+                    <option value={90}>90 días</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="action-button"
+                  disabled={telemetryExportBusy}
+                  onClick={() => void downloadTelemetryExport()}
+                >
+                  {telemetryExportBusy ? "Preparando..." : "Descargar para Codex"}
+                </button>
+              </div>
+            </div>
+
+            {telemetrySummary.isLoading ? (
+              <p className="inline-caption">Calculando telemetría...</p>
+            ) : telemetrySummary.isError ? (
+              <p className="inline-caption">No se pudo cargar el resumen de telemetría.</p>
+            ) : (
+              <div className="overview-kpi-grid">
+                <article className="kpi-card">
+                  <span>Eventos</span>
+                  <strong>{telemetrySummary.data?.eventCount ?? 0}</strong>
+                  <small>Backend y frontend</small>
+                </article>
+                <article className="kpi-card">
+                  <span>Errores</span>
+                  <strong>{telemetrySummary.data?.errorCount ?? 0}</strong>
+                  <small>Respuestas y fallos de cliente</small>
+                </article>
+                <article className="kpi-card">
+                  <span>Duración media</span>
+                  <strong>{Math.round(telemetrySummary.data?.averageDurationMs ?? 0)} ms</strong>
+                  <small>Solo mediciones con duración</small>
+                </article>
+                <article className="kpi-card">
+                  <span>Percentil 95</span>
+                  <strong>{Math.round(telemetrySummary.data?.p95DurationMs ?? 0)} ms</strong>
+                  <small>Cola lenta observada</small>
+                </article>
+              </div>
+            )}
+          </section>
+
+          {(telemetrySummary.data?.operations.length ?? 0) > 0 ? (
+            <section className="surface-card page-stack">
+              <h3>Operaciones más lentas</h3>
+              <div className="summary-list">
+                {[...(telemetrySummary.data?.operations ?? [])]
+                  .sort((left, right) => right.p95DurationMs - left.p95DurationMs)
+                  .slice(0, 8)
+                  .map((operation) => (
+                    <article
+                      className="summary-item"
+                      key={`${operation.layer}-${operation.name}-${operation.route}`}
+                    >
+                      <div>
+                        <strong>{operation.route || operation.name}</strong>
+                        <span>
+                          {operation.layer} · {operation.count} muestras · {operation.errorCount} errores
+                        </span>
+                      </div>
+                      <strong>p95 {Math.round(operation.p95DurationMs)} ms</strong>
+                    </article>
+                  ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="surface-card page-stack">
+            <h3>Privacidad y consumo</h3>
+            <p className="inline-caption">
+              La telemetría permanece en este equipo, usa un fichero acotado y escrituras por lotes.
+              No guarda contenido de incidencias, credenciales, identidad del usuario ni rutas
+              locales. Solo se comparte cuando pulsas la descarga.
+            </p>
           </section>
         </section>
       ) : null}

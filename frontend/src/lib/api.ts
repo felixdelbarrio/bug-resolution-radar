@@ -1,3 +1,5 @@
+import { telemetryFetch } from "./telemetry";
+
 export type WorkspaceSource = {
   source_id: string;
   source_type: string;
@@ -9,6 +11,12 @@ export type WorkspaceSource = {
   service_origin_buug?: string;
   service_origin_n1?: string;
   service_origin_n2?: string;
+};
+
+export type CorporateBrandContract = {
+  name: string;
+  wordmark: string;
+  descriptorLines: string[];
 };
 
 export type WorkspaceData = {
@@ -31,6 +39,7 @@ export type WorkspaceData = {
 
 export type BootstrapPayload = {
   appTitle: string;
+  brand: CorporateBrandContract;
   theme: string;
   defaultFilters: {
     status: string[];
@@ -47,13 +56,6 @@ export type BootstrapPayload = {
     theme?: {
       light?: Record<string, string>;
       dark?: Record<string, string>;
-    };
-    semantic?: {
-      statusByKey?: Record<string, string>;
-      priorityByKey?: Record<string, string>;
-      neutral?: string;
-      goalAccent?: string;
-      goalSurface?: string;
     };
   };
   permissionsPolicy: Record<string, string>;
@@ -221,8 +223,58 @@ export type FinalistDiscrepanciesPayload = {
   truncated: boolean;
 };
 
+export type EvolutionMetricPayload = {
+  id: string;
+  label: string;
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  unit: "count" | "days" | "average";
+  tone: "positive" | "negative" | "neutral";
+};
+
+export type EvolutionFlowPayload = {
+  label: string;
+  start: string;
+  end: string;
+  backlogStart: number;
+  backlogEnd: number;
+  backlogDelta: number;
+  created: number;
+  closed: number;
+  netFlow: number;
+  resolutionDays: number | null;
+  averageOpen: number;
+  criticalOpen: number;
+  aged30Open: number;
+};
+
+export type ExecutionEvolutionPayload = {
+  hasData: boolean;
+  referenceDate: string;
+  year: number;
+  executive: {
+    tone: "positive" | "negative" | "neutral" | "mixed";
+    title: string;
+    summary: string;
+    focus: string[];
+  };
+  annual: EvolutionFlowPayload & {
+    kpis: EvolutionMetricPayload[];
+  };
+  fortnight: {
+    current: EvolutionFlowPayload;
+    previous: EvolutionFlowPayload;
+    kpis: EvolutionMetricPayload[];
+  };
+  period: EvolutionFlowPayload & { summary: string; focus: string[] };
+  timeline: EvolutionFlowPayload[];
+  learning: { comparison: string[] };
+};
+
 export type IntelligencePayload = {
   tabs: Array<{ id: string; label: string }>;
+  executionEvolution: ExecutionEvolutionPayload;
   periodSummary: {
     caption: string;
     cards: Array<{
@@ -580,7 +632,7 @@ export async function fetchJson<T>(
   path: string,
   params?: Record<string, QueryValue>
 ): Promise<T> {
-  const response = await fetch(`${path}${toQueryString(params ?? {})}`, {
+  const response = await telemetryFetch(`${path}${toQueryString(params ?? {})}`, {
     credentials: "same-origin"
   });
   if (!response.ok) {
@@ -590,7 +642,7 @@ export async function fetchJson<T>(
 }
 
 export async function putJson<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await telemetryFetch(path, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json"
@@ -605,7 +657,7 @@ export async function putJson<T>(path: string, payload: unknown): Promise<T> {
 }
 
 export async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await telemetryFetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -620,7 +672,7 @@ export async function postJson<T>(path: string, payload: unknown): Promise<T> {
 }
 
 export async function deleteJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
+  const response = await telemetryFetch(path, {
     method: "DELETE",
     credentials: "same-origin"
   });
@@ -636,7 +688,7 @@ export async function postBinary<T>(
   contentType: string,
   params?: Record<string, QueryValue>
 ): Promise<T> {
-  const response = await fetch(`${path}${toQueryString(params ?? {})}`, {
+  const response = await telemetryFetch(`${path}${toQueryString(params ?? {})}`, {
     method: "POST",
     headers: {
       "Content-Type": contentType

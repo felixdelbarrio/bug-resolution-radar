@@ -98,6 +98,16 @@ def test_period_summary_frontend_uses_backend_delta_contract() -> None:
     assert "1400" not in summary_block
 
 
+def test_execution_evolution_frontend_renders_central_average_open_contract() -> None:
+    api_source = _frontend_file("lib/api.ts")
+    panel_source = _frontend_file("components/InsightsPanel.tsx")
+
+    assert 'unit: "count" | "days" | "average"' in api_source
+    assert "averageOpen: number" in api_source
+    assert "Cartera abierta media" not in panel_source
+    assert "row.averageOpen.toLocaleString" in panel_source
+
+
 def test_dashboard_page_does_not_prefetch_heavy_inactive_panels() -> None:
     source = _frontend_file("pages/DashboardPage.tsx")
 

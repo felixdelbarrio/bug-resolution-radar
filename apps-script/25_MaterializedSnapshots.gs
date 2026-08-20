@@ -410,13 +410,14 @@ function _materializedViewPayload_(record, input) {
   }
   if (input.view === 'insights') {
     const catalog = _loadSnapshotPart_(record, 'insights/catalog');
-    const activeId = _materializedCatalogId_(catalog, input.insightsId, 'summary');
+    const activeId = _materializedCatalogId_(catalog, input.insightsId, 'evolution');
     const selected = _loadSnapshotPart_(record, 'insights/' + activeId);
     const insights = {
       tabs: catalog,
       activeTab: activeId
     };
-    if (activeId === 'summary') insights.periodSummary = selected.periodSummary || selected;
+    if (activeId === 'evolution') insights.executionEvolution = selected.executionEvolution || selected;
+    else if (activeId === 'summary') insights.periodSummary = selected.periodSummary || selected;
     else insights[activeId] = selected || {};
     return Object.assign({}, common, { insights: insights });
   }
@@ -458,33 +459,6 @@ function _dashboardPayload_(request) {
   const payload = _materializedViewPayload_(record, input);
   _cachePutJson_(cache, cacheKey, payload, RADAR.cacheSeconds);
   return payload;
-}
-
-function _warmSnapshotViews_(record) {
-  const warmed = [];
-  const failed = [];
-  [
-    { request: { view: 'overview' }, label: 'overview' },
-    { request: { view: 'insights', insightsId: 'summary' }, label: 'insights/summary' },
-    { request: { view: 'trends', chartId: 'open_status_bar' }, label: 'trends/open_status_bar' },
-    { request: { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }, label: 'issues/1' }
-  ].forEach(function (item) {
-    try {
-      _materializedViewPayload_(
-        record,
-        _normalizeMaterializedRequest_(item.request, record.scope_key)
-      );
-      warmed.push(item.label);
-    } catch (err) {
-      failed.push(item.label);
-      console.warn('snapshot_warm_failed', {
-        snapshotId: record.snapshot_id,
-        label: item.label,
-        code: err && err.code
-      });
-    }
-  });
-  return { warmed: warmed, failed: failed };
 }
 
 function _workspaceManifest_() {

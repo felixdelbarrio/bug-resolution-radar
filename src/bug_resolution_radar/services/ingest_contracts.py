@@ -6,9 +6,8 @@ import json
 from typing import Any
 
 from bug_resolution_radar.config import Settings, helix_sources, jira_sources, save_settings
-from bug_resolution_radar.models.schema import IssuesDocument
 from bug_resolution_radar.repositories.helix_store import load_helix_meta
-from bug_resolution_radar.repositories.issues_store import load_issues_doc
+from bug_resolution_radar.repositories.issues_store import load_issues_meta
 
 
 def _parse_json_str_list(raw: object) -> list[str]:
@@ -32,19 +31,14 @@ def _parse_json_str_list(raw: object) -> list[str]:
     return out
 
 
-def _jira_last_ingest_payload(issues_doc: IssuesDocument) -> dict[str, Any]:
-    jira_source_ids = {
-        str(issue.source_id or "").strip()
-        for issue in issues_doc.issues
-        if str(issue.source_type or "").strip().lower() == "jira"
-    }
+def _jira_last_ingest_payload(metadata: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": issues_doc.schema_version,
-        "ingested_at": issues_doc.ingested_at,
-        "jira_base_url": issues_doc.jira_base_url,
-        "query": issues_doc.query,
-        "jira_source_count": len([source_id for source_id in jira_source_ids if source_id]),
-        "issues_count": len(issues_doc.issues),
+        "schema_version": str(metadata.get("schema_version") or "1.0"),
+        "ingested_at": str(metadata.get("ingested_at") or ""),
+        "jira_base_url": str(metadata.get("jira_base_url") or ""),
+        "query": str(metadata.get("query") or ""),
+        "jira_source_count": int(metadata.get("jira_source_count") or 0),
+        "issues_count": int(metadata.get("issues_count") or 0),
     }
 
 
@@ -77,7 +71,7 @@ def _selected_source_ids(
 def ingest_overview_payload(settings: Settings) -> dict[str, Any]:
     jira_cfg = list(jira_sources(settings))
     helix_cfg = list(helix_sources(settings))
-    issues_doc = load_issues_doc(settings.DATA_PATH)
+    issues_meta = load_issues_meta(settings.DATA_PATH)
     helix_path = _helix_data_path(settings)
     helix_meta = load_helix_meta(helix_path)
 
@@ -113,7 +107,7 @@ def ingest_overview_payload(settings: Settings) -> dict[str, Any]:
                 configured_source_ids=jira_source_ids,
                 disabled_source_ids=jira_disabled,
             ),
-            "lastIngest": _jira_last_ingest_payload(issues_doc),
+            "lastIngest": _jira_last_ingest_payload(issues_meta),
         },
         "helix": {
             "configuredCount": len(helix_cfg),

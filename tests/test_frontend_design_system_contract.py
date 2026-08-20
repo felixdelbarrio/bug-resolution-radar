@@ -44,6 +44,19 @@ def _type_block(source: str, type_name: str) -> str:
     return source[start:] if next_type == -1 else source[start:next_type]
 
 
+def _contrast_ratio(first: str, second: str) -> float:
+    def luminance(value: str) -> float:
+        channels = [int(value[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [
+            channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    lighter, darker = sorted((luminance(first), luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 def test_bbva_experience_palette_and_layout_are_canonical() -> None:
     palette = {
         "midnight": BBVA_MIDNIGHT,
@@ -130,12 +143,29 @@ def test_frontend_runtime_theme_exposes_the_same_design_contract() -> None:
     for mode in (light, dark):
         for token_name, value in expected_layout.items():
             assert mode[token_name] == value
-        assert mode["--bbva-neutral"] == BBVA_GREY_300
+        for token_name, value in expected_light.items():
+            assert mode[token_name] == value
+
+    assert light["--bbva-neutral"] == BBVA_GREY_300
+    assert dark["--bbva-neutral"] == BBVA_GREY_600
+    assert dark["--bbva-surface-2"] == BBVA_BLACK
+    assert dark["--bbva-surface"] == BBVA_GREY_900
+    assert dark["--bbva-surface-elevated"] == BBVA_GREY_800
+    assert dark["--bbva-border"] == BBVA_GREY_700
+    assert dark["--bbva-border-strong"] == BBVA_GREY_600
+    assert dark["--bbva-text"] == BBVA_GREY_200
+    assert dark["--bbva-text-muted"] == BBVA_GREY_400
+    assert dark["--bbva-brand-midnight"] == BBVA_MIDNIGHT
+    assert dark["--bbva-brand-on-hero"] == BBVA_WHITE
+    assert _contrast_ratio(dark["--bbva-text"], dark["--bbva-surface"]) >= 7
+    assert _contrast_ratio(dark["--bbva-text-muted"], dark["--bbva-surface"]) >= 4.5
+    assert _contrast_ratio(dark["--bbva-brand-on-hero"], dark["--bbva-brand-midnight"]) >= 7
 
 
 def test_desktop_css_uses_bbva_typography_grid_and_radius_contract() -> None:
     styles = _frontend_file("styles/app.css")
     light_root = styles[: styles.index(':root[data-theme="dark"]')]
+    dark_root = styles[styles.index(':root[data-theme="dark"]') : styles.index("\n\n* {")]
 
     for color in (
         "#070e46",
@@ -173,6 +203,34 @@ def test_desktop_css_uses_bbva_typography_grid_and_radius_contract() -> None:
     assert "--bbva-content-max: 1296px;" in styles
     assert "--bbva-radius-container: 16px;" in styles
     assert "--bbva-radius-component: 8px;" in styles
+    for primitive in (
+        "--bbva-midnight",
+        "--bbva-electric",
+        "--bbva-royal-dark",
+        "--bbva-royal",
+        "--bbva-serene-dark",
+        "--bbva-serene",
+        "--bbva-blue-light",
+        "--bbva-black",
+        "--bbva-white",
+    ):
+        assert f"{primitive}:" not in dark_root
+    assert "--bbva-surface: var(--bbva-grey-900);" in dark_root
+    assert "--bbva-surface-2: var(--bbva-black);" in dark_root
+    assert "--bbva-surface-elevated: var(--bbva-grey-800);" in dark_root
+    assert "background: var(--bbva-brand-midnight);" in styles
+    assert "color: var(--bbva-brand-on-hero);" in styles
+    assert (
+        '.evolution-hero[data-tone="positive"] { --evolution-accent: var(--bbva-success); }'
+        in styles
+    )
+    assert (
+        '.evolution-hero[data-tone="mixed"] { --evolution-accent: var(--bbva-warning); }' in styles
+    )
+    assert (
+        '.evolution-hero[data-tone="negative"] { --evolution-accent: var(--bbva-danger); }'
+        in styles
+    )
     assert (
         "width: min(100%, calc(var(--bbva-content-max) + 2 * var(--bbva-grid-margin)));" in styles
     )
@@ -219,6 +277,7 @@ def test_semantic_color_fallbacks_reference_central_css_tokens() -> None:
     assert '"var(--bbva-priority-highest)"' in source
     assert '"var(--bbva-neutral)"' in source
     assert "color-mix(in srgb" in source
+    assert "configureSemanticColors" not in source
 
 
 def test_desktop_data_transfer_is_export_only_and_uses_v2_contract() -> None:

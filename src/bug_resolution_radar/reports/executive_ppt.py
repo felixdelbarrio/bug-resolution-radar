@@ -51,6 +51,7 @@ from bug_resolution_radar.analytics.trend_insights import (
     build_trend_insight_pack,
 )
 from bug_resolution_radar.config import Settings, all_configured_sources
+from bug_resolution_radar.reports.branding import apply_corporate_branding
 from bug_resolution_radar.reports.plotly_png import render_plotly_figure_png
 from bug_resolution_radar.repositories.issues_store import load_issues_df
 from bug_resolution_radar.theme.design_tokens import (
@@ -1907,7 +1908,7 @@ def _add_header(slide: Any, *, title: str, subtitle: str, dark: bool = False) ->
 
 
 def _add_footer(slide: Any, *, context: _ScopeContext) -> None:
-    foot = slide.shapes.add_textbox(Inches(0.52), Inches(7.16), Inches(12.2), Inches(0.20))
+    foot = slide.shapes.add_textbox(Inches(0.52), Inches(7.16), Inches(9.7), Inches(0.20))
     tf = foot.text_frame
     tf.clear()
     p = tf.paragraphs[0]
@@ -2898,7 +2899,7 @@ def _add_final_summary_slide(prs: Any, context: _ScopeContext) -> None:
             color_hex=PALETTE["muted"],
         )
 
-    foot = slide.shapes.add_textbox(Inches(0.62), Inches(6.96), Inches(12.0), Inches(0.24))
+    foot = slide.shapes.add_textbox(Inches(0.62), Inches(6.96), Inches(9.6), Inches(0.24))
     ftf = foot.text_frame
     ftf.clear()
     fp = ftf.paragraphs[0]
@@ -2923,6 +2924,7 @@ def _compose_presentation(context: _ScopeContext) -> Any:
         _add_chart_insight_slide(prs, context=context, section=section, index=idx, total=total)
 
     _add_final_summary_slide(prs, context)
+    apply_corporate_branding(prs)
     return prs
 
 

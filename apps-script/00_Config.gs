@@ -2,11 +2,11 @@
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
   corporateBrand: 'BBVA Banca de Empresas e Instituciones',
-  appVersion: '2026.08.19.11',
-  contractVersion: '5.1.0',
+  appVersion: '2026.08.20.2',
+  contractVersion: '7.0.0',
   projectionContract: 'bug-resolution-radar-cloud-projection',
-  projectionVersion: 2,
-  semanticContract: 'desktop-authoritative-v2',
+  projectionVersion: 3,
+  semanticContract: 'desktop-authoritative-v3',
   spreadsheetId: '10_kDe-giOQtJxBX_M67z8In17MIh-6IQpmQl_9eo7c8',
   initialAdmin: 'felix.delbarrio@bbva.com',
   allowedDomain: 'bbva.com',
@@ -326,11 +326,10 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   NEWSLETTER_RECIPIENTS: Object.freeze({
-    key: 'recipient_uid', version: '5.0.0', unique: ['recipient_uid'],
+    key: 'recipient_uid', version: '7.0.0', unique: ['recipient_uid'],
     columns: Object.freeze([
-      ['recipient_uid', 'string', true], ['report_id', 'string', true], ['snapshot_id', 'string', true],
-      ['scope_key', 'string', true], ['scope_label', 'string', true],
-      ['email', 'email', true], ['display_name', 'string', false], ['active', 'boolean', true],
+      ['recipient_uid', 'string', true], ['scope_key', 'string', true],
+      ['scope_label', 'string', true], ['email', 'email', true], ['active', 'boolean', true],
       ['created_at', 'datetime', true], ['created_by', 'email', true],
       ['updated_at', 'datetime', true], ['updated_by', 'email', true]
     ])

@@ -154,7 +154,7 @@ def test_intelligence_payload_includes_finalist_discrepancies_tab(
 
     payload = build_intelligence_snapshot(settings, query=query)
 
-    assert [tab["id"] for tab in payload["tabs"]][2:5] == [
+    assert [tab["id"] for tab in payload["tabs"]][3:6] == [
         "duplicates",
         "rootCauseEvolutives",
         "finalistDiscrepancies",

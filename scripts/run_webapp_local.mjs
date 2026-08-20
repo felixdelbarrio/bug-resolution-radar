@@ -98,9 +98,10 @@ function localRuntimeMarkup() {
   };
   const dashboard = (request = {}) => {
     if (request.view === "insights") {
-      const activeTab = request.insightsId || "summary";
+      const activeTab = request.insightsId || "evolution";
       const insights = {
         tabs: [
+          { id: "evolution", label: "Evolución" },
           { id: "summary", label: "Resumen" },
           { id: "functionality", label: "Funcionalidad" },
           { id: "duplicates", label: "Duplicados" },
@@ -109,6 +110,46 @@ function localRuntimeMarkup() {
           { id: "people", label: "Personas" }
         ],
         activeTab
+      };
+      if (activeTab === "evolution") insights.executionEvolution = {
+        hasData: true,
+        referenceDate: "2026-07-28",
+        year: 2026,
+        executive: {
+          tone: "positive",
+          title: "Backlog reducido en 7 durante la quincena",
+          summary: "Se cerraron 71 incidencias y se crearon 64; el backlog pasa de 78 a 71. En el año, disminuye en 18, de 89 a 71. No hay incidencias abiertas de criticidad alta o muy alta.",
+          focus: ["Antigüedad: 9 abiertas superan 30 días (-3 vs quincena previa)."]
+        },
+        annual: {
+          label: "Evolución 2026",
+          kpis: [
+            { id: "backlog", label: "Backlog", current: 71, previous: 89, delta: -18, unit: "count", tone: "positive" },
+            { id: "created", label: "Creadas", current: 462, previous: null, delta: null, unit: "count", tone: "neutral" },
+            { id: "closed", label: "Cerradas", current: 480, previous: null, delta: null, unit: "count", tone: "neutral" },
+            { id: "critical", label: "Criticidad alta", current: 0, previous: null, delta: null, unit: "count", tone: "neutral" }
+          ]
+        },
+        fortnight: {
+          current: { label: "15-28 JUL", backlogStart: 78, backlogEnd: 71 },
+          previous: { label: "01-14 JUL", backlogStart: 82, backlogEnd: 78 },
+          kpis: [
+            { id: "backlog", label: "Backlog al cierre", current: 71, previous: 78, delta: -7, unit: "count", tone: "positive" },
+            { id: "created", label: "Creadas", current: 64, previous: 60, delta: 4, unit: "count", tone: "negative" },
+            { id: "closed", label: "Cerradas", current: 71, previous: 64, delta: 7, unit: "count", tone: "positive" },
+            { id: "resolution", label: "Resolución media", current: 16.1, previous: 25.6, delta: -9.5, unit: "days", tone: "positive" }
+          ]
+        },
+        period: {
+          label: "15-28 JUL",
+          summary: "La capacidad de cierre supera la entrada y reduce el backlog en 7 incidencias.",
+          focus: ["Antigüedad: 9 abiertas superan 30 días (-3 vs quincena previa)."]
+        },
+        timeline: [
+          { start: "2026-07-01", label: "01-14 JUL", backlogEnd: 78, backlogDelta: -4, created: 60, closed: 64, aged30Open: 12 },
+          { start: "2026-07-15", label: "15-28 JUL", backlogEnd: 71, backlogDelta: -7, created: 64, closed: 71, aged30Open: 9 }
+        ],
+        learning: { comparison: ["Evolución favorable vs última medición: Backlog abierto baja de 78 a 71 (-7)."] }
       };
       if (activeTab === "summary") insights.periodSummary = {
         caption: "España · Periodo 15/07 - 28/07/2026",
@@ -193,8 +234,8 @@ function localRuntimeMarkup() {
     app: {
       name: "Bug Resolution Radar · WebApp local",
       version: "2026.08.19.6",
-      contractVersion: "5.1.0",
-      semanticContract: "desktop-authoritative-v2",
+      contractVersion: "6.0.0",
+      semanticContract: "desktop-authoritative-v3",
       dataVersion: scope.dataVersion,
       cacheEpoch: "local-20260819-4",
       maxTransferBytes: 33554432,
@@ -214,7 +255,7 @@ function localRuntimeMarkup() {
       panel: "overview",
       scopeKey: scope.scopeKey,
       trendChart: "timeseries",
-      insightsId: "summary",
+      insightsId: "evolution",
       issuesView: "Cards",
       page: 1,
       pageSize: 50
@@ -224,7 +265,6 @@ function localRuntimeMarkup() {
   const mocks = {
     getBootstrap: () => bootstrap,
     queryDashboard: (request) => dashboard(request),
-    getDashboardViewBundle: () => [],
     recordAnalyticsEvents: (events) => ({ accepted: Array.isArray(events) ? events.length : 0 }),
     getIssueDetail: () => issue,
     getPeriodReportStatus: () => ({

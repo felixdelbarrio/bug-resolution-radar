@@ -40,7 +40,7 @@ function _initialDashboardState_(manifest) {
     panel: 'overview',
     scopeKey: scopes.length ? _text_(scopes[0].scopeKey) : '',
     trendChart: 'open_status_bar',
-    insightsId: 'summary',
+    insightsId: 'evolution',
     issuesView: 'Cards',
     page: 1,
     pageSize: RADAR.defaultPageSize
@@ -96,32 +96,6 @@ function queryDashboard(request) {
   return _rpc_(function () {
     _requireUser_();
     return _dashboardPayload_(request);
-  });
-}
-
-/** Hydrates only the four primary screens; secondary variants remain lazy. */
-function getDashboardViewBundle(scopeKey) {
-  return _rpc_(function () {
-    _requireUser_();
-    const record = _activeSnapshotRecordForScope_(_text_(scopeKey), true);
-    const requests = [
-      { view: 'overview' },
-      { view: 'insights', insightsId: 'summary' },
-      { view: 'trends', chartId: 'open_status_bar' },
-      { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }
-    ];
-    return requests.map(function (request) {
-      const normalized = _normalizeMaterializedRequest_(Object.assign({
-        scopeKey: _text_(record.scope_key),
-        page: 1,
-        pageSize: RADAR.defaultPageSize,
-        sortId: 'default'
-      }, request));
-      return {
-        request: normalized,
-        payload: _materializedViewPayload_(record, normalized)
-      };
-    });
   });
 }
 
@@ -326,7 +300,6 @@ function validateTransferImport(form) {
     const user = _requireAdmin_();
     _configuredReportDriveFolder_();
     _cleanupExpiredTransfers_();
-    _validateAllContracts_();
     const decoded = _decodeTransferPackage_(form && form.transferFile);
     const preview = _transferPreview_(decoded);
     return _withApplicationLock_(function () {
@@ -534,7 +507,7 @@ function commitTransferImport(token) {
         return _publishDecodedTransfer_(decoded, meta, user);
       });
       if (!published.idempotent) _invalidateCaches_();
-      const cache = _warmSnapshotViews_(published.record);
+      const cache = { warmed: [], failed: [] };
       let garbageCollection = { removedSnapshots: 0, removedChunks: 0, removedParts: 0 };
       try {
         garbageCollection = _garbageCollectSnapshots_(published.record.scope_key);
@@ -548,7 +521,7 @@ function commitTransferImport(token) {
         operation: 'import',
         summary: published.idempotent
           ? 'La proyección ya estaba publicada; no se duplicaron datos ni artefactos.'
-          : 'Snapshot publicado, cachés regeneradas y presentación nativa de Google Slides creada desde el PPTX autoritativo.',
+          : 'Snapshot publicado y presentación nativa de Google Slides creada desde el PPTX autoritativo.',
         completedAt: _nowIso_(),
         snapshotId: published.record.snapshot_id,
         scopeKey: published.record.scope_key,

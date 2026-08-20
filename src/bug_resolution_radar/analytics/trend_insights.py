@@ -21,7 +21,12 @@ from bug_resolution_radar.analytics.insights import (
 from bug_resolution_radar.analytics.insights import (
     top_non_other_theme as _top_non_other_theme,
 )
-from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
+from bug_resolution_radar.analytics.issues import (
+    critical_priority_mask,
+    is_critical_priority,
+    normalize_text_col,
+    priority_rank,
+)
 from bug_resolution_radar.analytics.kpis import (
     build_open_age_priority_payload,
     build_timeseries_daily,
@@ -238,7 +243,7 @@ def _sorted_cards(cards: Iterable[ActionInsight], *, limit: int = 5) -> List[Act
             p = str(raw or "").strip()
             if not p:
                 continue
-            if priority_rank(p) <= 2:
+            if is_critical_priority(p):
                 return True
         return False
 
@@ -436,9 +441,8 @@ def _timeseries_pack(dff: pd.DataFrame, open_df: pd.DataFrame) -> TrendInsightPa
         )
 
     if "priority" in open_df.columns and "status" in open_df.columns and not open_df.empty:
-        crit_mask = (
-            normalize_text_col(open_df["priority"], "(sin priority)").astype(str).map(priority_rank)
-            <= 2
+        crit_mask = critical_priority_mask(
+            normalize_text_col(open_df["priority"], "(sin priority)").astype(str)
         )
         triage_mask = (
             normalize_text_col(open_df["status"], "(sin estado)")
@@ -620,7 +624,7 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                     )
                 )
 
-        critical_old_mask = pr.map(priority_rank) <= 2
+        critical_old_mask = critical_priority_mask(pr)
         crit_old_count = int(
             (critical_old_mask & (ages.reindex(pr.index, fill_value=np.nan) > 14)).sum()
         )
@@ -641,7 +645,7 @@ def _age_pack(open_df: pd.DataFrame) -> TrendInsightPack:
             stx = normalize_text_col(open_df["status"], "(sin estado)").astype(str)
             early_old = int(
                 (
-                    (pr.map(priority_rank) <= 2)
+                    critical_priority_mask(pr)
                     & stx.isin(TRIAGE_STATUS_FILTERS)
                     & (ages.reindex(pr.index, fill_value=np.nan) > 7)
                 ).sum()
@@ -785,7 +789,7 @@ def _resolution_pack(dff: pd.DataFrame) -> TrendInsightPack:
 
     if "priority" in opened.columns and not opened.empty:
         pr = normalize_text_col(opened["priority"], "(sin priority)")
-        critical_old = opened.loc[(pr.map(priority_rank) <= 2) & (opened["open_days"] > 14)]
+        critical_old = opened.loc[critical_priority_mask(pr) & (opened["open_days"] > 14)]
         critical_old_count = int(len(critical_old))
         if critical_old_count > 0:
             cards.append(
@@ -842,7 +846,8 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
     df["_prio_rank"] = df["priority"].map(priority_rank).fillna(99).astype(int)
     df["_weight"] = (6 - df["_prio_rank"]).clip(lower=1, upper=6)
     risk_score = int(df["_weight"].sum())
-    high_share = float((df["_prio_rank"] <= 2).mean()) if total else 0.0
+    critical_mask = critical_priority_mask(df["priority"])
+    high_share = float(critical_mask.mean()) if total else 0.0
     missing_share = float((df["priority"] == "(sin priority)").mean()) if total else 0.0
 
     cards: List[ActionInsight] = []
@@ -858,17 +863,6 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
                 score=8.0 + (dominant_share * 100.0),
             )
         )
-
-    cards.append(
-        ActionInsight(
-            title="Riesgo ponderado",
-            body=(
-                f"Score ponderado = {risk_score}. "
-                "Permite priorizar capacidad segun impacto y no solo por volumen bruto."
-            ),
-            score=float(risk_score) / float(max(total, 1)),
-        )
-    )
 
     if high_share >= 0.35:
         cards.append(
@@ -898,7 +892,7 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     if "status" in df.columns:
         stx = normalize_text_col(df["status"], "(sin estado)").astype(str)
-        crit_early = int(((df["_prio_rank"] <= 2) & stx.isin(TRIAGE_STATUS_FILTERS)).sum())
+        crit_early = int((critical_mask & stx.isin(TRIAGE_STATUS_FILTERS)).sum())
         if crit_early > 0:
             cards.append(
                 ActionInsight(
@@ -915,7 +909,7 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     if "assignee" in df.columns:
         assignee = normalize_text_col(df["assignee"], "(sin asignar)")
-        crit_unassigned = int(((df["_prio_rank"] <= 2) & assignee.eq("(sin asignar)")).sum())
+        crit_unassigned = int((critical_mask & assignee.eq("(sin asignar)")).sum())
         if crit_unassigned > 0:
             cards.append(
                 ActionInsight(
@@ -933,7 +927,7 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
     if "created" in df.columns:
         ages = _age_days_aligned(df)
         if ages.notna().any():
-            crit_old = int(((df["_prio_rank"] <= 2) & (ages > 14)).sum())
+            crit_old = int((critical_mask & (ages > 14)).sum())
             if crit_old > 0:
                 cards.append(
                     ActionInsight(
@@ -949,7 +943,7 @@ def _priority_pack(open_df: pd.DataFrame) -> TrendInsightPack:
 
     stale_days = _stale_days_from_updated(df)
     if stale_days.notna().any():
-        crit_stale = int(((df["_prio_rank"] <= 2) & (stale_days > 7)).sum())
+        crit_stale = int((critical_mask & (stale_days > 7)).sum())
         if crit_stale > 0:
             cards.append(
                 ActionInsight(
@@ -1238,7 +1232,7 @@ def build_ops_health_brief(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> List[
 
     if "priority" in safe_open.columns:
         pr = normalize_text_col(safe_open["priority"], "(sin priority)")
-        critical_share = float((pr.map(priority_rank) <= 2).mean()) if open_total else 0.0
+        critical_share = float(critical_priority_mask(pr).mean()) if open_total else 0.0
         if critical_share >= 0.30:
             lines.append(
                 f"Prioridades de mayor impacto: {_fmt_pct(critical_share)} del backlog abierto está en Supone un impedimento / Highest / High."

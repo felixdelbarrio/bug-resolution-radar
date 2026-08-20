@@ -224,6 +224,24 @@ function formatTopicPercentage(pct: number) {
   }).format(Number.isFinite(pct) ? pct : 0)}%`;
 }
 
+function formatEvolutionValue(value: number | null, unit: "count" | "days" | "average") {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (unit === "days") return `${value.toLocaleString("es-ES", { maximumFractionDigits: 1 })} d`;
+  if (unit === "average") {
+    return value.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+  return Math.round(value).toLocaleString("es-ES");
+}
+
+function formatEvolutionDelta(value: number | null, unit: "count" | "days" | "average") {
+  if (value === null || !Number.isFinite(value)) return "Sin referencia comparable";
+  const sign = value > 0 ? "+" : "";
+  const rendered = unit === "count"
+    ? Math.round(value).toLocaleString("es-ES")
+    : value.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `${sign}${rendered}${unit === "days" ? " d" : ""} vs anterior`;
+}
+
 function finalistIssueToRecord(
   issue: IntelligencePayload["finalistDiscrepancies"]["groups"][number]["issues"][number]
 ): IssueRecord {
@@ -456,7 +474,7 @@ export function InsightsPanel({
 }: InsightsPanelProps) {
   const [duplicatesView, setDuplicatesView] = useState<"title" | "heuristic">("title");
   const activeTab =
-    data.tabs.find((tab) => tab.id === params.insightsTab)?.id ?? data.tabs[0]?.id ?? "summary";
+    data.tabs.find((tab) => tab.id === params.insightsTab)?.id ?? data.tabs[0]?.id ?? "evolution";
   const combo = data.functionality.combo;
 
   function jumpToIssues(quincenalScopeLabel: string) {
@@ -493,6 +511,118 @@ export function InsightsPanel({
           ))}
         </nav>
       </section>
+
+      {activeTab === "evolution" ? (
+        <section className="page-stack execution-evolution">
+          <section
+            className="surface-panel evolution-hero"
+            data-tone={data.executionEvolution.executive.tone}
+          >
+            <div>
+              <p className="section-kicker">Lectura ejecutiva</p>
+              <h3>{data.executionEvolution.executive.title}</h3>
+              <p>{data.executionEvolution.executive.summary}</p>
+            </div>
+            <span className="metric-chip">Actualizado {data.executionEvolution.referenceDate}</span>
+          </section>
+
+          {data.executionEvolution.hasData ? (
+            <>
+          <section className="page-stack">
+            <div className="panel-head">
+              <div>
+                <p className="section-kicker">Año en curso</p>
+                <h3>{data.executionEvolution.annual.label}</h3>
+              </div>
+            </div>
+            <div className="evolution-kpi-grid">
+              {data.executionEvolution.annual.kpis.map((metric) => (
+                <article className="evolution-kpi" data-tone={metric.tone} key={metric.id}>
+                  <span>{metric.label}</span>
+                  <strong>{formatEvolutionValue(metric.current, metric.unit)}</strong>
+                  <small>
+                    {metric.previous === null
+                      ? "Acumulado del año"
+                      : `Inicio: ${formatEvolutionValue(metric.previous, metric.unit)} · ${formatEvolutionDelta(metric.delta, metric.unit)}`}
+                  </small>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="surface-panel page-stack">
+            <div className="panel-head">
+              <div>
+                <p className="section-kicker">Quincena contra quincena</p>
+                <h3>
+                  {data.executionEvolution.fortnight.current.label} vs {data.executionEvolution.fortnight.previous.label}
+                </h3>
+              </div>
+            </div>
+            <div className="evolution-comparison-grid">
+              {data.executionEvolution.fortnight.kpis.map((metric) => (
+                <article className="evolution-comparison-card" data-tone={metric.tone} key={metric.id}>
+                  <span>{metric.label}</span>
+                  <strong>{formatEvolutionValue(metric.current, metric.unit)}</strong>
+                  <small>
+                    Antes {formatEvolutionValue(metric.previous, metric.unit)} · {formatEvolutionDelta(metric.delta, metric.unit)}
+                  </small>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="surface-panel page-stack">
+            <div className="panel-head">
+              <div>
+                <p className="section-kicker">Qué ha pasado en el periodo</p>
+                <h3>{data.executionEvolution.period.label}</h3>
+              </div>
+            </div>
+            <p className="evolution-period-summary">{data.executionEvolution.period.summary}</p>
+            {data.executionEvolution.period.focus.length > 0 ? (
+              <div className="recommendation-card">
+                <strong>Focos generales de ejecución</strong>
+                <ul className="signal-list">
+                  {data.executionEvolution.period.focus.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              </div>
+            ) : null}
+            {data.executionEvolution.learning.comparison.length > 0 ? (
+              <p className="inline-caption">{data.executionEvolution.learning.comparison[0]}</p>
+            ) : null}
+          </section>
+
+          <section className="surface-panel page-stack">
+            <div className="panel-head">
+              <div>
+                <p className="section-kicker">Evolución anual</p>
+                <h3>Cortes quincenales</h3>
+              </div>
+            </div>
+            <div className="evolution-timeline" role="table" aria-label="Evolución quincenal del año">
+              <div className="evolution-timeline-row evolution-timeline-head" role="row">
+                <span>Quincena</span><span>Backlog</span><span>Media abierta</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span>
+              </div>
+              {data.executionEvolution.timeline.map((row) => (
+                <div className="evolution-timeline-row" role="row" key={row.start}>
+                  <span>{row.label}</span>
+                  <strong>{row.backlogEnd.toLocaleString("es-ES")}</strong>
+                  <span>{row.averageOpen.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+                  <span data-tone={row.backlogDelta < 0 ? "positive" : row.backlogDelta > 0 ? "negative" : "neutral"}>
+                    {row.backlogDelta > 0 ? "+" : ""}{row.backlogDelta.toLocaleString("es-ES")}
+                  </span>
+                  <span>{row.created.toLocaleString("es-ES")}</span>
+                  <span>{row.closed.toLocaleString("es-ES")}</span>
+                  <span>{row.aged30Open.toLocaleString("es-ES")}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+            </>
+          ) : null}
+        </section>
+      ) : null}
 
       {activeTab === "summary" ? (
         <section className="page-stack">

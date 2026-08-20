@@ -14,7 +14,10 @@ from bug_resolution_radar.analytics.insights_scope import (
     build_insights_combo_context,
 )
 from bug_resolution_radar.analytics.issue_functionality import ensure_issue_functionality_columns
-from bug_resolution_radar.analytics.issues import sort_issues_for_display
+from bug_resolution_radar.analytics.issues import (
+    CRITICAL_PRIORITY_COMPACT_TOKENS,
+    sort_issues_for_display,
+)
 from bug_resolution_radar.analytics.period_summary import QuincenalScopeResult
 from bug_resolution_radar.analytics.topic_expandable_summary import (
     RootCauseRank,
@@ -36,15 +39,6 @@ _MONTH_NAMES_ES: tuple[str, ...] = (
     "Octubre",
     "Noviembre",
     "Diciembre",
-)
-_CRITICAL_PRIORITY_TOKENS: frozenset[str] = frozenset(
-    {
-        "high",
-        "highest",
-        "veryhigh",
-        "impedimento",
-        "suponeunimpedimento",
-    }
 )
 
 
@@ -144,7 +138,7 @@ def _is_critical_priority_selection(priorities: Sequence[str] | None) -> bool:
     normalized = {_compact_token(v) for v in selected}
     if not normalized:
         return False
-    return normalized.issubset(_CRITICAL_PRIORITY_TOKENS)
+    return normalized.issubset(CRITICAL_PRIORITY_COMPACT_TOKENS)
 
 
 def _apply_combo_filters(

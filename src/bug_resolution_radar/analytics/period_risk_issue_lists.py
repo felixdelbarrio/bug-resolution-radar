@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -10,6 +9,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.insights import classify_theme
 from bug_resolution_radar.analytics.issues import (
+    is_critical_priority,
     normalize_text_col,
     priority_rank,
     status_progress_rank,
@@ -37,17 +37,6 @@ class PeriodRiskIssueLists:
     aged: tuple[PeriodRiskIssueRow, ...]
 
 
-_HIGH_PRIORITY_COMPACT_TOKENS: frozenset[str] = frozenset(
-    {
-        "suponeunimpedimento",
-        "impedimento",
-        "highest",
-        "veryhigh",
-        "muyalto",
-        "high",
-        "alto",
-    }
-)
 _ROOT_CAUSE_COLUMNS: tuple[str, ...] = (
     "root_cause",
     "rootCause",
@@ -91,26 +80,6 @@ def _analysis_day(df: pd.DataFrame, *, fallback: pd.Timestamp | None = None) -> 
     if fallback is not None:
         return pd.Timestamp(fallback).normalize()
     return pd.Timestamp.now().normalize()
-
-
-def _compact_priority(value: object) -> str:
-    token = str(value or "").strip().lower()
-    token = token.replace("_", " ").replace("-", " ")
-    token = re.sub(r"\s+", " ", token).strip()
-    return "".join(ch for ch in token if ch.isalnum())
-
-
-def _risk_priority_rank(value: object) -> int:
-    compact = _compact_priority(value)
-    if compact in {"suponeunimpedimento", "impedimento", "highest", "veryhigh", "muyalto"}:
-        return 0
-    if compact in {"high", "alto"}:
-        return 1
-    return priority_rank(str(value or ""))
-
-
-def _is_high_priority(value: object) -> bool:
-    return _compact_priority(value) in _HIGH_PRIORITY_COMPACT_TOKENS
 
 
 def _first_text(row: pd.Series, columns: Sequence[str]) -> str:
@@ -163,8 +132,8 @@ def _prepare_open_issue_frame(
         pd.to_numeric(work["__open_days"], errors="coerce").fillna(0.0).clip(lower=0.0).floordiv(1)
     )
     if "priority" in work.columns:
-        work["__priority_rank"] = work["priority"].map(_risk_priority_rank)
-        work["__is_high_priority"] = work["priority"].map(_is_high_priority)
+        work["__priority_rank"] = work["priority"].map(priority_rank)
+        work["__is_high_priority"] = work["priority"].map(is_critical_priority)
     else:
         work["__priority_rank"] = 99
         work["__is_high_priority"] = False
