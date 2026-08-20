@@ -7,7 +7,9 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, MutableMapping, Sequence
 
@@ -113,6 +115,7 @@ from bug_resolution_radar.services.tabular_export import (
     dataframe_to_csv_bytes,
     download_filename,
 )
+from bug_resolution_radar.services.telemetry import TelemetryStore
 from bug_resolution_radar.services.workspace import (
     WorkspaceSelection,
     apply_workspace_source_scope,
@@ -693,6 +696,10 @@ class SourceExportSaveRequest(BaseModel):
     sourceType: str = "helix"
 
 
+class TelemetryBatchRequest(BaseModel):
+    events: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
 def _report_saved_payload(
     *,
     saved_path: Path,
@@ -757,6 +764,7 @@ def _reveal_in_file_manager(path: Path) -> bool:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Bug Resolution Radar API", version="1.0.0")
+    telemetry = TelemetryStore()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -767,6 +775,34 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def collect_backend_telemetry(request: Request, call_next: Any) -> Response:
+        path = str(request.url.path or "")
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = int(response.status_code)
+            return response
+        finally:
+            if path.startswith("/api/") and not path.startswith("/api/telemetry"):
+                route = request.scope.get("route")
+                route_path = str(getattr(route, "path", "") or path)
+                try:
+                    telemetry.append(
+                        {
+                            "layer": "backend",
+                            "name": "api_request",
+                            "route": route_path,
+                            "method": request.method,
+                            "status": "error" if status_code >= 400 else "success",
+                            "statusCode": status_code,
+                            "durationMs": (time.perf_counter() - started) * 1000,
+                        }
+                    )
+                except Exception:
+                    LOGGER.debug("telemetry_append_failed", exc_info=True)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -1350,6 +1386,29 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:
         return load_settings_payload()
+
+    @app.post("/api/telemetry/events")
+    def post_telemetry_events(payload: TelemetryBatchRequest) -> dict[str, int]:
+        return {"accepted": telemetry.append_many(payload.events)}
+
+    @app.get("/api/telemetry/summary")
+    def get_telemetry_summary(
+        days: int = Query(30, ge=1, le=90),
+    ) -> dict[str, Any]:
+        return telemetry.summary(days=days)
+
+    @app.get("/api/telemetry/export")
+    def get_telemetry_export(
+        days: int = Query(30, ge=1, le=90),
+    ) -> Response:
+        payload = telemetry.export(days=days)
+        content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        filename = f"radar_telemetria_codex_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers=_download_headers(filename),
+        )
 
     @app.put("/api/settings")
     def put_settings(payload: dict[str, Any]) -> dict[str, Any]:

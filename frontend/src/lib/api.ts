@@ -1,3 +1,5 @@
+import { telemetryFetch } from "./telemetry";
+
 export type WorkspaceSource = {
   source_id: string;
   source_type: string;
@@ -580,7 +582,7 @@ export async function fetchJson<T>(
   path: string,
   params?: Record<string, QueryValue>
 ): Promise<T> {
-  const response = await fetch(`${path}${toQueryString(params ?? {})}`, {
+  const response = await telemetryFetch(`${path}${toQueryString(params ?? {})}`, {
     credentials: "same-origin"
   });
   if (!response.ok) {
@@ -590,7 +592,7 @@ export async function fetchJson<T>(
 }
 
 export async function putJson<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await telemetryFetch(path, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json"
@@ -605,7 +607,7 @@ export async function putJson<T>(path: string, payload: unknown): Promise<T> {
 }
 
 export async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await telemetryFetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -620,7 +622,7 @@ export async function postJson<T>(path: string, payload: unknown): Promise<T> {
 }
 
 export async function deleteJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
+  const response = await telemetryFetch(path, {
     method: "DELETE",
     credentials: "same-origin"
   });
@@ -636,7 +638,7 @@ export async function postBinary<T>(
   contentType: string,
   params?: Record<string, QueryValue>
 ): Promise<T> {
-  const response = await fetch(`${path}${toQueryString(params ?? {})}`, {
+  const response = await telemetryFetch(`${path}${toQueryString(params ?? {})}`, {
     method: "POST",
     headers: {
       "Content-Type": contentType
