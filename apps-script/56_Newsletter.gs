@@ -91,14 +91,12 @@ function _newsletterAuditPayload_() {
 
 function _newsletterSettingsPayload_() {
   const reports = _newsletterReports_();
-  const activeReportIds = new Set(reports.map(function (report) { return report.reportId; }));
+  const activeScopeKeys = new Set(reports.map(function (report) { return report.scopeKey; }));
   const recipients = _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
-    return activeReportIds.has(_text_(row.report_id));
+    return activeScopeKeys.has(_text_(row.scope_key));
   }).map(function (row) {
     return {
       recipientUid: _text_(row.recipient_uid),
-      reportId: _text_(row.report_id),
-      snapshotId: _text_(row.snapshot_id),
       scopeKey: _text_(row.scope_key),
       scopeLabel: _text_(row.scope_label),
       email: _canonicalEmail_(row.email),
@@ -156,7 +154,7 @@ function saveNewsletterRecipient(payload) {
     _assert_(email.endsWith('@' + RADAR.allowedDomain),
       'El destinatario debe pertenecer al dominio @' + RADAR.allowedDomain + '.',
       'VALIDATION_ERROR');
-    const uid = report.reportId + '::' + email;
+    const uid = report.scopeKey + '::' + email;
     const updatedAt = _nowIso_();
     _withApplicationLock_(function () {
       const current = _readRecords_(RADAR.sheets.newsletterRecipients).find(function (row) {
@@ -166,12 +164,9 @@ function saveNewsletterRecipient(payload) {
       const createdBy = current ? current.created_by : user.email;
       _upsertRecord_(RADAR.sheets.newsletterRecipients, {
         recipient_uid: uid,
-        report_id: report.reportId,
-        snapshot_id: report.snapshotId,
         scope_key: report.scopeKey,
         scope_label: report.label,
         email: email,
-        display_name: '',
         active: input.active === true,
         created_at: createdAt,
         created_by: createdBy,
@@ -181,8 +176,6 @@ function saveNewsletterRecipient(payload) {
     });
     return {
       recipientUid: uid,
-      reportId: report.reportId,
-      snapshotId: report.snapshotId,
       scopeKey: report.scopeKey,
       scopeLabel: report.label,
       email: email,
@@ -483,14 +476,21 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
   return { html: html, plain: plain };
 }
 
-function _newsletterRecipientsForReport_(reportId) {
+function _newsletterRecipientsForScope_(scopeKey) {
   return Array.from(new Set(
     _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
-      return _text_(row.report_id) === _text_(reportId) && row.active === true;
+      return _text_(row.scope_key) === _text_(scopeKey) && row.active === true;
     }).map(function (row) {
       return _canonicalEmail_(row.email);
     }).filter(Boolean)
   )).sort();
+}
+
+function _newsletterRecipientsForReport_(reportId) {
+  const report = _newsletterReports_().find(function (item) {
+    return item.reportId === _text_(reportId);
+  });
+  return report ? _newsletterRecipientsForScope_(report.scopeKey) : [];
 }
 
 function _newsletterTestWasSentBy_(reportId, email) {

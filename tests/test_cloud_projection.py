@@ -63,7 +63,7 @@ def _intelligence(*, split: bool = True) -> dict[str, object]:
             "referenceDate": "2026-07-14",
             "year": 2026,
             "executive": {
-                "tone": "negative",
+                "tone": "mixed",
                 "title": "Backlog incrementado en 1 durante la quincena",
                 "summary": (
                     "El backlog pasa de 2 a 3. La cartera abierta media sube de 2,1 a 2,6 "

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.execution_evolution import build_execution_evolution
+from bug_resolution_radar.analytics.execution_evolution import (
+    _executive_message,
+    _FlowMetrics,
+    build_execution_evolution,
+)
 
 
 def _issue(
@@ -77,15 +81,14 @@ def test_execution_evolution_reconstructs_year_and_fortnight_flows() -> None:
         assert period["backlogDelta"] == period["created"] - period["closed"]
         assert period["backlogEnd"] == period["backlogStart"] + period["backlogDelta"]
 
-    assert "Permanecen 1 incidencias" in result["executive"]["summary"]
+    assert result["executive"]["tone"] == "negative"
+    assert result["executive"]["title"] == "1 incidencia crítica requiere atención"
+    assert "Permanecen 1 incidencia abierta" in result["executive"]["summary"]
     assert (
-        "La cartera abierta media sube 1,9 incidencias, de 2,4 a 4,3 y cierra en 4."
+        "Carga media: 4,3 incidencias (+1,9 frente a 2,4); señala mayor presión durante el periodo."
         in result["executive"]["summary"]
     )
-    assert (
-        "El tiempo medio de resolución mejora: baja 105,5 días, de 107,5 a 2,0."
-        in result["executive"]["summary"]
-    )
+    assert "Resolución: 2,0 días de media (-105,5); mejora." in result["executive"]["summary"]
     average_kpi = next(
         metric for metric in result["fortnight"]["kpis"] if metric["id"] == "averageOpen"
     )
@@ -115,10 +118,7 @@ def test_execution_evolution_never_invents_critical_incidents() -> None:
 
     assert result["period"]["criticalOpen"] == 0
     assert all(not line.startswith("Criticidad:") for line in result["period"]["focus"])
-    assert (
-        "No hay incidencias abiertas de criticidad alta o muy alta"
-        in result["executive"]["summary"]
-    )
+    assert "Sin incidencias abiertas de criticidad alta" in result["executive"]["summary"]
 
 
 def test_execution_evolution_is_complete_for_an_empty_scope() -> None:
@@ -138,6 +138,93 @@ def test_execution_evolution_omits_resolution_comparison_without_two_valid_sampl
     result = build_execution_evolution(dff=frame, reference_day="2026-08-20")
 
     summary = result["executive"]["summary"]
-    assert "cartera abierta media" in summary.lower()
-    assert "tiempo medio de resolución" not in summary.lower()
+    assert "carga media" in summary.lower()
+    assert "resolución:" not in summary.lower()
     assert result["fortnight"]["current"]["resolutionDays"] is None
+
+
+def test_executive_message_is_concise_and_yellow_for_mixed_screenshot_signals() -> None:
+    previous = _FlowMetrics(
+        start=pd.Timestamp("2026-08-01").date(),
+        end=pd.Timestamp("2026-08-14").date(),
+        backlog_start=76,
+        backlog_end=128,
+        created=101,
+        closed=49,
+        resolution_days=18.5,
+        average_open=85.5,
+        critical_end=0,
+        aged30_end=21,
+    )
+    current = _FlowMetrics(
+        start=pd.Timestamp("2026-08-15").date(),
+        end=pd.Timestamp("2026-08-20").date(),
+        backlog_start=128,
+        backlog_end=108,
+        created=15,
+        closed=35,
+        resolution_days=20.0,
+        average_open=115.5,
+        critical_end=0,
+        aged30_end=21,
+    )
+    annual = _FlowMetrics(
+        start=pd.Timestamp("2026-01-01").date(),
+        end=pd.Timestamp("2026-08-20").date(),
+        backlog_start=108,
+        backlog_end=108,
+        created=600,
+        closed=600,
+        resolution_days=17.0,
+        average_open=101.0,
+        critical_end=0,
+        aged30_end=21,
+    )
+
+    tone, title, summary = _executive_message(
+        annual=annual,
+        current=current,
+        previous=previous,
+    )
+
+    assert tone == "mixed"
+    assert title == "Backlog reducido en 20 incidencias"
+    assert summary == (
+        "Se cerraron 35 incidencias frente a 15 nuevas; la cartera termina en 108. "
+        "Carga media: 115,5 incidencias (+30,0 frente a 85,5); señala mayor presión "
+        "durante el periodo. Resolución: 20,0 días de media (+1,5); empeora. "
+        "En el año, el backlog se mantiene en el nivel de partida. "
+        "Sin incidencias abiertas de criticidad alta."
+    )
+    assert summary.count("108") == 1
+
+
+def test_executive_message_is_green_only_without_deterioration_or_critical_alerts() -> None:
+    previous = _FlowMetrics(
+        start=pd.Timestamp("2026-08-01").date(),
+        end=pd.Timestamp("2026-08-14").date(),
+        backlog_start=110,
+        backlog_end=100,
+        created=20,
+        closed=30,
+        resolution_days=12.0,
+        average_open=105.0,
+        critical_end=0,
+        aged30_end=12,
+    )
+    current = _FlowMetrics(
+        start=pd.Timestamp("2026-08-15").date(),
+        end=pd.Timestamp("2026-08-20").date(),
+        backlog_start=100,
+        backlog_end=90,
+        created=15,
+        closed=25,
+        resolution_days=9.0,
+        average_open=95.0,
+        critical_end=0,
+        aged30_end=8,
+    )
+
+    tone, _, _ = _executive_message(annual=current, current=current, previous=previous)
+
+    assert tone == "positive"

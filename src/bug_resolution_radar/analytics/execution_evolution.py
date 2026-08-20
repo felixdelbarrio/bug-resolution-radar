@@ -150,14 +150,11 @@ def _resolution_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str
         return ""
     delta = current.resolution_days - previous.resolution_days
     current_txt = _decimal_es(current.resolution_days)
-    previous_txt = _decimal_es(previous.resolution_days)
     if abs(delta) < 0.05:
-        return f"El tiempo medio de resolución se mantiene en {current_txt} días."
-    movement = "mejora: baja" if delta < 0 else "empeora: sube"
-    return (
-        f"El tiempo medio de resolución {movement} {_decimal_es(abs(delta))} días, "
-        f"de {previous_txt} a {current_txt}."
-    )
+        return f"Resolución: {current_txt} días de media, sin variación."
+    sign = "-" if delta < 0 else "+"
+    outcome = "mejora" if delta < 0 else "empeora"
+    return f"Resolución: {current_txt} días de media ({sign}{_decimal_es(abs(delta))}); {outcome}."
 
 
 def _portfolio_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str:
@@ -165,13 +162,53 @@ def _portfolio_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str:
     current_txt = _decimal_es(current.average_open)
     previous_txt = _decimal_es(previous.average_open)
     if abs(delta) < 0.05:
-        movement = f"se mantiene en {current_txt} incidencias"
-    else:
-        verb = "baja" if delta < 0 else "sube"
-        movement = (
-            f"{verb} {_decimal_es(abs(delta))} incidencias, de {previous_txt} a {current_txt}"
-        )
-    return f"La cartera abierta media {movement} y cierra en {current.backlog_end}."
+        return f"Carga media: {current_txt} incidencias, estable frente a la quincena anterior."
+    sign = "-" if delta < 0 else "+"
+    assessment = (
+        "confirma una menor presión durante el periodo"
+        if delta < 0
+        else "señala mayor presión durante el periodo"
+    )
+    return (
+        f"Carga media: {current_txt} incidencias ({sign}{_decimal_es(abs(delta))} frente a "
+        f"{previous_txt}); {assessment}."
+    )
+
+
+def _annual_comparison(annual: _FlowMetrics) -> str:
+    delta = annual.backlog_delta
+    if delta == 0:
+        return "En el año, el backlog se mantiene en el nivel de partida."
+    verb = "baja" if delta < 0 else "sube"
+    return (
+        f"En el año, el backlog {verb} {abs(delta)} incidencias "
+        f"({annual.backlog_start} a {annual.backlog_end})."
+    )
+
+
+def _executive_tone(current: _FlowMetrics, previous: _FlowMetrics) -> str:
+    if current.critical_end > 0:
+        return "negative"
+    resolution_delta = (
+        current.resolution_days - previous.resolution_days
+        if current.resolution_days is not None and previous.resolution_days is not None
+        else 0.0
+    )
+    deteriorates = (
+        current.backlog_delta > 0
+        or current.average_open - previous.average_open > 0.05
+        or resolution_delta > 0.05
+        or current.aged30_end > previous.aged30_end
+    )
+    if deteriorates:
+        return "mixed"
+    improves = (
+        current.backlog_delta < 0
+        or current.average_open - previous.average_open < -0.05
+        or resolution_delta < -0.05
+        or current.aged30_end < previous.aged30_end
+    )
+    return "positive" if improves else "mixed"
 
 
 def _fortnight_ranges(year: int, end: date) -> list[tuple[date, date]]:
@@ -199,39 +236,35 @@ def _executive_message(
             "El ámbito seleccionado no contiene incidencias con las que calcular una evolución fiable.",
         )
     period_delta = current.backlog_delta
-    annual_delta = annual.backlog_delta
-    if period_delta < 0 and current.closed >= current.created:
-        tone = "positive"
-        title = f"Backlog reducido en {abs(period_delta)} durante la quincena"
-    elif period_delta > 0 and current.created > current.closed:
-        tone = "negative"
-        title = f"Backlog incrementado en {period_delta} durante la quincena"
-    elif period_delta == 0:
-        tone = "neutral"
-        title = "Backlog estable durante la quincena"
+    tone = _executive_tone(current, previous)
+    if current.critical_end > 0:
+        title = (
+            "1 incidencia crítica requiere atención"
+            if current.critical_end == 1
+            else f"{current.critical_end} incidencias críticas requieren atención"
+        )
+    elif period_delta < 0:
+        title = f"Backlog reducido en {abs(period_delta)} incidencias"
+    elif period_delta > 0:
+        title = f"Backlog incrementado en {period_delta} incidencias"
     else:
-        tone = "mixed"
-        title = "Evolución mixta durante la quincena"
-    annual_direction = (
-        f"disminuye en {abs(annual_delta)}"
-        if annual_delta < 0
-        else f"aumenta en {annual_delta}"
-        if annual_delta > 0
-        else "se mantiene estable"
-    )
+        title = "Backlog estable durante la quincena"
     summary = (
-        f"Se cerraron {current.closed} incidencias y se crearon {current.created}; "
-        f"el backlog pasa de {current.backlog_start} a {current.backlog_end}. "
+        f"Se cerraron {current.closed} incidencias frente a {current.created} nuevas; "
+        f"la cartera termina en {current.backlog_end}. "
         f"{_portfolio_comparison(current, previous)} "
     )
     resolution_comparison = _resolution_comparison(current, previous)
     if resolution_comparison:
         summary += f"{resolution_comparison} "
-    summary += f"En el año, {annual_direction}, de {annual.backlog_start} a {annual.backlog_end}."
+    summary += _annual_comparison(annual)
     if current.critical_end:
-        summary += f" Permanecen {current.critical_end} incidencias de criticidad alta o muy alta."
+        critical_label = (
+            "incidencia abierta" if current.critical_end == 1 else "incidencias abiertas"
+        )
+        summary += f" Permanecen {current.critical_end} {critical_label} de criticidad alta."
     else:
-        summary += " No hay incidencias abiertas de criticidad alta o muy alta."
+        summary += " Sin incidencias abiertas de criticidad alta."
     return tone, title, summary
 
 

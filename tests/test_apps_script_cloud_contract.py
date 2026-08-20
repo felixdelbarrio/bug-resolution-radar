@@ -364,21 +364,34 @@ def test_every_boot_starts_on_overview_without_persisting_last_panel() -> None:
     assert "panel: state.panel" not in preferences
 
 
-def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
+def test_newsletter_recipients_persist_by_scope_across_new_reports() -> None:
     config = _source("00_Config.gs")
     newsletter = _source("56_Newsletter.gs")
+    setup = _source("90_Setup.gs")
+    app = _source("App.html")
     save_recipient = _function_body(newsletter, "saveNewsletterRecipient")
+    recipient_contract = config[
+        config.index("NEWSLETTER_RECIPIENTS:") : config.index("NEWSLETTER_AUDIT:")
+    ]
+    active_recipients = _function_body(newsletter, "_newsletterRecipientsForScope_")
 
-    assert "['report_id', 'string', true]" in config
-    assert "['snapshot_id', 'string', true]" in config
+    assert "['scope_key', 'string', true]" in recipient_contract
+    assert "report_id" not in recipient_contract
+    assert "snapshot_id" not in recipient_contract
     assert "reportId" in save_recipient
-    assert "report_id: report.reportId" in save_recipient
-    assert "snapshot_id: report.snapshotId" in save_recipient
+    assert "report.scopeKey + '::' + email" in save_recipient
+    assert "scope_key: report.scopeKey" in save_recipient
     assert "email.endsWith('@' + RADAR.allowedDomain)" in save_recipient
     assert "displayName" not in save_recipient
     assert "_assertExactFields_(input, ['reportId', 'email', 'active']" in save_recipient
     assert "return _newsletterSettingsPayload_()" not in save_recipient
-    assert "_newsletterRecipientsForReport_" in newsletter
+    assert "row.active === true" in active_recipients
+    assert "_newsletterRecipientsForScope_(report.scopeKey)" in newsletter
+    assert "_normalizeNewsletterRecipientStorage_();" in setup
+    assert "actual.length > expected.length" in setup
+    assert "clearContent();" in setup
+    assert "recipient.scopeKey === (selectedReport && selectedReport.scopeKey)" in app
+    assert "persistidos para este ámbito" in app
 
 
 def test_newsletter_recipient_ui_is_email_only() -> None:
@@ -462,6 +475,25 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
     assert "newsletter.responsibleRollups" in newsletter
     assert "DESIGN_TOKENS.radius.container" in newsletter
     assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
+
+
+def test_executive_signal_colors_are_consistent_in_webapp_and_newsletter() -> None:
+    design = _source("DesignSystem.html")
+    newsletter = _function_body(_source("56_Newsletter.gs"), "_newsletterRender_")
+
+    assert (
+        '.evolution-hero[data-tone="positive"] { --evolution-accent:var(--bbva-success); }'
+        in design
+    )
+    assert (
+        '.evolution-hero[data-tone="mixed"] { --evolution-accent:var(--bbva-warning); }' in design
+    )
+    assert (
+        '.evolution-hero[data-tone="negative"] { --evolution-accent:var(--bbva-danger); }' in design
+    )
+    assert "evolution.tone === 'positive'" in newsletter
+    assert "evolution.tone === 'negative'" in newsletter
+    assert "color.warningStrong" in newsletter
 
 
 def test_newsletter_uses_the_market_pulse_gmail_api_delivery_contract() -> None:

@@ -612,17 +612,20 @@ const App = (() => {
   function evolutionValue(value, unit) {
     if (value == null || !Number.isFinite(Number(value))) return '—';
     const number = Number(value);
-    return unit === 'days'
-      ? number.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' d'
+    if (unit === 'days') {
+      return number.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' d';
+    }
+    return unit === 'average'
+      ? number.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
       : Math.round(number).toLocaleString('es-ES');
   }
 
   function evolutionDelta(value, unit) {
     if (value == null || !Number.isFinite(Number(value))) return 'Sin referencia comparable';
     const number = Number(value);
-    const rendered = unit === 'days'
-      ? number.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-      : Math.round(number).toLocaleString('es-ES');
+    const rendered = unit === 'count'
+      ? Math.round(number).toLocaleString('es-ES')
+      : number.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     return (number > 0 ? '+' : '') + rendered + (unit === 'days' ? ' d' : '') + ' vs anterior';
   }
 
@@ -653,7 +656,7 @@ const App = (() => {
         ${(period.focus || []).length ? `<div class="recommendation-card"><strong>Focos generales de ejecución</strong><ul class="signal-list">${period.focus.map(line => `<li>${UI.escape(line)}</li>`).join('')}</ul></div>` : ''}
       </section>
       <section class="surface-panel page-stack"><div class="panel-head"><div><p class="section-kicker">Evolución anual</p><h3>Cortes quincenales</h3></div></div>
-        <div class="evolution-timeline" role="table"><div class="evolution-timeline-row evolution-timeline-head"><span>Quincena</span><span>Backlog</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span></div>${(evolution.timeline || []).map(row => `<div class="evolution-timeline-row"><span>${UI.escape(row.label)}</span><strong>${UI.formatNumber(row.backlogEnd)}</strong><span data-tone="${row.backlogDelta < 0 ? 'positive' : row.backlogDelta > 0 ? 'negative' : 'neutral'}">${row.backlogDelta > 0 ? '+' : ''}${UI.formatNumber(row.backlogDelta)}</span><span>${UI.formatNumber(row.created)}</span><span>${UI.formatNumber(row.closed)}</span><span>${UI.formatNumber(row.aged30Open)}</span></div>`).join('')}</div>
+        <div class="evolution-timeline" role="table"><div class="evolution-timeline-row evolution-timeline-head"><span>Quincena</span><span>Backlog</span><span>Media abierta</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span></div>${(evolution.timeline || []).map(row => `<div class="evolution-timeline-row"><span>${UI.escape(row.label)}</span><strong>${UI.formatNumber(row.backlogEnd)}</strong><span>${UI.escape(evolutionValue(row.averageOpen, 'average'))}</span><span data-tone="${row.backlogDelta < 0 ? 'positive' : row.backlogDelta > 0 ? 'negative' : 'neutral'}">${row.backlogDelta > 0 ? '+' : ''}${UI.formatNumber(row.backlogDelta)}</span><span>${UI.formatNumber(row.created)}</span><span>${UI.formatNumber(row.closed)}</span><span>${UI.formatNumber(row.aged30Open)}</span></div>`).join('')}</div>
       </section>
     </section>`;
   }
@@ -1142,7 +1145,7 @@ const App = (() => {
       }
       state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
       const recipients = (newsletter.recipients || []).filter(
-        recipient => recipient.reportId === state.newsletterReportId
+        recipient => recipient.scopeKey === (selectedReport && selectedReport.scopeKey)
       );
       const activeRecipients = recipients.filter(recipient => recipient.active).length;
       body = `<section class="page-stack">
@@ -1156,7 +1159,7 @@ const App = (() => {
           <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
           ).join('')}</select></label>
-          <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} configurados para este informe</span></div>
+          <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} persistidos para este ámbito</span></div>
           <form id="recipientForm" class="newsletter-recipient-form">
             <label class="field"><span>Correo BBVA</span><input id="recipientEmail" type="email" autocomplete="email" placeholder="nombre@bbva.com" required></label>
             <button class="action-button" type="submit" ${selectedReport ? '' : 'disabled'}>Añadir destinatario</button>

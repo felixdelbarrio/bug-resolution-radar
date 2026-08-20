@@ -221,6 +221,17 @@ def test_desktop_css_uses_bbva_typography_grid_and_radius_contract() -> None:
     assert "background: var(--bbva-brand-midnight);" in styles
     assert "color: var(--bbva-brand-on-hero);" in styles
     assert (
+        '.evolution-hero[data-tone="positive"] { --evolution-accent: var(--bbva-success); }'
+        in styles
+    )
+    assert (
+        '.evolution-hero[data-tone="mixed"] { --evolution-accent: var(--bbva-warning); }' in styles
+    )
+    assert (
+        '.evolution-hero[data-tone="negative"] { --evolution-accent: var(--bbva-danger); }'
+        in styles
+    )
+    assert (
         "width: min(100%, calc(var(--bbva-content-max) + 2 * var(--bbva-grid-margin)));" in styles
     )
 

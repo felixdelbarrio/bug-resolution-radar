@@ -64,11 +64,40 @@ function _removeObsoleteStorage_(ss) {
   OBSOLETE_SCRIPT_PROPERTIES.forEach(function (key) {
     properties.deleteProperty(key);
   });
-  _readRecords_(RADAR.sheets.newsletterRecipients).filter(function (row) {
-    return !_text_(row.report_id) || !_text_(row.snapshot_id);
-  }).forEach(function (row) {
-    _deleteRecord_(RADAR.sheets.newsletterRecipients, row.recipient_uid);
+}
+
+function _normalizeNewsletterRecipientStorage_() {
+  const sheetName = RADAR.sheets.newsletterRecipients;
+  const records = _readRecords_(sheetName);
+  const latestByUid = {};
+  records.forEach(function (row) {
+    const scopeKey = _text_(row.scope_key);
+    const email = _canonicalEmail_(row.email);
+    if (!scopeKey || !email) return;
+    const uid = scopeKey + '::' + email;
+    const candidate = {
+      recipient_uid: uid,
+      scope_key: scopeKey,
+      scope_label: _text_(row.scope_label) || scopeKey,
+      email: email,
+      active: row.active === true,
+      created_at: row.created_at || _nowIso_(),
+      created_by: _canonicalEmail_(row.created_by) || RADAR.initialAdmin,
+      updated_at: row.updated_at || row.created_at || _nowIso_(),
+      updated_by: _canonicalEmail_(row.updated_by) || _canonicalEmail_(row.created_by) || RADAR.initialAdmin
+    };
+    const previous = latestByUid[uid];
+    if (!previous || (_date_(candidate.updated_at) || new Date(0)) >= (_date_(previous.updated_at) || new Date(0))) {
+      latestByUid[uid] = candidate;
+    }
   });
+  const normalized = Object.keys(latestByUid).sort().map(function (uid) { return latestByUid[uid]; });
+  const sheet = _sheet_(sheetName);
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, _headersFor_(sheetName).length).clearContent();
+  }
+  _forgetSheet_(sheetName);
+  if (normalized.length) _appendRecords_(sheetName, normalized);
 }
 
 function _migrateSheetHeaders_(sheetName, sheet) {
@@ -106,6 +135,9 @@ function _migrateSheetHeaders_(sheetName, sheet) {
     sheet.getRange(2, 1, dataRowCount, expected.length).setValues(remapped);
   }
   sheet.getRange(1, 1, 1, expected.length).setValues([expected]);
+  if (actual.length > expected.length) {
+    sheet.getRange(1, expected.length + 1, sheet.getMaxRows(), actual.length - expected.length).clearContent();
+  }
 }
 
 /** Idempotent setup and compatible contract migration. Run manually as spreadsheet owner. */
@@ -121,6 +153,7 @@ function setupApplication() {
       _migrateSheetHeaders_(name, sheet);
       _validateSheetContract_(name); sheet.setFrozenRows(1); sheet.getRange(1, 1, 1, headers.length).setBackground(DESIGN_TOKENS.color.midnight).setFontColor(DESIGN_TOKENS.color.white).setFontWeight('bold');
     });
+    _normalizeNewsletterRecipientStorage_();
     _upsertRecord_(RADAR.sheets.users, { email: RADAR.initialAdmin, role: 'admin', active: true, display_name: 'Félix del Barrio', updated_at: _nowIso_(), updated_by: email });
     _setConfig_('APP_VERSION', RADAR.appVersion, 'string', 'Versión de código de la WebApp desplegada', email);
     _setConfig_('CONTRACT_VERSION', RADAR.contractVersion, 'string', 'Versión estricta de contratos', email);
