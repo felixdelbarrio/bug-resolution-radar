@@ -32,6 +32,11 @@ const INGEST_TABS: IngestTab[] = [
   "export"
 ];
 
+function activeProgressPolling(query: { state: { data: unknown } }) {
+  const progress = query.state.data as IngestProgressPayload | undefined;
+  return progress?.active ? 1500 : false;
+}
+
 function ingestTabLabel(tab: IngestTab): string {
   if (tab === "jira") return "Jira";
   if (tab === "helix") return "Helix";
@@ -338,17 +343,17 @@ export function IngestPage() {
   const jiraProgress = useQuery({
     queryKey: ["ingest-progress", "jira"],
     queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/jira/progress"),
-    refetchInterval: 1500
+    refetchInterval: activeProgressPolling
   });
   const helixProgress = useQuery({
     queryKey: ["ingest-progress", "helix"],
     queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/helix/progress"),
-    refetchInterval: 1500
+    refetchInterval: activeProgressPolling
   });
   const finalistLookupProgress = useQuery({
     queryKey: ["ingest-progress", "finalist_lookup"],
     queryFn: () => fetchJson<IngestProgressPayload>("/api/ingest/finalist-lookup/progress"),
-    refetchInterval: 1500
+    refetchInterval: activeProgressPolling
   });
 
   useEffect(() => {

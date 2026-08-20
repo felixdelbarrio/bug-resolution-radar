@@ -12,6 +12,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence, cast
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issues import (
+    critical_priority_mask as issue_critical_priority_mask,
+)
 from bug_resolution_radar.analytics.issues import sort_issues_for_display
 from bug_resolution_radar.analytics.quincenal_calculators import (
     ClosedIncidentsCalculator,
@@ -32,12 +35,6 @@ _MAESTRA_TRUE_TOKENS = {"1", "si", "yes", "true", "x", "maestra", "master"}
 OPEN_ISSUES_FOCUS_MODE_MAESTRAS = "maestras"
 OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH = "criticidad_alta"
 DEFAULT_OPEN_ISSUES_FOCUS_MODE = OPEN_ISSUES_FOCUS_MODE_CRITICAL_HIGH
-_CRITICAL_PRIORITY_TOKENS = {
-    "suponeunimpedimento",
-    "impedimento",
-    "highest",
-    "high",
-}
 _SMALL_COUNT_REFERENCE_LIMIT = 3
 _MIN_RESOLUTION_REFERENCE_DAYS = 1.0
 _MIN_RESOLUTION_SAMPLE_SIZE = 2
@@ -288,8 +285,7 @@ def _critical_priority_mask(df: pd.DataFrame) -> pd.Series:
         return pd.Series(False, index=safe.index, dtype=bool)
     if "priority" not in safe.columns:
         return pd.Series(False, index=safe.index, dtype=bool)
-    normalized = safe["priority"].fillna("").astype(str).map(_compact_token)
-    return normalized.isin(_CRITICAL_PRIORITY_TOKENS).fillna(False).astype(bool)
+    return issue_critical_priority_mask(safe["priority"])
 
 
 def critical_priority_mask(df: pd.DataFrame) -> pd.Series:

@@ -16,7 +16,7 @@ import {
   type WorkspaceData
 } from "../lib/api";
 import { cn } from "../lib/cn";
-import { configureSemanticColors } from "../lib/semanticColors";
+import { CorporateLockup } from "./CorporateLockup";
 
 const dashboardTabs = [
   ["overview", "Resumen"],
@@ -130,10 +130,6 @@ export function AppShell() {
     document.documentElement.dataset.theme = themeMode;
     applyThemeContract(bootstrap.data?.designTokens?.theme, themeMode);
   }, [bootstrap.data?.designTokens?.theme, themeMode]);
-
-  useEffect(() => {
-    configureSemanticColors(bootstrap.data?.designTokens?.semantic ?? null);
-  }, [bootstrap.data?.designTokens?.semantic]);
 
   useEffect(() => {
     document.title = heroTitle;
@@ -260,6 +256,7 @@ export function AppShell() {
     <div className="app-shell">
       <header className="bbva-hero">
         <div className="bbva-hero-copy">
+          <CorporateLockup brand={bootstrap.data?.brand} className="corporate-lockup-hero" />
           <h1 className="bbva-hero-title">{heroTitle}</h1>
           <p className="bbva-hero-sub">Análisis y seguimiento de incidencias</p>
         </div>

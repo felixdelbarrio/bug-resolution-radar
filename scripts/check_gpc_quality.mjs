@@ -50,8 +50,8 @@ if (manifest.runtimeVersion !== "V8") {
 const config = source("00_Config.gs");
 for (const expected of [
   "transferVersion: 3",
-  "projectionVersion: 2",
-  "semanticContract: 'desktop-authoritative-v2'"
+  "projectionVersion: 3",
+  "semanticContract: 'desktop-authoritative-v3'"
 ]) {
   if (!config.includes(expected)) throw new Error(`Falta el contrato GPC: ${expected}`);
 }

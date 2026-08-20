@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.backlog_evolution import build_evolution_insight
 from bug_resolution_radar.analytics.insights import (
     _tokenize_summary,
     build_theme_daily_trend,
@@ -14,6 +15,8 @@ from bug_resolution_radar.analytics.insights import (
     prepare_open_theme_payload,
     sort_theme_table_by_volume,
 )
+from bug_resolution_radar.analytics.issues import is_critical_priority, priority_rank
+from bug_resolution_radar.analytics.trend_insights import build_trend_insight_pack
 
 
 def test_tokenize_summary_removes_stopwords_and_short_tokens() -> None:
@@ -228,3 +231,80 @@ def test_build_theme_trends_whitelist_moves_others_to_last_position() -> None:
     assert daily["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
     assert fortnight["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
     assert is_other_theme_label("Otros")
+
+
+def test_medium_is_not_classified_as_critical_and_lowest_keeps_its_rank() -> None:
+    assert is_critical_priority("Supone un impedimento")
+    assert is_critical_priority("Highest")
+    assert is_critical_priority("High")
+    assert not is_critical_priority("Medium")
+    assert priority_rank("Lowest") > priority_rank("Low")
+
+
+def test_priority_insights_do_not_invent_high_priority_signals_for_medium_backlog() -> None:
+    open_df = pd.DataFrame(
+        [
+            {
+                "status": "New",
+                "priority": "Medium",
+                "created": "2026-08-01T00:00:00+00:00",
+                "updated": "2026-08-01T00:00:00+00:00",
+            }
+            for _ in range(8)
+        ]
+    )
+    pack = build_trend_insight_pack("open_priority_pie", dff=open_df, open_df=open_df)
+    text = " ".join(f"{card.title} {card.body}" for card in pack.cards).casefold()
+
+    assert "concentracion de prioridad" in text
+    assert "inflacion de prioridades altas" not in text
+    assert "mayor impacto" not in text
+
+
+def test_evolution_insight_reports_week_over_week_direction_from_material_changes() -> None:
+    insight = build_evolution_insight(
+        {
+            "reference_date": "2026-08-20",
+            "open_total": 108,
+            "critical_count": 0,
+            "blocked_count": 2,
+            "aged30_count": 18,
+            "stale_14_count": 12,
+            "net_14": -4,
+        },
+        {
+            "reference_date": "2026-08-13",
+            "open_total": 120,
+            "critical_count": 5,
+            "blocked_count": 4,
+            "aged30_count": 25,
+            "stale_14_count": 12,
+            "net_14": 3,
+        },
+    )
+
+    assert insight is not None
+    assert "WoW" in insight.title
+    assert insight.direction == "improves"
+    assert "Prioridades críticas baja de 5 a 0" in insight.body
+
+
+def test_evolution_insight_includes_resolution_and_average_open_week_over_week() -> None:
+    insight = build_evolution_insight(
+        {
+            "reference_date": "2026-08-20",
+            "average_open_14": 91.4,
+            "resolution_days_14": 8.2,
+        },
+        {
+            "reference_date": "2026-08-13",
+            "average_open_14": 96.8,
+            "resolution_days_14": 11.7,
+        },
+    )
+
+    assert insight is not None
+    assert insight.direction == "improves"
+    assert "WoW" in insight.title
+    assert "Cartera abierta media baja de 96.8 a 91.4 incidencias (-5.4)" in insight.body
+    assert "Resolución media baja de 11.7 a 8.2 días (-3.5)" in insight.body

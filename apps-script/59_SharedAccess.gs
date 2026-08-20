@@ -131,7 +131,7 @@ function getSharedBootstrap(token) {
       panel: 'overview',
       scopeKey: scope.scopeKey,
       trendChart: 'open_status_bar',
-      insightsId: 'summary',
+      insightsId: 'evolution',
       issuesView: 'Cards',
       page: 1,
       pageSize: RADAR.defaultPageSize

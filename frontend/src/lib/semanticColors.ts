@@ -1,13 +1,5 @@
 import type { CSSProperties } from "react";
 
-type SemanticContractPayload = {
-  statusByKey?: Record<string, string>;
-  priorityByKey?: Record<string, string>;
-  neutral?: string;
-  goalAccent?: string;
-  goalSurface?: string;
-} | null;
-
 type SemanticConfig = {
   statusByKey: Record<string, string>;
   priorityByKey: Record<string, string>;
@@ -16,7 +8,7 @@ type SemanticConfig = {
   goalSurface: string;
 };
 
-const DEFAULT_SEMANTIC_CONFIG: SemanticConfig = {
+const SEMANTIC_CONFIG: SemanticConfig = {
   statusByKey: {
     new: "var(--bbva-status-intake)",
     ready: "var(--bbva-status-intake)",
@@ -50,14 +42,6 @@ const DEFAULT_SEMANTIC_CONFIG: SemanticConfig = {
   goalSurface: "var(--bbva-goal-surface)"
 };
 
-let runtimeSemanticConfig: SemanticConfig = {
-  statusByKey: { ...DEFAULT_SEMANTIC_CONFIG.statusByKey },
-  priorityByKey: { ...DEFAULT_SEMANTIC_CONFIG.priorityByKey },
-  neutral: DEFAULT_SEMANTIC_CONFIG.neutral,
-  goalAccent: DEFAULT_SEMANTIC_CONFIG.goalAccent,
-  goalSurface: DEFAULT_SEMANTIC_CONFIG.goalSurface
-};
-
 function normalizeSemanticToken(value: string) {
   return String(value || "")
     .trim()
@@ -67,50 +51,8 @@ function normalizeSemanticToken(value: string) {
     .replace(/\s+/g, " ");
 }
 
-function normalizeColorMap(
-  input: Record<string, string> | undefined,
-  fallback: Record<string, string>
-) {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input ?? {})) {
-    const token = normalizeSemanticToken(key);
-    const color = String(value || "").trim();
-    if (!token || !color) {
-      continue;
-    }
-    mapped[token] = color;
-  }
-  if (Object.keys(mapped).length > 0) {
-    return mapped;
-  }
-  return { ...fallback };
-}
-
-export function configureSemanticColors(payload: SemanticContractPayload) {
-  if (!payload) {
-    runtimeSemanticConfig = {
-      statusByKey: { ...DEFAULT_SEMANTIC_CONFIG.statusByKey },
-      priorityByKey: { ...DEFAULT_SEMANTIC_CONFIG.priorityByKey },
-      neutral: DEFAULT_SEMANTIC_CONFIG.neutral,
-      goalAccent: DEFAULT_SEMANTIC_CONFIG.goalAccent,
-      goalSurface: DEFAULT_SEMANTIC_CONFIG.goalSurface
-    };
-    return;
-  }
-  runtimeSemanticConfig = {
-    statusByKey: normalizeColorMap(payload.statusByKey, DEFAULT_SEMANTIC_CONFIG.statusByKey),
-    priorityByKey: normalizeColorMap(
-      payload.priorityByKey,
-      DEFAULT_SEMANTIC_CONFIG.priorityByKey
-    ),
-    neutral: String(payload.neutral || "").trim() || DEFAULT_SEMANTIC_CONFIG.neutral,
-    goalAccent: String(payload.goalAccent || "").trim() || DEFAULT_SEMANTIC_CONFIG.goalAccent,
-    goalSurface: String(payload.goalSurface || "").trim() || DEFAULT_SEMANTIC_CONFIG.goalSurface
-  };
-}
-
 function colorWithAlpha(color: string, alpha: number) {
-  const source = String(color || "").trim() || runtimeSemanticConfig.neutral;
+  const source = String(color || "").trim() || SEMANTIC_CONFIG.neutral;
   const token = source.replace(/^#/, "");
   const boundedAlpha = Math.min(1, Math.max(0, alpha));
   if (/^[0-9a-fA-F]{6}$/.test(token)) {
@@ -124,12 +66,12 @@ function colorWithAlpha(color: string, alpha: number) {
 
 function chipPalette(color: string) {
   const normalized = String(color || "").trim().toUpperCase();
-  const goalAccent = runtimeSemanticConfig.goalAccent.toUpperCase();
+  const goalAccent = SEMANTIC_CONFIG.goalAccent.toUpperCase();
   if (normalized === goalAccent) {
     return {
-      color: runtimeSemanticConfig.goalAccent,
-      borderColor: colorWithAlpha(runtimeSemanticConfig.goalAccent, 0.64),
-      backgroundColor: runtimeSemanticConfig.goalSurface
+      color: SEMANTIC_CONFIG.goalAccent,
+      borderColor: colorWithAlpha(SEMANTIC_CONFIG.goalAccent, 0.64),
+      backgroundColor: SEMANTIC_CONFIG.goalSurface
     };
   }
   return {
@@ -141,15 +83,13 @@ function chipPalette(color: string) {
 
 export function statusColor(status: string) {
   return (
-    runtimeSemanticConfig.statusByKey[normalizeSemanticToken(status)] ??
-    runtimeSemanticConfig.neutral
+    SEMANTIC_CONFIG.statusByKey[normalizeSemanticToken(status)] ?? SEMANTIC_CONFIG.neutral
   );
 }
 
 export function priorityColor(priority: string) {
   return (
-    runtimeSemanticConfig.priorityByKey[normalizeSemanticToken(priority)] ??
-    runtimeSemanticConfig.neutral
+    SEMANTIC_CONFIG.priorityByKey[normalizeSemanticToken(priority)] ?? SEMANTIC_CONFIG.neutral
   );
 }
 

@@ -14,18 +14,15 @@ def test_learning_store_persists_per_scope(tmp_path: Path) -> None:
     path = tmp_path / "insights_learning.json"
     store = InsightsLearningStore(path)
     store.load()
-    store.set_scope(
+    store.record_snapshot(
         "Mexico::jira:mexico:core",
-        state={"shown_counts": {"a": 2}},
-        interactions=7,
+        snapshot={"reference_date": "2026-08-20", "open_total": 101, "year_closed": 45},
         country="México",
         source_id="jira:mexico:core",
-        snapshot={"open_total": 101, "blocked_count": 9},
     )
-    store.set_scope(
+    store.record_snapshot(
         "Spain::jira:espana:retail",
-        state={"shown_counts": {"b": 1}},
-        interactions=3,
+        snapshot={"reference_date": "2026-08-20", "open_total": 55, "year_closed": 31},
         country="España",
         source_id="jira:espana:retail",
     )
@@ -33,15 +30,15 @@ def test_learning_store_persists_per_scope(tmp_path: Path) -> None:
 
     reloaded = InsightsLearningStore(path)
     reloaded.load()
-    state_mx, inter_mx = reloaded.get_scope("Mexico::jira:mexico:core")
-    state_es, inter_es = reloaded.get_scope("Spain::jira:espana:retail")
-    _, _, snapshot_mx = reloaded.get_scope_bundle("Mexico::jira:mexico:core")
-    assert state_mx.get("shown_counts", {}).get("a") == 2
-    assert inter_mx == 7
-    assert int(snapshot_mx.get("open_total", 0) or 0) == 101
-    assert int(snapshot_mx.get("blocked_count", 0) or 0) == 9
-    assert state_es.get("shown_counts", {}).get("b") == 1
-    assert inter_es == 3
+    baseline, changed = reloaded.record_snapshot(
+        "Mexico::jira:mexico:core",
+        snapshot={"reference_date": "2026-08-20", "open_total": 101, "year_closed": 45},
+        country="México",
+        source_id="jira:mexico:core",
+    )
+    assert baseline == {}
+    assert changed is False
+    assert reloaded.count_all_scopes() == 2
 
 
 def test_learning_scope_key_and_default_path() -> None:
@@ -55,23 +52,19 @@ def test_learning_scope_key_and_default_path() -> None:
 def test_learning_store_remove_source() -> None:
     store = InsightsLearningStore(Path("/tmp/unused-learning.json"))
     store._raw = {
-        "version": 1,
+        "version": 3,
         "scopes": {
             "México::jira:mexico:core": {
-                "state": {"a": 1},
-                "interactions": 2,
+                "measurements": [{"open_total": 2}],
                 "source_id": "jira:mexico:core",
             },
             "España::jira:espana:retail": {
-                "state": {"b": 1},
-                "interactions": 3,
+                "measurements": [{"open_total": 3}],
                 "source_id": "jira:espana:retail",
             },
             "Peru::jira:mexico:core": {
-                "state": {"c": 1},
-                "interactions": 4,
-                # Fallback de versiones antiguas sin source_id explícito.
-                "source_id": "",
+                "measurements": [{"open_total": 4}],
+                "source_id": "jira:mexico:core",
             },
         },
     }
@@ -82,3 +75,36 @@ def test_learning_store_remove_source() -> None:
     assert "México::jira:mexico:core" not in scopes
     assert "Peru::jira:mexico:core" not in scopes
     assert "España::jira:espana:retail" in scopes
+
+
+def test_learning_store_keeps_previous_distinct_snapshot_as_baseline(tmp_path: Path) -> None:
+    store = InsightsLearningStore(tmp_path / "learning.json")
+    store.load()
+    scope = "México::*"
+
+    baseline, changed = store.record_snapshot(
+        scope,
+        snapshot={"reference_date": "2026-08-13", "open_total": 120},
+        country="México",
+        source_id="*",
+    )
+    assert baseline == {}
+    assert changed is True
+
+    baseline, changed = store.record_snapshot(
+        scope,
+        snapshot={"reference_date": "2026-08-20", "open_total": 108},
+        country="México",
+        source_id="*",
+    )
+    assert baseline["open_total"] == 120
+    assert changed is True
+
+    baseline, changed = store.record_snapshot(
+        scope,
+        snapshot={"reference_date": "2026-08-20", "open_total": 108},
+        country="México",
+        source_id="*",
+    )
+    assert baseline["open_total"] == 120
+    assert changed is False

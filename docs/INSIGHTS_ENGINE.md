@@ -39,16 +39,24 @@ el universo de incidencias ni recalcula insights.
 ## Scoring Rules
 
 - Priorizar señales con impacto operativo inmediato (atascos, antigüedad, riesgo de backlog).
+- Considerar críticas únicamente las prioridades P0/P1: `Supone un impedimento`, `Highest` y `High`; `Medium` nunca entra en este grupo.
 - Penalizar repeticiones sin novedad contextual.
 - Mantener lenguaje ejecutivo breve y verificable con evidencias numéricas.
+- No crear tarjetas de relleno: si una regla no emite una señal material, la superficie deja el espacio vacío u omite la sección.
 
 ## Learning Store
 
 - Persistencia por scope en:
   - `src/bug_resolution_radar/services/insights_learning_store.py`
 - Objetivo:
-  - recordar patrones de interacción por `country/source_id`
-  - ajustar orden de sugerencias entre sesiones
+  - guardar mediciones operativas distintas por `country/source_id` o agregado de país;
+  - conservar la medición anterior como baseline estable aunque se abran varios gráficos;
+  - producir comparación `WoW` solo con una separación de 5–9 días y usar `vs última medición` en el resto de cadencias;
+  - no emitir narrativa histórica sin baseline o sin variación material.
+
+La sincronización se realiza en backend mediante
+`src/bug_resolution_radar/services/insights_history.py`; no depende del estado de la WebApp.
+El mismo baseline alimenta tendencias, presentación de seguimiento y proyección cloud.
 
 ## Copilot Scope
 

@@ -23,6 +23,7 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.backlog_evolution import EvolutionInsight
 from bug_resolution_radar.analytics.finalist_discrepancies import (
     apply_effective_finalist_lookup_state,
     apply_effective_finalist_lookup_state_for_scope,
@@ -74,6 +75,7 @@ from bug_resolution_radar.common.issue_links import (
     linkify_issue_references,
 )
 from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
+from bug_resolution_radar.reports.branding import apply_corporate_branding
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
@@ -906,6 +908,25 @@ def validate_shapes_inside_slide(prs: Any) -> None:
             f"height={int(getattr(shape, 'height', 0) or 0)})"
         )
     raise ValueError("El informe contiene shapes fuera del canvas: " + "; ".join(details))
+
+
+def _clamp_minor_shape_overflow(prs: Any, *, tolerance_emu: int = 45_720) -> None:
+    """Trim sub-millimetre template overflow without masking real layout defects."""
+    slide_width = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
+    slide_height = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
+    tolerance = max(int(tolerance_emu), 0)
+    for slide in getattr(prs, "slides", []):
+        for shape in getattr(slide, "shapes", []):
+            left = int(getattr(shape, "left", 0) or 0)
+            top = int(getattr(shape, "top", 0) or 0)
+            width = int(getattr(shape, "width", 0) or 0)
+            height = int(getattr(shape, "height", 0) or 0)
+            right_overflow = left + width - slide_width
+            bottom_overflow = top + height - slide_height
+            if 0 < right_overflow <= tolerance and left >= 0:
+                shape.width = max(slide_width - left, 0)
+            if 0 < bottom_overflow <= tolerance and top >= 0:
+                shape.height = max(slide_height - top, 0)
 
 
 def _to_roman(value: int) -> str:
@@ -2126,39 +2147,25 @@ def _extract_resolution_story_values(
     return habitual, stalled, over_30
 
 
-def _resolution_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mapping[str, str]:
-    pack = build_trend_insight_pack("resolution_hist", dff=dff, open_df=open_df)
-    cards = list(getattr(pack, "cards", []) or [])
-    cards_by_token: dict[str, str] = {
-        _normalize_lookup_token(getattr(card, "title", "")): str(getattr(card, "body", "")).strip()
-        for card in cards
-    }
-    ordered_titles = (
-        "Incidencias críticas envejecidas",
-        "Brecha por prioridad",
-        "Riesgo real de envejecimiento",
-        "Cola extrema de antigüedad",
-    )
-    resolved: dict[str, str] = {}
-    for title in ordered_titles:
-        token = _normalize_lookup_token(title)
-        body = str(cards_by_token.get(token, "") or "").strip()
-        if body:
-            resolved[title] = body
-            continue
-        fallback = next(
-            (
-                str(getattr(card, "body", "") or "").strip()
-                for card in cards
-                if str(getattr(card, "body", "") or "").strip()
-                and str(getattr(card, "title", "") or "").strip() not in resolved
-            ),
-            "",
-        )
-        resolved[title] = (
-            fallback or "Sin datos suficientes para este insight en el scope seleccionado."
-        )
-    return resolved
+def _trend_card_content(
+    chart_id: str,
+    *,
+    dff: pd.DataFrame,
+    open_df: pd.DataFrame,
+    evolution_insight: EvolutionInsight | None = None,
+    limit: int = 4,
+) -> list[tuple[str, str]]:
+    """Return only cards actually emitted by the analytical engine, in score order."""
+    pack = build_trend_insight_pack(chart_id, dff=dff, open_df=open_df)
+    cards: list[tuple[str, str]] = []
+    if evolution_insight is not None:
+        cards.append((evolution_insight.title, evolution_insight.body))
+    for card in list(getattr(pack, "cards", []) or []):
+        title = str(getattr(card, "title", "") or "").strip()
+        body = str(getattr(card, "body", "") or "").strip()
+        if title and body:
+            cards.append((title, body))
+    return cards[: max(int(limit), 0)]
 
 
 def _resolution_chart_png_executive(
@@ -2322,6 +2329,59 @@ def _add_exec_insight_card(
         pass
 
 
+def _add_exec_insight_grid(
+    slide: Any,
+    *,
+    cards: Sequence[tuple[str, str]],
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+) -> None:
+    """Lay out one to four material insights without placeholder cards."""
+    visible = list(cards[:4])
+    if not visible:
+        return
+
+    gap_x = 185_000
+    gap_y = 72_000
+    half_w = max(int((width - gap_x) / 2), 1)
+    half_h = max(int((height - gap_y) / 2), 1)
+    if len(visible) == 1:
+        slots = [(left, top, width, min(height, 760_000))]
+    elif len(visible) == 2:
+        slots = [
+            (left, top, half_w, height),
+            (left + half_w + gap_x, top, half_w, height),
+        ]
+    elif len(visible) == 3:
+        slots = [
+            (left, top, width, half_h),
+            (left, top + half_h + gap_y, half_w, half_h),
+            (left + half_w + gap_x, top + half_h + gap_y, half_w, half_h),
+        ]
+    else:
+        slots = [
+            (left, top, half_w, half_h),
+            (left + half_w + gap_x, top, half_w, half_h),
+            (left, top + half_h + gap_y, half_w, half_h),
+            (left + half_w + gap_x, top + half_h + gap_y, half_w, half_h),
+        ]
+
+    for (title, body), (slot_left, slot_top, slot_width, slot_height) in zip(visible, slots):
+        _add_exec_insight_card(
+            slide,
+            left=slot_left,
+            top=slot_top,
+            width=slot_width,
+            height=slot_height,
+            title=title,
+            body=_boardroom_snippet(body, max_chars=150),
+            title_font_size_pt=12.4,
+            body_font_size_pt=9.2,
+        )
+
+
 def _populate_open_aging_executive_slide(
     slide: Any,
     *,
@@ -2434,77 +2494,19 @@ def _populate_open_aging_executive_slide(
             align=PP_ALIGN.CENTER,
         )
 
-    insight_text = _resolution_cards_by_title(scope_result.dff, scope_result.open_df)
-    cards = [
-        (
-            "Incidencias críticas envejecidas",
-            insight_text.get("Incidencias críticas envejecidas", ""),
-        ),
-        ("Brecha por prioridad", insight_text.get("Brecha por prioridad", "")),
-        ("Riesgo real de envejecimiento", insight_text.get("Riesgo real de envejecimiento", "")),
-        ("Cola extrema de antigüedad", insight_text.get("Cola extrema de antigüedad", "")),
-    ]
-
     cards_top = int(slide_h * 0.643)
-    cards_gap_x = int(slide_w * 0.021)
-    cards_gap_y = int(slide_h * 0.017)
-    card_w = int((content_w - cards_gap_x) / 2)
-    card_h = int((slide_h - cards_top - cards_gap_y - int(slide_h * 0.018)) / 2)
-    card_h = max(card_h, int(slide_h * 0.13))
-    coords = [
-        (margin_x, cards_top),
-        (margin_x + card_w + cards_gap_x, cards_top),
-        (margin_x, cards_top + card_h + cards_gap_y),
-        (margin_x + card_w + cards_gap_x, cards_top + card_h + cards_gap_y),
-    ]
-    for (left, top), (title, body) in zip(coords, cards):
-        _add_exec_insight_card(
-            slide,
-            left=left,
-            top=top,
-            width=card_w,
-            height=card_h,
-            title=title,
-            body=_boardroom_snippet(body, max_chars=118),
-            title_font_size_pt=12.6,
-            body_font_size_pt=9.6,
-        )
-
-
-def _priority_cards_by_title(dff: pd.DataFrame, open_df: pd.DataFrame) -> Mapping[str, str]:
-    pack = build_trend_insight_pack("open_priority_pie", dff=dff, open_df=open_df)
-    cards = list(getattr(pack, "cards", []) or [])
-    cards_by_token: dict[str, str] = {
-        _normalize_lookup_token(getattr(card, "title", "")): str(getattr(card, "body", "")).strip()
-        for card in cards
-    }
-    ordered_titles = (
-        "Inflación de prioridades altas",
-        "Concentración de prioridad",
-        "Incidencias de mayor impacto con antigüedad elevada",
-        "Incidencias de mayor impacto sin arrancar",
-        "Incidencias de mayor impacto sin movimiento reciente",
+    _add_exec_insight_grid(
+        slide,
+        cards=_trend_card_content(
+            "resolution_hist",
+            dff=scope_result.dff,
+            open_df=scope_result.open_df,
+        ),
+        left=margin_x,
+        top=cards_top,
+        width=content_w,
+        height=slide_h - cards_top - int(slide_h * 0.018),
     )
-    resolved: dict[str, str] = {}
-    for title in ordered_titles:
-        token = _normalize_lookup_token(title)
-        body = str(cards_by_token.get(token, "") or "").strip()
-        if body:
-            resolved[title] = body
-            continue
-        fallback = next(
-            (
-                str(getattr(card, "body", "") or "").strip()
-                for card in cards
-                if str(getattr(card, "body", "") or "").strip()
-                and str(getattr(card, "title", "") or "").strip() not in resolved
-            ),
-            "",
-        )
-        resolved[title] = (
-            fallback or "Sin datos suficientes para este insight en el scope seleccionado."
-        )
-    return resolved
 
 
 def _priority_chart_png_executive(
@@ -2614,6 +2616,7 @@ def _populate_open_priority_executive_slide(
     scope_result: QuincenalScopeResult,
     slide_width: int,
     slide_height: int,
+    evolution_insight: EvolutionInsight | None = None,
 ) -> None:
     _clear_slide_shapes(slide)
     try:
@@ -2684,85 +2687,19 @@ def _populate_open_priority_executive_slide(
             align=PP_ALIGN.CENTER,
         )
 
-    insight_text = _priority_cards_by_title(scope_result.dff, scope_result.open_df)
-    cards = [
-        ("Inflación de prioridades altas", insight_text.get("Inflación de prioridades altas", "")),
-        ("Concentración de prioridad", insight_text.get("Concentración de prioridad", "")),
-        (
-            "Incidencias de mayor impacto con antigüedad elevada",
-            insight_text.get("Incidencias de mayor impacto con antigüedad elevada", ""),
-        ),
-        (
-            "Incidencias de mayor impacto sin movimiento reciente",
-            insight_text.get("Incidencias de mayor impacto sin movimiento reciente", ""),
-        ),
-        (
-            "Incidencias de mayor impacto sin arrancar",
-            insight_text.get("Incidencias de mayor impacto sin arrancar", ""),
-        ),
-    ]
-
     cards_top = int(slide_h * 0.547)
-    cards_gap_x = int(slide_w * 0.021)
-    cards_gap_y = int(slide_h * 0.010)
-    card_w = int((content_w - cards_gap_x) / 2)
-    card_h = int(slide_h * 0.135)
-    _add_exec_insight_card(
+    _add_exec_insight_grid(
         slide,
+        cards=_trend_card_content(
+            "open_priority_pie",
+            dff=scope_result.dff,
+            open_df=scope_result.open_df,
+            evolution_insight=evolution_insight,
+        ),
         left=margin_x,
         top=cards_top,
-        width=card_w,
-        height=card_h,
-        title=cards[0][0],
-        body=re.sub(r"\s+", " ", str(cards[0][1] or "").strip()),
-        title_font_size_pt=12.0,
-        body_font_size_pt=8.35,
-    )
-    _add_exec_insight_card(
-        slide,
-        left=margin_x + card_w + cards_gap_x,
-        top=cards_top,
-        width=card_w,
-        height=card_h,
-        title=cards[2][0],
-        body=re.sub(r"\s+", " ", str(cards[2][1] or "").strip()),
-        title_font_size_pt=11.8,
-        body_font_size_pt=8.2,
-    )
-    _add_exec_insight_card(
-        slide,
-        left=margin_x,
-        top=cards_top + card_h + cards_gap_y,
-        width=card_w,
-        height=card_h,
-        title=cards[1][0],
-        body=re.sub(r"\s+", " ", str(cards[1][1] or "").strip()),
-        title_font_size_pt=12.0,
-        body_font_size_pt=8.35,
-    )
-    _add_exec_insight_card(
-        slide,
-        left=margin_x + card_w + cards_gap_x,
-        top=cards_top + card_h + cards_gap_y,
-        width=card_w,
-        height=card_h,
-        title=cards[3][0],
-        body=re.sub(r"\s+", " ", str(cards[3][1] or "").strip()),
-        title_font_size_pt=11.8,
-        body_font_size_pt=8.2,
-    )
-    full_card_top = cards_top + (2 * (card_h + cards_gap_y))
-    full_card_h = max(slide_h - full_card_top - int(slide_h * 0.022), int(slide_h * 0.075))
-    _add_exec_insight_card(
-        slide,
-        left=margin_x,
-        top=full_card_top,
         width=content_w,
-        height=full_card_h,
-        title=cards[4][0],
-        body=re.sub(r"\s+", " ", str(cards[4][1] or "").strip()),
-        title_font_size_pt=12.0,
-        body_font_size_pt=8.35,
+        height=slide_h - cards_top - int(slide_h * 0.022),
     )
 
 
@@ -3830,27 +3767,30 @@ def _append_period_risk_issue_sections(
     if len(prs.slides) < 2:
         raise ValueError("La plantilla de periodo debe contener la slide de portada de sección.")
     cover_template_slide = prs.slides[1]
-    specs = (
-        (
-            "Incidencias abiertas por criticidad alta",
-            _RISK_HIGH_PRIORITY_ORDER_NOTE,
-            tuple(high_priority_issues or ()),
-            "Sin incidencias abiertas de criticidad alta en el scope actual.",
-        ),
-        (
-            "Incidencias abiertas con más de 30 días",
-            _RISK_AGED_ORDER_NOTE,
-            tuple(aged_issues or ()),
-            "Sin incidencias abiertas con más de 30 días en el scope actual.",
-        ),
-    )
-    for title, order_note, issues, empty_message in specs:
+    specs: list[tuple[str, str, tuple[PeriodRiskIssueRow, ...]]] = []
+    if high_priority_issues:
+        specs.append(
+            (
+                "Incidencias abiertas por criticidad alta",
+                _RISK_HIGH_PRIORITY_ORDER_NOTE,
+                tuple(high_priority_issues),
+            )
+        )
+    if aged_issues:
+        specs.append(
+            (
+                "Incidencias abiertas con más de 30 días",
+                _RISK_AGED_ORDER_NOTE,
+                tuple(aged_issues),
+            )
+        )
+    for title, order_note, issues in specs:
         _append_period_risk_issue_section(
             prs,
             title=title,
             order_note=order_note,
             issues=issues,
-            empty_message=empty_message,
+            empty_message="",
             period_label=period_label,
             cover_template_slide=cover_template_slide,
             zoom_template_slide=zoom_template_slide,
@@ -4848,6 +4788,7 @@ def generate_country_period_followup_ppt(
     functionality_priority_filters: Sequence[str] | None = None,
     functionality_filters: Sequence[str] | None = None,
     reference_day: pd.Timestamp | str | None = None,
+    evolution_insight: EvolutionInsight | None = None,
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     country_txt = str(country or "").strip()
@@ -5013,6 +4954,7 @@ def generate_country_period_followup_ppt(
         scope_result=aggregate,
         slide_width=slide_width_emu,
         slide_height=slide_height_emu,
+        evolution_insight=evolution_insight,
     )
 
     risk_lists = build_period_risk_issue_lists(
@@ -5094,6 +5036,8 @@ def generate_country_period_followup_ppt(
     )
 
     _remove_slide_number_artifacts(prs)
+    _clamp_minor_shape_overflow(prs)
+    apply_corporate_branding(prs)
     validate_shapes_inside_slide(prs)
 
     buff = BytesIO()

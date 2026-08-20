@@ -195,7 +195,7 @@ def test_cloud_transfer_is_strict_desktop_authoritative_v3() -> None:
     adapters = _source("20_Adapters.gs")
 
     assert re.search(r"transferVersion:\s*3\b", config)
-    assert "desktop-authoritative-v2" in config
+    assert "desktop-authoritative-v3" in config
     assert "data/projection.json" in adapters
     assert "artifacts/period_followup.pptx" in adapters
     assert "data/issues.json" not in adapters
@@ -364,21 +364,34 @@ def test_every_boot_starts_on_overview_without_persisting_last_panel() -> None:
     assert "panel: state.panel" not in preferences
 
 
-def test_newsletter_recipients_are_pinned_to_a_loaded_report() -> None:
+def test_newsletter_recipients_persist_by_scope_across_new_reports() -> None:
     config = _source("00_Config.gs")
     newsletter = _source("56_Newsletter.gs")
+    setup = _source("90_Setup.gs")
+    app = _source("App.html")
     save_recipient = _function_body(newsletter, "saveNewsletterRecipient")
+    recipient_contract = config[
+        config.index("NEWSLETTER_RECIPIENTS:") : config.index("NEWSLETTER_AUDIT:")
+    ]
+    active_recipients = _function_body(newsletter, "_newsletterRecipientsForScope_")
 
-    assert "['report_id', 'string', true]" in config
-    assert "['snapshot_id', 'string', true]" in config
+    assert "['scope_key', 'string', true]" in recipient_contract
+    assert "report_id" not in recipient_contract
+    assert "snapshot_id" not in recipient_contract
     assert "reportId" in save_recipient
-    assert "report_id: report.reportId" in save_recipient
-    assert "snapshot_id: report.snapshotId" in save_recipient
+    assert "report.scopeKey + '::' + email" in save_recipient
+    assert "scope_key: report.scopeKey" in save_recipient
     assert "email.endsWith('@' + RADAR.allowedDomain)" in save_recipient
     assert "displayName" not in save_recipient
     assert "_assertExactFields_(input, ['reportId', 'email', 'active']" in save_recipient
     assert "return _newsletterSettingsPayload_()" not in save_recipient
-    assert "_newsletterRecipientsForReport_" in newsletter
+    assert "row.active === true" in active_recipients
+    assert "_newsletterRecipientsForScope_(report.scopeKey)" in newsletter
+    assert "_normalizeNewsletterRecipientStorage_();" in setup
+    assert "actual.length > expected.length" in setup
+    assert "clearContent();" in setup
+    assert "recipient.scopeKey === (selectedReport && selectedReport.scopeKey)" in app
+    assert "persistidos para este ámbito" in app
 
 
 def test_newsletter_recipient_ui_is_email_only() -> None:
@@ -464,6 +477,25 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
     assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
 
 
+def test_executive_signal_colors_are_consistent_in_webapp_and_newsletter() -> None:
+    design = _source("DesignSystem.html")
+    newsletter = _function_body(_source("56_Newsletter.gs"), "_newsletterRender_")
+
+    assert (
+        '.evolution-hero[data-tone="positive"] { --evolution-accent:var(--bbva-success); }'
+        in design
+    )
+    assert (
+        '.evolution-hero[data-tone="mixed"] { --evolution-accent:var(--bbva-warning); }' in design
+    )
+    assert (
+        '.evolution-hero[data-tone="negative"] { --evolution-accent:var(--bbva-danger); }' in design
+    )
+    assert "evolution.tone === 'positive'" in newsletter
+    assert "evolution.tone === 'negative'" in newsletter
+    assert "color.warningStrong" in newsletter
+
+
 def test_newsletter_uses_the_market_pulse_gmail_api_delivery_contract() -> None:
     manifest = json.loads(_source("appsscript.json"))
     newsletter = _source("56_Newsletter.gs")
@@ -542,32 +574,18 @@ def test_aggregate_scope_really_hides_origin_for_admins() -> None:
     assert ".is-admin .scope-admin-control.hidden { display: none !important; }" in design
 
 
-def test_dashboard_cache_hydrates_variants_without_repeated_rpcs() -> None:
+def test_dashboard_cache_loads_variants_on_demand_without_eager_bundle_rpc() -> None:
     main = _source("10_Main.gs")
     app = _source("App.html")
     sheets = _source("40_Sheets.gs")
     cache = _source("Cache.html")
 
-    assert "function getDashboardViewBundle" in main
-    assert "RPC.call('getDashboardViewBundle'" in app
-    assert "state.memory.set(key, entry.payload)" in app
+    assert "function getDashboardViewBundle" not in main
+    assert "RPC.call('getDashboardViewBundle'" not in app
+    assert "state.memory.set(key, payload)" in app
     assert "const operationBudgetMs = 500" in cache
     assert "_recordsCacheEnabled_" in sheets
     assert "RADAR.sheets.snapshotParts" in _function_body(sheets, "_recordsCacheEnabled_")
-
-
-def test_dashboard_bundle_prefetches_only_primary_views() -> None:
-    bundle = _function_body(_source("10_Main.gs"), "getDashboardViewBundle")
-
-    for primary in (
-        "{ view: 'overview' }",
-        "{ view: 'insights', insightsId: 'summary' }",
-        "{ view: 'trends', chartId: 'open_status_bar' }",
-        "{ view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }",
-    ):
-        assert primary in bundle
-    assert "insights/catalog" not in bundle
-    assert "trends/catalog" not in bundle
 
 
 def test_webapp_dark_mode_uses_bbva_dark_surfaces_and_preserves_brand_hero() -> None:
@@ -591,16 +609,14 @@ def test_webapp_dark_mode_uses_bbva_dark_surfaces_and_preserves_brand_hero() -> 
     assert "background: var(--bbva-inverse-surface)" in design
 
 
-def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
+def test_ingestion_invalidates_versioned_caches_without_eager_view_warming() -> None:
     main = _function_body(_source("10_Main.gs"), "commitTransferImport")
-    materialized = _function_body(_source("25_MaterializedSnapshots.gs"), "_warmSnapshotViews_")
     app = _source("App.html")
     cache = _source("Cache.html")
 
-    assert main.index("_invalidateCaches_()") < main.index("_warmSnapshotViews_")
-    for view_name in ("overview", "insights", "trends", "issues"):
-        assert f"view: '{view_name}'" in materialized
-    assert "kanban" not in materialized.casefold()
+    assert "_invalidateCaches_()" in main
+    assert "_warmSnapshotViews_" not in main
+    assert "function _warmSnapshotViews_" not in _source("25_MaterializedSnapshots.gs")
     assert "cacheGeneration: state.bootstrap.app.cacheEpoch" in app
     assert "scopeVersion: scope.dataVersion" in app
     assert "key.cacheGeneration !== current.cacheGeneration" in cache

@@ -7,7 +7,9 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, MutableMapping, Sequence
 
@@ -113,6 +115,7 @@ from bug_resolution_radar.services.tabular_export import (
     dataframe_to_csv_bytes,
     download_filename,
 )
+from bug_resolution_radar.services.telemetry import TelemetryStore
 from bug_resolution_radar.services.workspace import (
     WorkspaceSelection,
     apply_workspace_source_scope,
@@ -121,8 +124,8 @@ from bug_resolution_radar.services.workspace import (
     merge_sources_by_country,
     sources_by_country_from_index,
 )
+from bug_resolution_radar.theme.brand_identity import frontend_brand_contract
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
-from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
 
 LOGGER = logging.getLogger(__name__)
 
@@ -328,22 +331,6 @@ def _single_source_result(*, connector: str, ok: bool, message: str) -> dict[str
     }
 
 
-def _scoped_dataframe_for_options(
-    settings: Settings,
-    *,
-    workspace: WorkspaceSelection,
-) -> pd.DataFrame:
-    try:
-        df_all = load_issues_df(settings.DATA_PATH)
-    except Exception:
-        return pd.DataFrame()
-    df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
-    if df_all.empty:
-        return df_all
-    scoped = apply_workspace_source_scope(df_all, settings=settings, selection=workspace)
-    return apply_analysis_depth_filter(scoped, settings=settings)
-
-
 def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
     if df is None or df.empty:
         return _empty_filter_options()
@@ -455,11 +442,12 @@ def _workspace_payload(
         source_id=selected_source_id,
         scope_mode=normalized_scope_mode,
     )
-    scoped_df = (
-        _scoped_dataframe_for_options(settings, workspace=workspace)
-        if include_filter_options
-        else pd.DataFrame()
-    )
+    scoped_df = pd.DataFrame()
+    if include_filter_options and not df_all.empty:
+        scoped_df = apply_analysis_depth_filter(
+            apply_workspace_source_scope(df_all, settings=settings, selection=workspace),
+            settings=settings,
+        )
     active_source_ids = (
         [selected_source_id]
         if workspace.scope_mode == "source" and selected_source_id
@@ -693,6 +681,14 @@ class SourceExportSaveRequest(BaseModel):
     sourceType: str = "helix"
 
 
+class TelemetryBatchRequest(BaseModel):
+    events: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
+class TelemetryExportSaveRequest(BaseModel):
+    days: int = Field(default=30, ge=1, le=90)
+
+
 def _report_saved_payload(
     *,
     saved_path: Path,
@@ -757,6 +753,7 @@ def _reveal_in_file_manager(path: Path) -> bool:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Bug Resolution Radar API", version="1.0.0")
+    telemetry = TelemetryStore()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -767,6 +764,34 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def collect_backend_telemetry(request: Request, call_next: Any) -> Response:
+        path = str(request.url.path or "")
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response: Response = await call_next(request)
+            status_code = int(response.status_code)
+            return response
+        finally:
+            if path.startswith("/api/") and not path.startswith("/api/telemetry"):
+                route = request.scope.get("route")
+                route_path = str(getattr(route, "path", "") or path)
+                try:
+                    telemetry.append(
+                        {
+                            "layer": "backend",
+                            "name": "api_request",
+                            "route": route_path,
+                            "method": request.method,
+                            "status": "error" if status_code >= 400 else "success",
+                            "statusCode": status_code,
+                            "durationMs": (time.perf_counter() - started) * 1000,
+                        }
+                    )
+                except Exception:
+                    LOGGER.debug("telemetry_append_failed", exc_info=True)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -785,6 +810,7 @@ def create_app() -> FastAPI:
         settings = load_settings()
         return {
             "appTitle": str(settings.APP_TITLE or "Bug Resolution Radar"),
+            "brand": frontend_brand_contract(),
             "theme": str(settings.THEME or "auto"),
             "defaultFilters": build_default_filters(settings),
             "dashboardDefaults": build_dashboard_defaults(settings),
@@ -793,6 +819,7 @@ def create_app() -> FastAPI:
                 country=country,
                 source_id=sourceId,
                 scope_mode=scopeMode,
+                include_filter_options=False,
             ),
             "chartsCatalog": [
                 {"id": "timeseries", "label": "Evolución"},
@@ -803,7 +830,6 @@ def create_app() -> FastAPI:
             ],
             "designTokens": {
                 "theme": frontend_theme_tokens(),
-                "semantic": semantic_color_contract(),
             },
             "permissionsPolicy": {
                 "reports": "Solo se genera o descarga bajo acción explícita del usuario.",
@@ -1350,6 +1376,30 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:
         return load_settings_payload()
+
+    @app.post("/api/telemetry/events")
+    def post_telemetry_events(payload: TelemetryBatchRequest) -> dict[str, int]:
+        return {"accepted": telemetry.append_many(payload.events)}
+
+    @app.get("/api/telemetry/summary")
+    def get_telemetry_summary(
+        days: int = Query(30, ge=1, le=90),
+    ) -> dict[str, Any]:
+        return telemetry.summary(days=days)
+
+    @app.post("/api/telemetry/export/save")
+    def post_telemetry_export_save(
+        request_payload: TelemetryExportSaveRequest,
+    ) -> dict[str, Any]:
+        payload = telemetry.export(days=request_payload.days)
+        content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        filename = f"radar_telemetria_codex_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        export_path = save_download_content(
+            load_settings(),
+            file_name=filename,
+            content=content,
+        )
+        return _saved_file_payload(export_path, file_name=filename)
 
     @app.put("/api/settings")
     def put_settings(payload: dict[str, Any]) -> dict[str, Any]:

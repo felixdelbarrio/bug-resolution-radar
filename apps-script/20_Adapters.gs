@@ -222,7 +222,7 @@ function _validateProjectionNewsletter_(newsletter) {
     newsletter,
     [
       'periodLabel', 'focusLabel', 'metrics', 'previousOpen', 'backlogDelta',
-      'criticalOpen', 'responsibleRollups', 'draft'
+      'criticalOpen', 'evolution', 'responsibleRollups', 'draft'
     ],
     'projection.newsletterFacts'
   );
@@ -272,6 +272,20 @@ function _validateProjectionNewsletter_(newsletter) {
   });
   _assert_(newsletter.backlogDelta === newsletter.metrics.currentOpen - newsletter.previousOpen,
     'El delta de backlog de la newsletter no es coherente.', 'TRANSFER_INVALID');
+  _assertExactFields_(
+    newsletter.evolution,
+    ['tone', 'title', 'summary', 'focus', 'yearLabel', 'fortnightLabel'],
+    'projection.newsletterFacts.evolution'
+  );
+  _assert_(['positive', 'negative', 'neutral', 'mixed'].indexOf(_text_(newsletter.evolution.tone)) >= 0,
+    'El tono de evolución no es válido.', 'TRANSFER_INVALID');
+  ['title', 'summary', 'yearLabel', 'fortnightLabel'].forEach(function (key) {
+    _assert_(_sanitizeText_(newsletter.evolution[key], 4000),
+      'projection.newsletterFacts.evolution.' + key + ' está vacío.', 'TRANSFER_INVALID');
+  });
+  _assert_(Array.isArray(newsletter.evolution.focus),
+    'projection.newsletterFacts.evolution.focus debe ser una lista.', 'TRANSFER_INVALID');
+  newsletter.evolution.focus.forEach(function (line) { _sanitizeText_(line, 1000); });
   _assert_(Array.isArray(newsletter.responsibleRollups),
     'projection.newsletterFacts.responsibleRollups debe ser una lista.', 'TRANSFER_INVALID');
   newsletter.responsibleRollups.forEach(function (row) {
@@ -326,7 +340,7 @@ function _validateProjection_(projection, manifest, reportDescriptor) {
     'La proyección no pertenece al contrato GPC vigente.', 'TRANSFER_INVALID');
   _assert_(projection.semanticContract === RADAR.semanticContract &&
     manifest.semanticContract === RADAR.semanticContract,
-  'El contrato semántico debe ser desktop-authoritative-v2.', 'TRANSFER_INVALID');
+  'El contrato semántico debe ser desktop-authoritative-v3.', 'TRANSFER_INVALID');
   _assert_(_date_(projection.generatedAt), 'projection.generatedAt no es una fecha válida.', 'TRANSFER_INVALID');
   const scope = _normalizeProjectionScope_(projection.scope, 'projection.scope');
   const manifestScope = _normalizeManifestScope_(manifest.scope, 'manifest.scope');

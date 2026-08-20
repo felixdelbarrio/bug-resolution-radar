@@ -143,18 +143,18 @@ class ClosedIncidentsCalculator:
         *,
         window: QuincenalWindow,
     ) -> ClosedIncidentsResult:
-        resolved_day = frame.resolved_day
-        assignable_closed = frame.resolved_at.notna()
+        finalized_day = frame.finalized_day
+        assignable_closed = frame.finalized_at.notna()
         current_start = pd.Timestamp(window.current_start)
         current_end = pd.Timestamp(window.current_end)
         previous_start = pd.Timestamp(window.previous_start)
         previous_end = pd.Timestamp(window.previous_end)
-        current = assignable_closed & resolved_day.between(
+        current = assignable_closed & finalized_day.between(
             current_start,
             current_end,
             inclusive="both",
         )
-        previous = assignable_closed & resolved_day.between(
+        previous = assignable_closed & finalized_day.between(
             previous_start,
             previous_end,
             inclusive="both",
