@@ -153,6 +153,16 @@ def _patch_materializers(
                         "count": 1,
                         "cells": [{"priority": "High", "count": 1}],
                     },
+                    {
+                        "status": "Discarded",
+                        "count": 1,
+                        "cells": [{"priority": "High", "count": 1}],
+                    },
+                    {
+                        "status": "Deleted",
+                        "count": 1,
+                        "cells": [{"priority": "High", "count": 1}],
+                    },
                 ],
                 "selected": {"status": []},
             },
@@ -172,7 +182,7 @@ def _patch_materializers(
     monkeypatch.setattr(
         "bug_resolution_radar.services.cloud_projection.build_issue_rows",
         lambda *_args, **_kwargs: {
-            "total": 1,
+            "total": 3,
             "rows": [
                 {
                     "issue_uid": "jira:espana:core::RAD-1",
@@ -181,7 +191,23 @@ def _patch_materializers(
                     "url": "https://jira.example.com/browse/RAD-1",
                     "status": "Open",
                     "priority": "High",
-                }
+                },
+                {
+                    "issue_uid": "jira:espana:core::RAD-2",
+                    "key": "RAD-2",
+                    "summary": "Descartada",
+                    "url": "https://jira.example.com/browse/RAD-2",
+                    "status": "Discarded",
+                    "priority": "High",
+                },
+                {
+                    "issue_uid": "jira:espana:core::RAD-3",
+                    "key": "RAD-3",
+                    "summary": "Eliminada",
+                    "url": "https://jira.example.com/browse/RAD-3",
+                    "status": "Deleted",
+                    "priority": "High",
+                },
             ],
         },
     )
@@ -247,6 +273,8 @@ def test_projection_is_explicit_static_and_packages_exact_report_bytes(
     assert projection["views"]["overview"]["statusPriorityMatrix"]["priorities"] == [
         {"priority": "High", "count": 1}
     ]
+    assert projection["views"]["issues"]["total"] == 1
+    assert [row["status"] for row in projection["views"]["issues"]["rows"]] == ["Open"]
     assert projection["administration"]["jiraSources"][0]["dashboardUrl"] == (
         "https://jira.example.com/dashboard/1"
     )

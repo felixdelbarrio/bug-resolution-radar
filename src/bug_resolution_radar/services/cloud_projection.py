@@ -16,15 +16,7 @@ import pandas as pd
 from bug_resolution_radar.analytics.analysis_window import parse_analysis_lookback_months
 from bug_resolution_radar.analytics.filtering import FilterState
 from bug_resolution_radar.analytics.insights import THEME_RULES
-from bug_resolution_radar.analytics.period_functionality_followup import (
-    _CRITICAL_PRIORITY_TOKENS as FUNCTIONALITY_CRITICAL_PRIORITY_TOKENS,
-)
-from bug_resolution_radar.analytics.period_risk_issue_lists import (
-    _HIGH_PRIORITY_COMPACT_TOKENS as PERIOD_RISK_PRIORITY_TOKENS,
-)
-from bug_resolution_radar.analytics.period_summary import (
-    _CRITICAL_PRIORITY_TOKENS as OPEN_FOCUS_PRIORITY_TOKENS,
-)
+from bug_resolution_radar.analytics.issues import CRITICAL_PRIORITY_COMPACT_TOKENS
 from bug_resolution_radar.analytics.period_summary import (
     _quincena_last_finished_only,
     open_issues_focus_mode,
@@ -86,6 +78,7 @@ _CLOUD_ACTION_KEYS = frozenset(
         "selectedFunctionalities",
     }
 )
+_HIDDEN_WEBAPP_STATUS_TOKENS = frozenset({"discarded", "deleted"})
 
 
 @dataclass(frozen=True)
@@ -210,11 +203,9 @@ def _semantic_trace(settings: Settings) -> dict[str, Any]:
             "verifiedHelixFinalistOverlay": True,
         },
         "prioritySets": {
-            "openFocus": sorted(str(token) for token in OPEN_FOCUS_PRIORITY_TOKENS),
-            "periodRisk": sorted(str(token) for token in PERIOD_RISK_PRIORITY_TOKENS),
-            "functionalityFollowup": sorted(
-                str(token) for token in FUNCTIONALITY_CRITICAL_PRIORITY_TOKENS
-            ),
+            "openFocus": sorted(CRITICAL_PRIORITY_COMPACT_TOKENS),
+            "periodRisk": sorted(CRITICAL_PRIORITY_COMPACT_TOKENS),
+            "functionalityFollowup": sorted(CRITICAL_PRIORITY_COMPACT_TOKENS),
         },
         "openIssuesFocusMode": open_issues_focus_mode(settings),
         "functionalityRules": [
@@ -231,6 +222,10 @@ def _metric_int(value: Any) -> int:
         return int(float(str(value or "0").replace(",", "").rstrip("d")))
     except (TypeError, ValueError):
         return 0
+
+
+def _is_hidden_webapp_status(value: Any) -> bool:
+    return str(value or "").strip().casefold() in _HIDDEN_WEBAPP_STATUS_TOKENS
 
 
 def _manager_source_catalog(
@@ -613,7 +608,9 @@ def build_cloud_projection_artifact(
         matrix_rows = [
             row
             for row in list(matrix.get("rows") or [])
-            if isinstance(row, Mapping) and not is_finalist_status(row.get("status"))
+            if isinstance(row, Mapping)
+            and not is_finalist_status(row.get("status"))
+            and not _is_hidden_webapp_status(row.get("status"))
         ]
         priority_totals: dict[str, int] = {}
         for row in matrix_rows:
@@ -687,6 +684,14 @@ def build_cloud_projection_artifact(
         sort_by="key",
         sort_dir="asc",
     )
+    visible_issue_rows = [
+        row
+        for row in list(issues.get("rows") or [])
+        if isinstance(row, Mapping) and not _is_hidden_webapp_status(row.get("status"))
+    ]
+    issues = {**issues, "rows": visible_issue_rows, "total": len(visible_issue_rows)}
+    if "totalRows" in issues:
+        issues["totalRows"] = len(visible_issue_rows)
     raw_views = {
         "overview": overview,
         "insights": insights,

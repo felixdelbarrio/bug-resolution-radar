@@ -460,33 +460,6 @@ function _dashboardPayload_(request) {
   return payload;
 }
 
-function _warmSnapshotViews_(record) {
-  const warmed = [];
-  const failed = [];
-  [
-    { request: { view: 'overview' }, label: 'overview' },
-    { request: { view: 'insights', insightsId: 'summary' }, label: 'insights/summary' },
-    { request: { view: 'trends', chartId: 'open_status_bar' }, label: 'trends/open_status_bar' },
-    { request: { view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }, label: 'issues/1' }
-  ].forEach(function (item) {
-    try {
-      _materializedViewPayload_(
-        record,
-        _normalizeMaterializedRequest_(item.request, record.scope_key)
-      );
-      warmed.push(item.label);
-    } catch (err) {
-      failed.push(item.label);
-      console.warn('snapshot_warm_failed', {
-        snapshotId: record.snapshot_id,
-        label: item.label,
-        code: err && err.code
-      });
-    }
-  });
-  return { warmed: warmed, failed: failed };
-}
-
 function _workspaceManifest_() {
   const pointers = _activeSnapshotPointers_();
   const snapshots = _readRecords_(RADAR.sheets.snapshots);

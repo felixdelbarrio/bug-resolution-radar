@@ -224,7 +224,6 @@ function localRuntimeMarkup() {
   const mocks = {
     getBootstrap: () => bootstrap,
     queryDashboard: (request) => dashboard(request),
-    getDashboardViewBundle: () => [],
     recordAnalyticsEvents: (events) => ({ accepted: Array.isArray(events) ? events.length : 0 }),
     getIssueDetail: () => issue,
     getPeriodReportStatus: () => ({

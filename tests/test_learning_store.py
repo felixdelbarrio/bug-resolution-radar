@@ -82,3 +82,36 @@ def test_learning_store_remove_source() -> None:
     assert "México::jira:mexico:core" not in scopes
     assert "Peru::jira:mexico:core" not in scopes
     assert "España::jira:espana:retail" in scopes
+
+
+def test_learning_store_keeps_previous_distinct_snapshot_as_baseline(tmp_path: Path) -> None:
+    store = InsightsLearningStore(tmp_path / "learning.json")
+    store.load()
+    scope = "México::*"
+
+    baseline, changed = store.record_snapshot(
+        scope,
+        snapshot={"reference_date": "2026-08-13", "open_total": 120},
+        country="México",
+        source_id="*",
+    )
+    assert baseline == {}
+    assert changed is True
+
+    baseline, changed = store.record_snapshot(
+        scope,
+        snapshot={"reference_date": "2026-08-20", "open_total": 108},
+        country="México",
+        source_id="*",
+    )
+    assert baseline["open_total"] == 120
+    assert changed is True
+
+    baseline, changed = store.record_snapshot(
+        scope,
+        snapshot={"reference_date": "2026-08-20", "open_total": 108},
+        country="México",
+        source_id="*",
+    )
+    assert baseline["open_total"] == 120
+    assert changed is False

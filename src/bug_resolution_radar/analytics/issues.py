@@ -9,6 +9,21 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.status_semantics import effective_closed_mask
 
+CRITICAL_PRIORITY_MAX_RANK = 1
+CRITICAL_PRIORITY_COMPACT_TOKENS = frozenset(
+    {
+        "p0",
+        "p1",
+        "suponeunimpedimento",
+        "impedimento",
+        "highest",
+        "veryhigh",
+        "muyalto",
+        "high",
+        "alto",
+    }
+)
+
 
 def open_issues_only(df: pd.DataFrame | None) -> pd.DataFrame:
     """Return only open issues using unified closure semantics."""
@@ -41,11 +56,23 @@ def priority_rank(priority: Optional[str]) -> int:
         return 1
     if token == "p2" or "medium" in token:
         return 2
-    if token == "p3" or "low" in token:
-        return 3
     if token == "p4" or "lowest" in token:
         return 4
+    if token == "p3" or "low" in token:
+        return 3
     return 99
+
+
+def is_critical_priority(priority: object) -> bool:
+    """Return whether a priority is a P0/P1-equivalent critical priority."""
+    return priority_rank(str(priority or "")) <= CRITICAL_PRIORITY_MAX_RANK
+
+
+def critical_priority_mask(series: pd.Series | None) -> pd.Series:
+    """Vectorized critical-priority predicate with the source index preserved."""
+    if series is None:
+        return pd.Series([], dtype=bool)
+    return series.map(is_critical_priority).astype(bool)
 
 
 def _normalize_status_token(value: object) -> str:

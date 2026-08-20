@@ -96,6 +96,29 @@ def _find_slide_index(prs: Presentation, needle: str) -> int:
     raise AssertionError(f"No slide contains {needle!r}")
 
 
+def test_priority_slide_content_uses_only_emitted_insight_titles() -> None:
+    open_df = pd.DataFrame(
+        [
+            {
+                "status": "New",
+                "priority": "Medium",
+                "created": "2026-08-01T00:00:00+00:00",
+                "updated": "2026-08-01T00:00:00+00:00",
+            }
+            for _ in range(6)
+        ]
+    )
+
+    cards = period_ppt_mod._trend_card_content(
+        "open_priority_pie",
+        dff=open_df,
+        open_df=open_df,
+    )
+    titles = {title for title, _ in cards}
+
+    assert titles == {"Concentracion de prioridad"}
+
+
 def _native_tables(slide: Any) -> list[Any]:
     return [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
 
@@ -174,16 +197,16 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         reference_day=now,
     )
 
-    assert out.slide_count == 15
+    assert out.slide_count == 13
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 15
+    assert len(prs.slides) == 13
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
     assert "Incidencias abiertas por criticidad alta" in deck_text
-    assert "Incidencias abiertas con más de 30 días" in deck_text
+    assert "Incidencias abiertas con más de 30 días" not in deck_text
     dashboard_idx = _find_slide_index(
         prs, "Seguimiento de KPIs - Incidencias abiertas por funcionalidad"
     )
@@ -236,7 +259,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         reference_day=now,
     )
 
-    assert out.slide_count == 15
+    assert out.slide_count == 13
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
@@ -1891,7 +1914,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 19
+    assert len(prs.slides) == 15
     first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas en la quincena (I)")
     zoom_titles = [
         str(getattr(shape, "text", "") or "").strip()
@@ -1901,8 +1924,8 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     ]
     joined_titles = " | ".join(zoom_titles)
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
-    assert "Incidencias abiertas por criticidad alta" in deck_text
-    assert "Incidencias abiertas con más de 30 días" in deck_text
+    assert "Incidencias abiertas por criticidad alta" not in deck_text
+    assert "Incidencias abiertas con más de 30 días" not in deck_text
     assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
     assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
 

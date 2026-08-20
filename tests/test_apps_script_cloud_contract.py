@@ -542,32 +542,18 @@ def test_aggregate_scope_really_hides_origin_for_admins() -> None:
     assert ".is-admin .scope-admin-control.hidden { display: none !important; }" in design
 
 
-def test_dashboard_cache_hydrates_variants_without_repeated_rpcs() -> None:
+def test_dashboard_cache_loads_variants_on_demand_without_eager_bundle_rpc() -> None:
     main = _source("10_Main.gs")
     app = _source("App.html")
     sheets = _source("40_Sheets.gs")
     cache = _source("Cache.html")
 
-    assert "function getDashboardViewBundle" in main
-    assert "RPC.call('getDashboardViewBundle'" in app
-    assert "state.memory.set(key, entry.payload)" in app
+    assert "function getDashboardViewBundle" not in main
+    assert "RPC.call('getDashboardViewBundle'" not in app
+    assert "state.memory.set(key, payload)" in app
     assert "const operationBudgetMs = 500" in cache
     assert "_recordsCacheEnabled_" in sheets
     assert "RADAR.sheets.snapshotParts" in _function_body(sheets, "_recordsCacheEnabled_")
-
-
-def test_dashboard_bundle_prefetches_only_primary_views() -> None:
-    bundle = _function_body(_source("10_Main.gs"), "getDashboardViewBundle")
-
-    for primary in (
-        "{ view: 'overview' }",
-        "{ view: 'insights', insightsId: 'summary' }",
-        "{ view: 'trends', chartId: 'open_status_bar' }",
-        "{ view: 'issues', page: 1, pageSize: RADAR.defaultPageSize }",
-    ):
-        assert primary in bundle
-    assert "insights/catalog" not in bundle
-    assert "trends/catalog" not in bundle
 
 
 def test_webapp_dark_mode_uses_bbva_dark_surfaces_and_preserves_brand_hero() -> None:
@@ -591,16 +577,14 @@ def test_webapp_dark_mode_uses_bbva_dark_surfaces_and_preserves_brand_hero() -> 
     assert "background: var(--bbva-inverse-surface)" in design
 
 
-def test_ingestion_regenerates_stable_versioned_caches_for_all_main_views() -> None:
+def test_ingestion_invalidates_versioned_caches_without_eager_view_warming() -> None:
     main = _function_body(_source("10_Main.gs"), "commitTransferImport")
-    materialized = _function_body(_source("25_MaterializedSnapshots.gs"), "_warmSnapshotViews_")
     app = _source("App.html")
     cache = _source("Cache.html")
 
-    assert main.index("_invalidateCaches_()") < main.index("_warmSnapshotViews_")
-    for view_name in ("overview", "insights", "trends", "issues"):
-        assert f"view: '{view_name}'" in materialized
-    assert "kanban" not in materialized.casefold()
+    assert "_invalidateCaches_()" in main
+    assert "_warmSnapshotViews_" not in main
+    assert "function _warmSnapshotViews_" not in _source("25_MaterializedSnapshots.gs")
     assert "cacheGeneration: state.bootstrap.app.cacheEpoch" in app
     assert "scopeVersion: scope.dataVersion" in app
     assert "key.cacheGeneration !== current.cacheGeneration" in cache

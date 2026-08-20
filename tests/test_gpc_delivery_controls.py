@@ -34,6 +34,37 @@ def test_webapp_reports_incomplete_html_deployments_without_null_errors() -> Non
     assert "const table = $('runsTable');" in app
 
 
+def test_navigation_resets_each_section_to_its_primary_view() -> None:
+    app = _text("apps-script/App.html")
+
+    assert "if (panel === 'insights') state.insightsId = 'summary';" in app
+    assert "if (panel === 'trends') state.trendChart = 'timeseries';" in app
+    assert "if (panel === 'issues') state.issuesView = 'Cards';" in app
+    assert "if (state.route === 'settings') state.settingsTab = 'health';" in app
+
+
+def test_theme_is_only_toggled_from_shell_and_persisted_across_contract_versions() -> None:
+    app = _text("apps-script/App.html")
+
+    assert "window.localStorage.setItem('bug-resolution-radar:theme'" in app
+    assert "window.localStorage.getItem('bug-resolution-radar:theme')" in app
+    assert "$('themeToggle').addEventListener('click'" in app
+    assert 'id="themeLight"' not in app
+    assert 'id="themeDark"' not in app
+
+
+def test_snapshot_import_has_visible_busy_state_and_prevents_repeated_actions() -> None:
+    app = _text("apps-script/App.html")
+    design = _text("apps-script/DesignSystem.html")
+
+    assert 'id="transferOperationStatus"' in app
+    assert "setTransferBusy(true, {" in app
+    assert "button.disabled = Boolean(active)" in app
+    assert "Validando integridad y preparando el traslado" in app
+    assert "Publicando el nuevo snapshot" in app
+    assert ".transfer-operation-status" in design
+
+
 def test_makefile_exposes_local_webapp_and_gpc_gate() -> None:
     makefile = _text("Makefile")
 

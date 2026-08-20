@@ -14,6 +14,10 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
+from bug_resolution_radar.analytics.backlog_evolution import (
+    build_evolution_lines,
+    build_operational_snapshot,
+)
 from bug_resolution_radar.analytics.duplicate_insights import prepare_duplicates_payload
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.filtering import (
@@ -92,11 +96,7 @@ from bug_resolution_radar.analytics.trend_insights import (
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.repositories.issues_store import load_issues_df
-from bug_resolution_radar.services.insights_learning_store import (
-    InsightsLearningStore,
-    default_learning_path,
-    learning_scope_key,
-)
+from bug_resolution_radar.services.insights_history import record_scope_measurement
 from bug_resolution_radar.services.issue_enrichment import (
     enrich_issue_dataframe_with_helix,
     helix_revision_token,
@@ -165,164 +165,6 @@ def _parse_settings_list(raw: object) -> list[str]:
     if isinstance(payload, list):
         return normalize_filter_tokens([str(item).strip() for item in payload if str(item).strip()])
     return normalize_filter_tokens([part.strip() for part in token.split(",") if part.strip()])
-
-
-def _safe_series_count(mask: pd.Series) -> int:
-    if not isinstance(mask, pd.Series) or mask.empty:
-        return 0
-    try:
-        return int(mask.fillna(False).sum())
-    except Exception:
-        return 0
-
-
-def _to_dt_naive(values: object) -> pd.Series:
-    series = values if isinstance(values, pd.Series) else pd.Series([], dtype=object)
-    ts = pd.to_datetime(series, errors="coerce", utc=True)
-    try:
-        return ts.dt.tz_localize(None)
-    except Exception:
-        try:
-            return ts.dt.tz_convert(None)
-        except Exception:
-            return pd.Series([], dtype="datetime64[ns]")
-
-
-def _fmt_pct(value: float) -> str:
-    return f"{value * 100.0:.1f}%"
-
-
-def _build_operational_snapshot(*, dff: pd.DataFrame, open_df: pd.DataFrame) -> dict[str, Any]:
-    safe_dff = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
-    safe_open = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
-
-    status = (
-        normalize_text_col(safe_open["status"], "(sin estado)").astype(str)
-        if (not safe_open.empty and "status" in safe_open.columns)
-        else pd.Series([], dtype=str)
-    )
-    priority = (
-        normalize_text_col(safe_open["priority"], "(sin priority)").astype(str)
-        if (not safe_open.empty and "priority" in safe_open.columns)
-        else pd.Series([], dtype=str)
-    )
-
-    created_open = (
-        _to_dt_naive(safe_open["created"])
-        if "created" in safe_open.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    updated_open = (
-        _to_dt_naive(safe_open["updated"])
-        if "updated" in safe_open.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    now = pd.Timestamp.now("UTC").tz_localize(None)
-    age_days = (
-        ((now - created_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
-        if not created_open.empty
-        else pd.Series([], dtype=float)
-    )
-    stale_days = (
-        ((now - updated_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
-        if not updated_open.empty
-        else pd.Series([], dtype=float)
-    )
-
-    blocked_count = (
-        _safe_series_count(status.str.lower().str.contains("blocked|bloque", regex=True))
-        if not status.empty
-        else 0
-    )
-    critical_mask = (
-        priority.map(priority_rank) <= 2 if not priority.empty else pd.Series([], dtype=bool)
-    )
-    critical_count = _safe_series_count(critical_mask) if not critical_mask.empty else 0
-    aged30_count = _safe_series_count(age_days > 30) if not age_days.empty else 0
-    stale_14_count = _safe_series_count(stale_days > 14) if not stale_days.empty else 0
-    open_total = int(len(safe_open))
-
-    created_all = (
-        _to_dt_naive(safe_dff["created"])
-        if "created" in safe_dff.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    resolved_all = (
-        _to_dt_naive(safe_dff["resolved"])
-        if "resolved" in safe_dff.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    from_14 = now - pd.Timedelta(days=14)
-    created_14 = _safe_series_count(created_all >= from_14) if not created_all.empty else 0
-    resolved_14 = _safe_series_count(resolved_all >= from_14) if not resolved_all.empty else 0
-
-    return {
-        "open_total": open_total,
-        "aged30_pct": (float(aged30_count) / float(open_total)) if open_total else 0.0,
-        "blocked_count": blocked_count,
-        "critical_count": critical_count,
-        "stale_14_pct": (float(stale_14_count) / float(open_total)) if open_total else 0.0,
-        "net_14": int(created_14 - resolved_14),
-    }
-
-
-def _build_session_delta_lines(
-    current_snapshot: dict[str, Any],
-    baseline_snapshot: dict[str, Any] | None,
-) -> list[str]:
-    cur = current_snapshot if isinstance(current_snapshot, dict) else {}
-    base = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
-    if not base:
-        return [
-            "No hay referencia previa guardada para este cliente. Esta sesión crea la primera línea base."
-        ]
-
-    candidates: list[tuple[float, str]] = []
-
-    def add_abs(key: str, label: str, *, pct: bool = False) -> None:
-        c = float(cur.get(key, 0.0) or 0.0)
-        b = float(base.get(key, 0.0) or 0.0)
-        delta = c - b
-        magnitude = abs(delta) * (100.0 if pct else 1.0)
-        if magnitude < (2.0 if pct else 1.0):
-            return
-        if pct:
-            candidates.append(
-                (
-                    magnitude,
-                    f"{label}: {_fmt_pct(b)} -> {_fmt_pct(c)} ({'+' if delta > 0 else ''}{delta * 100.0:.1f} pp).",
-                )
-            )
-        else:
-            candidates.append(
-                (
-                    magnitude,
-                    f"{label}: {int(b)} -> {int(c)} ({'+' if delta > 0 else ''}{int(delta)}).",
-                )
-            )
-
-    add_abs("open_total", "Backlog abierto")
-    add_abs("aged30_pct", "Cola >30 dias", pct=True)
-    add_abs("blocked_count", "Bloqueadas activas")
-    add_abs("critical_count", "Criticas abiertas")
-    add_abs("stale_14_pct", "Sin movimiento >14 dias", pct=True)
-    add_abs("net_14", "Balance neto 14d")
-
-    if not candidates:
-        return ["Sin cambios materiales frente a la ultima sesion en este cliente."]
-
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return [text for _, text in candidates[:3]]
-
-
-def _load_trend_baseline_snapshot(
-    settings: Settings, *, workspace: WorkspaceSelection
-) -> dict[str, Any]:
-    scope = learning_scope_key(workspace.country, workspace.source_id)
-    store = InsightsLearningStore(default_learning_path(settings))
-    store.load()
-    _, _, snapshot = store.get_scope_bundle(scope)
-    return snapshot if isinstance(snapshot, dict) else {}
 
 
 def build_default_filters(settings: Settings) -> dict[str, list[str]]:
@@ -1394,8 +1236,13 @@ def build_trend_detail(
             "adaptedForTerminal": adapted_for_terminal,
         }
     pack = build_trend_insight_pack(str(chart_id or "").strip(), dff=dff, open_df=trend_open_df)
-    baseline_snapshot = _load_trend_baseline_snapshot(settings, workspace=query.workspace)
-    current_snapshot = _build_operational_snapshot(dff=dff, open_df=trend_open_df)
+    current_snapshot = build_operational_snapshot(dff=dff, open_df=trend_open_df)
+    baseline_snapshot = record_scope_measurement(
+        settings,
+        country=query.workspace.country,
+        source_ids=context.source_ids,
+        snapshot=current_snapshot,
+    )
     return {
         "chart": {
             "id": str(chart_id or "").strip(),
@@ -1418,7 +1265,7 @@ def build_trend_detail(
             }
             for card in list(pack.cards or [])
         ],
-        "sessionDelta": _build_session_delta_lines(current_snapshot, baseline_snapshot),
+        "sessionDelta": build_evolution_lines(current_snapshot, baseline_snapshot),
         "executiveTip": pack.executive_tip,
         "adaptedForTerminal": adapted_for_terminal,
     }

@@ -34,40 +34,29 @@ def default_learning_path(settings: Settings) -> Path:
     return Path("data/insights_learning.json")
 
 
-def learning_payload_hash(
-    *, state: Dict[str, Any], interactions: int, snapshot: Dict[str, Any]
-) -> str:
-    payload = {
-        "state": _as_dict(state),
-        "interactions": int(interactions),
-        "snapshot": _as_dict(snapshot),
-    }
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
-
-
 class InsightsLearningStore:
     """Local JSON store with per-scope learning state."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._raw: Dict[str, Any] = {"version": 1, "scopes": {}}
+        self._raw: Dict[str, Any] = {"version": 2, "scopes": {}}
 
     def load(self) -> None:
         if not self.path.exists():
-            self._raw = {"version": 1, "scopes": {}}
+            self._raw = {"version": 2, "scopes": {}}
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except Exception:
-            self._raw = {"version": 1, "scopes": {}}
+            self._raw = {"version": 2, "scopes": {}}
             return
         if not isinstance(data, dict):
-            self._raw = {"version": 1, "scopes": {}}
+            self._raw = {"version": 2, "scopes": {}}
             return
         scopes = data.get("scopes")
         if not isinstance(scopes, dict):
             scopes = {}
-        self._raw = {"version": int(data.get("version", 1) or 1), "scopes": scopes}
+        self._raw = {"version": 2, "scopes": scopes}
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,10 +102,48 @@ class InsightsLearningStore:
             "country": str(country or ""),
             "source_id": str(source_id or ""),
             "last_snapshot": resolved_snapshot,
+            "previous_snapshot": _as_dict(current.get("previous_snapshot")),
             "updated_at": now_iso(),
         }
         self._raw["scopes"] = scopes
-        self._raw["version"] = 1
+        self._raw["version"] = 2
+
+    def record_snapshot(
+        self,
+        scope: str,
+        *,
+        snapshot: Dict[str, Any],
+        country: str,
+        source_id: str,
+    ) -> Tuple[Dict[str, Any], bool]:
+        """Persist a distinct measurement and return its comparison baseline.
+
+        Re-reading the same data does not advance the baseline. This keeps every
+        chart in one application session aligned with the same prior measurement.
+        """
+        current_snapshot = _as_dict(snapshot)
+        scopes = _as_dict(self._raw.get("scopes"))
+        record = _as_dict(scopes.get(scope))
+        latest = _as_dict(record.get("last_snapshot"))
+        previous = _as_dict(record.get("previous_snapshot"))
+        current_hash = json.dumps(current_snapshot, ensure_ascii=False, sort_keys=True)
+        latest_hash = json.dumps(latest, ensure_ascii=False, sort_keys=True)
+        if latest and current_hash == latest_hash:
+            return previous, False
+
+        scopes[scope] = {
+            **record,
+            "state": _as_dict(record.get("state")),
+            "interactions": _safe_int(record.get("interactions"), default=0) + 1,
+            "country": str(country or ""),
+            "source_id": str(source_id or ""),
+            "previous_snapshot": latest,
+            "last_snapshot": current_snapshot,
+            "updated_at": now_iso(),
+        }
+        self._raw["scopes"] = scopes
+        self._raw["version"] = 2
+        return latest, True
 
     def remove_source(self, source_id: str) -> int:
         sid = str(source_id or "").strip()
@@ -139,7 +166,7 @@ class InsightsLearningStore:
 
         if removed > 0:
             self._raw["scopes"] = kept
-            self._raw["version"] = 1
+            self._raw["version"] = 2
 
         return removed
 
@@ -166,5 +193,5 @@ class InsightsLearningStore:
     def clear_all(self) -> int:
         scopes = _as_dict(self._raw.get("scopes"))
         removed = len(scopes)
-        self._raw = {"version": 1, "scopes": {}}
+        self._raw = {"version": 2, "scopes": {}}
         return removed

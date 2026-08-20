@@ -839,6 +839,30 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
   border-radius: 16px;
   background: var(--bbva-surface-2);
 }
+.upload-zone-busy {
+  border-style: solid;
+  border-color: var(--bbva-electric);
+  background: var(--bbva-accent-bg);
+}
+.transfer-operation-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 88px;
+  padding: 16px 20px;
+  border: 1px solid var(--bbva-electric);
+  border-radius: 12px;
+  background: var(--bbva-accent-bg);
+  color: var(--bbva-text);
+}
+.transfer-operation-status p { margin: 4px 0 0; color: var(--bbva-text-muted); }
+.transfer-operation-status .transfer-spinner {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  border-width: 3px;
+}
 .transfer-validation-running, .transfer-validation-badge, .transfer-import-commit {
   display: flex;
   align-items: center;
