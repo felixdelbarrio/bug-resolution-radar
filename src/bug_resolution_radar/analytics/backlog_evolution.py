@@ -68,9 +68,29 @@ def build_evolution_insight(
             )
         )
 
+    def add_average(key: str, label: str, weight: float, *, unit: str) -> None:
+        if key not in cur or key not in base or cur.get(key) is None or base.get(key) is None:
+            return
+        before = float(base[key])
+        after = float(cur[key])
+        delta = after - before
+        if abs(delta) < 0.05:
+            return
+        direction = -1 if delta > 0 else 1
+        verb = "baja" if delta < 0 else "sube"
+        signals.append(
+            (
+                weight * abs(delta) / max(abs(before), 1.0),
+                direction,
+                f"{label} {verb} de {before:.1f} a {after:.1f} {unit} ({delta:+.1f})",
+            )
+        )
+
     add_count("critical_count", "Prioridades críticas", 8.0)
     add_count("aged30_count", "Cola >30 días", 5.0)
     add_count("open_total", "Backlog abierto", 4.0)
+    add_average("average_open_14", "Cartera abierta media", 4.0, unit="incidencias")
+    add_average("resolution_days_14", "Resolución media", 3.0, unit="días")
     add_count("net_14", "Balance neto 14d", 2.0, minimum=2)
     if not signals:
         return None

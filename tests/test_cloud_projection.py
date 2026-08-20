@@ -65,7 +65,11 @@ def _intelligence(*, split: bool = True) -> dict[str, object]:
             "executive": {
                 "tone": "negative",
                 "title": "Backlog incrementado en 1 durante la quincena",
-                "summary": "El backlog pasa de 2 a 3.",
+                "summary": (
+                    "El backlog pasa de 2 a 3. La cartera abierta media sube de 2,1 a 2,6 "
+                    "y cierra en 3. El tiempo medio de resolución mejora: baja 1,0 días, "
+                    "de 4,0 a 3,0."
+                ),
                 "focus": ["Antigüedad: 1 abierta supera 30 días."],
             },
             "annual": {"label": "Evolución 2026"},
@@ -77,10 +81,16 @@ def _intelligence(*, split: bool = True) -> dict[str, object]:
                     "created": 2,
                     "closed": 1,
                     "resolutionDays": 3.0,
+                    "averageOpen": 2.6,
                     "criticalOpen": 2,
                     "aged30Open": 1,
                 },
-                "previous": {"created": 1, "closed": 0},
+                "previous": {
+                    "created": 1,
+                    "closed": 0,
+                    "resolutionDays": 4.0,
+                    "averageOpen": 2.1,
+                },
             },
             "period": {},
             "timeline": [],
@@ -320,6 +330,13 @@ def test_projection_is_explicit_static_and_packages_exact_report_bytes(
     assert projection["newsletterFacts"]["backlogDelta"] == 1
     assert projection["newsletterFacts"]["evolution"]["title"] == (
         "Backlog incrementado en 1 durante la quincena"
+    )
+    evolution = projection["views"]["insights"]["byId"]["evolution"]["executionEvolution"]
+    assert evolution["fortnight"]["current"]["averageOpen"] == 2.6
+    assert "cartera abierta media" in projection["newsletterFacts"]["evolution"]["summary"].lower()
+    assert (
+        "tiempo medio de resolución mejora"
+        in projection["newsletterFacts"]["draft"]["summary"].lower()
     )
     assert (
         projection["factsSha256"]

@@ -287,3 +287,24 @@ def test_evolution_insight_reports_week_over_week_direction_from_material_change
     assert "WoW" in insight.title
     assert insight.direction == "improves"
     assert "Prioridades críticas baja de 5 a 0" in insight.body
+
+
+def test_evolution_insight_includes_resolution_and_average_open_week_over_week() -> None:
+    insight = build_evolution_insight(
+        {
+            "reference_date": "2026-08-20",
+            "average_open_14": 91.4,
+            "resolution_days_14": 8.2,
+        },
+        {
+            "reference_date": "2026-08-13",
+            "average_open_14": 96.8,
+            "resolution_days_14": 11.7,
+        },
+    )
+
+    assert insight is not None
+    assert insight.direction == "improves"
+    assert "WoW" in insight.title
+    assert "Cartera abierta media baja de 96.8 a 91.4 incidencias (-5.4)" in insight.body
+    assert "Resolución media baja de 11.7 a 8.2 días (-3.5)" in insight.body

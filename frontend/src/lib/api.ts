@@ -229,7 +229,7 @@ export type EvolutionMetricPayload = {
   current: number | null;
   previous: number | null;
   delta: number | null;
-  unit: "count" | "days";
+  unit: "count" | "days" | "average";
   tone: "positive" | "negative" | "neutral";
 };
 
@@ -244,6 +244,7 @@ export type EvolutionFlowPayload = {
   closed: number;
   netFlow: number;
   resolutionDays: number | null;
+  averageOpen: number;
   criticalOpen: number;
   aged30Open: number;
 };

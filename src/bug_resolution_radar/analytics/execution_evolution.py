@@ -23,6 +23,7 @@ class _FlowMetrics:
     created: int
     closed: int
     resolution_days: float | None
+    average_open: float
     critical_end: int
     aged30_end: int
 
@@ -81,6 +82,17 @@ def _flow_metrics(
     resolution_days = (frame.resolved_at - frame.created_at).dt.total_seconds() / 86400.0
     resolved_mask = _between(frame.resolved_at, start, end) & resolution_days.ge(0).fillna(False)
     resolved_values = resolution_days.loc[resolved_mask].dropna()
+    period_end = pd.Timestamp(end)
+    period_days = (end - start).days + 1
+    created_open_days = (
+        (period_end - frame.created_at.loc[created_mask].dt.normalize()).dt.days.add(1).sum()
+    )
+    finalized_open_days = (
+        (period_end - frame.finalized_at.loc[closed_mask].dt.normalize()).dt.days.add(1).sum()
+    )
+    total_open_days = (
+        int(start_open.sum()) * period_days + int(created_open_days) - int(finalized_open_days)
+    )
     end_created = frame.created_at.loc[end_open]
     end_age = (pd.Timestamp(end) - end_created.dt.normalize()).dt.days
     return _FlowMetrics(
@@ -91,6 +103,7 @@ def _flow_metrics(
         created=int(created_mask.sum()),
         closed=int(closed_mask.sum()),
         resolution_days=float(resolved_values.mean()) if not resolved_values.empty else None,
+        average_open=max(float(total_open_days) / float(period_days), 0.0),
         critical_end=int((end_open & critical_mask).sum()),
         aged30_end=int((end_age > 30).sum()),
     )
@@ -126,6 +139,39 @@ def _metric(
 
 def _window_label(service: TimeWindowService, metrics: _FlowMetrics) -> str:
     return service.format_compact_range(metrics.start, metrics.end)
+
+
+def _decimal_es(value: float) -> str:
+    return f"{float(value):.1f}".replace(".", ",")
+
+
+def _resolution_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str:
+    if current.resolution_days is None or previous.resolution_days is None:
+        return ""
+    delta = current.resolution_days - previous.resolution_days
+    current_txt = _decimal_es(current.resolution_days)
+    previous_txt = _decimal_es(previous.resolution_days)
+    if abs(delta) < 0.05:
+        return f"El tiempo medio de resolución se mantiene en {current_txt} días."
+    movement = "mejora: baja" if delta < 0 else "empeora: sube"
+    return (
+        f"El tiempo medio de resolución {movement} {_decimal_es(abs(delta))} días, "
+        f"de {previous_txt} a {current_txt}."
+    )
+
+
+def _portfolio_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str:
+    delta = current.average_open - previous.average_open
+    current_txt = _decimal_es(current.average_open)
+    previous_txt = _decimal_es(previous.average_open)
+    if abs(delta) < 0.05:
+        movement = f"se mantiene en {current_txt} incidencias"
+    else:
+        verb = "baja" if delta < 0 else "sube"
+        movement = (
+            f"{verb} {_decimal_es(abs(delta))} incidencias, de {previous_txt} a {current_txt}"
+        )
+    return f"La cartera abierta media {movement} y cierra en {current.backlog_end}."
 
 
 def _fortnight_ranges(year: int, end: date) -> list[tuple[date, date]]:
@@ -176,8 +222,12 @@ def _executive_message(
     summary = (
         f"Se cerraron {current.closed} incidencias y se crearon {current.created}; "
         f"el backlog pasa de {current.backlog_start} a {current.backlog_end}. "
-        f"En el año, {annual_direction}, de {annual.backlog_start} a {annual.backlog_end}."
+        f"{_portfolio_comparison(current, previous)} "
     )
+    resolution_comparison = _resolution_comparison(current, previous)
+    if resolution_comparison:
+        summary += f"{resolution_comparison} "
+    summary += f"En el año, {annual_direction}, de {annual.backlog_start} a {annual.backlog_end}."
     if current.critical_end:
         summary += f" Permanecen {current.critical_end} incidencias de criticidad alta o muy alta."
     else:
@@ -279,6 +329,7 @@ def build_execution_evolution(
             "resolutionDays": round(metrics.resolution_days, 1)
             if metrics.resolution_days is not None
             else None,
+            "averageOpen": round(metrics.average_open, 1),
             "criticalOpen": metrics.critical_end,
             "aged30Open": metrics.aged30_end,
         }
@@ -308,6 +359,13 @@ def build_execution_evolution(
             "previous": flow_payload(previous),
             "kpis": [
                 _metric("backlog", "Backlog al cierre", current.backlog_end, previous.backlog_end),
+                _metric(
+                    "averageOpen",
+                    "Cartera abierta media",
+                    round(current.average_open, 1),
+                    round(previous.average_open, 1),
+                    unit="average",
+                ),
                 _metric("created", "Creadas", current.created, previous.created),
                 _metric(
                     "closed", "Cerradas", current.closed, previous.closed, lower_is_better=False
@@ -336,6 +394,10 @@ def build_execution_evolution(
         "learningMeasurement": {
             "reference_date": ref.date().isoformat(),
             "open_total": current.backlog_end,
+            "average_open_14": round(current.average_open, 1),
+            "resolution_days_14": round(current.resolution_days, 1)
+            if current.resolution_days is not None
+            else None,
             "aged30_count": current.aged30_end,
             "critical_count": current.critical_end,
             "created_14": current.created,

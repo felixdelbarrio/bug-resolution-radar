@@ -2851,8 +2851,8 @@ textarea::placeholder {
 
 .evolution-timeline-row {
   display: grid;
-  grid-template-columns: minmax(9rem, 1.5fr) repeat(5, minmax(6rem, 1fr));
-  min-width: 52rem;
+  grid-template-columns: minmax(9rem, 1.5fr) repeat(6, minmax(6rem, 1fr));
+  min-width: 58rem;
   padding: 0.72rem 0.9rem;
   border-bottom: 1px solid var(--bbva-border);
   align-items: center;

@@ -65,6 +65,9 @@ def test_execution_evolution_reconstructs_year_and_fortnight_flows() -> None:
     assert result["annual"]["created"] == 7
     assert result["annual"]["closed"] == 4
     assert len(result["timeline"]) == 16
+    assert previous["averageOpen"] == 2.4
+    assert current["averageOpen"] == 4.3
+    assert current["resolutionDays"] == 2.0
 
     for period in (
         result["annual"],
@@ -75,7 +78,29 @@ def test_execution_evolution_reconstructs_year_and_fortnight_flows() -> None:
         assert period["backlogEnd"] == period["backlogStart"] + period["backlogDelta"]
 
     assert "Permanecen 1 incidencias" in result["executive"]["summary"]
+    assert (
+        "La cartera abierta media sube 1,9 incidencias, de 2,4 a 4,3 y cierra en 4."
+        in result["executive"]["summary"]
+    )
+    assert (
+        "El tiempo medio de resolución mejora: baja 105,5 días, de 107,5 a 2,0."
+        in result["executive"]["summary"]
+    )
+    average_kpi = next(
+        metric for metric in result["fortnight"]["kpis"] if metric["id"] == "averageOpen"
+    )
+    assert average_kpi == {
+        "id": "averageOpen",
+        "label": "Cartera abierta media",
+        "current": 4.3,
+        "previous": 2.4,
+        "delta": 1.9,
+        "unit": "average",
+        "tone": "negative",
+    }
     assert result["learningMeasurement"]["critical_count"] == 1
+    assert result["learningMeasurement"]["average_open_14"] == 4.3
+    assert result["learningMeasurement"]["resolution_days_14"] == 2.0
 
 
 def test_execution_evolution_never_invents_critical_incidents() -> None:
@@ -105,3 +130,14 @@ def test_execution_evolution_is_complete_for_an_empty_scope() -> None:
     assert result["hasData"] is False
     assert result["executive"]["title"] == "Sin datos para evaluar la evolución"
     assert result["executive"]["focus"] == []
+
+
+def test_execution_evolution_omits_resolution_comparison_without_two_valid_samples() -> None:
+    frame = pd.DataFrame([_issue("A", "2026-08-01")])
+
+    result = build_execution_evolution(dff=frame, reference_day="2026-08-20")
+
+    summary = result["executive"]["summary"]
+    assert "cartera abierta media" in summary.lower()
+    assert "tiempo medio de resolución" not in summary.lower()
+    assert result["fortnight"]["current"]["resolutionDays"] is None

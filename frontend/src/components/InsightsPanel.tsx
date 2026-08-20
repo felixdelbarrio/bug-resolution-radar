@@ -224,16 +224,21 @@ function formatTopicPercentage(pct: number) {
   }).format(Number.isFinite(pct) ? pct : 0)}%`;
 }
 
-function formatEvolutionValue(value: number | null, unit: "count" | "days") {
+function formatEvolutionValue(value: number | null, unit: "count" | "days" | "average") {
   if (value === null || !Number.isFinite(value)) return "—";
   if (unit === "days") return `${value.toLocaleString("es-ES", { maximumFractionDigits: 1 })} d`;
+  if (unit === "average") {
+    return value.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
   return Math.round(value).toLocaleString("es-ES");
 }
 
-function formatEvolutionDelta(value: number | null, unit: "count" | "days") {
+function formatEvolutionDelta(value: number | null, unit: "count" | "days" | "average") {
   if (value === null || !Number.isFinite(value)) return "Sin referencia comparable";
   const sign = value > 0 ? "+" : "";
-  const rendered = unit === "days" ? value.toFixed(1) : Math.round(value).toLocaleString("es-ES");
+  const rendered = unit === "count"
+    ? Math.round(value).toLocaleString("es-ES")
+    : value.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return `${sign}${rendered}${unit === "days" ? " d" : ""} vs anterior`;
 }
 
@@ -597,12 +602,13 @@ export function InsightsPanel({
             </div>
             <div className="evolution-timeline" role="table" aria-label="Evolución quincenal del año">
               <div className="evolution-timeline-row evolution-timeline-head" role="row">
-                <span>Quincena</span><span>Backlog</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span>
+                <span>Quincena</span><span>Backlog</span><span>Media abierta</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span>
               </div>
               {data.executionEvolution.timeline.map((row) => (
                 <div className="evolution-timeline-row" role="row" key={row.start}>
                   <span>{row.label}</span>
                   <strong>{row.backlogEnd.toLocaleString("es-ES")}</strong>
+                  <span>{row.averageOpen.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
                   <span data-tone={row.backlogDelta < 0 ? "positive" : row.backlogDelta > 0 ? "negative" : "neutral"}>
                     {row.backlogDelta > 0 ? "+" : ""}{row.backlogDelta.toLocaleString("es-ES")}
                   </span>
