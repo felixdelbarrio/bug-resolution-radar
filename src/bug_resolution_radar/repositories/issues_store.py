@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
@@ -21,6 +22,10 @@ def _parquet_path(path: Path) -> Path:
 
 def _workspace_index_path(path: Path) -> Path:
     return path.with_suffix(".workspace.json")
+
+
+def _metadata_path(path: Path) -> Path:
+    return path.with_suffix(".meta.json")
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -181,10 +186,73 @@ def save_issues_doc(path: str, doc: IssuesDocument) -> None:
     payload = doc.model_dump_json(ensure_ascii=False)
     _atomic_write_text(resolved, payload)
     try:
-        _sync_read_models(resolved, _issues_to_dataframe(doc))
+        frame = _issues_to_dataframe(doc)
+        _sync_read_models(resolved, frame)
+        source_ids = {
+            str(issue.source_id or "").strip()
+            for issue in doc.issues
+            if str(issue.source_type or "").strip().lower() == "jira"
+            and str(issue.source_id or "").strip()
+        }
+        _atomic_write_text(
+            _metadata_path(resolved),
+            json.dumps(
+                {
+                    "schema_version": doc.schema_version,
+                    "ingested_at": doc.ingested_at,
+                    "jira_base_url": doc.jira_base_url,
+                    "query": doc.query,
+                    "jira_source_count": len(source_ids),
+                    "issues_count": len(doc.issues),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
     except Exception:
         # JSON is the source of truth; sidecars are best-effort accelerators.
         pass
+
+
+def load_issues_meta(path: str) -> dict[str, Any]:
+    """Load lightweight ingest metadata without deserializing the issues document."""
+    resolved = Path(path)
+    meta_path = _metadata_path(resolved)
+    try:
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+
+    index = load_issues_workspace_index(path)
+    source_rows = [
+        row
+        for rows in dict(index.get("sourcesByCountry") or {}).values()
+        for row in list(rows or [])
+        if isinstance(row, dict)
+    ]
+    jira_source_ids = {
+        str(row.get("source_id") or "").strip()
+        for row in source_rows
+        if str(row.get("source_type") or "").strip().lower() == "jira"
+        and str(row.get("source_id") or "").strip()
+    }
+    try:
+        ingested_at = datetime.fromtimestamp(
+            resolved.stat().st_mtime,
+            tz=timezone.utc,
+        ).isoformat()
+    except Exception:
+        ingested_at = ""
+    return {
+        "schema_version": str(index.get("schema_version") or "1.0"),
+        "ingested_at": ingested_at,
+        "jira_base_url": "",
+        "query": "",
+        "jira_source_count": len(jira_source_ids),
+        "issues_count": int(index.get("rowCount") or 0),
+    }
 
 
 @lru_cache(maxsize=8)

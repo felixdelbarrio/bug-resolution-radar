@@ -37,7 +37,7 @@ def test_webapp_reports_incomplete_html_deployments_without_null_errors() -> Non
 def test_navigation_resets_each_section_to_its_primary_view() -> None:
     app = _text("apps-script/App.html")
 
-    assert "if (panel === 'insights') state.insightsId = 'summary';" in app
+    assert "if (panel === 'insights') state.insightsId = 'evolution';" in app
     assert "if (panel === 'trends') state.trendChart = 'timeseries';" in app
     assert "if (panel === 'issues') state.issuesView = 'Cards';" in app
     assert "if (state.route === 'settings') state.settingsTab = 'health';" in app

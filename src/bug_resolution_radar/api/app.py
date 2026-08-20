@@ -124,6 +124,7 @@ from bug_resolution_radar.services.workspace import (
     merge_sources_by_country,
     sources_by_country_from_index,
 )
+from bug_resolution_radar.theme.brand_identity import frontend_brand_contract
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
 from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
 
@@ -331,22 +332,6 @@ def _single_source_result(*, connector: str, ok: bool, message: str) -> dict[str
     }
 
 
-def _scoped_dataframe_for_options(
-    settings: Settings,
-    *,
-    workspace: WorkspaceSelection,
-) -> pd.DataFrame:
-    try:
-        df_all = load_issues_df(settings.DATA_PATH)
-    except Exception:
-        return pd.DataFrame()
-    df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
-    if df_all.empty:
-        return df_all
-    scoped = apply_workspace_source_scope(df_all, settings=settings, selection=workspace)
-    return apply_analysis_depth_filter(scoped, settings=settings)
-
-
 def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
     if df is None or df.empty:
         return _empty_filter_options()
@@ -458,11 +443,12 @@ def _workspace_payload(
         source_id=selected_source_id,
         scope_mode=normalized_scope_mode,
     )
-    scoped_df = (
-        _scoped_dataframe_for_options(settings, workspace=workspace)
-        if include_filter_options
-        else pd.DataFrame()
-    )
+    scoped_df = pd.DataFrame()
+    if include_filter_options and not df_all.empty:
+        scoped_df = apply_analysis_depth_filter(
+            apply_workspace_source_scope(df_all, settings=settings, selection=workspace),
+            settings=settings,
+        )
     active_source_ids = (
         [selected_source_id]
         if workspace.scope_mode == "source" and selected_source_id
@@ -825,6 +811,7 @@ def create_app() -> FastAPI:
         settings = load_settings()
         return {
             "appTitle": str(settings.APP_TITLE or "Bug Resolution Radar"),
+            "brand": frontend_brand_contract(),
             "theme": str(settings.THEME or "auto"),
             "defaultFilters": build_default_filters(settings),
             "dashboardDefaults": build_dashboard_defaults(settings),
@@ -833,6 +820,7 @@ def create_app() -> FastAPI:
                 country=country,
                 source_id=sourceId,
                 scope_mode=scopeMode,
+                include_filter_options=False,
             ),
             "chartsCatalog": [
                 {"id": "timeseries", "label": "Evolución"},

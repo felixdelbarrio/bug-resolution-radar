@@ -351,7 +351,7 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
   const reportLink = _sanitizeUrl_(reportUrl);
   const appLink = _sanitizeUrl_(applicationUrl);
   const metrics = newsletter.metrics || {};
-  const backlogDelta = Number(newsletter.backlogDelta || 0);
+  const evolution = newsletter.evolution || {};
   const rollups = newsletter.responsibleRollups || [];
   const scopeLabel = _text_(publication && publication.scopeLabel);
   const periodLabel = _newsletterPeriodOnly_(newsletter.periodLabel);
@@ -361,13 +361,20 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
   // around family names so the generated markup remains valid in Gmail.
   const font = _newsletterEmailFont_(DESIGN_TOKENS.font.webBody);
   const headline = _newsletterEmailFont_(DESIGN_TOKENS.font.webHeadline);
-  const movementColor = backlogDelta <= 0 ? color.success : color.warningStrong;
-  const movementBackground = backlogDelta <= 0 ? color.successSoft : color.warningSoft;
-  const movementLabel = backlogDelta < 0
-    ? 'Backlog reducido en ' + Math.abs(backlogDelta)
-    : backlogDelta > 0
-      ? 'Backlog incrementado en ' + backlogDelta
-      : 'Backlog estable';
+  const movementColor = evolution.tone === 'positive'
+    ? color.success
+    : evolution.tone === 'negative'
+      ? color.danger
+      : color.warningStrong;
+  const movementBackground = evolution.tone === 'positive'
+    ? color.successSoft
+    : evolution.tone === 'negative'
+      ? color.dangerSoft
+      : color.warningSoft;
+  const movementLabel = _text_(evolution.title);
+  const evolutionFocus = (evolution.focus || []).slice(0, 3).map(function (line) {
+    return '<li style="margin:4px 0">' + _newsletterEscapeHtml_(line) + '</li>';
+  }).join('');
 
   function metricCell_(label, value, caption) {
     return '<td class="metric-cell" width="25%" valign="top" style="padding:0 6px 12px">' +
@@ -433,7 +440,8 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
     DESIGN_TOKENS.radius.component + ';background:' + movementBackground + '">' +
     '<strong style="display:block;color:' + movementColor + ';font-size:20px;line-height:24px">' +
     _newsletterEscapeHtml_(movementLabel) + '</strong><span style="display:block;margin-top:4px;color:' +
-    color.grey700 + '">' + _newsletterEscapeHtml_(draft.summary) + '</span></div>' +
+    color.grey700 + '">' + _newsletterEscapeHtml_(evolution.summary || draft.summary) + '</span>' +
+    (evolutionFocus ? '<ul style="margin:8px 0 0;padding-left:20px;color:' + color.grey700 + '">' + evolutionFocus + '</ul>' : '') + '</div>' +
     '<table class="email-actions" role="presentation" style="margin-bottom:32px"><tr>' +
     '<td style="padding-right:8px"><a href="' + _newsletterEscapeHtml_(reportLink) +
     '" style="display:inline-block;padding:12px 20px;border-radius:' + DESIGN_TOKENS.radius.component + ';background:' +
@@ -459,7 +467,9 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
     'Resultado correspondiente al seguimiento de incidencias de la última quincena:',
     reportLink,
     '',
-    draft.summary,
+    evolution.title,
+    evolution.summary || draft.summary,
+    ...(evolution.focus || []),
     '',
     draft.responsibleIntro,
     ...(draft.responsibleParagraphs || []),

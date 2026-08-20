@@ -330,8 +330,7 @@ def generate_period_followup_report_artifact(
         raise ValueError("No hay incidencias en la ventana temporal y filtros seleccionados.")
 
     current_snapshot = build_operational_snapshot(
-        dff=context.dff,
-        open_df=context.open_df,
+        dff=context.scoped_df,
         reference_day=reference_day,
     )
     baseline_snapshot = record_scope_measurement(

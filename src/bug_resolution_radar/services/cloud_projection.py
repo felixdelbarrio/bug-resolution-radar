@@ -48,8 +48,8 @@ from bug_resolution_radar.services.dashboard_snapshot import (
 from bug_resolution_radar.services.workspace import WorkspaceSelection
 
 PROJECTION_SCHEMA = "bug-resolution-radar-cloud-projection"
-PROJECTION_SCHEMA_VERSION = 2
-SEMANTIC_CONTRACT = "desktop-authoritative-v2"
+PROJECTION_SCHEMA_VERSION = 3
+SEMANTIC_CONTRACT = "desktop-authoritative-v3"
 REPORT_PATH = "artifacts/period_followup.pptx"
 REPORT_MIME_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 TREND_IDS: tuple[str, ...] = (
@@ -333,7 +333,6 @@ def _manager_rollups(
 
 def _newsletter_facts(
     *,
-    overview: Mapping[str, Any],
     insights: Mapping[str, Any],
     context: Any,
     sources: Sequence[Mapping[str, str]],
@@ -347,40 +346,38 @@ def _newsletter_facts(
         for card in cards
         if isinstance(card, Mapping) and str(card.get("cardId") or "")
     }
+    evolution = insights.get("executionEvolution")
+    evolution = evolution if isinstance(evolution, Mapping) else {}
+    fortnight = evolution.get("fortnight")
+    fortnight = fortnight if isinstance(fortnight, Mapping) else {}
+    current_period = fortnight.get("current")
+    current_period = current_period if isinstance(current_period, Mapping) else {}
+    previous_period = fortnight.get("previous")
+    previous_period = previous_period if isinstance(previous_period, Mapping) else {}
+    executive = evolution.get("executive")
+    executive = executive if isinstance(executive, Mapping) else {}
 
     def card_metric(card_id: str) -> int:
         card = by_id.get(card_id, {})
         return _metric_int(card.get("metric"))
 
-    def previous_metric(card_id: str) -> int:
-        card = by_id.get(card_id, {})
-        delta = card.get("delta")
-        delta = delta if isinstance(delta, Mapping) else {}
-        return _metric_int(delta.get("previousValue"))
-
-    created_current = card_metric("new_now")
-    created_previous = previous_metric("new_now")
-    closed_current = card_metric("closed_now")
-    closed_previous = previous_metric("closed_now")
-    current_open = card_metric("open_total")
-    # Backlog conservation within the current fortnight:
-    # current = previous + created - closed.
-    previous_open = max(0, current_open - created_current + closed_current)
+    created_current = _metric_int(current_period.get("created"))
+    created_previous = _metric_int(previous_period.get("created"))
+    closed_current = _metric_int(current_period.get("closed"))
+    closed_previous = _metric_int(previous_period.get("closed"))
+    current_open = _metric_int(current_period.get("backlogEnd"))
+    previous_open = _metric_int(current_period.get("backlogStart"))
     focus_open = card_metric("open_focus")
     other_open = card_metric("open_other")
     focus_card = by_id.get("open_focus", {})
     focus_label = str(focus_card.get("label") or "Foco abierto")
-    resolution_card = by_id.get("resolution_now", {})
-    resolution_current = str(resolution_card.get("metric") or "0.0d")
+    resolution_value = current_period.get("resolutionDays")
+    resolution_current = (
+        f"{float(resolution_value):.1f}d" if resolution_value is not None else "—"
+    )
     backlog_delta = current_open - previous_open
 
-    aged_open = 0
-    for item in overview.get("overviewKpis", []) if isinstance(overview, Mapping) else []:
-        if not isinstance(item, Mapping):
-            continue
-        if "> 30" in str(item.get("label") or ""):
-            aged_open = _metric_int(item.get("value"))
-            break
+    aged_open = _metric_int(current_period.get("aged30Open"))
 
     show_open_split = bool(period.get("showOpenSplit"))
     valid_open_split = show_open_split and focus_open + other_open == current_open
@@ -396,22 +393,9 @@ def _newsletter_facts(
     if valid_open_split:
         metrics["focusOpen"] = focus_open
         metrics["otherOpen"] = other_open
-    critical_tokens = {"supone un impedimento", "highest", "high", "p0", "p1"}
-    priorities = _series_text(context.open_df, "priority").str.casefold()
-    critical_open = int(priorities.isin(critical_tokens).sum())
+    critical_open = _metric_int(current_period.get("criticalOpen"))
     rollups = _manager_rollups(context=context, sources=sources)
-    direction = (
-        "crecimiento" if backlog_delta > 0 else "reducción" if backlog_delta < 0 else "estabilidad"
-    )
-    summary = (
-        f"Se observa {direction} del backlog de {abs(backlog_delta)} incidencias, "
-        f"pasando de {previous_open} abiertas a {current_open} incidencias abiertas"
-    )
-    summary += (
-        f", con {critical_open} incidencias de criticidad alta o muy alta."
-        if critical_open
-        else ", sin incidencias de criticidad alta o muy alta."
-    )
+    summary = str(executive.get("summary") or "").strip()
     responsible_paragraphs = [
         (
             f"{row['name']}: {row['openIssues']} incidencias abiertas, "
@@ -427,6 +411,14 @@ def _newsletter_facts(
         "previousOpen": previous_open,
         "backlogDelta": backlog_delta,
         "criticalOpen": critical_open,
+        "evolution": {
+            "tone": str(executive.get("tone") or "neutral"),
+            "title": str(executive.get("title") or "Evolución del periodo"),
+            "summary": summary,
+            "focus": [str(item) for item in list(executive.get("focus") or []) if str(item)],
+            "yearLabel": str((evolution.get("annual") or {}).get("label") or ""),
+            "fortnightLabel": str(current_period.get("label") or ""),
+        },
         "responsibleRollups": rollups,
         "draft": {
             "subject": f"Seguimiento quincenal de incidencias · {str(period.get('caption') or '')}",
@@ -640,6 +632,7 @@ def build_cloud_projection_artifact(
         insights_view_mode="accumulated",
     )
     cloud_insight_ids = {
+        "evolution",
         "summary",
         "functionality",
         "duplicates",
@@ -655,6 +648,7 @@ def build_cloud_projection_artifact(
     insights = {
         "catalog": insight_catalog,
         "byId": {
+            "evolution": {"executionEvolution": intelligence.get("executionEvolution") or {}},
             "summary": {"periodSummary": intelligence.get("periodSummary") or {}},
             "functionality": intelligence.get("functionality") or {},
             "duplicates": intelligence.get("duplicates") or {},
@@ -725,7 +719,6 @@ def build_cloud_projection_artifact(
         source_ids=clean_source_ids,
     )
     newsletter = _newsletter_facts(
-        overview=overview,
         insights=intelligence,
         context=context,
         sources=manager_sources,

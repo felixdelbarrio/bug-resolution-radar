@@ -195,7 +195,7 @@ def test_cloud_transfer_is_strict_desktop_authoritative_v3() -> None:
     adapters = _source("20_Adapters.gs")
 
     assert re.search(r"transferVersion:\s*3\b", config)
-    assert "desktop-authoritative-v2" in config
+    assert "desktop-authoritative-v3" in config
     assert "data/projection.json" in adapters
     assert "artifacts/period_followup.pptx" in adapters
     assert "data/issues.json" not in adapters

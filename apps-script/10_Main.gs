@@ -40,7 +40,7 @@ function _initialDashboardState_(manifest) {
     panel: 'overview',
     scopeKey: scopes.length ? _text_(scopes[0].scopeKey) : '',
     trendChart: 'open_status_bar',
-    insightsId: 'summary',
+    insightsId: 'evolution',
     issuesView: 'Cards',
     page: 1,
     pageSize: RADAR.defaultPageSize

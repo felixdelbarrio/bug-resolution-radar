@@ -116,17 +116,15 @@ def test_purge_source_cache_removes_issues_helix_and_learning(tmp_path: Path) ->
 
     learning_store = InsightsLearningStore(learning_path)
     learning_store.load()
-    learning_store.set_scope(
+    learning_store.record_snapshot(
         "España::helix:espana:es-smartit",
-        state={"seen": {"a": 1}},
-        interactions=3,
+        snapshot={"reference_date": "2026-08-20", "open_total": 1},
         country="España",
         source_id="helix:espana:es-smartit",
     )
-    learning_store.set_scope(
+    learning_store.record_snapshot(
         "México::jira:mexico:core-mx",
-        state={"seen": {"b": 2}},
-        interactions=5,
+        snapshot={"reference_date": "2026-08-20", "open_total": 2},
         country="México",
         source_id="jira:mexico:core-mx",
     )
@@ -206,10 +204,9 @@ def test_source_cache_impact_preview_counts_records(tmp_path: Path) -> None:
 
     learning_store = InsightsLearningStore(learning_path)
     learning_store.load()
-    learning_store.set_scope(
+    learning_store.record_snapshot(
         "México::jira:mexico:core-mx",
-        state={"seen": {"a": 1}},
-        interactions=1,
+        snapshot={"reference_date": "2026-08-20", "open_total": 2},
         country="México",
         source_id="jira:mexico:core-mx",
     )
@@ -260,10 +257,9 @@ def test_cache_inventory_and_reset_store(tmp_path: Path) -> None:
     )
     learning_store = InsightsLearningStore(learning_path)
     learning_store.load()
-    learning_store.set_scope(
+    learning_store.record_snapshot(
         "México::jira:mexico:core-mx",
-        state={"seen": {"x": 1}},
-        interactions=2,
+        snapshot={"reference_date": "2026-08-20", "open_total": 1},
         country="México",
         source_id="jira:mexico:core-mx",
     )

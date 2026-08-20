@@ -18,7 +18,8 @@ import {
   type KanbanPayload,
   type NotePayload,
   type NoteListPayload,
-  type TrendDetailPayload
+  type TrendDetailPayload,
+  type WorkspaceData
 } from "../lib/api";
 import type { ShellContextValue } from "../components/AppShell";
 import { ChartFigure } from "../components/ChartFigure";
@@ -217,7 +218,25 @@ export function DashboardPage() {
       pageSize
     ]
   );
-  const issueWorkspace = workspace;
+  const filterWorkspace = useQuery({
+    queryKey: [
+      "dashboard-filter-workspace",
+      dashboardState.params.country,
+      dashboardState.params.sourceId,
+      dashboardState.params.scopeMode
+    ],
+    queryFn: () =>
+      fetchJson<WorkspaceData>("/api/workspace", {
+        country: dashboardState.params.country,
+        sourceId: dashboardState.params.sourceId,
+        scopeMode: dashboardState.params.scopeMode
+      }),
+    enabled:
+      Boolean(workspace?.selectedCountry) &&
+      (activePanel === "issues" || activePanel === "kanban"),
+    ...commonQueryOptions
+  });
+  const issueWorkspace = filterWorkspace.data ?? workspace;
   useEffect(() => {
     if (!bootstrap?.dashboardDefaults.defaultTrendChartId) {
       return;

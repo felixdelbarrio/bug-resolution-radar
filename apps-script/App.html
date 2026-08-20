@@ -55,7 +55,7 @@ const App = (() => {
     dashboard: null,
     scopeKey: '',
     trendChart: 'open_status_bar',
-    insightsId: 'summary',
+    insightsId: 'evolution',
     issuesView: 'Cards',
     page: 1,
     pageSize: 50,
@@ -609,12 +609,63 @@ const App = (() => {
     schedulePreferenceSave();
   }
 
+  function evolutionValue(value, unit) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    const number = Number(value);
+    return unit === 'days'
+      ? number.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' d'
+      : Math.round(number).toLocaleString('es-ES');
+  }
+
+  function evolutionDelta(value, unit) {
+    if (value == null || !Number.isFinite(Number(value))) return 'Sin referencia comparable';
+    const number = Number(value);
+    const rendered = unit === 'days'
+      ? number.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      : Math.round(number).toLocaleString('es-ES');
+    return (number > 0 ? '+' : '') + rendered + (unit === 'days' ? ' d' : '') + ' vs anterior';
+  }
+
+  function renderExecutionEvolution(evolution) {
+    const executive = evolution.executive || {};
+    const annual = evolution.annual || { kpis: [] };
+    const fortnight = evolution.fortnight || { current: {}, previous: {}, kpis: [] };
+    const period = evolution.period || { focus: [] };
+    if (evolution.hasData === false) {
+      return `<section class="page-stack execution-evolution"><section class="surface-panel evolution-hero" data-tone="neutral">
+        <div><p class="section-kicker">Lectura ejecutiva</p><h3>${UI.escape(executive.title)}</h3><p>${UI.escape(executive.summary)}</p></div>
+        <span class="metric-chip">Actualizado ${UI.escape(evolution.referenceDate)}</span>
+      </section></section>`;
+    }
+    return `<section class="page-stack execution-evolution">
+      <section class="surface-panel evolution-hero" data-tone="${UI.escape(executive.tone || 'neutral')}">
+        <div><p class="section-kicker">Lectura ejecutiva</p><h3>${UI.escape(executive.title)}</h3><p>${UI.escape(executive.summary)}</p></div>
+        <span class="metric-chip">Actualizado ${UI.escape(evolution.referenceDate)}</span>
+      </section>
+      <section class="page-stack"><div class="panel-head"><div><p class="section-kicker">Año en curso</p><h3>${UI.escape(annual.label)}</h3></div></div>
+        <div class="evolution-kpi-grid">${(annual.kpis || []).map(metric => `<article class="evolution-kpi" data-tone="${UI.escape(metric.tone)}"><span>${UI.escape(metric.label)}</span><strong>${UI.escape(evolutionValue(metric.current, metric.unit))}</strong><small>${metric.previous == null ? 'Acumulado del año' : 'Inicio: ' + UI.escape(evolutionValue(metric.previous, metric.unit)) + ' · ' + UI.escape(evolutionDelta(metric.delta, metric.unit))}</small></article>`).join('')}</div>
+      </section>
+      <section class="surface-panel page-stack"><div class="panel-head"><div><p class="section-kicker">Quincena contra quincena</p><h3>${UI.escape(fortnight.current.label)} vs ${UI.escape(fortnight.previous.label)}</h3></div></div>
+        <div class="evolution-comparison-grid">${(fortnight.kpis || []).map(metric => `<article class="evolution-comparison-card" data-tone="${UI.escape(metric.tone)}"><span>${UI.escape(metric.label)}</span><strong>${UI.escape(evolutionValue(metric.current, metric.unit))}</strong><small>Antes ${UI.escape(evolutionValue(metric.previous, metric.unit))} · ${UI.escape(evolutionDelta(metric.delta, metric.unit))}</small></article>`).join('')}</div>
+      </section>
+      <section class="surface-panel page-stack"><div class="panel-head"><div><p class="section-kicker">Qué ha pasado en el periodo</p><h3>${UI.escape(period.label)}</h3></div></div>
+        <p class="evolution-period-summary">${UI.escape(period.summary)}</p>
+        ${(period.focus || []).length ? `<div class="recommendation-card"><strong>Focos generales de ejecución</strong><ul class="signal-list">${period.focus.map(line => `<li>${UI.escape(line)}</li>`).join('')}</ul></div>` : ''}
+      </section>
+      <section class="surface-panel page-stack"><div class="panel-head"><div><p class="section-kicker">Evolución anual</p><h3>Cortes quincenales</h3></div></div>
+        <div class="evolution-timeline" role="table"><div class="evolution-timeline-row evolution-timeline-head"><span>Quincena</span><span>Backlog</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span></div>${(evolution.timeline || []).map(row => `<div class="evolution-timeline-row"><span>${UI.escape(row.label)}</span><strong>${UI.formatNumber(row.backlogEnd)}</strong><span data-tone="${row.backlogDelta < 0 ? 'positive' : row.backlogDelta > 0 ? 'negative' : 'neutral'}">${row.backlogDelta > 0 ? '+' : ''}${UI.formatNumber(row.backlogDelta)}</span><span>${UI.formatNumber(row.created)}</span><span>${UI.formatNumber(row.closed)}</span><span>${UI.formatNumber(row.aged30Open)}</span></div>`).join('')}</div>
+      </section>
+    </section>`;
+  }
+
   function renderInsights() {
     const data = (state.dashboard && state.dashboard.insights) || {};
     const tabs = data.tabs || [];
     Charts.begin(view());
     let body = '';
-    if (data.periodSummary && (data.periodSummary.cards || []).length) {
+    if (data.executionEvolution && data.activeTab === 'evolution') {
+      body = renderExecutionEvolution(data.executionEvolution);
+    } else if (data.periodSummary && (data.periodSummary.cards || []).length) {
       body = `<section class="page-stack">
         <p class="inline-caption">${UI.escape(data.periodSummary.caption)}</p>
         <div class="period-card-grid">${data.periodSummary.cards.map(card =>
@@ -1389,7 +1440,7 @@ const App = (() => {
     state.route = 'dashboard';
     state.panel = panel;
     state.page = 1;
-    if (panel === 'insights') state.insightsId = 'summary';
+    if (panel === 'insights') state.insightsId = 'evolution';
     if (panel === 'trends') state.trendChart = 'timeseries';
     if (panel === 'issues') state.issuesView = 'Cards';
     syncNavigation();
@@ -1434,7 +1485,7 @@ const App = (() => {
       state.panel = 'overview';
       state.page = 1;
       state.trendChart = local.trendChart || initial.trendChart || 'open_status_bar';
-      state.insightsId = local.insightsId || initial.insightsId || 'summary';
+      state.insightsId = local.insightsId || initial.insightsId || 'evolution';
       state.issuesView = local.issuesView === 'Table' ? 'Table' : 'Cards';
       state.pageSize = Number(initial.pageSize || 50);
       state.dark = local.theme === 'dark';

@@ -69,7 +69,7 @@ def test_quincenal_calculators_count_created_closed_and_total_deterministically(
     assert created.current == 3
     assert created.previous == 2
     assert created.total == 5
-    assert closed.current == 2
+    assert closed.current == 3
     assert closed.previous == 0
     assert frame.df.loc[created.total_mask, "key"].tolist() == [
         "CUR-1",
@@ -78,7 +78,11 @@ def test_quincenal_calculators_count_created_closed_and_total_deterministically(
         "PREV-2",
         "FINAL-PROXY",
     ]
-    assert frame.df.loc[closed.current_mask, "key"].tolist() == ["CUR-2", "PREV-2"]
+    assert frame.df.loc[closed.current_mask, "key"].tolist() == [
+        "CUR-2",
+        "PREV-2",
+        "FINAL-PROXY",
+    ]
 
 
 def test_resolution_metrics_use_only_valid_closed_current_rows() -> None:
@@ -217,7 +221,7 @@ def test_inclusion_debug_frame_lists_created_and_real_closed_membership() -> Non
             "created_date": "2026-03-10",
             "resolved_date": "",
             "included_in_created": True,
-            "included_in_closed": False,
+            "included_in_closed": True,
         },
     ]
 

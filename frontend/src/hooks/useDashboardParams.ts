@@ -54,7 +54,7 @@ export function useDashboardParams(defaultPanel = "overview") {
     issuePage: searchParams.get("issuePage") ?? "1",
     trendChart: searchParams.get("trendChart") ?? "",
     notesIssueKey: searchParams.get("notesIssueKey") ?? "",
-    insightsTab: searchParams.get("insightsTab") ?? "summary",
+    insightsTab: searchParams.get("insightsTab") ?? "evolution",
     insightsViewMode: searchParams.get("insightsViewMode") ?? "quincenal",
     insightsStatus: splitValue(searchParams.get("insightsStatus")),
     insightsPriority: splitValue(searchParams.get("insightsPriority")),

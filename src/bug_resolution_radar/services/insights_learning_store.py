@@ -14,13 +14,6 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
 def learning_scope_key(country: str, source_id: str) -> str:
     country_token = str(country or "").strip() or "global"
     source_token = str(source_id or "").strip() or "all-sources"
@@ -39,74 +32,30 @@ class InsightsLearningStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._raw: Dict[str, Any] = {"version": 2, "scopes": {}}
+        self._raw: Dict[str, Any] = {"version": 3, "scopes": {}}
 
     def load(self) -> None:
         if not self.path.exists():
-            self._raw = {"version": 2, "scopes": {}}
+            self._raw = {"version": 3, "scopes": {}}
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except Exception:
-            self._raw = {"version": 2, "scopes": {}}
+            self._raw = {"version": 3, "scopes": {}}
             return
-        if not isinstance(data, dict):
-            self._raw = {"version": 2, "scopes": {}}
+        if not isinstance(data, dict) or data.get("version") != 3:
+            self._raw = {"version": 3, "scopes": {}}
             return
         scopes = data.get("scopes")
         if not isinstance(scopes, dict):
             scopes = {}
-        self._raw = {"version": 2, "scopes": scopes}
+        self._raw = {"version": 3, "scopes": scopes}
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(self._raw, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path)
-
-    def get_scope(self, scope: str) -> Tuple[Dict[str, Any], int]:
-        scopes = _as_dict(self._raw.get("scopes"))
-        record = _as_dict(scopes.get(scope))
-        state = _as_dict(record.get("state"))
-        interactions = _safe_int(record.get("interactions"), default=0)
-        return state, interactions
-
-    def get_scope_bundle(self, scope: str) -> Tuple[Dict[str, Any], int, Dict[str, Any]]:
-        scopes = _as_dict(self._raw.get("scopes"))
-        record = _as_dict(scopes.get(scope))
-        state = _as_dict(record.get("state"))
-        interactions = _safe_int(record.get("interactions"), default=0)
-        snapshot = _as_dict(record.get("last_snapshot"))
-        return state, interactions, snapshot
-
-    def set_scope(
-        self,
-        scope: str,
-        *,
-        state: Dict[str, Any],
-        interactions: int,
-        country: str,
-        source_id: str,
-        snapshot: Dict[str, Any] | None = None,
-    ) -> None:
-        scopes = _as_dict(self._raw.get("scopes"))
-        current = _as_dict(scopes.get(scope))
-        resolved_snapshot = (
-            _as_dict(snapshot)
-            if isinstance(snapshot, dict)
-            else _as_dict(current.get("last_snapshot"))
-        )
-        scopes[scope] = {
-            "state": _as_dict(state),
-            "interactions": int(interactions),
-            "country": str(country or ""),
-            "source_id": str(source_id or ""),
-            "last_snapshot": resolved_snapshot,
-            "previous_snapshot": _as_dict(current.get("previous_snapshot")),
-            "updated_at": now_iso(),
-        }
-        self._raw["scopes"] = scopes
-        self._raw["version"] = 2
 
     def record_snapshot(
         self,
@@ -116,33 +65,29 @@ class InsightsLearningStore:
         country: str,
         source_id: str,
     ) -> Tuple[Dict[str, Any], bool]:
-        """Persist a distinct measurement and return its comparison baseline.
-
-        Re-reading the same data does not advance the baseline. This keeps every
-        chart in one application session aligned with the same prior measurement.
-        """
+        """Persist a distinct KPI measurement and return the previous one."""
         current_snapshot = _as_dict(snapshot)
         scopes = _as_dict(self._raw.get("scopes"))
         record = _as_dict(scopes.get(scope))
-        latest = _as_dict(record.get("last_snapshot"))
-        previous = _as_dict(record.get("previous_snapshot"))
+        measurements = [
+            _as_dict(item) for item in list(record.get("measurements") or []) if _as_dict(item)
+        ]
+        latest = measurements[-1] if measurements else {}
+        previous = measurements[-2] if len(measurements) > 1 else {}
         current_hash = json.dumps(current_snapshot, ensure_ascii=False, sort_keys=True)
         latest_hash = json.dumps(latest, ensure_ascii=False, sort_keys=True)
         if latest and current_hash == latest_hash:
             return previous, False
 
+        measurements.append(current_snapshot)
         scopes[scope] = {
-            **record,
-            "state": _as_dict(record.get("state")),
-            "interactions": _safe_int(record.get("interactions"), default=0) + 1,
             "country": str(country or ""),
             "source_id": str(source_id or ""),
-            "previous_snapshot": latest,
-            "last_snapshot": current_snapshot,
+            "measurements": measurements[-30:],
             "updated_at": now_iso(),
         }
         self._raw["scopes"] = scopes
-        self._raw["version"] = 2
+        self._raw["version"] = 3
         return latest, True
 
     def remove_source(self, source_id: str) -> int:
@@ -166,7 +111,7 @@ class InsightsLearningStore:
 
         if removed > 0:
             self._raw["scopes"] = kept
-            self._raw["version"] = 2
+            self._raw["version"] = 3
 
         return removed
 
@@ -193,5 +138,5 @@ class InsightsLearningStore:
     def clear_all(self) -> int:
         scopes = _as_dict(self._raw.get("scopes"))
         removed = len(scopes)
-        self._raw = {"version": 2, "scopes": {}}
+        self._raw = {"version": 3, "scopes": {}}
         return removed

@@ -75,6 +75,7 @@ from bug_resolution_radar.common.issue_links import (
     linkify_issue_references,
 )
 from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
+from bug_resolution_radar.reports.branding import add_corporate_lockup_to_all_slides
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
@@ -907,6 +908,25 @@ def validate_shapes_inside_slide(prs: Any) -> None:
             f"height={int(getattr(shape, 'height', 0) or 0)})"
         )
     raise ValueError("El informe contiene shapes fuera del canvas: " + "; ".join(details))
+
+
+def _clamp_minor_shape_overflow(prs: Any, *, tolerance_emu: int = 45_720) -> None:
+    """Trim sub-millimetre template overflow without masking real layout defects."""
+    slide_width = _safe_emu(getattr(prs, "slide_width", None), default=9_144_000)
+    slide_height = _safe_emu(getattr(prs, "slide_height", None), default=5_143_500)
+    tolerance = max(int(tolerance_emu), 0)
+    for slide in getattr(prs, "slides", []):
+        for shape in getattr(slide, "shapes", []):
+            left = int(getattr(shape, "left", 0) or 0)
+            top = int(getattr(shape, "top", 0) or 0)
+            width = int(getattr(shape, "width", 0) or 0)
+            height = int(getattr(shape, "height", 0) or 0)
+            right_overflow = left + width - slide_width
+            bottom_overflow = top + height - slide_height
+            if 0 < right_overflow <= tolerance and left >= 0:
+                shape.width = max(slide_width - left, 0)
+            if 0 < bottom_overflow <= tolerance and top >= 0:
+                shape.height = max(slide_height - top, 0)
 
 
 def _to_roman(value: int) -> str:
@@ -5016,6 +5036,8 @@ def generate_country_period_followup_ppt(
     )
 
     _remove_slide_number_artifacts(prs)
+    _clamp_minor_shape_overflow(prs)
+    add_corporate_lockup_to_all_slides(prs)
     validate_shapes_inside_slide(prs)
 
     buff = BytesIO()

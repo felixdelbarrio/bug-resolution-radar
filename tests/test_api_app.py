@@ -514,6 +514,7 @@ def test_intelligence_endpoint_returns_react_aligned_payload(
     assert response.status_code == 200
     payload = response.json()
     assert [tab["id"] for tab in payload["tabs"]] == [
+        "evolution",
         "summary",
         "functionality",
         "duplicates",
@@ -663,7 +664,7 @@ def test_helix_issue_rows_use_raw_executive_description_for_display_and_function
     assert [topic["topic"] for topic in topics] == ["Pagos"]
 
 
-def test_bootstrap_workspace_filter_options_include_real_functionalities(
+def test_workspace_filter_options_load_on_demand_with_real_functionalities(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -673,12 +674,12 @@ def test_bootstrap_workspace_filter_options_include_real_functionalities(
 
     client = TestClient(api_app.create_app())
     response = client.get(
-        "/api/bootstrap",
+        "/api/workspace",
         params={"country": "España", "sourceId": source_id, "scopeMode": "source"},
     )
 
     assert response.status_code == 200
-    filter_options = response.json()["workspace"]["filterOptions"]
+    filter_options = response.json()["filterOptions"]
     assert filter_options["status"] == ["Open"]
     assert filter_options["priority"] == ["High"]
     assert filter_options["assignee"] == ["Alice"]

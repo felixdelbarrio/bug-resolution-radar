@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.issues import critical_priority_mask, normalize_text_col
+from bug_resolution_radar.analytics.execution_evolution import build_execution_evolution
 
 
 @dataclass(frozen=True)
@@ -18,119 +18,15 @@ class EvolutionInsight:
     direction: str
 
 
-def _to_dt_naive(values: object) -> pd.Series:
-    series = values if isinstance(values, pd.Series) else pd.Series([], dtype=object)
-    ts = pd.to_datetime(series, errors="coerce", utc=True)
-    try:
-        return ts.dt.tz_localize(None)
-    except Exception:
-        return pd.Series([], dtype="datetime64[ns]")
-
-
-def _count(mask: pd.Series) -> int:
-    if not isinstance(mask, pd.Series) or mask.empty:
-        return 0
-    return int(mask.fillna(False).sum())
-
-
-def _reference_day(dff: pd.DataFrame, explicit: pd.Timestamp | str | None) -> pd.Timestamp:
-    if explicit is not None:
-        parsed = pd.to_datetime(explicit, errors="coerce", utc=True)
-        if pd.notna(parsed):
-            return pd.Timestamp(parsed).tz_convert(None).normalize()
-    candidates: list[pd.Timestamp] = []
-    for column in ("updated", "resolved", "created"):
-        if column not in dff.columns:
-            continue
-        values = _to_dt_naive(dff[column])
-        if values.notna().any():
-            candidates.append(pd.Timestamp(values.max()).normalize())
-    if candidates:
-        return max(candidates)
-    return pd.Timestamp.now("UTC").tz_localize(None).normalize()
-
-
 def build_operational_snapshot(
     *,
     dff: pd.DataFrame,
-    open_df: pd.DataFrame,
     reference_day: pd.Timestamp | str | None = None,
 ) -> dict[str, Any]:
-    """Build a compact, deterministic measurement for historical comparison."""
+    """Build the canonical learning measurement used across views and reports."""
     safe_dff = dff if isinstance(dff, pd.DataFrame) else pd.DataFrame()
-    safe_open = open_df if isinstance(open_df, pd.DataFrame) else pd.DataFrame()
-    ref = _reference_day(safe_dff, reference_day)
-
-    status = (
-        normalize_text_col(safe_open["status"], "(sin estado)").astype(str)
-        if "status" in safe_open.columns
-        else pd.Series([], dtype=str)
-    )
-    priority = (
-        normalize_text_col(safe_open["priority"], "(sin priority)").astype(str)
-        if "priority" in safe_open.columns
-        else pd.Series([], dtype=str)
-    )
-    created_open = (
-        _to_dt_naive(safe_open["created"])
-        if "created" in safe_open.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    updated_open = (
-        _to_dt_naive(safe_open["updated"])
-        if "updated" in safe_open.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    age_days = (
-        ((ref - created_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
-        if not created_open.empty
-        else pd.Series([], dtype=float)
-    )
-    stale_days = (
-        ((ref - updated_open).dt.total_seconds() / 86400.0).clip(lower=0.0)
-        if not updated_open.empty
-        else pd.Series([], dtype=float)
-    )
-
-    open_total = int(len(safe_open))
-    blocked_count = (
-        _count(status.str.casefold().str.contains("blocked|bloque", regex=True))
-        if not status.empty
-        else 0
-    )
-    critical_count = _count(critical_priority_mask(priority)) if not priority.empty else 0
-    aged30_count = _count(age_days > 30) if not age_days.empty else 0
-    stale_14_count = _count(stale_days > 14) if not stale_days.empty else 0
-
-    created_all = (
-        _to_dt_naive(safe_dff["created"])
-        if "created" in safe_dff.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    resolved_all = (
-        _to_dt_naive(safe_dff["resolved"])
-        if "resolved" in safe_dff.columns
-        else pd.Series([], dtype="datetime64[ns]")
-    )
-    from_14 = ref - pd.Timedelta(days=14)
-    created_14 = _count((created_all >= from_14) & (created_all <= ref))
-    resolved_14 = _count((resolved_all >= from_14) & (resolved_all <= ref))
-
-    return {
-        "reference_date": ref.date().isoformat(),
-        "open_total": open_total,
-        "aged30_count": aged30_count,
-        "aged30_pct": (aged30_count / open_total) if open_total else 0.0,
-        "blocked_count": blocked_count,
-        "blocked_pct": (blocked_count / open_total) if open_total else 0.0,
-        "critical_count": critical_count,
-        "critical_pct": (critical_count / open_total) if open_total else 0.0,
-        "stale_14_count": stale_14_count,
-        "stale_14_pct": (stale_14_count / open_total) if open_total else 0.0,
-        "created_14": created_14,
-        "resolved_14": resolved_14,
-        "net_14": created_14 - resolved_14,
-    }
+    evolution = build_execution_evolution(dff=safe_dff, reference_day=reference_day)
+    return dict(evolution["learningMeasurement"])
 
 
 def _measurement_label(current: dict[str, Any], baseline: dict[str, Any]) -> str:
@@ -173,10 +69,8 @@ def build_evolution_insight(
         )
 
     add_count("critical_count", "Prioridades críticas", 8.0)
-    add_count("blocked_count", "Bloqueadas", 6.0)
     add_count("aged30_count", "Cola >30 días", 5.0)
     add_count("open_total", "Backlog abierto", 4.0)
-    add_count("stale_14_count", "Sin movimiento >14 días", 3.0)
     add_count("net_14", "Balance neto 14d", 2.0, minimum=2)
     if not signals:
         return None

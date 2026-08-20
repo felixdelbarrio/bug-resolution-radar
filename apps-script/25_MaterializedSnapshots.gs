@@ -410,13 +410,14 @@ function _materializedViewPayload_(record, input) {
   }
   if (input.view === 'insights') {
     const catalog = _loadSnapshotPart_(record, 'insights/catalog');
-    const activeId = _materializedCatalogId_(catalog, input.insightsId, 'summary');
+    const activeId = _materializedCatalogId_(catalog, input.insightsId, 'evolution');
     const selected = _loadSnapshotPart_(record, 'insights/' + activeId);
     const insights = {
       tabs: catalog,
       activeTab: activeId
     };
-    if (activeId === 'summary') insights.periodSummary = selected.periodSummary || selected;
+    if (activeId === 'evolution') insights.executionEvolution = selected.executionEvolution || selected;
+    else if (activeId === 'summary') insights.periodSummary = selected.periodSummary || selected;
     else insights[activeId] = selected || {};
     return Object.assign({}, common, { insights: insights });
   }

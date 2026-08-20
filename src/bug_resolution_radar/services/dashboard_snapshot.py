@@ -20,6 +20,7 @@ from bug_resolution_radar.analytics.backlog_evolution import (
 )
 from bug_resolution_radar.analytics.duplicate_insights import prepare_duplicates_payload
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
+from bug_resolution_radar.analytics.execution_evolution import build_execution_evolution
 from bug_resolution_radar.analytics.filtering import (
     FilterState,
     apply_dashboard_issue_scope,
@@ -64,6 +65,7 @@ from bug_resolution_radar.analytics.period_functionality_followup import (
 )
 from bug_resolution_radar.analytics.period_summary import (
     QuincenalCountryResult,
+    _quincena_last_finished_only,
     build_country_quincenal_result,
     format_window_label,
     source_label_map,
@@ -113,6 +115,7 @@ _scope_context_cache: OrderedDict[tuple[Any, ...], tuple[float, "DashboardScopeC
 )
 _scope_context_cache_lock = Lock()
 _INSIGHTS_TABS = (
+    {"id": "evolution", "label": "Evolución"},
     {"id": "summary", "label": "Resumen quincenal"},
     {"id": "functionality", "label": "Por funcionalidad"},
     {"id": "duplicates", "label": "Duplicados"},
@@ -1236,7 +1239,7 @@ def build_trend_detail(
             "adaptedForTerminal": adapted_for_terminal,
         }
     pack = build_trend_insight_pack(str(chart_id or "").strip(), dff=dff, open_df=trend_open_df)
-    current_snapshot = build_operational_snapshot(dff=dff, open_df=trend_open_df)
+    current_snapshot = build_operational_snapshot(dff=context.scoped_df)
     baseline_snapshot = record_scope_measurement(
         settings,
         country=query.workspace.country,
@@ -2703,6 +2706,23 @@ def build_intelligence_snapshot(
     source_ids = list(context.source_ids)
     country_txt = str(query.workspace.country or "").strip()
     labels = source_label_map(settings, country=country_txt, source_ids=source_ids)
+    if build_all_tabs or active_tab == "evolution":
+        execution_evolution = build_execution_evolution(
+            dff=context.scoped_df,
+            last_finished_only=_quincena_last_finished_only(settings),
+        )
+        measurement = dict(execution_evolution.pop("learningMeasurement", {}) or {})
+        baseline = record_scope_measurement(
+            settings,
+            country=country_txt,
+            source_ids=source_ids,
+            snapshot=measurement,
+        )
+        execution_evolution["learning"] = {
+            "comparison": build_evolution_lines(measurement, baseline),
+        }
+    else:
+        execution_evolution = {}
     quincenal = (
         build_country_quincenal_result(
             df=dff,
@@ -2794,6 +2814,7 @@ def build_intelligence_snapshot(
     )
     return {
         "tabs": list(_INSIGHTS_TABS),
+        "executionEvolution": execution_evolution,
         "periodSummary": period_summary,
         "functionality": functionality,
         "duplicates": duplicates,

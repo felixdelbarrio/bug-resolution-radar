@@ -80,13 +80,58 @@ def _helix_revision_key(settings: Settings) -> tuple[str, int, int]:
         return str(path.resolve()), -1, -1
 
 
+def _raw_parquet_revision(path: str) -> tuple[str, int, int]:
+    raw_path = Path(path).with_suffix(".raw.parquet")
+    try:
+        stats = raw_path.stat()
+        return str(raw_path.resolve()), int(stats.st_mtime_ns), int(stats.st_size)
+    except Exception:
+        return str(raw_path.resolve()), -1, -1
+
+
+def _description_map_from_raw_parquet(path: str) -> dict[str, str] | None:
+    resolved = Path(path)
+    if not resolved.exists():
+        return None
+    try:
+        frame = pd.read_parquet(
+            resolved,
+            columns=["id", "source_id", "BBVA_ExecutiveDescription"],
+        )
+    except Exception:
+        return None
+    if frame.empty:
+        return {}
+
+    ids = frame["id"].fillna("").astype(str).str.strip().str.upper()
+    source_ids = frame["source_id"].fillna("").astype(str).str.strip().str.lower()
+    descriptions = frame["BBVA_ExecutiveDescription"].fillna("").astype(str).str.strip()
+    valid = ids.ne("") & descriptions.ne("")
+    out: dict[str, str] = {}
+    for item_id, source_id, description in zip(
+        ids.loc[valid],
+        source_ids.loc[valid],
+        descriptions.loc[valid],
+    ):
+        out.setdefault(item_id, description)
+        if source_id:
+            out.setdefault(f"{source_id}::{item_id}", description)
+    return out
+
+
 @lru_cache(maxsize=8)
 def _helix_executive_description_map_cached(
     path: str,
     mtime_ns: int,
     size: int,
+    raw_parquet_path: str,
+    raw_parquet_mtime_ns: int,
+    raw_parquet_size: int,
 ) -> dict[str, str]:
-    del mtime_ns, size
+    del mtime_ns, size, raw_parquet_mtime_ns, raw_parquet_size
+    parquet_map = _description_map_from_raw_parquet(raw_parquet_path)
+    if parquet_map is not None:
+        return parquet_map
     resolved = Path(path)
     if not resolved.exists():
         return {}
@@ -112,7 +157,15 @@ def _helix_executive_description_map_cached(
 
 def helix_executive_description_map(settings: Settings) -> dict[str, str]:
     path, mtime_ns, size = _helix_revision_key(settings)
-    return _helix_executive_description_map_cached(path, mtime_ns, size)
+    raw_path, raw_mtime_ns, raw_size = _raw_parquet_revision(path)
+    return _helix_executive_description_map_cached(
+        path,
+        mtime_ns,
+        size,
+        raw_path,
+        raw_mtime_ns,
+        raw_size,
+    )
 
 
 def enrich_issue_dataframe_with_helix(

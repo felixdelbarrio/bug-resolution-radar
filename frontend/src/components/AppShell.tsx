@@ -17,6 +17,7 @@ import {
 } from "../lib/api";
 import { cn } from "../lib/cn";
 import { configureSemanticColors } from "../lib/semanticColors";
+import { CorporateLockup } from "./CorporateLockup";
 
 const dashboardTabs = [
   ["overview", "Resumen"],
@@ -260,6 +261,7 @@ export function AppShell() {
     <div className="app-shell">
       <header className="bbva-hero">
         <div className="bbva-hero-copy">
+          <CorporateLockup brand={bootstrap.data?.brand} className="corporate-lockup-hero" />
           <h1 className="bbva-hero-title">{heroTitle}</h1>
           <p className="bbva-hero-sub">Análisis y seguimiento de incidencias</p>
         </div>

@@ -13,6 +13,12 @@ export type WorkspaceSource = {
   service_origin_n2?: string;
 };
 
+export type CorporateBrandContract = {
+  name: string;
+  wordmark: string;
+  descriptorLines: string[];
+};
+
 export type WorkspaceData = {
   countries: Array<{ country: string; sourceCount: number }>;
   sources: WorkspaceSource[];
@@ -33,6 +39,7 @@ export type WorkspaceData = {
 
 export type BootstrapPayload = {
   appTitle: string;
+  brand: CorporateBrandContract;
   theme: string;
   defaultFilters: {
     status: string[];
@@ -223,8 +230,57 @@ export type FinalistDiscrepanciesPayload = {
   truncated: boolean;
 };
 
+export type EvolutionMetricPayload = {
+  id: string;
+  label: string;
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  unit: "count" | "days";
+  tone: "positive" | "negative" | "neutral";
+};
+
+export type EvolutionFlowPayload = {
+  label: string;
+  start: string;
+  end: string;
+  backlogStart: number;
+  backlogEnd: number;
+  backlogDelta: number;
+  created: number;
+  closed: number;
+  netFlow: number;
+  resolutionDays: number | null;
+  criticalOpen: number;
+  aged30Open: number;
+};
+
+export type ExecutionEvolutionPayload = {
+  hasData: boolean;
+  referenceDate: string;
+  year: number;
+  executive: {
+    tone: "positive" | "negative" | "neutral" | "mixed";
+    title: string;
+    summary: string;
+    focus: string[];
+  };
+  annual: EvolutionFlowPayload & {
+    kpis: EvolutionMetricPayload[];
+  };
+  fortnight: {
+    current: EvolutionFlowPayload;
+    previous: EvolutionFlowPayload;
+    kpis: EvolutionMetricPayload[];
+  };
+  period: EvolutionFlowPayload & { summary: string; focus: string[] };
+  timeline: EvolutionFlowPayload[];
+  learning: { comparison: string[] };
+};
+
 export type IntelligencePayload = {
   tabs: Array<{ id: string; label: string }>;
+  executionEvolution: ExecutionEvolutionPayload;
   periodSummary: {
     caption: string;
     cards: Array<{

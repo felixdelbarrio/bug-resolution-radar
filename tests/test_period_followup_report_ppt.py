@@ -140,6 +140,22 @@ def _table_intersects_picture(slide: Any, table_shape: Any) -> bool:
     return False
 
 
+def test_minor_template_overflow_is_trimmed_before_validation() -> None:
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = slide.shapes.add_textbox(
+        100_000,
+        int(prs.slide_height) - 20_000,
+        300_000,
+        40_000,
+    )
+
+    period_ppt_mod._clamp_minor_shape_overflow(prs)
+
+    assert int(shape.top) + int(shape.height) == int(prs.slide_height)
+    period_ppt_mod.validate_shapes_inside_slide(prs)
+
+
 def _assert_native_table_font_floor(table_shape: Any) -> None:
     table = table_shape.table
     for ridx, row in enumerate(table.rows):
