@@ -75,7 +75,7 @@ from bug_resolution_radar.common.issue_links import (
     linkify_issue_references,
 )
 from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
-from bug_resolution_radar.reports.branding import add_corporate_lockup_to_all_slides
+from bug_resolution_radar.reports.branding import apply_corporate_branding
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
@@ -5037,7 +5037,7 @@ def generate_country_period_followup_ppt(
 
     _remove_slide_number_artifacts(prs)
     _clamp_minor_shape_overflow(prs)
-    add_corporate_lockup_to_all_slides(prs)
+    apply_corporate_branding(prs)
     validate_shapes_inside_slide(prs)
 
     buff = BytesIO()

@@ -13,6 +13,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
+from pptx.util import Inches
 
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
@@ -926,6 +927,47 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
     assert period_shape.text_frame.word_wrap is False
     assert int(period_shape.text_frame.margin_left) > 0
     assert int(period_shape.text_frame.margin_right) > 0
+
+    cover_wordmark = next(
+        shape
+        for shape in prs.slides[0].shapes
+        if shape.name == "BBVA Corporate Lockup cover Wordmark"
+    )
+    assert cover_wordmark.text == "BBVA"
+    assert cover_wordmark.text_frame.paragraphs[0].runs[0].font.color.rgb == RGBColor(255, 255, 255)
+
+    section_slides = [
+        slide
+        for slide in prs.slides
+        if any(shape.name.endswith("section Wordmark") for shape in slide.shapes)
+    ]
+    assert len(section_slides) >= 3
+    for slide in section_slides:
+        wordmark = next(shape for shape in slide.shapes if shape.name.endswith("section Wordmark"))
+        assert (wordmark.left, wordmark.top) == (cover_wordmark.left, cover_wordmark.top)
+        background = next(
+            shape for shape in slide.shapes if shape.name == "BBVA Corporate Full Bleed Background"
+        )
+        assert (background.left, background.top) == (0, 0)
+        assert (background.width, background.height) == (prs.slide_width, prs.slide_height)
+
+    for slide in prs.slides:
+        lockup_shapes = [
+            shape for shape in slide.shapes if shape.name.startswith("BBVA Corporate Lockup")
+        ]
+        assert len(lockup_shapes) == 3
+        content_wordmarks = [
+            shape for shape in lockup_shapes if shape.name.endswith("content Wordmark")
+        ]
+        if content_wordmarks:
+            wordmark = content_wordmarks[0]
+            descriptor = next(
+                shape for shape in lockup_shapes if shape.name.endswith("content Descriptor")
+            )
+            assert wordmark.top < int(prs.slide_height * 0.10)
+            assert int(descriptor.left) + int(descriptor.width) > int(
+                prs.slide_width - Inches(0.25)
+            )
 
 
 def test_resolution_chart_uses_executive_fonts_and_column_totals(monkeypatch: Any) -> None:
@@ -2100,12 +2142,16 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
             cover.shapes[0].fill.fore_color.rgb
             == section_cover_template.shapes[0].fill.fore_color.rgb
         )
-        assert cover.shapes[1].left == section_cover_title.left
-        assert cover.shapes[1].top == section_cover_title.top
-        assert cover.shapes[1].width == section_cover_title.width
-        assert cover.shapes[1].height == section_cover_title.height
-        assert cover.shapes[1].text == expected_title
-        assert cover.shapes[1].text_frame.paragraphs[0].runs[0].font.name == (
+        cover_title = next(
+            shape
+            for shape in cover.shapes
+            if getattr(shape, "has_text_frame", False) and shape.text == expected_title
+        )
+        assert cover_title.left == section_cover_title.left
+        assert cover_title.top == section_cover_title.top
+        assert cover_title.width == section_cover_title.width
+        assert cover_title.height == section_cover_title.height
+        assert cover_title.text_frame.paragraphs[0].runs[0].font.name == (
             section_cover_title.text_frame.paragraphs[0].runs[0].font.name
         )
 

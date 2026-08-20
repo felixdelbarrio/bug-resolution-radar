@@ -51,7 +51,7 @@ from bug_resolution_radar.analytics.trend_insights import (
     build_trend_insight_pack,
 )
 from bug_resolution_radar.config import Settings, all_configured_sources
-from bug_resolution_radar.reports.branding import add_corporate_lockup_to_all_slides
+from bug_resolution_radar.reports.branding import apply_corporate_branding
 from bug_resolution_radar.reports.plotly_png import render_plotly_figure_png
 from bug_resolution_radar.repositories.issues_store import load_issues_df
 from bug_resolution_radar.theme.design_tokens import (
@@ -2924,7 +2924,7 @@ def _compose_presentation(context: _ScopeContext) -> Any:
         _add_chart_insight_slide(prs, context=context, section=section, index=idx, total=total)
 
     _add_final_summary_slide(prs, context)
-    add_corporate_lockup_to_all_slides(prs)
+    apply_corporate_branding(prs)
     return prs
 
 
