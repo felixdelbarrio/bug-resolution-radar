@@ -9,9 +9,7 @@ CORPORATE_DESCRIPTOR_LINES: Final[tuple[str, str]] = (
     "Banca de Empresas",
     "e Instituciones",
 )
-CORPORATE_BRAND_NAME: Final[str] = (
-    f"{CORPORATE_WORDMARK} {' '.join(CORPORATE_DESCRIPTOR_LINES)}"
-)
+CORPORATE_BRAND_NAME: Final[str] = f"{CORPORATE_WORDMARK} {' '.join(CORPORATE_DESCRIPTOR_LINES)}"
 
 
 def frontend_brand_contract() -> dict[str, object]:

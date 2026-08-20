@@ -43,17 +43,16 @@ def test_execution_evolution_reconstructs_year_and_fortnight_flows() -> None:
     assert result["referenceDate"] == "2026-08-20"
     previous = result["fortnight"]["previous"]
     current = result["fortnight"]["current"]
-    assert {key: previous[key] for key in (
-        "backlogStart", "backlogEnd", "created", "closed"
-    )} == {
+    assert {key: previous[key] for key in ("backlogStart", "backlogEnd", "created", "closed")} == {
         "backlogStart": 2,
         "backlogEnd": 2,
         "created": 2,
         "closed": 2,
     }
-    assert {key: current[key] for key in (
-        "backlogStart", "backlogEnd", "created", "closed", "criticalOpen", "aged30Open"
-    )} == {
+    assert {
+        key: current[key]
+        for key in ("backlogStart", "backlogEnd", "created", "closed", "criticalOpen", "aged30Open")
+    } == {
         "backlogStart": 2,
         "backlogEnd": 4,
         "created": 4,
@@ -67,7 +66,11 @@ def test_execution_evolution_reconstructs_year_and_fortnight_flows() -> None:
     assert result["annual"]["closed"] == 4
     assert len(result["timeline"]) == 16
 
-    for period in (result["annual"], result["fortnight"]["previous"], result["fortnight"]["current"]):
+    for period in (
+        result["annual"],
+        result["fortnight"]["previous"],
+        result["fortnight"]["current"],
+    ):
         assert period["backlogDelta"] == period["created"] - period["closed"]
         assert period["backlogEnd"] == period["backlogStart"] + period["backlogDelta"]
 
@@ -87,7 +90,10 @@ def test_execution_evolution_never_invents_critical_incidents() -> None:
 
     assert result["period"]["criticalOpen"] == 0
     assert all(not line.startswith("Criticidad:") for line in result["period"]["focus"])
-    assert "No hay incidencias abiertas de criticidad alta o muy alta" in result["executive"]["summary"]
+    assert (
+        "No hay incidencias abiertas de criticidad alta o muy alta"
+        in result["executive"]["summary"]
+    )
 
 
 def test_execution_evolution_is_complete_for_an_empty_scope() -> None:

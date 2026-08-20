@@ -372,9 +372,7 @@ def _newsletter_facts(
     focus_card = by_id.get("open_focus", {})
     focus_label = str(focus_card.get("label") or "Foco abierto")
     resolution_value = current_period.get("resolutionDays")
-    resolution_current = (
-        f"{float(resolution_value):.1f}d" if resolution_value is not None else "—"
-    )
+    resolution_current = f"{float(resolution_value):.1f}d" if resolution_value is not None else "—"
     backlog_delta = current_open - previous_open
 
     aged_open = _metric_int(current_period.get("aged30Open"))

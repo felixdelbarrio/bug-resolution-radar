@@ -772,7 +772,7 @@ def create_app() -> FastAPI:
         started = time.perf_counter()
         status_code = 500
         try:
-            response = await call_next(request)
+            response: Response = await call_next(request)
             status_code = int(response.status_code)
             return response
         finally:

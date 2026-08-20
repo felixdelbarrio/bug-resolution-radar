@@ -51,7 +51,11 @@ def _reference_day(frame: pd.DataFrame, explicit: pd.Timestamp | str | None) -> 
 
 
 def _between(values: pd.Series, start: date, end: date) -> pd.Series:
-    return values.dt.normalize().between(pd.Timestamp(start), pd.Timestamp(end), inclusive="both").fillna(False)
+    return (
+        values.dt.normalize()
+        .between(pd.Timestamp(start), pd.Timestamp(end), inclusive="both")
+        .fillna(False)
+    )
 
 
 def _open_mask(frame: NormalizedIssueFrame, day: date) -> pd.Series:
@@ -74,9 +78,7 @@ def _flow_metrics(
     closed_mask = _between(frame.finalized_at, start, end)
     start_open = _open_mask(frame, (pd.Timestamp(start) - pd.Timedelta(days=1)).date())
     end_open = _open_mask(frame, end)
-    resolution_days = (
-        (frame.resolved_at - frame.created_at).dt.total_seconds() / 86400.0
-    )
+    resolution_days = (frame.resolved_at - frame.created_at).dt.total_seconds() / 86400.0
     resolved_mask = _between(frame.resolved_at, start, end) & resolution_days.ge(0).fillna(False)
     resolved_values = resolution_days.loc[resolved_mask].dropna()
     end_created = frame.created_at.loc[end_open]
@@ -307,11 +309,15 @@ def build_execution_evolution(
             "kpis": [
                 _metric("backlog", "Backlog al cierre", current.backlog_end, previous.backlog_end),
                 _metric("created", "Creadas", current.created, previous.created),
-                _metric("closed", "Cerradas", current.closed, previous.closed, lower_is_better=False),
+                _metric(
+                    "closed", "Cerradas", current.closed, previous.closed, lower_is_better=False
+                ),
                 _metric(
                     "resolution",
                     "Resolución media",
-                    round(current.resolution_days, 1) if current.resolution_days is not None else None,
+                    round(current.resolution_days, 1)
+                    if current.resolution_days is not None
+                    else None,
                     round(previous.resolution_days, 1)
                     if previous.resolution_days is not None
                     else None,

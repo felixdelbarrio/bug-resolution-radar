@@ -70,9 +70,7 @@ def test_store_builds_backend_and_frontend_summary(tmp_path: Path) -> None:
     assert len(exported["events"]) == 2
 
 
-def test_api_accepts_sanitized_events_and_exports_json(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_api_accepts_sanitized_events_and_exports_json(tmp_path: Path, monkeypatch) -> None:
     telemetry_file = tmp_path / "telemetry.jsonl"
     export_dir = tmp_path / "configured-downloads"
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_TELEMETRY_PATH", str(telemetry_file))

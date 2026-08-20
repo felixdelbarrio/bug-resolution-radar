@@ -49,10 +49,7 @@ def _slide_is_dark(slide: Any, *, slide_width: int, slide_height: int) -> bool:
         if rgb is not None:
             return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) < 125
     rgb = _fill_rgb(getattr(getattr(slide, "background", None), "fill", None))
-    return bool(
-        rgb is not None
-        and (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) < 125
-    )
+    return bool(rgb is not None and (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) < 125)
 
 
 def add_corporate_lockup(

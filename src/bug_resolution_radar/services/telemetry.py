@@ -164,7 +164,9 @@ class TelemetryStore:
         clean = [sanitize_event(event) for event in events]
         if not clean:
             return 0
-        lines = "".join(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n" for event in clean)
+        lines = "".join(
+            json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n" for event in clean
+        )
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as handle:
@@ -208,12 +210,17 @@ class TelemetryStore:
         return [
             row
             for row in rows
-            if (_parse_timestamp(row.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff
+            if (_parse_timestamp(row.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc))
+            >= cutoff
         ]
 
     def summary(self, *, days: int = DEFAULT_RETENTION_DAYS) -> dict[str, Any]:
         rows = self.events(days=days)
-        durations = [float(row.get("durationMs") or 0) for row in rows if float(row.get("durationMs") or 0) > 0]
+        durations = [
+            float(row.get("durationMs") or 0)
+            for row in rows
+            if float(row.get("durationMs") or 0) > 0
+        ]
         by_layer = Counter(str(row.get("layer") or "unknown") for row in rows)
         by_status = Counter(str(row.get("status") or "unknown") for row in rows)
         grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
