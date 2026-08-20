@@ -16,7 +16,6 @@ import {
   type WorkspaceData
 } from "../lib/api";
 import { cn } from "../lib/cn";
-import { configureSemanticColors } from "../lib/semanticColors";
 import { CorporateLockup } from "./CorporateLockup";
 
 const dashboardTabs = [
@@ -131,10 +130,6 @@ export function AppShell() {
     document.documentElement.dataset.theme = themeMode;
     applyThemeContract(bootstrap.data?.designTokens?.theme, themeMode);
   }, [bootstrap.data?.designTokens?.theme, themeMode]);
-
-  useEffect(() => {
-    configureSemanticColors(bootstrap.data?.designTokens?.semantic ?? null);
-  }, [bootstrap.data?.designTokens?.semantic]);
 
   useEffect(() => {
     document.title = heroTitle;

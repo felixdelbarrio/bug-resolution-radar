@@ -358,8 +358,7 @@ def test_bootstrap_infers_workspace_sources_from_data_when_settings_are_empty(
     assert payload["workspace"]["filterOptions"]["quincenal"][0] == "Todas"
     assert "designTokens" in payload
     assert "theme" in payload["designTokens"]
-    assert "semantic" in payload["designTokens"]
-    assert payload["designTokens"]["semantic"]["statusByKey"]["new"] == "#E85D63"
+    assert set(payload["designTokens"]) == {"theme"}
     assert "--bbva-primary" in payload["designTokens"]["theme"]["light"]
 
 

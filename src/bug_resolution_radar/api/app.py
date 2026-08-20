@@ -126,7 +126,6 @@ from bug_resolution_radar.services.workspace import (
 )
 from bug_resolution_radar.theme.brand_identity import frontend_brand_contract
 from bug_resolution_radar.theme.design_tokens import frontend_theme_tokens
-from bug_resolution_radar.theme.semantic_colors import semantic_color_contract
 
 LOGGER = logging.getLogger(__name__)
 
@@ -831,7 +830,6 @@ def create_app() -> FastAPI:
             ],
             "designTokens": {
                 "theme": frontend_theme_tokens(),
-                "semantic": semantic_color_contract(),
             },
             "permissionsPolicy": {
                 "reports": "Solo se genera o descarga bajo acción explícita del usuario.",
