@@ -24,8 +24,8 @@ from bug_resolution_radar.theme.design_tokens import (
 )
 
 _EMU_PER_INCH = 914_400
+_CORPORATE_PREFIX = "BBVA Corporate"
 _LOCKUP_PREFIX = "BBVA Corporate Lockup"
-_FULL_BLEED_BACKGROUND_NAME = "BBVA Corporate Full Bleed Background"
 
 
 class SlideBrandRole(StrEnum):
@@ -99,11 +99,7 @@ def _remove_existing_branding(slide: Any) -> None:
         text = (
             str(getattr(shape, "text", "") or "") if getattr(shape, "has_text_frame", False) else ""
         )
-        if (
-            name.startswith(_LOCKUP_PREFIX)
-            or name == _FULL_BLEED_BACKGROUND_NAME
-            or _is_brand_text(text)
-        ):
+        if name.startswith(_CORPORATE_PREFIX) or _is_brand_text(text):
             _remove_shape(shape)
 
 
@@ -150,14 +146,7 @@ def _role_for_slide(
     return SlideBrandRole.CONTENT
 
 
-def _send_to_back(slide: Any, shape: Any) -> None:
-    tree = slide.shapes._spTree
-    element = shape.element
-    tree.remove(element)
-    tree.insert(2, element)
-
-
-def _make_full_bleed_background(
+def _set_full_bleed_background(
     slide: Any,
     *,
     role: SlideBrandRole,
@@ -172,18 +161,27 @@ def _make_full_bleed_background(
     color = (
         _fill_rgb(getattr(dominant, "fill", None)) if role == SlideBrandRole.SECTION else None
     ) or hex_to_rgb(BBVA_ELECTRIC)
-    background = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        0,
-        0,
-        int(slide_width),
-        int(slide_height),
-    )
-    background.name = _FULL_BLEED_BACKGROUND_NAME
-    background.fill.solid()
-    background.fill.fore_color.rgb = RGBColor(*color)
-    background.line.fill.background()
-    _send_to_back(slide, background)
+    fill = slide.background.fill
+    fill.solid()
+    fill.fore_color.rgb = RGBColor(*color)
+
+
+def _remove_inherited_brand_artifacts(slide: Any) -> None:
+    """Remove obsolete BBVA-only artwork inherited from cover/divider layouts."""
+    layout = getattr(slide, "slide_layout", None)
+    for shape in list(getattr(layout, "shapes", ())):
+        text = (
+            str(getattr(shape, "text", "") or "") if getattr(shape, "has_text_frame", False) else ""
+        )
+        is_small_top_left_picture = (
+            getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+            and int(getattr(shape, "left", 0) or 0) < int(Inches(2.0))
+            and int(getattr(shape, "top", 0) or 0) < int(Inches(1.0))
+            and int(getattr(shape, "width", 0) or 0) < int(Inches(2.0))
+            and int(getattr(shape, "height", 0) or 0) < int(Inches(1.0))
+        )
+        if is_small_top_left_picture or _is_brand_text(text):
+            _remove_shape(shape)
 
 
 def _lockup_geometry(
@@ -312,12 +310,13 @@ def apply_corporate_branding(presentation: Any) -> None:
             slide_height=slide_height,
         )
         if role in {SlideBrandRole.COVER, SlideBrandRole.SECTION}:
-            _make_full_bleed_background(
+            _set_full_bleed_background(
                 slide,
                 role=role,
                 slide_width=slide_width,
                 slide_height=slide_height,
             )
+            _remove_inherited_brand_artifacts(slide)
         _add_lockup(
             slide,
             role=role,

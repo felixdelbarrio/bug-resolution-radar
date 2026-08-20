@@ -945,11 +945,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
     for slide in section_slides:
         wordmark = next(shape for shape in slide.shapes if shape.name.endswith("section Wordmark"))
         assert (wordmark.left, wordmark.top) == (cover_wordmark.left, cover_wordmark.top)
-        background = next(
-            shape for shape in slide.shapes if shape.name == "BBVA Corporate Full Bleed Background"
-        )
-        assert (background.left, background.top) == (0, 0)
-        assert (background.width, background.height) == (prs.slide_width, prs.slide_height)
+        assert slide.background.fill.fore_color.rgb == RGBColor(0, 19, 145)
 
     for slide in prs.slides:
         lockup_shapes = [

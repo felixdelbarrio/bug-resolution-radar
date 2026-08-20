@@ -76,15 +76,8 @@ def test_brand_contract_and_presentation_lockup_are_canonical() -> None:
     )
     assert int(content_title.left) + int(content_title.width) < int(content_wordmark.left)
 
-    for slide in (cover_slide, section_slide):
-        full_bleed = next(
-            shape for shape in slide.shapes if shape.name == "BBVA Corporate Full Bleed Background"
-        )
-        assert (full_bleed.left, full_bleed.top) == (0, 0)
-        assert (full_bleed.width, full_bleed.height) == (
-            presentation.slide_width,
-            presentation.slide_height,
-        )
+    assert cover_slide.background.fill.fore_color.rgb == RGBColor(0, 19, 145)
+    assert section_slide.background.fill.fore_color.rgb == RGBColor(7, 14, 70)
     assert (
         sum(
             1
