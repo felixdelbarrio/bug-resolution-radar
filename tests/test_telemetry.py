@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from bug_resolution_radar.api.app import create_app
+from bug_resolution_radar.config import Settings
 from bug_resolution_radar.services.telemetry import TelemetryStore, sanitize_event
 
 
@@ -73,7 +74,12 @@ def test_api_accepts_sanitized_events_and_exports_json(
     tmp_path: Path, monkeypatch
 ) -> None:
     telemetry_file = tmp_path / "telemetry.jsonl"
+    export_dir = tmp_path / "configured-downloads"
     monkeypatch.setenv("BUG_RESOLUTION_RADAR_TELEMETRY_PATH", str(telemetry_file))
+    monkeypatch.setattr(
+        "bug_resolution_radar.api.app.load_settings",
+        lambda: Settings(REPORT_PPT_DOWNLOAD_DIR=str(export_dir)),
+    )
     client = TestClient(create_app())
 
     accepted = client.post(
@@ -91,14 +97,16 @@ def test_api_accepts_sanitized_events_and_exports_json(
         },
     )
     summary = client.get("/api/telemetry/summary?days=30")
-    exported = client.get("/api/telemetry/export?days=30")
+    exported = client.post("/api/telemetry/export/save", json={"days": 30})
 
     assert accepted.status_code == 200
     assert accepted.json() == {"accepted": 1}
     assert summary.json()["eventCount"] == 1
     assert summary.json()["errorCount"] == 1
     assert exported.status_code == 200
-    assert exported.headers["content-type"].startswith("application/json")
-    assert "attachment" in exported.headers["content-disposition"]
-    assert "do not persist" not in exported.text
-    assert exported.json()["events"][0]["details"] == {"metric": "render"}
+    saved_path = Path(exported.json()["savedPath"])
+    assert saved_path.parent == export_dir
+    assert saved_path.suffix == ".json"
+    saved_payload = json.loads(saved_path.read_text(encoding="utf-8"))
+    assert "do not persist" not in saved_path.read_text(encoding="utf-8")
+    assert saved_payload["events"][0]["details"] == {"metric": "render"}

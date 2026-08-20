@@ -700,6 +700,10 @@ class TelemetryBatchRequest(BaseModel):
     events: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
 
 
+class TelemetryExportSaveRequest(BaseModel):
+    days: int = Field(default=30, ge=1, le=90)
+
+
 def _report_saved_payload(
     *,
     saved_path: Path,
@@ -1397,18 +1401,19 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         return telemetry.summary(days=days)
 
-    @app.get("/api/telemetry/export")
-    def get_telemetry_export(
-        days: int = Query(30, ge=1, le=90),
-    ) -> Response:
-        payload = telemetry.export(days=days)
+    @app.post("/api/telemetry/export/save")
+    def post_telemetry_export_save(
+        request_payload: TelemetryExportSaveRequest,
+    ) -> dict[str, Any]:
+        payload = telemetry.export(days=request_payload.days)
         content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         filename = f"radar_telemetria_codex_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        return Response(
+        export_path = save_download_content(
+            load_settings(),
+            file_name=filename,
             content=content,
-            media_type="application/json",
-            headers=_download_headers(filename),
         )
+        return _saved_file_payload(export_path, file_name=filename)
 
     @app.put("/api/settings")
     def put_settings(payload: dict[str, Any]) -> dict[str, Any]:

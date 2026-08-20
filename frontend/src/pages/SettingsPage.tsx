@@ -783,25 +783,10 @@ export function SettingsPage() {
     trackTelemetry("telemetry_export_requested");
     try {
       await flushTelemetry();
-      const response = await fetch(`/api/telemetry/export?days=${telemetryDays}`, {
-        credentials: "same-origin"
+      const saved = await postJson<SavedFilePayload>("/api/telemetry/export/save", {
+        days: telemetryDays
       });
-      if (!response.ok) {
-        throw new Error(`No se pudo generar la telemetría (${response.status}).`);
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("Content-Disposition") ?? "";
-      const fileName =
-        disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? "radar_telemetria_codex.json";
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      setFlashMessage("Telemetría descargada. El JSON está preparado para compartir con Codex.");
+      setFlashMessage(`Telemetría guardada en ${saved.savedPath}`);
       await telemetrySummary.refetch();
     } catch (error) {
       setFlashMessage(error instanceof Error ? error.message : "No se pudo descargar la telemetría.");
