@@ -104,30 +104,11 @@ function _configuredReportDriveFolder_() {
   return folder;
 }
 
-function _exactReportBlob_(fileId, expectedSha256, expectedBytes, fileName) {
-  _assert_(Number(expectedBytes) <= RADAR.maxReportBytes,
-    'El PPTX supera 20 MB y no puede adjuntarse de forma segura a la newsletter.',
-    'ATTACHMENT_TOO_LARGE');
-  let blob;
-  try {
-    blob = DriveApp.getFileById(_text_(fileId)).getBlob().setName(_text_(fileName));
-  } catch (err) {
-    const error = new Error('El PPTX exacto ya no está disponible en Google Drive.');
-    error.code = 'NOT_FOUND';
-    throw error;
-  }
-  const bytes = blob.getBytes();
-  _assert_(bytes.length === Number(expectedBytes) &&
-    _sha256Bytes_(bytes) === _text_(expectedSha256),
-  'El PPTX conservado no coincide con el artefacto importado.', 'SNAPSHOT_CORRUPT');
-  return blob;
-}
-
 function _importExactReportArtifacts_(reportBlob, projection, folder) {
   const report = projection.report;
   _assert_(Number(report.bytes) <= RADAR.maxReportBytes,
-    'El PPTX supera 20 MB y no puede publicarse y adjuntarse con garantías.',
-    'ATTACHMENT_TOO_LARGE');
+    'El PPTX supera 20 MB y no puede publicarse con garantías.',
+    'TRANSFER_TOO_LARGE');
   const fileName = _sanitizeText_(report.fileName, 240);
   const slidesName = fileName.replace(/\.pptx$/i, '');
   let pptxId = '';

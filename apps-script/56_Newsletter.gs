@@ -247,20 +247,19 @@ function _newsletterMimeText_(value) {
   );
 }
 
-function _newsletterMimeBytes_(bytes) {
-  return _newsletterWrapBase64_(Utilities.base64Encode(bytes));
+function _newsletterSenderName_(country) {
+  const geography = _sanitizeText_(country, 80) || 'Global';
+  return RADAR.appName + ' - ' + geography;
 }
 
-function _newsletterMimeMessage_(recipient, subject, rendered, attachment, sender) {
+function _newsletterMimeMessage_(recipient, subject, rendered, sender, senderName) {
   const normalizedRecipient = _canonicalEmail_(recipient);
   _assert_(normalizedRecipient, 'El destinatario de la newsletter no es válido.', 'VALIDATION_ERROR');
   const token = Utilities.getUuid().replace(/-/g, '');
-  const mixedBoundary = 'radar_mixed_' + token;
   const alternativeBoundary = 'radar_alternative_' + token;
-  const fileName = _text_(attachment.getName()) || 'bug-resolution-radar.pptx';
   const crlf = '\r\n';
   const mime = [
-    'From: ' + _newsletterEncodedHeader_(RADAR.corporateBrand) + ' <' + sender.effective + '>',
+    'From: ' + _newsletterEncodedHeader_(senderName) + ' <' + sender.effective + '>',
     'Reply-To: ' + sender.effective,
     'To: ' + normalizedRecipient,
     'Subject: ' + _newsletterEncodedHeader_(subject),
@@ -268,9 +267,6 @@ function _newsletterMimeMessage_(recipient, subject, rendered, attachment, sende
     'Message-ID: <' + token + '@bug-resolution-radar.bbva.com>',
     'X-Bug-Resolution-Radar-Version: ' + RADAR.appVersion,
     'MIME-Version: 1.0',
-    'Content-Type: multipart/mixed; boundary="' + mixedBoundary + '"',
-    '',
-    '--' + mixedBoundary,
     'Content-Type: multipart/alternative; boundary="' + alternativeBoundary + '"',
     '',
     '--' + alternativeBoundary,
@@ -284,15 +280,6 @@ function _newsletterMimeMessage_(recipient, subject, rendered, attachment, sende
     '',
     _newsletterMimeText_(rendered.html),
     '--' + alternativeBoundary + '--',
-    '',
-    '--' + mixedBoundary,
-    'Content-Type: application/vnd.openxmlformats-officedocument.presentationml.presentation; name="' +
-      _newsletterEncodedHeader_(fileName) + '"',
-    'Content-Transfer-Encoding: base64',
-    'Content-Disposition: attachment; filename="' + _newsletterEncodedHeader_(fileName) + '"',
-    '',
-    _newsletterMimeBytes_(attachment.getBytes()),
-    '--' + mixedBoundary + '--',
     ''
   ].join(crlf);
   return {
@@ -301,12 +288,12 @@ function _newsletterMimeMessage_(recipient, subject, rendered, attachment, sende
   };
 }
 
-function _newsletterDeliver_(recipients, subject, rendered, attachment, sender) {
+function _newsletterDeliver_(recipients, subject, rendered, sender, senderName) {
   const deliveries = [];
   const failures = [];
   recipients.forEach(function (recipient) {
     try {
-      const message = _newsletterMimeMessage_(recipient, subject, rendered, attachment, sender);
+      const message = _newsletterMimeMessage_(recipient, subject, rendered, sender, senderName);
       const accepted = Gmail.Users.Messages.send({ raw: message.raw }, 'me');
       if (!accepted || !_text_(accepted.id)) {
         throw new Error('Gmail API no ha devuelto un identificador de mensaje.');
@@ -566,12 +553,7 @@ function sendPeriodNewsletter(reportId, mode) {
         (sender.executor || 'el propietario del despliegue') + ' (' + sender.verificationStatus + '). ' +
         _newsletterSenderAction_(sender),
       'NEWSLETTER_SENDER_UNAVAILABLE');
-    const attachment = _exactReportBlob_(
-      context.record.pptx_file_id,
-      context.record.pptx_sha256,
-      context.record.pptx_bytes,
-      context.record.report_name
-    );
+    const senderName = _newsletterSenderName_(context.record.country);
     const authoredSubject = _sanitizeText_(context.newsletter.draft.subject, 220);
     const subject = deliveryMode === 'test' ? '[PRUEBA] ' + authoredSubject : authoredSubject;
     const newsletterId = _uuid_();
@@ -624,7 +606,7 @@ function sendPeriodNewsletter(reportId, mode) {
       const pendingRecipients = recipients.filter(function (recipient) {
         return !previouslyDelivered.has(_canonicalEmail_(recipient));
       });
-      const outcome = _newsletterDeliver_(pendingRecipients, subject, rendered, attachment, sender);
+      const outcome = _newsletterDeliver_(pendingRecipients, subject, rendered, sender, senderName);
       deliveries = outcome.deliveries;
       deliveryFailures = outcome.failures;
       _assert_(!deliveryFailures.length,
@@ -635,8 +617,8 @@ function sendPeriodNewsletter(reportId, mode) {
       _upsertRecord_(RADAR.sheets.newsletterAudit, Object.assign({}, baseAudit, {
         status: 'sent',
         details: deliveryMode === 'test'
-          ? 'Prueba aceptada por Gmail API con el PPTX exacto adjunto. Message ID: ' + deliveries[0].messageId
-          : 'Newsletter aceptada por Gmail API para ' + deliveries.length + ' destinatarios con el PPTX exacto adjunto.'
+          ? 'Prueba aceptada por Gmail API. Message ID: ' + deliveries[0].messageId
+          : 'Newsletter aceptada por Gmail API para ' + deliveries.length + ' destinatarios.'
       }));
     } catch (err) {
       if (reportShare && !deliveries.length) _deactivateReportShare_(reportShare.shareId);
@@ -673,6 +655,7 @@ function sendPeriodNewsletter(reportId, mode) {
       recipientCount: recipients.length,
       testRecipient: deliveryMode === 'test' ? user.email : '',
       sender: sender.effective,
+      senderName: senderName,
       senderMode: sender.mode,
       messageIds: deliveries.map(function (item) { return item.messageId; }),
       reportUrl: context.record.slides_url,
