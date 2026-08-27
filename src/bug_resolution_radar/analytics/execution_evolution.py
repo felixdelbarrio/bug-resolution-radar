@@ -249,28 +249,28 @@ def _focus_lines(
 ) -> list[str]:
     lines: list[str] = []
     if current.aged30_end > 0:
-        delta = current.aged30_end - previous.aged30_end
+        aged30_delta = current.aged30_end - previous.aged30_end
         subject = (
             "incidencia abierta supera"
             if current.aged30_end == 1
             else "incidencias abiertas superan"
         )
-        if delta == 0:
+        if aged30_delta == 0:
             comparison = "sin variación frente a la quincena anterior"
-        elif delta > 0:
-            comparison = f"{delta} más que en la quincena anterior"
+        elif aged30_delta > 0:
+            comparison = f"{aged30_delta} más que en la quincena anterior"
         else:
-            comparison = f"{abs(delta)} menos que en la quincena anterior"
+            comparison = f"{abs(aged30_delta)} menos que en la quincena anterior"
         lines.append(f"Antigüedad: {current.aged30_end} {subject} 30 días, {comparison}.")
     if (
         current.resolution_days is not None
         and previous.resolution_days is not None
         and abs(current.resolution_days - previous.resolution_days) >= 0.05
     ):
-        delta = current.resolution_days - previous.resolution_days
-        movement = "sube" if delta > 0 else "baja"
+        resolution_delta = current.resolution_days - previous.resolution_days
+        movement = "sube" if resolution_delta > 0 else "baja"
         lines.append(
-            f"Resolución: el tiempo medio {movement} {_decimal_es(abs(delta))} días frente a la "
+            f"Resolución: el tiempo medio {movement} {_decimal_es(abs(resolution_delta))} días frente a la "
             "quincena anterior."
         )
     return lines[:3]
