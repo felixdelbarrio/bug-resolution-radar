@@ -5,6 +5,7 @@ import pandas as pd
 from bug_resolution_radar.analytics.execution_evolution import (
     _executive_message,
     _FlowMetrics,
+    _focus_lines,
     build_execution_evolution,
 )
 
@@ -83,12 +84,16 @@ def test_execution_evolution_reconstructs_year_and_fortnight_flows() -> None:
 
     assert result["executive"]["tone"] == "negative"
     assert result["executive"]["title"] == "1 incidencia crítica requiere atención"
-    assert "Permanecen 1 incidencia abierta" in result["executive"]["summary"]
     assert (
-        "Carga media: 4,3 incidencias (+1,9 frente a 2,4); señala mayor presión durante el periodo."
-        in result["executive"]["summary"]
+        "Cartera abierta media: 4,3 incidencias, frente a 2,4 en la quincena anterior; "
+        "aumenta la presión operativa." in result["executive"]["summary"]
     )
-    assert "Resolución: 2,0 días de media (-105,5); mejora." in result["executive"]["summary"]
+    assert "Resolución:" not in result["executive"]["summary"]
+    assert "Criticidad:" not in " ".join(result["executive"]["focus"])
+    assert (
+        "Resolución: el tiempo medio baja 105,5 días frente a la quincena anterior."
+        in result["executive"]["focus"]
+    )
     average_kpi = next(
         metric for metric in result["fortnight"]["kpis"] if metric["id"] == "averageOpen"
     )
@@ -138,7 +143,7 @@ def test_execution_evolution_omits_resolution_comparison_without_two_valid_sampl
     result = build_execution_evolution(dff=frame, reference_day="2026-08-20")
 
     summary = result["executive"]["summary"]
-    assert "carga media" in summary.lower()
+    assert "cartera abierta media" in summary.lower()
     assert "resolución:" not in summary.lower()
     assert result["fortnight"]["current"]["resolutionDays"] is None
 
@@ -190,13 +195,19 @@ def test_executive_message_is_concise_and_yellow_for_mixed_screenshot_signals() 
     assert tone == "mixed"
     assert title == "Backlog reducido en 20 incidencias"
     assert summary == (
-        "Se cerraron 35 incidencias frente a 15 nuevas; la cartera termina en 108. "
-        "Carga media: 115,5 incidencias (+30,0 frente a 85,5); señala mayor presión "
-        "durante el periodo. Resolución: 20,0 días de media (+1,5); empeora. "
-        "En el año, el backlog se mantiene en el nivel de partida. "
+        "Cartera abierta media: 115,5 incidencias, frente a 85,5 en la quincena anterior; "
+        "aumenta la presión operativa. En el año, el backlog permanece estable. "
         "Sin incidencias abiertas de criticidad alta."
     )
-    assert summary.count("108") == 1
+    assert "Se cerraron" not in summary
+    assert "nuevas" not in summary
+    assert "108" not in summary
+    assert "Resolución:" not in summary
+    assert _focus_lines(current=current, previous=previous) == [
+        "Antigüedad: 21 incidencias abiertas superan 30 días, sin variación frente a la "
+        "quincena anterior.",
+        "Resolución: el tiempo medio sube 1,5 días frente a la quincena anterior.",
+    ]
 
 
 def test_executive_message_is_green_only_without_deterioration_or_critical_alerts() -> None:

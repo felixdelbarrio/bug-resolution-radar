@@ -145,43 +145,30 @@ def _decimal_es(value: float) -> str:
     return f"{float(value):.1f}".replace(".", ",")
 
 
-def _resolution_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str:
-    if current.resolution_days is None or previous.resolution_days is None:
-        return ""
-    delta = current.resolution_days - previous.resolution_days
-    current_txt = _decimal_es(current.resolution_days)
-    if abs(delta) < 0.05:
-        return f"Resolución: {current_txt} días de media, sin variación."
-    sign = "-" if delta < 0 else "+"
-    outcome = "mejora" if delta < 0 else "empeora"
-    return f"Resolución: {current_txt} días de media ({sign}{_decimal_es(abs(delta))}); {outcome}."
-
-
 def _portfolio_comparison(current: _FlowMetrics, previous: _FlowMetrics) -> str:
     delta = current.average_open - previous.average_open
     current_txt = _decimal_es(current.average_open)
     previous_txt = _decimal_es(previous.average_open)
     if abs(delta) < 0.05:
-        return f"Carga media: {current_txt} incidencias, estable frente a la quincena anterior."
-    sign = "-" if delta < 0 else "+"
-    assessment = (
-        "confirma una menor presión durante el periodo"
-        if delta < 0
-        else "señala mayor presión durante el periodo"
-    )
+        return (
+            f"Cartera abierta media: {current_txt} incidencias, sin variación frente a la "
+            "quincena anterior."
+        )
+    assessment = "disminuye" if delta < 0 else "aumenta"
     return (
-        f"Carga media: {current_txt} incidencias ({sign}{_decimal_es(abs(delta))} frente a "
-        f"{previous_txt}); {assessment}."
+        f"Cartera abierta media: {current_txt} incidencias, frente a {previous_txt} en la "
+        f"quincena anterior; {assessment} la presión operativa."
     )
 
 
 def _annual_comparison(annual: _FlowMetrics) -> str:
     delta = annual.backlog_delta
     if delta == 0:
-        return "En el año, el backlog se mantiene en el nivel de partida."
+        return "En el año, el backlog permanece estable."
     verb = "baja" if delta < 0 else "sube"
+    unit = "incidencia" if abs(delta) == 1 else "incidencias"
     return (
-        f"En el año, el backlog {verb} {abs(delta)} incidencias "
+        f"En el año, el backlog {verb} {abs(delta)} {unit} "
         f"({annual.backlog_start} a {annual.backlog_end})."
     )
 
@@ -249,21 +236,8 @@ def _executive_message(
         title = f"Backlog incrementado en {period_delta} incidencias"
     else:
         title = "Backlog estable durante la quincena"
-    summary = (
-        f"Se cerraron {current.closed} incidencias frente a {current.created} nuevas; "
-        f"la cartera termina en {current.backlog_end}. "
-        f"{_portfolio_comparison(current, previous)} "
-    )
-    resolution_comparison = _resolution_comparison(current, previous)
-    if resolution_comparison:
-        summary += f"{resolution_comparison} "
-    summary += _annual_comparison(annual)
-    if current.critical_end:
-        critical_label = (
-            "incidencia abierta" if current.critical_end == 1 else "incidencias abiertas"
-        )
-        summary += f" Permanecen {current.critical_end} {critical_label} de criticidad alta."
-    else:
+    summary = f"{_portfolio_comparison(current, previous)} {_annual_comparison(annual)}"
+    if not current.critical_end:
         summary += " Sin incidencias abiertas de criticidad alta."
     return tone, title, summary
 
@@ -274,28 +248,30 @@ def _focus_lines(
     previous: _FlowMetrics,
 ) -> list[str]:
     lines: list[str] = []
-    if current.critical_end > 0:
-        delta = current.critical_end - previous.critical_end
-        lines.append(
-            f"Criticidad: {current.critical_end} abiertas al cierre ({delta:+d} vs quincena previa)."
-        )
     if current.aged30_end > 0:
         delta = current.aged30_end - previous.aged30_end
-        lines.append(
-            f"Antigüedad: {current.aged30_end} abiertas superan 30 días ({delta:+d} vs quincena previa)."
+        subject = (
+            "incidencia abierta supera"
+            if current.aged30_end == 1
+            else "incidencias abiertas superan"
         )
-    if current.created > current.closed:
-        lines.append(
-            f"Capacidad: entraron {current.created - current.closed} incidencias más de las que se cerraron."
-        )
+        if delta == 0:
+            comparison = "sin variación frente a la quincena anterior"
+        elif delta > 0:
+            comparison = f"{delta} más que en la quincena anterior"
+        else:
+            comparison = f"{abs(delta)} menos que en la quincena anterior"
+        lines.append(f"Antigüedad: {current.aged30_end} {subject} 30 días, {comparison}.")
     if (
         current.resolution_days is not None
         and previous.resolution_days is not None
-        and current.resolution_days > previous.resolution_days
+        and abs(current.resolution_days - previous.resolution_days) >= 0.05
     ):
+        delta = current.resolution_days - previous.resolution_days
+        movement = "sube" if delta > 0 else "baja"
         lines.append(
-            "Resolución: el tiempo medio sube "
-            f"{current.resolution_days - previous.resolution_days:.1f} días frente a la quincena previa."
+            f"Resolución: el tiempo medio {movement} {_decimal_es(abs(delta))} días frente a la "
+            "quincena anterior."
         )
     return lines[:3]
 

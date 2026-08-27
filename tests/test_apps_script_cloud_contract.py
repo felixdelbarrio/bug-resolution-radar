@@ -263,15 +263,15 @@ def test_cloud_ui_has_no_incident_filter_controls_or_filter_drilldowns() -> None
         assert obsolete_identifier not in app
 
 
-def test_newsletter_attaches_the_canonical_pptx() -> None:
+def test_newsletter_links_the_native_slides_without_attaching_the_pptx() -> None:
     newsletter = _source("56_Newsletter.gs")
     report_storage = _source("55_PeriodReport.gs")
 
-    assert "Content-Disposition: attachment" in newsletter
-    assert "_newsletterMimeBytes_(attachment.getBytes())" in newsletter
-    assert re.search(r"pptx", newsletter, re.IGNORECASE)
-    assert "_exactReportBlob_" in newsletter
-    assert re.search(r"getBlob\s*\(", report_storage)
+    assert "Content-Disposition: attachment" not in newsletter
+    assert "_newsletterMimeBytes_" not in newsletter
+    assert "_exactReportBlob_" not in newsletter + report_storage
+    assert "Abrir presentación" in newsletter
+    assert "context.record.slides_url" in newsletter
 
 
 def test_snapshot_parts_are_sectional_integrity_checked_and_sheet_safe() -> None:
@@ -419,9 +419,7 @@ def test_final_newsletter_requires_a_successful_test_by_connected_admin() -> Non
     assert "dataset.sending" in app
 
 
-def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_personal_identity() -> (
-    None
-):
+def test_newsletter_requires_the_verified_mailbox_and_uses_a_geographic_sender_name() -> None:
     config = _source("00_Config.gs")
     newsletter = _source("56_Newsletter.gs")
     identity = _function_body(newsletter, "_newsletterSenderIdentity_")
@@ -433,11 +431,13 @@ def test_newsletter_requires_the_corporate_alias_and_never_falls_back_to_persona
     assert "Gmail.Users.Settings.SendAs.list('me')" in identity
     assert "verificationStatus === 'accepted'" in identity
     assert "'NEWSLETTER_SENDER_UNAVAILABLE'" in sender
-    assert sender.index("_newsletterSenderIdentity_(true)") < sender.index("_exactReportBlob_(")
+    assert "const senderName = _newsletterSenderName_(context.record.country);" in sender
+    assert "return RADAR.appName + ' - ' + geography;" in newsletter
+    assert "_newsletterEncodedHeader_(senderName)" in newsletter
     assert "function revalidateNewsletterSender" in newsletter
     assert "_cachePutJson_" in identity
     assert "@bug-resolution-radar.bbva.com" in newsletter
-    assert "_newsletterDeliver_(pendingRecipients, subject, rendered, attachment, sender)" in sender
+    assert "_newsletterDeliver_(pendingRecipients, subject, rendered, sender, senderName)" in sender
     assert "_newsletterPreviouslyDeliveredRecipients_" in newsletter
     assert "deliveries.length ? 'partial' : 'failed'" in sender
     assert "newsletterSenderReady" in app
@@ -507,8 +507,9 @@ def test_newsletter_uses_the_market_pulse_gmail_api_delivery_contract() -> None:
     assert "https://www.googleapis.com/auth/script.send_mail" not in manifest["oauthScopes"]
     assert "https://mail.google.com/" not in manifest["oauthScopes"]
     assert "Gmail.Users.Messages.send({ raw: message.raw }, 'me')" in newsletter
-    assert "multipart/mixed" in newsletter
-    assert "Content-Disposition: attachment" in newsletter
+    assert "multipart/alternative" in newsletter
+    assert "multipart/mixed" not in newsletter
+    assert "Content-Disposition: attachment" not in newsletter
 
 
 def test_materialized_insight_variants_keep_the_desktop_payload_shape() -> None:
