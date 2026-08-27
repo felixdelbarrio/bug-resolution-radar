@@ -422,7 +422,7 @@ def _newsletter_facts(
             "subject": f"Seguimiento quincenal de incidencias · {str(period.get('caption') or '')}",
             "greeting": "Buenos días,",
             "intro": (
-                "Adjunto el informe correspondiente al seguimiento de incidencias "
+                "Puedes consultar el informe correspondiente al seguimiento de incidencias "
                 "de la última quincena:"
             ),
             "reportLinkLabel": "Enlace a la presentación",
