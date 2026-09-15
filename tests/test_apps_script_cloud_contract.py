@@ -664,13 +664,13 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     assert "_requireScopeAccess_(user, request && request.scopeKey)" in _function_body(
         main, "queryDashboard"
     )
-    assert "_requireScopeAccess_(user, input.scopeKey)" in _function_body(
-        main, "getIssueDetail"
-    )
+    assert "_requireScopeAccess_(user, input.scopeKey)" in _function_body(main, "getIssueDetail")
 
 
 def test_domain_viewer_receives_latest_snapshot_per_country_in_country_order() -> None:
-    script = _source("10_Main.gs") + r"""
+    script = (
+        _source("10_Main.gs")
+        + r"""
 function _text_(value) { return value == null ? '' : String(value); }
 function _date_(value) { const date = new Date(value); return isNaN(date) ? null : date; }
 const manifest = {
@@ -689,6 +689,7 @@ const manifest = {
 };
 console.log(JSON.stringify(_viewerWorkspaceManifest_(manifest)));
 """
+    )
     result = subprocess.run(
         ["node", "-"], input=script, text=True, capture_output=True, check=False
     )
