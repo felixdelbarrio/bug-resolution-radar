@@ -337,6 +337,8 @@ const App = (() => {
     const scopes = state.bootstrap.scopes || [];
     const active = currentScope() || scopes[0] || {};
     const countries = [...new Set(scopes.map(scope => scope.country).filter(Boolean))];
+    const countryField = document.querySelector('.workspace-country-field');
+    countryField.classList.toggle('hidden', isShared() || countries.length <= 1);
     $('workspaceCountry').innerHTML = countries.map(country => (
       `<option value="${UI.escape(country)}" ${country === active.country ? 'selected' : ''}>` +
       `${UI.escape(country)}</option>`
@@ -354,7 +356,7 @@ const App = (() => {
       `${UI.escape(scope.scopeLabel)}</option>`
     )).join('') || '<option value="">Sin vista por origen</option>';
     $('workspaceSource').disabled = !isAdmin() || isShared() || rollup || !individual.length;
-    $('workspaceCountry').disabled = !isAdmin() || isShared();
+    $('workspaceCountry').disabled = isShared() || countries.length <= 1;
     const sourceSlot = document.querySelector('.workspace-source-slot');
     sourceSlot.classList.toggle('hidden', rollup);
     sourceSlot.setAttribute('aria-hidden', String(rollup));
@@ -1481,7 +1483,7 @@ const App = (() => {
       const initial = bootstrap.initialState || {};
       const local = readLocalPreferences();
       const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
-      state.scopeKey = validScopeKeys.has(local.scopeKey)
+      state.scopeKey = isAdmin() && validScopeKeys.has(local.scopeKey)
         ? local.scopeKey
         : initial.scopeKey || (bootstrap.scopes[0] && bootstrap.scopes[0].scopeKey) || '';
       state.route = 'dashboard';

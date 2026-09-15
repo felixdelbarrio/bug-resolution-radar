@@ -47,10 +47,62 @@ function _initialDashboardState_(manifest) {
   };
 }
 
+function _viewerWorkspaceManifest_(manifest) {
+  const latestByCountry = {};
+  (manifest.scopes || []).forEach(function (scope) {
+    const country = _text_(scope.country);
+    const current = latestByCountry[country];
+    const activatedAt = (_date_(scope.activatedAt) || new Date(0)).getTime();
+    const currentActivatedAt = current
+      ? (_date_(current.activatedAt) || new Date(0)).getTime()
+      : -1;
+    if (!current || activatedAt > currentActivatedAt || (
+      activatedAt === currentActivatedAt &&
+      _text_(scope.scopeKey).localeCompare(_text_(current.scopeKey), 'es') < 0
+    )) {
+      latestByCountry[country] = scope;
+    }
+  });
+  const scopes = Object.keys(latestByCountry).sort(function (left, right) {
+    return left.localeCompare(right, 'es', { sensitivity: 'base' });
+  }).map(function (country) {
+    return latestByCountry[country];
+  });
+  const allowedSources = new Set();
+  const scopeVersions = {};
+  scopes.forEach(function (scope) {
+    scopeVersions[scope.scopeKey] = scope.dataVersion;
+    (scope.sourceIds || []).forEach(function (sourceId) {
+      allowedSources.add(scope.country + '\u001f' + sourceId);
+    });
+  });
+  return {
+    scopes: scopes,
+    countries: scopes.map(function (scope) { return scope.country; }),
+    sources: (manifest.sources || []).filter(function (source) {
+      return allowedSources.has(source.country + '\u001f' + source.source_id);
+    }),
+    scopeVersions: scopeVersions
+  };
+}
+
+function _workspaceManifestForUser_(user) {
+  const manifest = _workspaceManifest_();
+  return user.role === 'admin' ? manifest : _viewerWorkspaceManifest_(manifest);
+}
+
+function _requireScopeAccess_(user, scopeKey) {
+  const key = _text_(scopeKey);
+  const allowed = _workspaceManifestForUser_(user).scopes.some(function (scope) {
+    return scope.scopeKey === key;
+  });
+  _assert_(allowed, 'No tienes acceso a este ámbito publicado.', 'FORBIDDEN');
+}
+
 function getBootstrap() {
   return _rpc_(function () {
     const user = _requireUser_();
-    const manifest = _workspaceManifest_();
+    const manifest = _workspaceManifestForUser_(user);
     const reportDriveFolder = user.role === 'admin' ? _reportDriveFolderSetting_() : null;
     const initialState = _initialDashboardState_(manifest);
     let dashboard = null;
@@ -94,16 +146,18 @@ function getBootstrap() {
 
 function queryDashboard(request) {
   return _rpc_(function () {
-    _requireUser_();
+    const user = _requireUser_();
+    _requireScopeAccess_(user, request && request.scopeKey);
     return _dashboardPayload_(request);
   });
 }
 
 function getIssueDetail(request) {
   return _rpc_(function () {
-    _requireUser_();
+    const user = _requireUser_();
     const input = request || {};
     _assertExactFields_(input, ['scopeKey', 'issueUid'], 'issueDetail');
+    _requireScopeAccess_(user, input.scopeKey);
     const record = _activeSnapshotRecordForScope_(_text_(input.scopeKey), true);
     const row = _snapshotIssueDetail_(record, _text_(input.issueUid));
     _assert_(row, 'No existe la incidencia en el snapshot publicado.', 'NOT_FOUND');

@@ -334,6 +334,9 @@ def test_admin_controls_are_revealed_only_after_an_admin_bootstrap() -> None:
     assert ".admin-only { display: none !important; }" in design
     assert ".is-admin .admin-only { display: inline-flex !important; }" in design
     assert "isAdmin() && !isShared() ? 'is-admin' : ''" in app
+    assert '<div class="workspace-country-field hidden">' in _source("Index.html")
+    assert "countryField.classList.toggle('hidden', isShared() || countries.length <= 1)" in app
+    assert "$('workspaceCountry').disabled = isShared() || countries.length <= 1" in app
     assert "_requireAdmin_()" in _function_body(main, "validateTransferImport")
     assert "_requireAdmin_()" in _function_body(main, "commitTransferImport")
 
@@ -650,9 +653,52 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_requireUser_")
     assert "role: 'viewer'" in _function_body(main, "_requireUser_")
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
-    assert index.count("scope-admin-control") >= 3
+    assert index.count("scope-admin-control") == 2
+    assert '<div class="workspace-country-field hidden">' in index
     assert ".scope-admin-control { display: none !important; }" in design
     assert ".is-admin .scope-admin-control" in design
+    viewer_manifest = _function_body(main, "_viewerWorkspaceManifest_")
+    assert "latestByCountry" in viewer_manifest
+    assert "activatedAt > currentActivatedAt" in viewer_manifest
+    assert "_workspaceManifestForUser_(user)" in _function_body(main, "getBootstrap")
+    assert "_requireScopeAccess_(user, request && request.scopeKey)" in _function_body(
+        main, "queryDashboard"
+    )
+    assert "_requireScopeAccess_(user, input.scopeKey)" in _function_body(main, "getIssueDetail")
+
+
+def test_domain_viewer_receives_latest_snapshot_per_country_in_country_order() -> None:
+    script = (
+        _source("10_Main.gs")
+        + r"""
+function _text_(value) { return value == null ? '' : String(value); }
+function _date_(value) { const date = new Date(value); return isNaN(date) ? null : date; }
+const manifest = {
+  scopes: [
+    { scopeKey: 'mx::old', country: 'México', sourceIds: ['mx-old'], dataVersion: '1', activatedAt: '2026-08-01T10:00:00Z' },
+    { scopeKey: 'es::new', country: 'España', sourceIds: ['es-new'], dataVersion: '3', activatedAt: '2026-09-02T10:00:00Z' },
+    { scopeKey: 'mx::new', country: 'México', sourceIds: ['mx-new'], dataVersion: '2', activatedAt: '2026-09-01T10:00:00Z' },
+    { scopeKey: 'es::old', country: 'España', sourceIds: ['es-old'], dataVersion: '1', activatedAt: '2026-08-02T10:00:00Z' }
+  ],
+  sources: [
+    { country: 'México', source_id: 'mx-old' },
+    { country: 'España', source_id: 'es-new' },
+    { country: 'México', source_id: 'mx-new' },
+    { country: 'España', source_id: 'es-old' }
+  ]
+};
+console.log(JSON.stringify(_viewerWorkspaceManifest_(manifest)));
+"""
+    )
+    result = subprocess.run(
+        ["node", "-"], input=script, text=True, capture_output=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    viewer = json.loads(result.stdout)
+    assert viewer["countries"] == ["España", "México"]
+    assert [scope["scopeKey"] for scope in viewer["scopes"]] == ["es::new", "mx::new"]
+    assert viewer["scopeVersions"] == {"es::new": "3", "mx::new": "2"}
+    assert [source["source_id"] for source in viewer["sources"]] == ["es-new", "mx-new"]
 
 
 def test_admin_console_covers_health_drive_newsletter_analytics_and_summary_charts() -> None:
