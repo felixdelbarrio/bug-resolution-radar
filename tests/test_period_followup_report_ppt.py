@@ -15,6 +15,10 @@ from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Inches
 
+from bug_resolution_radar.analytics.period_functionality_followup import (
+    MitigationBucket,
+    PeriodFunctionalityFollowupSummary,
+)
 from bug_resolution_radar.config import Settings, bundled_period_ppt_template_path
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.reports import generate_country_period_followup_ppt
@@ -88,6 +92,26 @@ def _slide_table_text(slide: Any) -> str:
 
 def _slide_all_text(slide: Any) -> str:
     return f"{_slide_text(slide)} {_slide_table_text(slide)}".strip()
+
+
+def test_functionality_mitigation_omits_empty_zero_day_buckets() -> None:
+    zero = MitigationBucket(count=0, avg_open_days=0.0)
+    summary = PeriodFunctionalityFollowupSummary(
+        period_label="Quincena 15/Septiembre - 16/Septiembre",
+        total_open_critical=116,
+        is_critical_focus=False,
+        top_rows=(),
+        tail_rows=(),
+        mitigation_ready_to_verify=zero,
+        mitigation_new=zero,
+        mitigation_blocked=zero,
+        mitigation_non_critical=MitigationBucket(count=116, avg_open_days=14.0),
+        zoom_slides=(),
+    )
+
+    assert period_ppt_mod._visible_mitigation_lines(summary) == [
+        "Resto: 116 incidencias con 14 días de promedio abiertas"
+    ]
 
 
 def _find_slide_index(prs: Presentation, needle: str) -> int:
@@ -214,13 +238,13 @@ def test_generate_country_period_followup_ppt_with_minimal_template(tmp_path: Pa
         reference_day=now,
     )
 
-    assert out.slide_count == 13
+    assert out.slide_count == 12
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
     assert out.content
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 13
+    assert len(prs.slides) == 12
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
     assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" not in deck_text
@@ -276,7 +300,7 @@ def test_generate_country_period_followup_ppt_with_compact_template(tmp_path: Pa
         reference_day=now,
     )
 
-    assert out.slide_count == 13
+    assert out.slide_count == 12
     assert out.total_issues == 2
     assert out.open_issues == 1
     assert out.closed_issues == 1
@@ -830,8 +854,8 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
             *hex_to_rgb(BBVA_REPORT_AMBER_BG)
         )
 
-    # Regression guard: redesigned slides 7/8 keep a single hero chart panel.
-    for slide_idx in (6, 7):  # slides 7 and 8 (0-based indexes)
+    # Regression guard: aging and priority keep a single hero chart panel.
+    for slide_idx in (5, 6):
         slide = prs.slides[slide_idx]
         pic_shapes = []
         for shape in slide.shapes:
@@ -846,7 +870,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
 
     s7_blob = " ".join(
         str(getattr(shape, "text", "") or "")
-        for shape in prs.slides[6].shapes
+        for shape in prs.slides[5].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
     assert "visión agregada de incidencias abiertas : rango de días por prioridad" in s7_blob
@@ -854,7 +878,7 @@ def test_generate_country_period_followup_ppt_bundled_template_layout_regression
 
     s8_blob = " ".join(
         str(getattr(shape, "text", "") or "")
-        for shape in prs.slides[7].shapes
+        for shape in prs.slides[6].shapes
         if getattr(shape, "has_text_frame", False)
     ).lower()
     assert "visión agregada de incidencias abiertas por prioridad" in s8_blob
@@ -1449,7 +1473,7 @@ def test_period_followup_ppt_handles_three_rollup_sources(monkeypatch: Any, tmp_
     prs = Presentation(BytesIO(out.content))
     full_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
     assert out.source_ids == ("jira:mexico:senda", "jira:mexico:gema", "jira:mexico:core")
-    assert out.slide_count == 9
+    assert out.slide_count == 8
     assert "SENDA" in full_text
     assert "GEMA" in full_text
     assert "CORE" in full_text
@@ -1459,6 +1483,66 @@ def test_period_followup_ppt_handles_three_rollup_sources(monkeypatch: Any, tmp_
         ("jira:mexico:gema",),
         ("jira:mexico:core",),
     ]
+
+
+def test_period_followup_ppt_helix_rollup_keeps_only_aggregate_summary(
+    monkeypatch: Any,
+) -> None:
+    now = pd.Timestamp("2026-09-16T00:00:00+00:00")
+    dff = pd.DataFrame(
+        [
+            {
+                "key": "INC-1",
+                "summary": "Incidencia Senda",
+                "status": "New",
+                "priority": "Low",
+                "created": (now - pd.Timedelta(days=2)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "Argentina",
+                "source_id": "helix:argentina:senda",
+                "source_type": "helix",
+            },
+            {
+                "key": "INC-2",
+                "summary": "Incidencia Gema",
+                "status": "New",
+                "priority": "Low",
+                "created": (now - pd.Timedelta(days=1)).isoformat(),
+                "updated": now.isoformat(),
+                "resolved": None,
+                "country": "Argentina",
+                "source_id": "helix:argentina:gema",
+                "source_type": "helix",
+            },
+        ]
+    )
+    monkeypatch.setattr(period_ppt_mod, "_chart_png", lambda *args, **kwargs: b"")
+    monkeypatch.setattr(
+        period_ppt_mod, "_append_functionality_followup_slides", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        period_ppt_mod, "_append_period_risk_issue_sections", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        period_ppt_mod, "validate_shapes_inside_slide", lambda *args, **kwargs: None
+    )
+
+    out = generate_country_period_followup_ppt(
+        Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path())),
+        country="Argentina",
+        source_ids=["helix:argentina:senda", "helix:argentina:gema"],
+        dff_override=dff,
+        reference_day=now,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
+    assert out.slide_count == 5
+    assert "ARGENTINA (vista agregada)" in deck_text
+    assert "Seguimiento de incidencias - HELIX:ARGENTINA:SENDA" not in deck_text
+    assert "Seguimiento de incidencias - HELIX:ARGENTINA:GEMA" not in deck_text
+    assert "Seguimiento de KPIs - Gráficos" not in deck_text
 
 
 def test_period_followup_ppt_without_rollups_omits_aggregate_and_source_summary_slides(
@@ -1505,7 +1589,7 @@ def test_period_followup_ppt_without_rollups_omits_aggregate_and_source_summary_
     prs = Presentation(BytesIO(out.content))
     full_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
     assert out.source_ids == ()
-    assert out.slide_count == 5
+    assert out.slide_count == 4
     assert "vista agregada" not in full_text
     assert "Seguimiento de incidencias - SENDA" not in full_text
 
@@ -1884,10 +1968,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
     )
     assert mitigation_panel is not None
     dashboard_text = _slide_all_text(prs.slides[dashboard_idx])
-    assert "Estado Ready to Verify" in dashboard_text
-    assert "Estado New" in dashboard_text
-    assert "Estado bloqueadas" in dashboard_text
-    assert "Resto:" in dashboard_text
+    assert "0 incidencias con 0 días" not in dashboard_text
     assert "d. prom." not in dashboard_text
     assert "Incidencias en New:" not in dashboard_text
     assert "Resto de incidencias:" not in dashboard_text
@@ -1968,7 +2049,7 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
         reference_day=now,
     )
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 15
+    assert len(prs.slides) == 14
     first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas en la quincena (I)")
     zoom_titles = [
         str(getattr(shape, "text", "") or "").strip()
@@ -2251,7 +2332,7 @@ def test_period_followup_functionality_detail_toggle_off_omits_zoom_slides() -> 
     prs = Presentation(BytesIO(out.content))
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
 
-    assert len(prs.slides) == 15
+    assert len(prs.slides) == 14
     assert "Incidencias abiertas por criticidad alta" in deck_text
     assert "Incidencias abiertas con más de 30 días" in deck_text
     assert "Seguimiento de KPIs - Incidencias abiertas por funcionalidad" in deck_text

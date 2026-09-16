@@ -362,6 +362,28 @@ def test_newsletter_omits_false_open_split_when_desktop_hides_it(
     assert newsletter["focusLabel"] == ""
 
 
+def test_newsletter_omits_responsible_rollups_without_jira_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_materializers(monkeypatch)
+    monkeypatch.setattr(
+        "bug_resolution_radar.services.cloud_projection.jira_sources",
+        lambda *_args, **_kwargs: [],
+    )
+
+    projection = build_cloud_projection_artifact(
+        Settings(),
+        country="Argentina",
+        source_ids=["helix:argentina:senda"],
+        scope_mode="source",
+        report_result=_report(),
+    ).projection
+
+    newsletter = projection["newsletterFacts"]
+    assert newsletter["responsibleRollups"] == []
+    assert newsletter["draft"]["responsibleParagraphs"] == []
+
+
 def test_data_version_changes_when_materialized_detail_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
