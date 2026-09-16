@@ -8,23 +8,13 @@ function _requireUser_() {
   _assert_(email, 'Debes abrir la aplicación con tu cuenta corporativa.', 'AUTH_REQUIRED');
   _assert_(email.endsWith('@' + RADAR.allowedDomain),
     'La cuenta no pertenece al dominio autorizado.', 'FORBIDDEN');
-  let user = _readRecords_(RADAR.sheets.users).find(function (row) {
+  const user = _readRecords_(RADAR.sheets.users).find(function (row) {
     return _canonicalEmail_(row.email) === email;
   });
-  if (!user) {
-    user = _upsertRecord_(RADAR.sheets.users, {
-      email: email,
-      role: 'viewer',
-      active: true,
-      display_name: email.split('@')[0],
-      updated_at: _nowIso_(),
-      updated_by: email
-    });
-  }
   return {
     email: email,
-    role: user.active === true && _text_(user.role) === 'admin' ? 'admin' : 'viewer',
-    displayName: _text_(user.display_name)
+    role: user && user.active === true && _text_(user.role) === 'admin' ? 'admin' : 'viewer',
+    displayName: _text_(user && user.display_name) || email.split('@')[0]
   };
 }
 

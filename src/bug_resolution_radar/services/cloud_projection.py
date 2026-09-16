@@ -275,9 +275,14 @@ def _manager_rollups(
     sources: Sequence[Mapping[str, str]],
 ) -> list[dict[str, Any]]:
     source_by_id = {str(row.get("sourceId") or ""): row for row in sources}
+    if not source_by_id:
+        return []
 
     def with_manager(frame: pd.DataFrame) -> pd.DataFrame:
         work = frame.copy(deep=False) if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+        if work.empty:
+            return work
+        work = work.loc[_series_text(work, "source_id").isin(source_by_id)].copy(deep=False)
         if work.empty:
             return work
         configured = _series_text(work, "source_id").map(

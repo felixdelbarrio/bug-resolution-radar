@@ -476,6 +476,9 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
     ):
         assert expected in newsletter
     assert "newsletter.responsibleRollups" in newsletter
+    assert "const responsibleSection = responsibleRows" in newsletter
+    assert "responsibleSection +" in newsletter
+    assert "rollups.length ?" in newsletter
     assert "DESIGN_TOKENS.radius.container" in newsletter
     assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
 
@@ -650,8 +653,12 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     design = _source("DesignSystem.html")
 
     assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_DEPLOYING"}
-    assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_requireUser_")
-    assert "role: 'viewer'" in _function_body(main, "_requireUser_")
+    require_user = _function_body(main, "_requireUser_")
+    assert "email.endsWith('@' + RADAR.allowedDomain)" in require_user
+    assert "? 'admin' : 'viewer'" in require_user
+    assert "_upsertRecord_" not in require_user
+    assert "user && user.active === true" in require_user
+    assert "email.split('@')[0]" in require_user
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
     assert index.count("scope-admin-control") == 2
     assert '<div class="workspace-country-field hidden">' in index
@@ -765,6 +772,18 @@ def test_analytics_export_flushes_pending_events_and_is_self_describing() -> Non
     assert "unversionedEvents" in administration
     assert "versionAttribution" in administration
     assert "legacy-unknown" in administration
+
+
+def test_app_open_is_flushed_immediately_and_failed_telemetry_is_retried() -> None:
+    app = _source("App.html")
+    boot = _function_body(app, "boot")
+    flush = _function_body(app, "flushAnalytics")
+
+    assert "trackEvent('app_open'" in boot
+    assert "flushAnalytics()," in boot
+    assert boot.index("trackEvent('app_open'") < boot.index("flushAnalytics(),")
+    assert "scheduleAnalyticsFlush();" in flush
+    assert "function scheduleAnalyticsFlush" in app
     assert "_telemetry" in app
 
 
