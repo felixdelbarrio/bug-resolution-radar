@@ -650,8 +650,12 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     design = _source("DesignSystem.html")
 
     assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_DEPLOYING"}
-    assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_requireUser_")
-    assert "role: 'viewer'" in _function_body(main, "_requireUser_")
+    require_user = _function_body(main, "_requireUser_")
+    assert "email.endsWith('@' + RADAR.allowedDomain)" in require_user
+    assert "? 'admin' : 'viewer'" in require_user
+    assert "_upsertRecord_" not in require_user
+    assert "user && user.active === true" in require_user
+    assert "email.split('@')[0]" in require_user
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
     assert index.count("scope-admin-control") == 2
     assert '<div class="workspace-country-field hidden">' in index
