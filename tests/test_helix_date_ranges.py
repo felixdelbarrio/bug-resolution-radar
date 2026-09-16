@@ -288,12 +288,16 @@ def test_build_arsql_sql_falls_back_incident_type_filter_to_service_type_with_ma
 
     assert "`HPD:Help Desk`.`Service Type` IN (" in sql
     for token in (
+        "'Incidencia'",
         "'Incident'",
+        "'Evento Monitorización'",
         "'Monitoring Event'",
         "'Event'",
-        "'Evento Monitorización'",
+        "'Consulta'",
         "'Question'",
         "'Consultation'",
+        "'Query'",
+        "'Inquiry'",
         "'Request'",
         "'Service Request'",
     ):
