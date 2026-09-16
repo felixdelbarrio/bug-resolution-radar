@@ -289,7 +289,7 @@ def _ensure_slide_index(prs: Any, *, index: int, role: str) -> None:
 
 def _normalize_period_template(prs: Any) -> None:
     """
-    Normalize user-provided template into the 8-slide structure expected by renderer.
+    Normalize the template into the eight canonical slides expected by the renderer.
 
     Target structure:
       1) Portada
@@ -297,9 +297,9 @@ def _normalize_period_template(prs: Any) -> None:
       3) Resumen país
       4) Resumen origen A
       5) Resumen origen B
-      6) Header evolución
-      7) Evolución origen A
-      8) Evolución origen B
+      6) Separador de gráficos
+      7) Antigüedad
+      8) Prioridad
     """
     if len(prs.slides) < 7:
         raise ValueError(
@@ -324,7 +324,7 @@ def _normalize_period_template(prs: Any) -> None:
     else:
         _append_slide_clone(prs, source_index=6)
 
-    # Keep exactly 8 slides, preserving canonical order.
+    # Keep exactly 8 slides, preserving canonical order while the report is assembled.
     while len(prs.slides) > 8:
         _remove_slide(prs, 8)
 
@@ -333,8 +333,8 @@ def _normalize_period_template(prs: Any) -> None:
         2: "Resumen país",
         3: "Resumen origen A",
         4: "Resumen origen B",
-        6: "Evolución origen A",
-        7: "Evolución origen B",
+        6: "Antigüedad",
+        7: "Prioridad",
     }
     for idx, role in required_roles.items():
         _ensure_slide_index(prs, index=idx, role=role)
@@ -381,6 +381,11 @@ def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
         if sid and sid not in out:
             out.append(sid)
     return out
+
+
+def _show_source_breakdown(source_ids: Sequence[str]) -> bool:
+    clean = _clean_source_ids(source_ids)
+    return len(clean) > 1 and any(source_id.casefold().startswith("jira:") for source_id in clean)
 
 
 def _resolve_template_path(settings: Settings, explicit_path: str | None = None) -> Path:
@@ -3035,7 +3040,7 @@ def _write_functionality_total_open_badge(
     tf = shape.text_frame
     tf.clear()
     try:
-        tf.word_wrap = False
+        tf.word_wrap = True
     except Exception:
         pass
     try:
@@ -3054,8 +3059,8 @@ def _write_functionality_total_open_badge(
     except Exception:
         pass
 
-    number_size_pt = 40.0 if int(abs(total_open)) >= 100 else 44.0
-    label_size_pt = 14.0 if critical_wording else 16.0
+    number_size_pt = 34.0 if int(abs(total_open)) >= 100 else 38.0
+    label_size_pt = 11.2 if critical_wording else 12.2
     label_lines = (
         ("INCIDENCIAS CRÍTICAS", "ABIERTAS") if critical_wording else ("INCIDENCIAS ABIERTAS",)
     )
@@ -3072,6 +3077,9 @@ def _write_functionality_total_open_badge(
         p0.alignment = PP_ALIGN.LEFT
     except Exception:
         pass
+    p0.space_before = Pt(0)
+    p0.space_after = Pt(0)
+    p0.line_spacing = 1.0
 
     for line in label_lines:
         p = tf.add_paragraph()
@@ -3086,6 +3094,9 @@ def _write_functionality_total_open_badge(
             p.alignment = PP_ALIGN.LEFT
         except Exception:
             pass
+        p.space_before = Pt(0)
+        p.space_after = Pt(0)
+        p.line_spacing = 1.0
 
 
 def _top_row_line(row: FunctionalityTopRow) -> str:
@@ -3151,6 +3162,26 @@ def _write_mitigation_status_line(slide: Any, shape_index: int, text: str) -> No
         tf.margin_bottom = 4_000
     except Exception:
         pass
+
+
+def _visible_mitigation_lines(summary: PeriodFunctionalityFollowupSummary) -> list[str]:
+    specs = (
+        ("Estado Ready to Verify", summary.mitigation_ready_to_verify, True, False),
+        ("Estado New", summary.mitigation_new, False, False),
+        ("Estado bloqueadas", summary.mitigation_blocked, False, False),
+        ("Resto", summary.mitigation_non_critical, False, True),
+    )
+    return [
+        _mitigation_status_line(
+            label=label,
+            count=int(bucket.count),
+            avg_open_days=bucket.avg_open_days,
+            in_fortnight=in_fortnight,
+            rest_open=rest_open,
+        )
+        for label, bucket, in_fortnight, rest_open in specs
+        if int(bucket.count) > 0 or float(bucket.avg_open_days or 0.0) > 0.0
+    ]
 
 
 def _root_cause_caption(zoom: FunctionalityZoomSlide, *, critical_wording: bool) -> str:
@@ -3430,47 +3461,17 @@ def _populate_functionality_dashboard_slide(
         )
         _set_shape_font_name(slide, shape_index=shape_idx, font_name=_PPT_FONT_BODY_MEDIUM)
 
-    _write_mitigation_status_line(
-        slide,
-        13,
-        _mitigation_status_line(
-            label="Estado Ready to Verify",
-            count=int(summary.mitigation_ready_to_verify.count),
-            avg_open_days=summary.mitigation_ready_to_verify.avg_open_days,
-            in_fortnight=True,
-        ),
-    )
-    _write_mitigation_status_line(
-        slide,
-        19,
-        _mitigation_status_line(
-            label="Estado New",
-            count=int(summary.mitigation_new.count),
-            avg_open_days=summary.mitigation_new.avg_open_days,
-        ),
-    )
-    _write_mitigation_status_line(
-        slide,
-        20,
-        _mitigation_status_line(
-            label="Estado bloqueadas",
-            count=int(summary.mitigation_blocked.count),
-            avg_open_days=summary.mitigation_blocked.avg_open_days,
-        ),
-    )
-    _write_mitigation_status_line(
-        slide,
-        21,
-        _mitigation_status_line(
-            label="Resto",
-            count=int(summary.mitigation_non_critical.count),
-            avg_open_days=summary.mitigation_non_critical.avg_open_days,
-            rest_open=True,
-        ),
-    )
-    for idx in (5, 13, 19, 20, 21):
-        _set_shape_font_name(slide, shape_index=idx, font_name=_PPT_FONT_BODY_MEDIUM)
+    mitigation_slots = ((13, 14), (19, 15), (20, 16), (21, 17))
+    visible_lines = _visible_mitigation_lines(summary)
+    unused_icons: list[int] = []
+    for slot_index, (text_shape_index, icon_shape_index) in enumerate(mitigation_slots):
+        text = visible_lines[slot_index] if slot_index < len(visible_lines) else ""
+        _write_mitigation_status_line(slide, text_shape_index, text)
+        if not text:
+            unused_icons.append(icon_shape_index)
+    _set_shape_font_name(slide, shape_index=5, font_name=_PPT_FONT_BODY_MEDIUM)
     _set_shape_font_color(slide, shape_index=18, color_rgb=RGBColor(255, 255, 255))
+    _remove_shape_indices(slide, *unused_icons)
     table_target_geometry = _functionality_dashboard_table_target_geometry(
         slide,
         table_shape_index=1,
@@ -4853,14 +4854,9 @@ def generate_country_period_followup_ppt(
         prs.slides[0], period_label=format_window_label(aggregate.summary.window)
     )
 
+    show_source_breakdown = _show_source_breakdown(clean_source_ids)
+    deferred_slide_removals: list[int] = []
     if clean_source_ids:
-        insert_index = 5
-        for _ in range(max(len(clean_source_ids) - 2, 0)):
-            source_template = prs.slides[4] if len(prs.slides) > 4 else prs.slides[3]
-            _append_slide_clone_from_source(prs, source_slide=source_template)
-            _move_slide(prs, from_index=len(prs.slides) - 1, to_index=insert_index)
-            insert_index += 1
-
         _populate_summary_slide(
             prs.slides[2],
             title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)",
@@ -4885,6 +4881,14 @@ def generate_country_period_followup_ppt(
             replace_anchor=True,
             preserve_aspect=True,
         )
+
+    if show_source_breakdown:
+        insert_index = 5
+        for _ in range(max(len(clean_source_ids) - 2, 0)):
+            source_template = prs.slides[4] if len(prs.slides) > 4 else prs.slides[3]
+            _append_slide_clone_from_source(prs, source_slide=source_template)
+            _move_slide(prs, from_index=len(prs.slides) - 1, to_index=insert_index)
+            insert_index += 1
 
         for offset, source_id in enumerate(clean_source_ids):
             slide_index = 3 + offset
@@ -4917,11 +4921,8 @@ def generate_country_period_followup_ppt(
                 preserve_aspect=True,
             )
 
-        extra_template_source_count = 2
-        if len(clean_source_ids) < extra_template_source_count:
-            for remove_idx in range(4, 3 + len(clean_source_ids), -1):
-                if remove_idx < len(prs.slides):
-                    _remove_slide(prs, remove_idx)
+    elif clean_source_ids:
+        deferred_slide_removals.extend((4, 3))
     else:
         LOGGER.info(
             "period_followup_no_rollups",
@@ -4934,12 +4935,15 @@ def generate_country_period_followup_ppt(
                 ),
             },
         )
-        for remove_idx in (4, 3, 2):
-            if remove_idx < len(prs.slides):
-                _remove_slide(prs, remove_idx)
+        deferred_slide_removals.extend((4, 3, 2))
 
-    aging_slide_index = 4 + len(clean_source_ids) if clean_source_ids else 3
-    priority_slide_index = 5 + len(clean_source_ids) if clean_source_ids else 4
+    if show_source_breakdown:
+        aging_slide_index = 4 + len(clean_source_ids)
+    else:
+        aging_slide_index = 6
+    priority_slide_index = aging_slide_index + 1
+    chart_divider_index = aging_slide_index - 1
+    deferred_slide_removals.append(chart_divider_index)
 
     _populate_open_aging_executive_slide(
         prs.slides[aging_slide_index],
@@ -5029,6 +5033,8 @@ def generate_country_period_followup_ppt(
         finalist_discrepancies=all_finalist_link_discrepancies,
         settings=settings,
     )
+    for slide_index in sorted(set(deferred_slide_removals), reverse=True):
+        _remove_slide(prs, slide_index)
     _linkify_helix_references_in_tables(
         prs,
         jira_urls=jira_url_map,

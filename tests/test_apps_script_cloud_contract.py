@@ -476,6 +476,9 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
     ):
         assert expected in newsletter
     assert "newsletter.responsibleRollups" in newsletter
+    assert "const responsibleSection = responsibleRows" in newsletter
+    assert "responsibleSection +" in newsletter
+    assert "rollups.length ?" in newsletter
     assert "DESIGN_TOKENS.radius.container" in newsletter
     assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter
 
