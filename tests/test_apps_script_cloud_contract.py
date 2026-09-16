@@ -769,6 +769,18 @@ def test_analytics_export_flushes_pending_events_and_is_self_describing() -> Non
     assert "unversionedEvents" in administration
     assert "versionAttribution" in administration
     assert "legacy-unknown" in administration
+
+
+def test_app_open_is_flushed_immediately_and_failed_telemetry_is_retried() -> None:
+    app = _source("App.html")
+    boot = _function_body(app, "boot")
+    flush = _function_body(app, "flushAnalytics")
+
+    assert "trackEvent('app_open'" in boot
+    assert "flushAnalytics()," in boot
+    assert boot.index("trackEvent('app_open'") < boot.index("flushAnalytics(),")
+    assert "scheduleAnalyticsFlush();" in flush
+    assert "function scheduleAnalyticsFlush" in app
     assert "_telemetry" in app
 
 

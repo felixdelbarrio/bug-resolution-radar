@@ -149,6 +149,7 @@ const App = (() => {
           accepted += Number(result.accepted || 0);
         } catch (error) {
           state.analyticsQueue.unshift(...events);
+          scheduleAnalyticsFlush();
           throw error;
         }
       }
@@ -158,6 +159,14 @@ const App = (() => {
       state.analyticsFlushPromise = null;
     });
     return state.analyticsFlushPromise;
+  }
+
+  function scheduleAnalyticsFlush(delayMs = 5000) {
+    window.clearTimeout(state.analyticsTimer);
+    state.analyticsTimer = window.setTimeout(
+      () => flushAnalytics().catch(() => {}),
+      delayMs
+    );
   }
 
   function trackEvent(eventName, details = {}, durationMs = 0, status = 'success') {
@@ -183,10 +192,7 @@ const App = (() => {
       userAgent: navigator.userAgent
     });
     if (state.analyticsQueue.length >= 10) flushAnalytics().catch(() => {});
-    else {
-      window.clearTimeout(state.analyticsTimer);
-      state.analyticsTimer = window.setTimeout(() => flushAnalytics().catch(() => {}), 5000);
-    }
+    else scheduleAnalyticsFlush();
   }
   window.__RADAR_TELEMETRY__ = trackEvent;
 
@@ -1521,6 +1527,11 @@ const App = (() => {
         shared: isShared(),
         dataVersion: bootstrap.app.dataVersion
       });
+      await deadline(
+        flushAnalytics(),
+        30000,
+        'No se pudo confirmar la telemetría de apertura.'
+      ).catch(error => console.warn('App-open telemetry pending retry', error));
       if (window.requestIdleCallback) {
         window.requestIdleCallback(runIdleMaintenance, { timeout: 5000 });
       } else {
