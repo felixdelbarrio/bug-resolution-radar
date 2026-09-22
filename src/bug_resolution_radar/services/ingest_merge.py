@@ -99,5 +99,8 @@ def helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
         source_type="helix",
         source_alias=str(item.source_alias or "").strip(),
         source_id=str(item.source_id or "").strip(),
+        owner_support_company=str(item.owner_support_company or "").strip(),
+        service_origin_n1=str(item.source_service_n1 or item.matrix_service_n1 or "").strip(),
+        service_origin_n2=str(item.source_service_n2 or "").strip(),
         helix_lookup_kind=str(item.helix_lookup_kind or "").strip(),
     )

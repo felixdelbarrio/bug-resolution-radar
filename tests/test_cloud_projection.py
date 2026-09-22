@@ -157,6 +157,7 @@ def _patch_materializers(
         lambda *_args, **_kwargs: [
             {
                 "source_id": "jira:espana:core",
+                "source_type": "jira",
                 "country": "España",
                 "alias": "Core",
                 "po_team_leader": "Ana Responsable",
@@ -317,9 +318,11 @@ def test_projection_is_explicit_static_and_packages_exact_report_bytes(
     assert projection["administration"]["jiraSources"][0]["dashboardUrl"] == (
         "https://jira.example.com/dashboard/1"
     )
-    assert projection["newsletterFacts"]["responsibleRollups"] == [
+    assert projection["newsletterFacts"]["focusRollups"] == [
         {
+            "sourceType": "jira",
             "name": "Ana Responsable",
+            "serviceOriginN2": "",
             "dashboardUrl": "https://jira.example.com/dashboard/1",
             "openIssues": 1,
             "rootCauseEvolutives": 1,
@@ -362,13 +365,42 @@ def test_newsletter_omits_false_open_split_when_desktop_hides_it(
     assert newsletter["focusLabel"] == ""
 
 
-def test_newsletter_omits_responsible_rollups_without_jira_sources(
+def test_newsletter_builds_helix_focus_from_open_n1_and_owner_company(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_materializers(monkeypatch)
     monkeypatch.setattr(
         "bug_resolution_radar.services.cloud_projection.jira_sources",
         lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "bug_resolution_radar.services.cloud_projection.helix_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "source_id": "helix:argentina:senda",
+                "source_type": "helix",
+                "country": "Argentina",
+                "alias": "Senda",
+                "owner_support_company": "BBVA Argentina",
+                "service_origin_n1": "AR02 ENTERPRISE WEB CORE",
+                "service_origin_n2": "Canales",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bug_resolution_radar.services.cloud_projection.load_scope_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            dff=pd.DataFrame({"key": ["INC1"]}),
+            open_df=pd.DataFrame(
+                {
+                    "issue_uid": ["helix:argentina:senda::INC1"],
+                    "key": ["INC1"],
+                    "source_id": ["helix:argentina:senda"],
+                }
+            ),
+            root_cause_evolutives=pd.DataFrame(),
+            finalist_discrepancies=pd.DataFrame(),
+        ),
     )
 
     projection = build_cloud_projection_artifact(
@@ -380,8 +412,24 @@ def test_newsletter_omits_responsible_rollups_without_jira_sources(
     ).projection
 
     newsletter = projection["newsletterFacts"]
-    assert newsletter["responsibleRollups"] == []
-    assert newsletter["draft"]["responsibleParagraphs"] == []
+    assert newsletter["focusRollups"] == [
+        {
+            "sourceType": "helix",
+            "name": "AR02 ENTERPRISE WEB CORE",
+            "serviceOriginN2": "Canales",
+            "dashboardUrl": (
+                "https://itsmhelixbbva-ir1.onbmc.com/dashboards/d/"
+                "c6683c35-c8e4-4192-ac83-b63feab9599d/bbva-incident-report?"
+                "var-owner_support_company=BBVA+Argentina&"
+                "var-servicio_origen_n1=AR02+ENTERPRISE+WEB+CORE&"
+                "var-servicio_origen_n2=Canales"
+            ),
+            "openIssues": 1,
+            "rootCauseEvolutives": 0,
+            "finalistDiscrepancies": 0,
+        }
+    ]
+    assert newsletter["draft"]["focusParagraphs"]
 
 
 def test_data_version_changes_when_materialized_detail_changes(

@@ -235,7 +235,7 @@ function localRuntimeMarkup() {
       name: "Bug Resolution Radar · WebApp local",
       version: "2026.08.19.6",
       contractVersion: "6.0.0",
-      semanticContract: "desktop-authoritative-v3",
+      semanticContract: "desktop-authoritative-v4",
       dataVersion: scope.dataVersion,
       cacheEpoch: "local-20260819-4",
       maxTransferBytes: 33554432,

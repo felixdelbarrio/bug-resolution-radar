@@ -1654,7 +1654,7 @@ def create_app() -> FastAPI:
                 source_id=str(test_source.get("source_id", "")).strip(),
                 proxy=str(getattr(settings, "HELIX_PROXY", "") or "").strip(),
                 ssl_verify=str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip(),
-                service_origin_buug=test_source.get("service_origin_buug"),
+                owner_support_company=test_source.get("owner_support_company"),
                 service_origin_n1=test_source.get("service_origin_n1"),
                 service_origin_n2=test_source.get("service_origin_n2"),
                 dry_run=True,

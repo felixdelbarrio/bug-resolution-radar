@@ -1485,7 +1485,7 @@ def test_period_followup_ppt_handles_three_rollup_sources(monkeypatch: Any, tmp_
     ]
 
 
-def test_period_followup_ppt_helix_rollup_keeps_only_aggregate_summary(
+def test_period_followup_ppt_helix_rollup_adds_one_summary_per_n1(
     monkeypatch: Any,
 ) -> None:
     now = pd.Timestamp("2026-09-16T00:00:00+00:00")
@@ -1529,7 +1529,13 @@ def test_period_followup_ppt_helix_rollup_keeps_only_aggregate_summary(
     )
 
     out = generate_country_period_followup_ppt(
-        Settings(PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path())),
+        Settings(
+            PERIOD_PPT_TEMPLATE_PATH=str(bundled_period_ppt_template_path()),
+            HELIX_SOURCES_JSON=(
+                '[{"country":"Argentina","alias":"Senda","service_origin_n1":"AR02 ENTERPRISE WEB CORE"},'
+                '{"country":"Argentina","alias":"Gema","service_origin_n1":"AR16 COMERCIO EXTERIOR"}]'
+            ),
+        ),
         country="Argentina",
         source_ids=["helix:argentina:senda", "helix:argentina:gema"],
         dff_override=dff,
@@ -1538,10 +1544,10 @@ def test_period_followup_ppt_helix_rollup_keeps_only_aggregate_summary(
 
     prs = Presentation(BytesIO(out.content))
     deck_text = " ".join(_slide_all_text(slide) for slide in prs.slides)
-    assert out.slide_count == 5
+    assert out.slide_count == 7
     assert "ARGENTINA (vista agregada)" in deck_text
-    assert "Seguimiento de incidencias - HELIX:ARGENTINA:SENDA" not in deck_text
-    assert "Seguimiento de incidencias - HELIX:ARGENTINA:GEMA" not in deck_text
+    assert "Seguimiento de incidencias - AR02 ENTERPRISE WEB CORE" in deck_text
+    assert "Seguimiento de incidencias - AR16 COMERCIO EXTERIOR" in deck_text
     assert "Seguimiento de KPIs - Gráficos" not in deck_text
 
 
@@ -1730,7 +1736,7 @@ def test_period_followup_ppt_enriches_po_from_source_config() -> None:
             }
         ]
     )
-    out = period_ppt_mod._enrich_po_team_leader_from_sources(
+    out = period_ppt_mod._enrich_issue_owner_from_sources(
         df,
         Settings(
             JIRA_SOURCES_JSON=(
@@ -2235,7 +2241,7 @@ def test_period_followup_risk_sections_use_native_tables_after_functionality() -
     expected_headers = {
         "ID",
         "Descripción",
-        "Responsable",
+        "Responsable / Origen N1",
         "Estado",
         "Criticidad",
         "Días abierta",

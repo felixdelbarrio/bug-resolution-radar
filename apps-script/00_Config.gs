@@ -2,11 +2,11 @@
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
   corporateBrand: 'BBVA Banca de Empresas e Instituciones',
-  appVersion: '2026.09.16.2',
-  contractVersion: '7.0.0',
+  appVersion: '2026.09.22.1',
+  contractVersion: '8.0.0',
   projectionContract: 'bug-resolution-radar-cloud-projection',
-  projectionVersion: 3,
-  semanticContract: 'desktop-authoritative-v3',
+  projectionVersion: 4,
+  semanticContract: 'desktop-authoritative-v4',
   spreadsheetId: '10_kDe-giOQtJxBX_M67z8In17MIh-6IQpmQl_9eo7c8',
   initialAdmin: 'felix.delbarrio@bbva.com',
   allowedDomain: 'bbva.com',
@@ -15,7 +15,6 @@ const RADAR = Object.freeze({
   defaultPageSize: 50,
   cacheSeconds: 21600,
   transferTtlSeconds: 1800,
-  shareTtlSeconds: 90 * 24 * 60 * 60,
   maxTransferBytes: 32 * 1024 * 1024,
   maxTransferExpandedBytes: 80 * 1024 * 1024,
   maxProjectionBytes: 24 * 1024 * 1024,
@@ -317,12 +316,12 @@ const CONTRACTS = Object.freeze({
     ])
   }),
   REPORT_SHARES: Object.freeze({
-    key: 'share_id', version: '5.0.0', unique: ['share_id'],
+    key: 'share_id', version: '8.0.0', unique: ['share_id'],
     columns: Object.freeze([
       ['share_id', 'string', true], ['token_sha256', 'string', true], ['report_id', 'string', true],
       ['snapshot_id', 'string', true], ['scope_key', 'string', true], ['scope_label', 'string', true],
       ['projection_sha256', 'string', true], ['data_version', 'string', true], ['active', 'boolean', true],
-      ['created_at', 'datetime', true], ['expires_at', 'datetime', true], ['created_by', 'email', true]
+      ['created_at', 'datetime', true], ['created_by', 'email', true]
     ])
   }),
   NEWSLETTER_RECIPIENTS: Object.freeze({

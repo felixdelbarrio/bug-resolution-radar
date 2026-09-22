@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, cast
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 
@@ -28,7 +29,9 @@ from bug_resolution_radar.analytics.status_semantics import (
     is_finalist_status,
 )
 from bug_resolution_radar.config import (
+    DEFAULT_HELIX_INCIDENT_DASHBOARD_URL,
     Settings,
+    helix_sources,
     jira_root_cause_labels_by_country,
     jira_sources,
 )
@@ -48,8 +51,8 @@ from bug_resolution_radar.services.dashboard_snapshot import (
 from bug_resolution_radar.services.workspace import WorkspaceSelection
 
 PROJECTION_SCHEMA = "bug-resolution-radar-cloud-projection"
-PROJECTION_SCHEMA_VERSION = 3
-SEMANTIC_CONTRACT = "desktop-authoritative-v3"
+PROJECTION_SCHEMA_VERSION = 4
+SEMANTIC_CONTRACT = "desktop-authoritative-v4"
 REPORT_PATH = "artifacts/period_followup.pptx"
 REPORT_MIME_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 TREND_IDS: tuple[str, ...] = (
@@ -228,7 +231,27 @@ def _is_hidden_webapp_status(value: Any) -> bool:
     return str(value or "").strip().casefold() in _HIDDEN_WEBAPP_STATUS_TOKENS
 
 
-def _manager_source_catalog(
+def _helix_dashboard_url(settings: Settings, source: Mapping[str, Any]) -> str:
+    base = str(
+        getattr(settings, "HELIX_ARSQL_DASHBOARD_URL", "") or DEFAULT_HELIX_INCIDENT_DASHBOARD_URL
+    ).strip()
+    if not base:
+        return ""
+    parts = urlsplit(base)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update(
+        {
+            "var-owner_support_company": str(source.get("owner_support_company") or ""),
+            "var-servicio_origen_n1": str(source.get("service_origin_n1") or ""),
+        }
+    )
+    service_n2 = str(source.get("service_origin_n2") or "").strip()
+    if service_n2:
+        query["var-servicio_origen_n2"] = service_n2
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _focus_source_catalog(
     settings: Settings,
     *,
     country: str,
@@ -236,16 +259,30 @@ def _manager_source_catalog(
 ) -> list[dict[str, str]]:
     selected = set(source_ids)
     rows: list[dict[str, str]] = []
-    for source in jira_sources(settings):
+    for source in jira_sources(settings) + helix_sources(settings):
         source_id = str(source.get("source_id") or "").strip()
         if source_id not in selected or str(source.get("country") or "").strip() != country:
             continue
+        source_type = str(source.get("source_type") or "").strip()
+        service_n1 = str(source.get("service_origin_n1") or "").strip()
         rows.append(
             {
                 "sourceId": source_id,
+                "sourceType": source_type,
                 "alias": str(source.get("alias") or "").strip(),
                 "poTeamLeader": str(source.get("po_team_leader") or "").strip(),
-                "dashboardUrl": str(source.get("dashboard_url") or "").strip(),
+                "name": (
+                    str(source.get("po_team_leader") or "").strip()
+                    if source_type == "jira"
+                    else service_n1
+                )
+                or "Sin responsable configurado",
+                "serviceOriginN2": str(source.get("service_origin_n2") or "").strip(),
+                "dashboardUrl": (
+                    str(source.get("dashboard_url") or "").strip()
+                    if source_type == "jira"
+                    else _helix_dashboard_url(settings, source)
+                ),
             }
         )
     return rows
@@ -269,7 +306,7 @@ def _unique_issue_count(frame: pd.DataFrame, *, key_columns: Sequence[str]) -> i
     return int(len(frame))
 
 
-def _manager_rollups(
+def _focus_rollups(
     *,
     context: Any,
     sources: Sequence[Mapping[str, str]],
@@ -278,53 +315,42 @@ def _manager_rollups(
     if not source_by_id:
         return []
 
-    def with_manager(frame: pd.DataFrame) -> pd.DataFrame:
+    def selected(frame: pd.DataFrame) -> pd.DataFrame:
         work = frame.copy(deep=False) if isinstance(frame, pd.DataFrame) else pd.DataFrame()
         if work.empty:
             return work
         work = work.loc[_series_text(work, "source_id").isin(source_by_id)].copy(deep=False)
         if work.empty:
             return work
-        configured = _series_text(work, "source_id").map(
-            lambda source_id: str(source_by_id.get(source_id, {}).get("poTeamLeader") or "").strip()
-        )
-        existing = _series_text(work, "po_team_leader")
-        work = work.copy()
-        work["__manager"] = existing.where(existing.ne(""), configured)
-        work["__manager"] = work["__manager"].replace("", "Sin responsable configurado")
         return work
 
-    open_frame = with_manager(context.open_df)
-    root_frame = with_manager(context.root_cause_evolutives)
-    finalist_frame = with_manager(context.finalist_discrepancies)
-    managers = sorted(
-        set(_series_text(open_frame, "__manager"))
-        | set(_series_text(root_frame, "__manager"))
-        | set(_series_text(finalist_frame, "__manager")),
-        key=lambda value: unicodedata.normalize("NFKD", value).casefold(),
-    )
+    def by_source(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
+        work = selected(frame)
+        if work.empty:
+            return {}
+        return {
+            str(source_id): bucket
+            for source_id, bucket in work.groupby(_series_text(work, "source_id"), sort=False)
+        }
+
+    open_by_source = by_source(context.open_df)
+    root_by_source = by_source(context.root_cause_evolutives)
+    finalist_by_source = by_source(context.finalist_discrepancies)
     rows: list[dict[str, Any]] = []
-    for manager in managers:
-        open_bucket = open_frame.loc[_series_text(open_frame, "__manager").eq(manager)]
-        root_bucket = root_frame.loc[_series_text(root_frame, "__manager").eq(manager)]
-        finalist_bucket = finalist_frame.loc[_series_text(finalist_frame, "__manager").eq(manager)]
-        manager_source_ids = set(_series_text(open_bucket, "source_id"))
-        manager_source_ids.update(_series_text(root_bucket, "source_id"))
-        manager_source_ids.update(_series_text(finalist_bucket, "source_id"))
-        dashboard_url = next(
-            (
-                str(source_by_id[source_id].get("dashboardUrl") or "")
-                for source_id in sorted(manager_source_ids)
-                if source_id in source_by_id
-                and str(source_by_id[source_id].get("dashboardUrl") or "")
-            ),
-            "",
-        )
+    for source_id, source in source_by_id.items():
+        open_bucket = open_by_source.get(source_id, pd.DataFrame())
+        open_count = _unique_issue_count(open_bucket, key_columns=("issue_uid", "key"))
+        if source.get("sourceType") == "helix" and open_count == 0:
+            continue
+        root_bucket = root_by_source.get(source_id, pd.DataFrame())
+        finalist_bucket = finalist_by_source.get(source_id, pd.DataFrame())
         rows.append(
             {
-                "name": manager,
-                "dashboardUrl": dashboard_url,
-                "openIssues": _unique_issue_count(open_bucket, key_columns=("issue_uid", "key")),
+                "sourceType": source["sourceType"],
+                "name": source["name"],
+                "serviceOriginN2": source["serviceOriginN2"],
+                "dashboardUrl": source["dashboardUrl"],
+                "openIssues": open_count,
                 "rootCauseEvolutives": _unique_issue_count(
                     root_bucket, key_columns=("jira_key", "key")
                 ),
@@ -397,9 +423,9 @@ def _newsletter_facts(
         metrics["focusOpen"] = focus_open
         metrics["otherOpen"] = other_open
     critical_open = _metric_int(current_period.get("criticalOpen"))
-    rollups = _manager_rollups(context=context, sources=sources)
+    rollups = _focus_rollups(context=context, sources=sources)
     summary = str(executive.get("summary") or "").strip()
-    responsible_paragraphs = [
+    focus_paragraphs = [
         (
             f"{row['name']}: {row['openIssues']} incidencias abiertas, "
             f"de las cuales {row['rootCauseEvolutives']} son evolutivos para solucionar "
@@ -422,7 +448,7 @@ def _newsletter_facts(
             "yearLabel": str((evolution.get("annual") or {}).get("label") or ""),
             "fortnightLabel": str(current_period.get("label") or ""),
         },
-        "responsibleRollups": rollups,
+        "focusRollups": rollups,
         "draft": {
             "subject": f"Seguimiento quincenal de incidencias · {str(period.get('caption') or '')}",
             "greeting": "Buenos días,",
@@ -432,10 +458,10 @@ def _newsletter_facts(
             ),
             "reportLinkLabel": "Enlace a la presentación",
             "summary": summary,
-            "responsibleIntro": (
-                "Conforme al análisis realizado, los datos por responsable son los siguientes:"
+            "focusIntro": (
+                "Conforme al análisis realizado, los focos de actuación son los siguientes:"
             ),
-            "responsibleParagraphs": responsible_paragraphs,
+            "focusParagraphs": focus_paragraphs,
             "closing": "Esperamos que esta información os sea de utilidad.",
         },
     }
@@ -716,7 +742,7 @@ def build_cloud_projection_artifact(
         "bytes": len(report_content),
         "slideCount": int(report_result.slide_count),
     }
-    manager_sources = _manager_source_catalog(
+    focus_sources = _focus_source_catalog(
         settings,
         country=country_text,
         source_ids=clean_source_ids,
@@ -724,15 +750,16 @@ def build_cloud_projection_artifact(
     newsletter = _newsletter_facts(
         insights=intelligence,
         context=context,
-        sources=manager_sources,
+        sources=focus_sources,
     )
+    jira_administration = [source for source in focus_sources if source.get("sourceType") == "jira"]
     facts_sha256 = sha256_bytes(canonical_json_bytes(newsletter))
     revision_payload = {
         "country": country_text,
         "scopeMode": mode,
         "sourceIds": list(clean_source_ids),
         "referenceDate": reference_date,
-        "administration": {"jiraSources": manager_sources},
+        "administration": {"jiraSources": jira_administration},
         "views": views,
         "newsletterFacts": newsletter,
         "report": report,
@@ -760,7 +787,7 @@ def build_cloud_projection_artifact(
         "generatedAt": stamp,
         "scope": scope,
         "semantics": _semantic_trace(settings),
-        "administration": {"jiraSources": manager_sources},
+        "administration": {"jiraSources": jira_administration},
         "views": views,
         "newsletterFacts": newsletter,
         "report": report,

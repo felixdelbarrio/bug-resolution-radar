@@ -50,8 +50,8 @@ if (manifest.runtimeVersion !== "V8") {
 const config = source("00_Config.gs");
 for (const expected of [
   "transferVersion: 3",
-  "projectionVersion: 3",
-  "semanticContract: 'desktop-authoritative-v3'"
+  "projectionVersion: 4",
+  "semanticContract: 'desktop-authoritative-v4'"
 ]) {
   if (!config.includes(expected)) throw new Error(`Falta el contrato GPC: ${expected}`);
 }
@@ -93,5 +93,5 @@ const renderedWebapp = renderWebapp();
 validateRenderedWebapp(renderedWebapp);
 console.log(
   `GPC quality gate OK: ${gsFiles.length} archivos GS, ${htmlFiles.length} HTML, ` +
-  `${requiredShellIds.length} nodos de arranque y WebApp local v3.`
+  `${requiredShellIds.length} nodos de arranque y WebApp local v4.`
 );

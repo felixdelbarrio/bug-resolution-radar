@@ -93,7 +93,7 @@ const CONNECTOR_COPY: Record<
     columns: [
       { key: "country", label: "country" },
       { key: "alias", label: "alias" },
-      { key: "service_origin_buug", label: "Servicio Origen BU/UG" },
+      { key: "owner_support_company", label: "Owner Support Company" },
       { key: "service_origin_n1", label: "Servicio Origen N1" },
       { key: "service_origin_n2", label: "Servicio Origen N2" }
     ]

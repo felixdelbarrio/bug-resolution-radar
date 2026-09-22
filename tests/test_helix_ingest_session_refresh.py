@@ -154,7 +154,7 @@ def test_ingest_helix_sends_expected_body_shape(monkeypatch: Any) -> None:
     assert "FROM `HPD:Help Desk`" in sql
     assert "LIMIT 75 OFFSET 0" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" in sql
-    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`Owner Support Company` IN ('BBVA México')" in sql
 
 
 def test_ingest_helix_exact_incident_lookup_uses_minimal_filters(monkeypatch: Any) -> None:
@@ -182,7 +182,7 @@ def test_ingest_helix_exact_incident_lookup_uses_minimal_filters(monkeypatch: An
     ok, msg, _ = helix_mod.ingest_helix(
         browser="chrome",
         country="México",
-        service_origin_buug="BBVA México",
+        owner_support_company="BBVA México",
         service_origin_n1="ENTERPRISE WEB",
         incident_ids=["INC000104216018"],
         incident_ids_only=True,
@@ -194,7 +194,7 @@ def test_ingest_helix_exact_incident_lookup_uses_minimal_filters(monkeypatch: An
     assert captured_sql
     sql = captured_sql[0]
     assert "`HPD:Help Desk`.`Incident Number` IN ('INC000104216018')" in sql
-    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`Owner Support Company` IN ('BBVA México')" in sql
     assert "`HPD:Help Desk`.`BBVA_SourceServiceN1` IN ('ENTERPRISE WEB')" not in sql
     assert "Service Type" not in sql
     assert "BBVA_Environment" not in sql
@@ -230,7 +230,7 @@ def test_ingest_helix_exact_incident_lookup_ignores_cached_pending_ids(
         country="México",
         source_alias="Lookup estados finalistas Jira",
         source_id="helix:mexico:lookup-estados-finalistas-jira",
-        service_origin_buug="BBVA México",
+        owner_support_company="BBVA México",
         incident_ids=["INC000104216018"],
         incident_ids_only=True,
         allow_interactive_bootstrap=False,
@@ -852,7 +852,7 @@ def test_ingest_helix_noninteractive_lookup_does_not_open_browser_without_cookie
     ok, msg, doc = helix_mod.ingest_helix(
         browser="chrome",
         country="México",
-        service_origin_buug="BBVA México",
+        owner_support_company="BBVA México",
         incident_ids=["INC000104216018"],
         incident_ids_only=True,
         allow_interactive_bootstrap=False,

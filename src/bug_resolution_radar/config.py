@@ -110,13 +110,17 @@ DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
-HELIX_SERVICE_ORIGIN_BUUG_BY_COUNTRY: Dict[str, str] = {
+HELIX_OWNER_SUPPORT_COMPANY_BY_COUNTRY: Dict[str, str] = {
     "Argentina": "BBVA Argentina",
     "Colombia": "BBVA Colombia",
     "España": "BBVA España",
     "México": "BBVA México",
     "Perú": "BBVA Perú",
 }
+DEFAULT_HELIX_INCIDENT_DASHBOARD_URL = (
+    "https://itsmhelixbbva-ir1.onbmc.com/dashboards/d/"
+    "c6683c35-c8e4-4192-ac83-b63feab9599d/bbva-incident-report"
+)
 _PERIOD_TEMPLATE_PRIMARY_FILENAME = "Seguimiento de incidencias del periodo.pptx"
 _PERIOD_TEMPLATE_ALTERNATE_FILENAMES = (
     _PERIOD_TEMPLATE_PRIMARY_FILENAME,
@@ -308,15 +312,15 @@ def _normalize_country(value: str, *, supported: List[str]) -> str:
     return ""
 
 
-def helix_service_origin_buug_for_country(country: str) -> str:
-    """Return the configured Helix Servicio Origen BU/UG for a supported country."""
+def helix_owner_support_company_for_country(country: str) -> str:
+    """Return the configured Helix Owner Support Company for a supported country."""
     country_norm = _normalize_country(
         _coerce_str(country),
-        supported=list(HELIX_SERVICE_ORIGIN_BUUG_BY_COUNTRY.keys()),
+        supported=list(HELIX_OWNER_SUPPORT_COMPANY_BY_COUNTRY.keys()),
     )
     if not country_norm:
         return ""
-    return HELIX_SERVICE_ORIGIN_BUUG_BY_COUNTRY.get(country_norm, "")
+    return HELIX_OWNER_SUPPORT_COMPANY_BY_COUNTRY.get(country_norm, "")
 
 
 def _parse_json_list(raw: str) -> List[Dict[str, Any]]:
@@ -355,7 +359,7 @@ def _normalized_helix_source_rows_for_storage(settings: "Settings") -> List[Dict
             "source_id": sid,
             "country": country,
             "alias": alias,
-            "service_origin_buug": helix_service_origin_buug_for_country(country),
+            "owner_support_company": helix_owner_support_company_for_country(country),
         }
         service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
         service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
@@ -428,7 +432,7 @@ class Settings(BaseModel):
     HELIX_ARSQL_CLIENT_TYPE: str = "4021"
     HELIX_ARSQL_GRAFANA_ORG_ID: str = ""
     HELIX_ARSQL_GRAFANA_DEVICE_ID: str = ""
-    HELIX_ARSQL_DASHBOARD_URL: str = ""
+    HELIX_ARSQL_DASHBOARD_URL: str = DEFAULT_HELIX_INCIDENT_DASHBOARD_URL
     HELIX_INC_LOOKUP_BATCH_SIZE: int = 25
     HELIX_BROWSER_LOGIN_WAIT_SECONDS: int = 90
     HELIX_BROWSER_LOGIN_POLL_SECONDS: float = 2.0
@@ -601,7 +605,7 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
     for row in rows:
         country = _normalize_country(_coerce_str(row.get("country")), supported=countries)
         alias = _coerce_str(row.get("alias"))
-        service_origin_buug = helix_service_origin_buug_for_country(country)
+        owner_support_company = helix_owner_support_company_for_country(country)
         service_origin_n1 = _coerce_str(row.get("service_origin_n1"))
         service_origin_n2 = _coerce_str(row.get("service_origin_n2"))
         if not country or not alias:
@@ -616,8 +620,8 @@ def helix_sources(settings: Settings) -> List[Dict[str, str]]:
             "country": country,
             "alias": alias,
         }
-        if service_origin_buug:
-            payload["service_origin_buug"] = service_origin_buug
+        if owner_support_company:
+            payload["owner_support_company"] = owner_support_company
         if service_origin_n1:
             payload["service_origin_n1"] = service_origin_n1
         if service_origin_n2:

@@ -507,13 +507,13 @@ def map_helix_values_to_item(
         closed_date=_to_iso_datetime(_extract_custom_attr(values, "bbva_closeddate")),
         matrix_service_n1=_extract_custom_attr(values, "bbva_matrixservicen1"),
         source_service_n1=_extract_custom_attr(values, "bbva_sourceservicen1"),
+        source_service_n2=_extract_text(
+            values.get("bbva_sourceservicen2") or values.get("BBVA_SourceServiceN2")
+        ),
         url=url,
         country=country,
-        service_origin_buug=_extract_text(
-            values.get("bbva_sourceservicebuug")
-            or values.get("BBVA_SourceServiceBUUG")
-            or values.get("BBVA_SourceServiceCompany")
-            or values.get("Contact Company")
+        owner_support_company=_extract_text(
+            values.get("ownerSupportCompany") or values.get("Owner Support Company")
         ),
         source_alias=source_alias,
         source_id=source_id,

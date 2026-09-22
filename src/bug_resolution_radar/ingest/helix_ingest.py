@@ -397,6 +397,9 @@ _ARSQL_SELECT_ALIASES: List[str] = [
     "customerName",
     "bbva_matrixservicen1",
     "bbva_sourceservicen1",
+    "bbva_sourceservicen2",
+    "ownerSupportCompany",
+    "bbva_executivedescription",
     "bbva_startdatetime",
     "bbva_closeddate",
     "lastModifiedDate",
@@ -637,7 +640,7 @@ def _build_arsql_sql(
     source_service_n2: Optional[List[str]] = None,
     incident_types: Optional[List[str]] = None,
     incident_ids: Optional[List[str]] = None,
-    companies: Optional[List[str]] = None,
+    owner_support_companies: Optional[List[str]] = None,
     environments: Optional[List[str]] = None,
     time_fields: Optional[List[str]] = None,
     incident_ids_only: bool = False,
@@ -803,17 +806,14 @@ def _build_arsql_sql(
     if incident_type_filter:
         where_parts.append(incident_type_filter)
 
-    # Official Enterprise Web exports filter by "Servicio Origen - BU/UG", not by recognizer/customer company.
-    company_filter_field = _first_available_field(
-        ["BBVA_SourceServiceBUUG", "BBVA_SourceServiceCompany", "Contact Company"]
-    )
-    company_filter = (
-        _sql_in_filter(_field_ref(company_filter_field), companies)
-        if company_filter_field
+    owner_company_field = _first_available_field(["Owner Support Company"])
+    owner_company_filter = (
+        _sql_in_filter(_field_ref(owner_company_field), owner_support_companies)
+        if owner_company_field
         else None
     )
-    if company_filter:
-        where_parts.append(company_filter)
+    if owner_company_filter:
+        where_parts.append(owner_company_filter)
 
     environment_filter_field = _first_available_field(list(_ARSQL_ENVIRONMENT_FIELD_CANDIDATES))
     environment_filter_values = _environment_filter_values(environment_filter_field, environments)
@@ -861,6 +861,8 @@ def _build_arsql_sql(
         f"{_select_alias('Contact Company', 'customerName')}, "
         f"{_select_alias('BBVA_MatrixServiceN1', 'bbva_matrixservicen1')}, "
         f"{_select_alias('BBVA_SourceServiceN1', 'bbva_sourceservicen1')}, "
+        f"{_select_alias('BBVA_SourceServiceN2', 'bbva_sourceservicen2')}, "
+        f"{_select_alias('Owner Support Company', 'ownerSupportCompany')}, "
         f"{_select_alias('BBVA_ExecutiveDescription', 'bbva_executivedescription')}, "
         f"{_select_alias('BBVA_StartDateTime', 'bbva_startdatetime')}, "
         f"{_select_alias('Closed Date', 'bbva_closeddate')}, "
@@ -1339,7 +1341,7 @@ def ingest_helix(
     source_id: str = "",
     proxy: str = "",
     ssl_verify: str = "",
-    service_origin_buug: Any = None,
+    owner_support_company: Any = None,
     service_origin_n1: Any = None,
     service_origin_n2: Any = None,
     ca_bundle: str = "",
@@ -1857,7 +1859,7 @@ def ingest_helix(
     if exact_incident_lookup:
         # Exact finalist lookups must not inherit broad-ingest filters such as
         # ENTERPRISE WEB, environment or business type; the Incident Number and
-        # country BU/UG are the stable keys for closed historical records.
+        # Owner Support Company is the stable geographic key for closed historical records.
         incident_types_filter: List[str] = []
         allowed_business_incident_types: List[str] = []
         arsql_environments_filter: List[str] = []
@@ -1869,12 +1871,11 @@ def ingest_helix(
         allowed_business_incident_types = list(_ARSQL_OFFICIAL_BUSINESS_INCIDENT_TYPES)
         arsql_environments_filter = list(_ARSQL_OFFICIAL_ENVIRONMENTS)
         arsql_time_fields = list(_ARSQL_OFFICIAL_TIME_FIELDS)
-    buug_names = (
-        _csv_list(service_origin_buug, "")
-        if service_origin_buug is not None
-        else _csv_list(os.getenv("HELIX_FILTER_COMPANIES"), "BBVA México")
+    owner_support_companies = (
+        _csv_list(owner_support_company, "")
+        if owner_support_company is not None
+        else _csv_list(os.getenv("HELIX_OWNER_SUPPORT_COMPANIES"), "BBVA México")
     )
-    companies_filter = [{"name": name} for name in buug_names]
 
     if exact_incident_lookup:
         arsql_source_service_n1: List[str] = []
@@ -1896,7 +1897,6 @@ def ingest_helix(
             ),
             "",
         )
-    arsql_companies = [str(r.get("name") or "").strip() for r in companies_filter if r]
     allowed_env_tokens = {
         _normalize_space_token(x) for x in arsql_environments_filter if str(x).strip()
     }
@@ -1922,7 +1922,7 @@ def ingest_helix(
             source_service_n2=arsql_source_service_n2,
             incident_types=incident_types_filter,
             incident_ids=arsql_pending_incident_ids,
-            companies=arsql_companies,
+            owner_support_companies=owner_support_companies,
             environments=arsql_environments_filter,
             time_fields=arsql_time_fields,
             incident_ids_only=bool(incident_ids_only and explicit_incident_ids),
@@ -2167,9 +2167,7 @@ def ingest_helix(
         create_start_iso = _iso_from_epoch_ms(create_start_ms)
         create_end_iso = _iso_from_epoch_ms(create_end_ms)
         incident_types_q = ",".join(incident_types_filter) or "all"
-        companies_q = (
-            ",".join(str(r.get("name") or "").strip() for r in companies_filter if r) or "all"
-        )
+        owner_companies_q = ",".join(owner_support_companies) or "all"
         source_service_n1_q = ",".join(arsql_source_service_n1) or "all"
         source_service_n2_q = ",".join(arsql_source_service_n2) or "all"
         arsql_environments_q = ",".join(arsql_environments_filter) or "all"
@@ -2188,7 +2186,7 @@ def ingest_helix(
             f"timeFields=[{arsql_time_fields_q}]; "
             f"sourceServiceN1=[{source_service_n1_q}]; "
             f"sourceServiceN2=[{source_service_n2_q}]; "
-            f"incidentTypes=[{incident_types_q}]; companies=[{companies_q}]; environments=[{arsql_environments_q}]; "
+            f"incidentTypes=[{incident_types_q}]; ownerSupportCompanies=[{owner_companies_q}]; environments=[{arsql_environments_q}]; "
             f"postFilterBusinessIncidentTypes=[{','.join(allowed_business_incident_types) or 'all'}]; "
             f"page_limit={base_chunk_size}; "
             f"select={select_mode_q}; "
@@ -2372,8 +2370,9 @@ def ingest_helix(
             ]
             mapped_item = mapped_item.model_copy(
                 update={
-                    "service_origin_buug": str(
-                        mapped_item.service_origin_buug or (buug_names[0] if buug_names else "")
+                    "owner_support_company": str(
+                        mapped_item.owner_support_company
+                        or (owner_support_companies[0] if owner_support_companies else "")
                     ).strip(),
                     "helix_lookup_kind": str(helix_lookup_kind or "").strip(),
                     "matched_jira_keys": sorted(set(matched_jira_keys)),
@@ -2444,7 +2443,7 @@ def lookup_helix_incidents_by_arsql(
     settings: Settings,
     *,
     country: str,
-    service_origin_buug: str,
+    owner_support_company: str,
     incident_ids: List[str],
     source_alias: str,
     source_id: str,
@@ -2467,7 +2466,7 @@ def lookup_helix_incidents_by_arsql(
         source_id=str(source_id or "").strip(),
         proxy=str(getattr(settings, "HELIX_PROXY", "") or "").strip(),
         ssl_verify=str(getattr(settings, "HELIX_SSL_VERIFY", "") or "").strip(),
-        service_origin_buug=str(service_origin_buug or "").strip(),
+        owner_support_company=str(owner_support_company or "").strip(),
         service_origin_n1=getattr(settings, "HELIX_ARSQL_SOURCE_SERVICE_N1", ""),
         service_origin_n2=getattr(settings, "HELIX_ARSQL_SOURCE_SERVICE_N2", ""),
         chunk_size=max(int(batch_size or 0), 1),

@@ -32,7 +32,7 @@ def _settings(tmp_path: Path) -> Settings:
         HELIX_DATA_PATH=str((tmp_path / "helix.json").resolve()),
         JIRA_SOURCES_JSON='[{"country":"España","alias":"Core","jql":"project = RADAR"}]',
         HELIX_SOURCES_JSON=(
-            '[{"country":"España","alias":"Helix Core","service_origin_buug":"Canales",'
+            '[{"country":"España","alias":"Helix Core","owner_support_company":"BBVA España",'
             '"service_origin_n1":"Pagos","service_origin_n2":"Transferencias"}]'
         ),
         REPORT_PPT_DOWNLOAD_DIR=str((tmp_path / "exports").resolve()),
@@ -1489,8 +1489,8 @@ def test_issues_export_aggregate_multi_helix_creates_raw_sheet_per_source(
         HELIX_DATA_PATH=str((tmp_path / "helix.json").resolve()),
         JIRA_SOURCES_JSON="[]",
         HELIX_SOURCES_JSON=(
-            '[{"country":"España","alias":"Helix Core","service_origin_buug":"Canales"},'
-            '{"country":"España","alias":"Helix Ops","service_origin_buug":"Canales"}]'
+            '[{"country":"España","alias":"Helix Core","owner_support_company":"BBVA España"},'
+            '{"country":"España","alias":"Helix Ops","owner_support_company":"BBVA España"}]'
         ),
         COUNTRY_ROLLUP_SOURCES_JSON=(
             f'[{{"country":"España","source_ids":["{source_a}","{source_b}"]}}]'
@@ -1619,7 +1619,7 @@ def test_settings_sources_export_endpoint_streams_helix_xlsx(
         "source_id",
         "country",
         "alias",
-        "service_origin_buug",
+        "owner_support_company",
         "service_origin_n1",
         "service_origin_n2",
     ]
