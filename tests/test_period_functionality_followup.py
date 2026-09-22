@@ -111,7 +111,7 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
     assert summary.total_open_critical == 5
     assert summary.is_critical_focus
     assert len(summary.top_rows) == 3
-    assert summary.top_rows[0].functionality == "Login y acceso"
+    assert summary.top_rows[0].functionality == "Acceso y seguridad"
     assert summary.top_rows[0].new_count == 2
     assert summary.top_rows[0].open_total == 2
     assert float(summary.top_rows[0].avg_open_days) > 5.0
@@ -123,7 +123,7 @@ def test_build_period_functionality_followup_summary_uses_centralized_metrics() 
 
     assert len(summary.zoom_slides) == 3
     login_zoom = summary.zoom_slides[0]
-    assert login_zoom.functionality == "Login y acceso"
+    assert login_zoom.functionality == "Acceso y seguridad"
     assert login_zoom.current_open_critical_count == 2
     assert login_zoom.issues
     assert login_zoom.issues[0].url.startswith("https://jira.example/")

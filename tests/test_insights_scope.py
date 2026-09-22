@@ -68,8 +68,8 @@ def test_insights_combo_context_functionality_options_follow_selected_view() -> 
         view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
     )
 
-    assert list(ctx_quincenal.functionality_options) == ["Login y acceso"]
-    assert set(ctx_accumulated.functionality_options) == {"Pagos", "Login y acceso"}
+    assert list(ctx_quincenal.functionality_options) == ["Acceso y seguridad"]
+    assert set(ctx_accumulated.functionality_options) == {"Pagos y nómina", "Acceso y seguridad"}
 
 
 def test_insights_combo_context_applies_selected_functionalities() -> None:
@@ -84,11 +84,11 @@ def test_insights_combo_context_applies_selected_functionalities() -> None:
         accumulated_df=df,
         quincenal_df=df,
         view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
-        selected_functionalities=["Pagos"],
+        selected_functionalities=["Pagos y nómina"],
     )
 
     assert "__insights_theme" in ctx.filtered_df.columns
-    assert set(ctx.filtered_df["__insights_theme"].tolist()) == {"Pagos"}
+    assert set(ctx.filtered_df["__insights_theme"].tolist()) == {"Pagos y nómina"}
     assert ctx.filtered_df["key"].tolist() == ["A-1"]
 
 
@@ -120,7 +120,7 @@ def test_insights_combo_context_uses_helix_executive_description_for_functionali
         view_mode=INSIGHTS_VIEW_MODE_QUINCENAL,
     )
 
-    assert set(ctx.functionality_options) == {"Login y acceso", "Pagos"}
+    assert set(ctx.functionality_options) == {"Acceso y seguridad", "Pagos y nómina"}
 
 
 def test_insights_combo_context_default_status_uses_operational_order_and_excludes_discarded() -> (

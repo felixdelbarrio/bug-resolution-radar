@@ -27,7 +27,7 @@ def test_infer_root_cause_label_detects_known_patterns() -> None:
 def test_infer_root_cause_label_uses_theme_fallback_for_unknown_text() -> None:
     assert (
         infer_root_cause_label("Error funcional no especificado en pagos")
-        == "Fallo funcional en Pagos"
+        == "Fallo funcional en Pagos y nómina"
     )
 
 
@@ -167,7 +167,7 @@ def test_build_topic_expandable_summaries_builds_flow_and_root_causes() -> None:
         top_root_causes=3,
     )
 
-    tareas = out["Tareas"]
+    tareas = out["Otros"]
     assert tareas.flow.direction == "worsening"
     assert tareas.flow.created_count == 4
     assert tareas.flow.resolved_count == 1
@@ -176,7 +176,7 @@ def test_build_topic_expandable_summaries_builds_flow_and_root_causes() -> None:
     assert tareas.root_causes[0].label == "Visualización / UI"
     assert tareas.root_causes[0].count == 2
 
-    pagos = out["Pagos"]
+    pagos = out["Pagos y nómina"]
     assert pagos.flow.direction == "improving"
     assert pagos.flow.created_count == 1
     assert pagos.flow.resolved_count == 3

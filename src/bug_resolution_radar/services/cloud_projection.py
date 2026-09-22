@@ -16,7 +16,6 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import parse_analysis_lookback_months
 from bug_resolution_radar.analytics.filtering import FilterState
-from bug_resolution_radar.analytics.insights import THEME_RULES
 from bug_resolution_radar.analytics.issues import CRITICAL_PRIORITY_COMPACT_TOKENS
 from bug_resolution_radar.analytics.period_summary import (
     _quincena_last_finished_only,
@@ -31,9 +30,11 @@ from bug_resolution_radar.analytics.status_semantics import (
 from bug_resolution_radar.config import (
     DEFAULT_HELIX_INCIDENT_DASHBOARD_URL,
     Settings,
+    functionality_taxonomy_for_country,
     helix_sources,
     jira_root_cause_labels_by_country,
     jira_sources,
+    supported_countries,
 )
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
 from bug_resolution_radar.reports.service import (
@@ -226,9 +227,13 @@ def _semantic_trace(settings: Settings) -> dict[str, Any]:
             "functionalityFollowup": sorted(CRITICAL_PRIORITY_COMPACT_TOKENS),
         },
         "openIssuesFocusMode": open_issues_focus_mode(settings),
-        "functionalityRules": [
-            {"label": label, "tokens": list(tokens)} for label, tokens in THEME_RULES
-        ],
+        "functionalityRulesByCountry": {
+            country: [
+                {"label": label, "tokens": list(tokens)}
+                for label, tokens in functionality_taxonomy_for_country(settings, country)
+            ]
+            for country in supported_countries(settings)
+        },
         "rootCauseLabelsByCountry": jira_root_cause_labels_by_country(settings),
     }
 

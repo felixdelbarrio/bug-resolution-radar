@@ -95,7 +95,7 @@ def test_prepare_open_theme_payload_includes_other_bucket_after_top_themes() -> 
     )
     payload = prepare_open_theme_payload(open_df, top_n=3)
     top_tbl = payload["top_tbl"]
-    assert top_tbl["tema"].tolist() == ["Pagos", "Login y acceso", "Otros"]
+    assert top_tbl["tema"].tolist() == ["Pagos y nómina", "Acceso y seguridad", "Otros"]
     assert top_tbl["open_count"].tolist() == [2, 1, 1]
 
 
@@ -118,17 +118,21 @@ def test_build_theme_fortnight_trend_builds_raw_and_cumulative_series() -> None:
     )
     trend = build_theme_fortnight_trend(
         df,
-        theme_whitelist=["Pagos", "Login y acceso", "Otros"],
+        theme_whitelist=["Pagos y nómina", "Acceso y seguridad", "Otros"],
         cumulative=True,
     )
-    assert trend["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
+    assert trend["tema"].drop_duplicates().tolist() == [
+        "Pagos y nómina",
+        "Acceso y seguridad",
+        "Otros",
+    ]
     assert trend["quincena_label"].drop_duplicates().tolist() == [
         "2026-01 \u00b7 1-14",
         "2026-01 \u00b7 15-31",
         "2026-02 \u00b7 1-14",
     ]
-    pagos = trend.loc[trend["tema"] == "Pagos", "issues"].tolist()
-    pagos_acc = trend.loc[trend["tema"] == "Pagos", "issues_cumulative"].tolist()
+    pagos = trend.loc[trend["tema"] == "Pagos y nómina", "issues"].tolist()
+    pagos_acc = trend.loc[trend["tema"] == "Pagos y nómina", "issues_cumulative"].tolist()
     assert pagos == [1, 1, 0]
     assert pagos_acc == [1, 2, 2]
     assert trend["issues_value"].equals(trend["issues_cumulative"])
@@ -151,21 +155,24 @@ def test_build_theme_daily_trend_uses_day_axis_inside_fortnight() -> None:
     )
     trend = build_theme_daily_trend(
         df,
-        theme_whitelist=["Pagos", "Login y acceso"],
+        theme_whitelist=["Pagos y nómina", "Acceso y seguridad"],
     )
-    assert trend["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso"]
+    assert trend["tema"].drop_duplicates().tolist() == [
+        "Pagos y nómina",
+        "Acceso y seguridad",
+    ]
     assert trend["date_label"].iloc[0] == "2026-01-15"
     assert trend["date_label"].iloc[-1] == "2026-01-31"
-    pagos_daily = trend.loc[trend["tema"] == "Pagos", "issues"].tolist()
+    pagos_daily = trend.loc[trend["tema"] == "Pagos y nómina", "issues"].tolist()
     assert pagos_daily[0] == 0  # 2026-01-15 canonical fortnight boundary
     assert pagos_daily[1] == 1  # 2026-01-16
     assert pagos_daily[2] == 0  # 2026-01-17 gap
     assert pagos_daily[3] == 1  # 2026-01-18
 
 
-def test_order_theme_labels_prioritizes_business_focus_themes() -> None:
+def test_order_theme_labels_preserves_requested_priority() -> None:
     ordered = order_theme_labels(["Otros", "Softoken", "Pagos", "Monetarias"])
-    assert ordered == ["Pagos", "Monetarias", "Otros", "Softoken"]
+    assert ordered == ["Otros", "Softoken", "Pagos", "Monetarias"]
 
 
 def test_order_theme_labels_by_volume_puts_others_last() -> None:
@@ -224,12 +231,20 @@ def test_build_theme_trends_whitelist_moves_others_to_last_position() -> None:
         }
     )
 
-    whitelist = ["Otros", "Pagos", "Login y acceso"]
+    whitelist = ["Otros", "Pagos y nómina", "Acceso y seguridad"]
     daily = build_theme_daily_trend(df, theme_whitelist=whitelist)
     fortnight = build_theme_fortnight_trend(df, theme_whitelist=whitelist, cumulative=True)
 
-    assert daily["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
-    assert fortnight["tema"].drop_duplicates().tolist() == ["Pagos", "Login y acceso", "Otros"]
+    assert daily["tema"].drop_duplicates().tolist() == [
+        "Pagos y nómina",
+        "Acceso y seguridad",
+        "Otros",
+    ]
+    assert fortnight["tema"].drop_duplicates().tolist() == [
+        "Pagos y nómina",
+        "Acceso y seguridad",
+        "Otros",
+    ]
     assert is_other_theme_label("Otros")
 
 

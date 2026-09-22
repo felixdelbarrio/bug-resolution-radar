@@ -36,7 +36,8 @@ from bug_resolution_radar.analytics.insights import (
     build_theme_color_map,
     build_theme_daily_trend,
     build_theme_fortnight_trend,
-    build_theme_render_order,
+    is_other_theme_label,
+    order_theme_labels,
     order_theme_labels_by_volume,
     prepare_open_theme_payload,
     segment_text_color,
@@ -52,6 +53,7 @@ from bug_resolution_radar.analytics.issue_functionality import (
     FUNCTIONALITY_COL,
     HELIX_EXECUTIVE_DESCRIPTION_COL,
     ensure_issue_functionality_columns,
+    functionality_order,
 )
 from bug_resolution_radar.analytics.issues import (
     normalize_text_col,
@@ -109,7 +111,7 @@ from bug_resolution_radar.theme.design_tokens import BBVA_LIGHT
 from bug_resolution_radar.theme.plotly_style import apply_plotly_bbva
 
 _SCOPE_CONTEXT_CACHE_MAX_ENTRIES = 24
-_SCOPE_CONTEXT_CACHE_TTL_SECONDS = 12.0
+_SCOPE_CONTEXT_CACHE_TTL_SECONDS = 60.0
 _scope_context_cache: OrderedDict[tuple[Any, ...], tuple[float, "DashboardScopeContext"]] = (
     OrderedDict()
 )
@@ -757,6 +759,16 @@ def _scope_context_cache_key(
         str(query.issue_sort_col or "").strip(),
         str(query.issue_like_query or "").strip(),
         str(getattr(settings, "JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON", "") or "").strip(),
+        tuple(
+            str(getattr(settings, variable_name, "") or "")
+            for variable_name in (
+                "FUNCTIONALITY_TAXONOMY_MEXICO",
+                "FUNCTIONALITY_TAXONOMY_ARGENTINA",
+                "FUNCTIONALITY_TAXONOMY_SPAIN",
+                "FUNCTIONALITY_TAXONOMY_COLOMBIA",
+                "FUNCTIONALITY_TAXONOMY_PERU",
+            )
+        ),
     )
 
 
@@ -785,7 +797,12 @@ def _build_scope_context(
         settings=settings,
         country=str(query.workspace.country or "").strip(),
     )
-    dff = ensure_issue_functionality_columns(apply_filters(scoped_df, query.filters))
+    classified_scope = ensure_issue_functionality_columns(
+        scoped_df,
+        settings=settings,
+        country=query.workspace.country,
+    )
+    dff = apply_filters(classified_scope, query.filters)
     dff = apply_dashboard_issue_scope(
         dff,
         settings=settings,
@@ -904,10 +921,11 @@ def load_scope_context(
         include_kpis=include_kpis,
         include_timeseries_chart=include_timeseries_chart,
     )
+    completed_at = monotonic()
     with _scope_context_cache_lock:
-        _scope_context_cache[cache_key] = (now, context)
+        _scope_context_cache[cache_key] = (completed_at, context)
         _scope_context_cache.move_to_end(cache_key)
-        _prune_scope_context_cache(now)
+        _prune_scope_context_cache(completed_at)
     return context
 
 
@@ -1540,14 +1558,14 @@ def _build_theme_trend_figure(
             counts_by_label=theme_totals,
             others_last=True,
         )
-    ordering = build_theme_render_order(
-        ordered_themes,
-        counts_by_label=theme_totals,
-        others_last=True,
-        others_at_x_axis=True,
-    )
-    legend_order = list(ordering.display_order)
-    stacked_order = list(ordering.stack_order_bottom_to_top)
+    legend_order = order_theme_labels(ordered_themes, priority=theme_order)
+    other_themes = [theme for theme in legend_order if is_other_theme_label(theme)]
+    legend_order = [
+        theme for theme in legend_order if not is_other_theme_label(theme)
+    ] + other_themes
+    stacked_order = other_themes + [
+        theme for theme in reversed(legend_order) if not is_other_theme_label(theme)
+    ]
     if not legend_order or not stacked_order:
         return None
 
@@ -1957,6 +1975,8 @@ def _build_period_summary_payload(
 
 def _build_functionality_payload(
     *,
+    settings: Settings,
+    country: str,
     dff: pd.DataFrame,
     dff_quincenal: pd.DataFrame,
     view_mode: str,
@@ -1966,6 +1986,7 @@ def _build_functionality_payload(
     apply_default_status_when_empty: bool,
     dark_mode: bool,
 ) -> dict[str, Any]:
+    configured_order = functionality_order(settings, country=country, include_other=True)
     combo_ctx = build_insights_combo_context(
         accumulated_df=dff,
         quincenal_df=dff_quincenal,
@@ -1974,6 +1995,7 @@ def _build_functionality_payload(
         selected_priorities=list(priority_filters or []),
         selected_functionalities=list(functionality_filters or []),
         apply_default_status_when_empty=apply_default_status_when_empty,
+        functionality_order=configured_order,
     )
     filtered_df = combo_ctx.filtered_df
     history_ctx = build_insights_combo_context(
@@ -1984,10 +2006,15 @@ def _build_functionality_payload(
         selected_priorities=list(combo_ctx.selected_priorities),
         selected_functionalities=list(combo_ctx.selected_functionalities),
         apply_default_status_when_empty=False,
+        functionality_order=configured_order,
     )
     use_accumulated_scope = combo_ctx.view_mode == INSIGHTS_VIEW_MODE_ACCUMULATED
 
-    theme_payload = prepare_open_theme_payload(open_only(filtered_df), top_n=10)
+    theme_payload = prepare_open_theme_payload(
+        open_only(filtered_df),
+        top_n=10,
+        theme_order=configured_order,
+    )
     tmp_open = theme_payload.get("tmp_open")
     if not isinstance(tmp_open, pd.DataFrame):
         tmp_open = pd.DataFrame()
@@ -2592,6 +2619,7 @@ def _build_functionality_followup_payload(
     )
     followup = build_period_functionality_followup_summary(
         scope_result=quincenal.aggregate,
+        settings=settings,
         jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
         status_filters=list(status_filters or []),
         priority_filters=list(priority_filters or []),
@@ -2739,6 +2767,8 @@ def build_intelligence_snapshot(
     )
     if build_all_tabs or active_tab == "functionality":
         functionality = _build_functionality_payload(
+            settings=settings,
+            country=country_txt,
             dff=dff,
             dff_quincenal=dff_quincenal,
             view_mode=insights_view_mode,

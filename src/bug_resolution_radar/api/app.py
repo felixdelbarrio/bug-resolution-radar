@@ -331,7 +331,12 @@ def _single_source_result(*, connector: str, ok: bool, message: str) -> dict[str
     }
 
 
-def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
+def _filter_options(
+    df: pd.DataFrame,
+    *,
+    settings: Settings,
+    country: str,
+) -> dict[str, list[str]]:
     if df is None or df.empty:
         return _empty_filter_options()
 
@@ -342,7 +347,7 @@ def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
         "functionality": [],
         "quincenal": [QUINCENAL_SCOPE_ALL],
     }
-    df = ensure_issue_functionality_columns(df)
+    df = ensure_issue_functionality_columns(df, settings=settings, country=country)
     if "status" in df.columns:
         out["status"] = sorted(
             set(normalize_text_col(df["status"], "(sin estado)").astype(str).tolist())
@@ -454,7 +459,9 @@ def _workspace_payload(
         else list(configured_rollup or source_ids)
     )
     filter_options = (
-        _filter_options(scoped_df) if include_filter_options else _empty_filter_options()
+        _filter_options(scoped_df, settings=settings, country=workspace.country)
+        if include_filter_options
+        else _empty_filter_options()
     )
     if include_filter_options:
         filter_options["quincenal"] = list(

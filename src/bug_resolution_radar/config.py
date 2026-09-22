@@ -7,11 +7,12 @@ import os
 import re
 import sys
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 from dotenv import dotenv_values
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.repositories.issues_store import (
@@ -110,6 +111,228 @@ DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
+FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY: Dict[str, str] = {
+    "México": "FUNCTIONALITY_TAXONOMY_MEXICO",
+    "Argentina": "FUNCTIONALITY_TAXONOMY_ARGENTINA",
+    "España": "FUNCTIONALITY_TAXONOMY_SPAIN",
+    "Colombia": "FUNCTIONALITY_TAXONOMY_COLOMBIA",
+    "Perú": "FUNCTIONALITY_TAXONOMY_PERU",
+}
+DEFAULT_FUNCTIONALITY_TAXONOMIES: Dict[str, List[Dict[str, Any]]] = {
+    "México": [
+        {
+            "label": "Pagos y nómina",
+            "keywords": ["pago", "pagos", "nomina", "proveedores", "dispersion", "impuestos"],
+        },
+        {
+            "label": "Transferencias",
+            "keywords": ["transferencia", "transferencias", "traspaso", "traspasos", "spei"],
+        },
+        {
+            "label": "Cuentas y liquidez",
+            "keywords": ["cuenta", "cuentas", "saldo", "saldos", "movimientos", "liquidez"],
+        },
+        {
+            "label": "Cobros y recaudación",
+            "keywords": ["cobro", "cobros", "cobranza", "recaudacion", "codi", "domiciliacion"],
+        },
+        {
+            "label": "Crédito y financiación",
+            "keywords": [
+                "credito",
+                "creditos",
+                "prestamo",
+                "prestamos",
+                "financiamiento",
+                "financiacion",
+            ],
+        },
+        {
+            "label": "Acceso y seguridad",
+            "keywords": [
+                "login",
+                "acceso",
+                "autenticacion",
+                "usuario",
+                "usuarios",
+                "token",
+                "contrasena",
+            ],
+        },
+        {"label": "Tarjetas", "keywords": ["tarjeta", "tarjetas", "tpv"]},
+        {
+            "label": "Internacional / SWIFT",
+            "keywords": ["swift", "internacional", "divisa", "divisas", "comercio exterior"],
+        },
+    ],
+    "Argentina": [
+        {
+            "label": "Acceso, claves y token",
+            "keywords": [
+                "acceso",
+                "clave",
+                "claves",
+                "token",
+                "login",
+                "autenticacion",
+                "usuario",
+                "usuarios",
+                "perfil",
+            ],
+        },
+        {"label": "eCheq y cheques", "keywords": ["echeq", "e-cheq", "cheque", "cheques", "fcem"]},
+        {
+            "label": "Pagos y proveedores",
+            "keywords": ["pago", "pagos", "proveedores", "pago a proveedores"],
+        },
+        {
+            "label": "Transferencias",
+            "keywords": ["transferencia", "transferencias", "cbu", "cvu", "interbanking"],
+        },
+        {"label": "Nómina y haberes", "keywords": ["nomina", "haberes", "sueldo", "sueldos"]},
+        {
+            "label": "Cuentas y movimientos",
+            "keywords": [
+                "cuenta",
+                "cuentas",
+                "saldo",
+                "saldos",
+                "movimientos",
+                "net cash",
+                "netcash",
+            ],
+        },
+        {
+            "label": "Crédito y financiación",
+            "keywords": ["credito", "prestamo", "modulo crediticio", "factoring", "confirming"],
+        },
+        {
+            "label": "Comercio exterior",
+            "keywords": ["comercio exterior", "comex", "swift", "divisa", "divisas"],
+        },
+    ],
+    "España": [
+        {
+            "label": "Ficheros y remesas",
+            "keywords": [
+                "fichero",
+                "ficheros",
+                "remesa",
+                "remesas",
+                "carga de fichero",
+                "envio de fichero",
+            ],
+        },
+        {"label": "Transferencias", "keywords": ["transferencia", "transferencias"]},
+        {
+            "label": "Adeudos y cobros SEPA",
+            "keywords": [
+                "adeudo",
+                "adeudos",
+                "sepa",
+                "domiciliacion",
+                "recibo",
+                "recibos",
+                "cobro",
+                "cobros",
+            ],
+        },
+        {"label": "Nóminas", "keywords": ["nomina", "nominas", "fichero nominas"]},
+        {
+            "label": "Firma y autorización",
+            "keywords": ["firma", "firmar", "autorizacion", "autorizar"],
+        },
+        {
+            "label": "Acceso y usuarios",
+            "keywords": ["acceso", "login", "usuario", "usuarios", "token", "clave", "roles"],
+        },
+        {
+            "label": "Cuentas y posición",
+            "keywords": ["cuenta", "cuentas", "saldo", "saldos", "posicion global", "movimientos"],
+        },
+        {"label": "Pagos", "keywords": ["pago", "pagos", "proveedores"]},
+    ],
+    "Perú": [
+        {
+            "label": "Pagos y pagos masivos",
+            "keywords": ["pago", "pagos", "pagos masivos", "masivos online", "proveedores"],
+        },
+        {"label": "Transferencias", "keywords": ["transferencia", "transferencias"]},
+        {
+            "label": "Cuentas y movimientos",
+            "keywords": [
+                "cuenta",
+                "cuentas",
+                "saldo",
+                "saldos",
+                "movimientos",
+                "estado de cuenta",
+                "extracto",
+                "extractos",
+            ],
+        },
+        {
+            "label": "Cobros y recaudación",
+            "keywords": ["cobro", "cobros", "recaudacion", "recaudos", "abonos recibidos"],
+        },
+        {
+            "label": "Acceso y token",
+            "keywords": [
+                "acceso",
+                "login",
+                "token",
+                "clave",
+                "autenticacion",
+                "usuario",
+                "usuarios",
+            ],
+        },
+        {
+            "label": "Ficheros y operaciones",
+            "keywords": ["fichero", "ficheros", "archivo", "archivos", "carga", "cargas"],
+        },
+        {
+            "label": "Crédito y financiación",
+            "keywords": ["credito", "prestamo", "confirming", "cartera"],
+        },
+        {
+            "label": "Comercio exterior y garantías",
+            "keywords": ["transferencia exterior", "extranjero", "carta fianza", "divisas"],
+        },
+    ],
+    "Colombia": [
+        {"label": "Pagos", "keywords": ["pago", "pagos", "anulacion pago"]},
+        {
+            "label": "Acceso y usuarios",
+            "keywords": [
+                "acceso",
+                "login",
+                "usuario",
+                "usuarios",
+                "crear usuario",
+                "token",
+                "autenticacion",
+            ],
+        },
+        {
+            "label": "Cuentas y movimientos",
+            "keywords": ["cuenta", "cuentas", "saldo", "saldos", "movimientos"],
+        },
+        {"label": "Transferencias", "keywords": ["transferencia", "transferencias"]},
+        {
+            "label": "Cobros y recaudos",
+            "keywords": ["cobro", "cobros", "recaudo", "recaudos", "recaudacion"],
+        },
+        {
+            "label": "Ficheros y procesos",
+            "keywords": ["fichero", "ficheros", "archivo", "archivos", "carga", "cargas"],
+        },
+    ],
+}
+DEFAULT_FUNCTIONALITY_TAXONOMY_JSON: Dict[str, str] = {
+    country: json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+    for country, rows in DEFAULT_FUNCTIONALITY_TAXONOMIES.items()
+}
 HELIX_OWNER_SUPPORT_COMPANY_BY_COUNTRY: Dict[str, str] = {
     "Argentina": "BBVA Argentina",
     "Colombia": "BBVA Colombia",
@@ -375,6 +598,43 @@ def build_source_id(source_type: str, country: str, alias: str) -> str:
     return f"{_slug_token(source_type)}:{_slug_token(country)}:{_slug_token(alias)}"
 
 
+@lru_cache(maxsize=32)
+def _parse_functionality_taxonomy(
+    variable_name: str,
+    raw_json: str,
+) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    try:
+        payload = json.loads(raw_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{variable_name} no contiene JSON válido: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"{variable_name} debe ser una lista JSON")
+    if not payload:
+        raise ValueError(f"{variable_name} debe contener al menos una categoría")
+
+    rows: List[Tuple[str, Tuple[str, ...]]] = []
+    seen_labels: set[str] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise ValueError(f"{variable_name}[{index}] debe ser un objeto")
+        raw_label = item.get("label")
+        label = _coerce_str(raw_label)
+        keywords_value = item.get("keywords")
+        if not isinstance(raw_label, str) or not label:
+            raise ValueError(f"{variable_name}[{index}].label no puede estar vacío")
+        label_key = _ascii_fold(label).casefold()
+        if label_key in seen_labels:
+            raise ValueError(f"{variable_name} contiene el label duplicado '{label}'")
+        if not isinstance(keywords_value, list) or not keywords_value:
+            raise ValueError(f"{variable_name}[{index}].keywords debe ser una lista no vacía")
+        if any(not isinstance(value, str) or not _coerce_str(value) for value in keywords_value):
+            raise ValueError(f"{variable_name}[{index}].keywords solo admite strings no vacíos")
+        keywords = tuple(_coerce_str(value) for value in keywords_value)
+        seen_labels.add(label_key)
+        rows.append((label, keywords))
+    return tuple(rows)
+
+
 class Settings(BaseModel):
     APP_TITLE: str = "Cuadro de mando de incidencias"
     THEME: str = "auto"
@@ -455,6 +715,19 @@ class Settings(BaseModel):
     OPEN_ISSUES_FOCUS_MODE: str = "criticidad_alta"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
     JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON: str = "[]"
+    FUNCTIONALITY_TAXONOMY_MEXICO: str = DEFAULT_FUNCTIONALITY_TAXONOMY_JSON["México"]
+    FUNCTIONALITY_TAXONOMY_ARGENTINA: str = DEFAULT_FUNCTIONALITY_TAXONOMY_JSON["Argentina"]
+    FUNCTIONALITY_TAXONOMY_SPAIN: str = DEFAULT_FUNCTIONALITY_TAXONOMY_JSON["España"]
+    FUNCTIONALITY_TAXONOMY_COLOMBIA: str = DEFAULT_FUNCTIONALITY_TAXONOMY_JSON["Colombia"]
+    FUNCTIONALITY_TAXONOMY_PERU: str = DEFAULT_FUNCTIONALITY_TAXONOMY_JSON["Perú"]
+
+    @model_validator(mode="after")
+    def validate_functionality_taxonomies(self) -> "Settings":
+        for variable_name in FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY.values():
+            _parse_functionality_taxonomy(
+                variable_name, str(getattr(self, variable_name, "") or "")
+            )
+        return self
 
 
 def ensure_env() -> None:
@@ -557,6 +830,21 @@ def normalize_country_name(
     else:
         candidates = list(DEFAULT_SUPPORTED_COUNTRIES)
     return _normalize_country(_coerce_str(value), supported=candidates)
+
+
+def functionality_taxonomy_for_country(
+    settings: Settings,
+    country: object,
+) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    """Resolve one canonical geography to its validated functional taxonomy."""
+    canonical = normalize_country_name(
+        country, supported=list(FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY)
+    )
+    if not canonical:
+        raise ValueError(f"Geografía sin taxonomía funcional configurada: {country!s}")
+    variable_name = FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY[canonical]
+    raw_json = str(getattr(settings, variable_name, "") or "")
+    return _parse_functionality_taxonomy(variable_name, raw_json)
 
 
 def jira_sources(settings: Settings) -> List[Dict[str, str]]:
