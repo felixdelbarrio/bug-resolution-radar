@@ -3,10 +3,20 @@ from __future__ import annotations
 import pandas as pd
 
 from bug_resolution_radar.analytics.insights_scope import (
+    DEFAULT_INSIGHTS_VIEW_MODE,
     INSIGHTS_VIEW_MODE_ACCUMULATED,
     INSIGHTS_VIEW_MODE_QUINCENAL,
     build_insights_combo_context,
+    normalize_insights_view_mode,
 )
+
+
+def test_insights_view_mode_defaults_to_accumulated() -> None:
+    assert DEFAULT_INSIGHTS_VIEW_MODE == INSIGHTS_VIEW_MODE_ACCUMULATED
+    assert normalize_insights_view_mode(None) == INSIGHTS_VIEW_MODE_ACCUMULATED
+    assert normalize_insights_view_mode("") == INSIGHTS_VIEW_MODE_ACCUMULATED
+    assert normalize_insights_view_mode("invalid") == INSIGHTS_VIEW_MODE_ACCUMULATED
+    assert normalize_insights_view_mode(INSIGHTS_VIEW_MODE_QUINCENAL) == INSIGHTS_VIEW_MODE_QUINCENAL
 
 
 def test_insights_combo_context_default_status_excludes_core_final_states() -> None:

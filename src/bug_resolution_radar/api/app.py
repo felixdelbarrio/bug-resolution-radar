@@ -23,6 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.filtering import FilterState, normalize_filter_tokens
+from bug_resolution_radar.analytics.insights_scope import DEFAULT_INSIGHTS_VIEW_MODE
 from bug_resolution_radar.analytics.issue_functionality import (
     FUNCTIONALITY_COL,
     ensure_issue_functionality_columns,
@@ -932,7 +933,7 @@ def create_app() -> FastAPI:
         issueKeys: str = "",
         issueSortCol: str = "",
         issueLikeQuery: str = "",
-        insightsViewMode: str = "quincenal",
+        insightsViewMode: str = DEFAULT_INSIGHTS_VIEW_MODE,
         insightsStatus: str = "",
         insightsPriority: str = "",
         insightsFunctionality: str = "",
