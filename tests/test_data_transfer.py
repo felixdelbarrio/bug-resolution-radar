@@ -102,7 +102,16 @@ def _artifact(report_content: bytes) -> CloudProjectionArtifact:
         "generatedAt": "2026-07-23T10:00:00+00:00",
         "scope": scope,
         "semantics": {"sourceOfTruth": "desktop"},
-        "administration": {"jiraSources": []},
+        "administration": {
+            "jiraSources": [
+                {
+                    "sourceId": "jira:espana:core",
+                    "alias": "Core",
+                    "poTeamLeader": "Ana Responsable",
+                    "dashboardUrl": "https://jira.example.com/dashboard/1",
+                }
+            ]
+        },
         "views": {
             "overview": {
                 "stats": {"issues_total": 3},
