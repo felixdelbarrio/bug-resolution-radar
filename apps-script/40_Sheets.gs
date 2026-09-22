@@ -44,6 +44,51 @@ function _contractFor_(sheetName) {
   return contract;
 }
 function _headersFor_(sheetName) { return _contractFor_(sheetName).columns.map(function (c) { return c[0]; }); }
+
+const RUNTIME_COMPATIBLE_RETIRED_COLUMNS = Object.freeze({
+  REPORT_SHARES: Object.freeze(['expires_at'])
+});
+
+function _runtimeCompatibleRetiredColumns_(sheetName) {
+  return RUNTIME_COMPATIBLE_RETIRED_COLUMNS[sheetName] || [];
+}
+
+function _tryRepairCompatibleSheetContract_(sheetName, sheet, actual, expected) {
+  const retired = new Set(_runtimeCompatibleRetiredColumns_(sheetName));
+  if (!retired.size || actual.length <= expected.length) return false;
+  const seen = new Set();
+  const unique = actual.every(function (header) {
+    if (!header || seen.has(header)) return false;
+    seen.add(header);
+    return true;
+  });
+  if (!unique) return false;
+  if (!expected.every(function (header) { return seen.has(header); })) return false;
+  if (!actual.every(function (header) {
+    return expected.indexOf(header) >= 0 || retired.has(header);
+  })) return false;
+
+  const sourceIndex = {};
+  actual.forEach(function (header, index) { sourceIndex[header] = index; });
+  const dataRowCount = Math.max(0, sheet.getLastRow() - 1);
+  if (dataRowCount) {
+    const sourceRange = sheet.getRange(2, 1, dataRowCount, actual.length);
+    const values = sourceRange.getValues();
+    const formulas = sourceRange.getFormulas();
+    const remapped = values.map(function (row, rowIndex) {
+      return expected.map(function (header) {
+        const columnIndex = sourceIndex[header];
+        return formulas[rowIndex][columnIndex] || row[columnIndex];
+      });
+    });
+    sheet.getRange(2, 1, dataRowCount, expected.length).setValues(remapped);
+  }
+  sheet.getRange(1, 1, 1, expected.length).setValues([expected]);
+  sheet.getRange(1, expected.length + 1, sheet.getMaxRows(), actual.length - expected.length)
+    .clearContent();
+  _forgetSheet_(sheetName);
+  return true;
+}
 function _sheet_(sheetName) {
   const memo = _runtimeMemo_();
   const sheet = memo.sheets[sheetName] || _spreadsheet_().getSheetByName(sheetName);
@@ -55,8 +100,19 @@ function _validateSheetContract_(sheetName) {
   const memo = _runtimeMemo_();
   if (memo.contracts[sheetName]) return true;
   const sheet = _sheet_(sheetName); const expected = _headersFor_(sheetName);
-  const actual = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(_text_) : [];
-  _assert_(actual.length === expected.length && actual.every(function (h, i) { return h === expected[i]; }), 'Cabeceras incompatibles en ' + sheetName + '. Actual: ' + (actual.length ? actual.join(', ') : '(vacías)') + '. Esperado: ' + expected.join(', ') + '.', 'CONTRACT_ERROR');
+  let actual = sheet.getLastColumn()
+    ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(_text_)
+    : [];
+  let compatible = actual.length === expected.length && actual.every(function (h, i) {
+    return h === expected[i];
+  });
+  if (!compatible && _tryRepairCompatibleSheetContract_(sheetName, sheet, actual, expected)) {
+    actual = sheet.getRange(1, 1, 1, expected.length).getDisplayValues()[0].map(_text_);
+    compatible = actual.length === expected.length && actual.every(function (h, i) {
+      return h === expected[i];
+    });
+  }
+  _assert_(compatible, 'Cabeceras incompatibles en ' + sheetName + '. Actual: ' + (actual.length ? actual.join(', ') : '(vacías)') + '. Esperado: ' + expected.join(', ') + '.', 'CONTRACT_ERROR');
   memo.contracts[sheetName] = true;
   return true;
 }
