@@ -712,7 +712,9 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     assert ".is-admin .scope-admin-control" in design
     viewer_manifest = _function_body(main, "_viewerWorkspaceManifest_")
     assert "latestByCountry" in viewer_manifest
-    workspace_manifest = _function_body(_source("25_MaterializedSnapshots.gs"), "_workspaceManifest_")
+    workspace_manifest = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_workspaceManifest_"
+    )
     assert "slidesUrl: _text_(record.slides_url)" in workspace_manifest
     app = _source("App.html")
     assert "button.dataset.route === 'reports' && !isAdmin() && !isShared()" in app

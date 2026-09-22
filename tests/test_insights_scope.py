@@ -16,7 +16,9 @@ def test_insights_view_mode_defaults_to_accumulated() -> None:
     assert normalize_insights_view_mode(None) == INSIGHTS_VIEW_MODE_ACCUMULATED
     assert normalize_insights_view_mode("") == INSIGHTS_VIEW_MODE_ACCUMULATED
     assert normalize_insights_view_mode("invalid") == INSIGHTS_VIEW_MODE_ACCUMULATED
-    assert normalize_insights_view_mode(INSIGHTS_VIEW_MODE_QUINCENAL) == INSIGHTS_VIEW_MODE_QUINCENAL
+    assert (
+        normalize_insights_view_mode(INSIGHTS_VIEW_MODE_QUINCENAL) == INSIGHTS_VIEW_MODE_QUINCENAL
+    )
 
 
 def test_insights_combo_context_default_status_excludes_core_final_states() -> None:
