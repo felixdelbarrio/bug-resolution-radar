@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactElement } from "react";
 import {
   createBrowserRouter,
   isRouteErrorResponse,
@@ -21,7 +21,7 @@ const SettingsPage = lazy(() =>
   import("../pages/SettingsPage").then((module) => ({ default: module.SettingsPage }))
 );
 
-function withSuspense(node: JSX.Element) {
+function withSuspense(node: ReactElement) {
   return <Suspense fallback={<div className="hero-panel"><h3>Cargando vista...</h3></div>}>{node}</Suspense>;
 }
 

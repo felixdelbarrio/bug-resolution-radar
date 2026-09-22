@@ -29,8 +29,8 @@ from bug_resolution_radar.services.downloads import ensure_download_dir, save_do
 TRANSFER_FORMAT = "bug-resolution-radar-transfer"
 TRANSFER_VERSION = 3
 TRANSFER_EXTENSION = ".brr"
-MAX_ARCHIVE_BYTES = 40 * 1024 * 1024
-MAX_EXPANDED_BYTES = 120 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
+MAX_EXPANDED_BYTES = 80 * 1024 * 1024
 MAX_PROJECTION_BYTES = 24 * 1024 * 1024
 MAX_REPORT_BYTES = 20 * 1024 * 1024
 
@@ -145,7 +145,7 @@ def _build_archive(files: dict[str, bytes], manifest: dict[str, Any]) -> bytes:
     content = buffer.getvalue()
     if len(content) > MAX_ARCHIVE_BYTES:
         raise TransferValidationError(
-            "El traslado supera 40 MB; reduce el ámbito antes de publicarlo en GPC."
+            "El traslado supera 32 MB; reduce el ámbito antes de publicarlo en GPC."
         )
     return content
 
@@ -238,6 +238,14 @@ def export_business_data(
             "projection": artifact.projection_content,
             "report": artifact.report_content,
         }
+        if len(files["projection"]) > MAX_PROJECTION_BYTES:
+            raise TransferValidationError(
+                "La proyección supera 24 MB; reduce el ámbito antes de publicarlo en GPC."
+            )
+        if len(files["report"]) > MAX_REPORT_BYTES:
+            raise TransferValidationError(
+                "La presentación supera 20 MB; reduce su contenido antes de publicarla en GPC."
+            )
         created_at = str(projection["generatedAt"])
         manifest = _manifest(
             created_at=created_at,

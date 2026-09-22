@@ -23,6 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from bug_resolution_radar.analytics.analysis_window import apply_analysis_depth_filter
 from bug_resolution_radar.analytics.filtering import FilterState, normalize_filter_tokens
+from bug_resolution_radar.analytics.insights_scope import DEFAULT_INSIGHTS_VIEW_MODE
 from bug_resolution_radar.analytics.issue_functionality import (
     FUNCTIONALITY_COL,
     ensure_issue_functionality_columns,
@@ -66,6 +67,7 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_kanban_columns,
     build_trend_detail,
+    invalidate_scope_context_cache,
     load_scope_context,
 )
 from bug_resolution_radar.services.data_transfer import (
@@ -76,6 +78,11 @@ from bug_resolution_radar.services.data_transfer import (
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
     save_download_content,
+)
+from bug_resolution_radar.services.functionality_taxonomies import (
+    functionality_taxonomy_payload,
+    reset_functionality_taxonomy_override,
+    save_functionality_taxonomy_override,
 )
 from bug_resolution_radar.services.ingest_async import (
     get_ingest_progress,
@@ -331,7 +338,12 @@ def _single_source_result(*, connector: str, ok: bool, message: str) -> dict[str
     }
 
 
-def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
+def _filter_options(
+    df: pd.DataFrame,
+    *,
+    settings: Settings,
+    country: str,
+) -> dict[str, list[str]]:
     if df is None or df.empty:
         return _empty_filter_options()
 
@@ -342,7 +354,7 @@ def _filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
         "functionality": [],
         "quincenal": [QUINCENAL_SCOPE_ALL],
     }
-    df = ensure_issue_functionality_columns(df)
+    df = ensure_issue_functionality_columns(df, settings=settings, country=country)
     if "status" in df.columns:
         out["status"] = sorted(
             set(normalize_text_col(df["status"], "(sin estado)").astype(str).tolist())
@@ -454,7 +466,9 @@ def _workspace_payload(
         else list(configured_rollup or source_ids)
     )
     filter_options = (
-        _filter_options(scoped_df) if include_filter_options else _empty_filter_options()
+        _filter_options(scoped_df, settings=settings, country=workspace.country)
+        if include_filter_options
+        else _empty_filter_options()
     )
     if include_filter_options:
         filter_options["quincenal"] = list(
@@ -617,6 +631,15 @@ def _finalist_discrepancies_export_bytes(settings: Settings, *, query: Dashboard
 
 class SourceSelectionRequest(BaseModel):
     sourceIds: list[str] = Field(default_factory=list)
+
+
+class FunctionalityTaxonomyCategoryRequest(BaseModel):
+    label: str
+    keywords: list[str]
+
+
+class FunctionalityTaxonomyUpdateRequest(BaseModel):
+    taxonomy: list[FunctionalityTaxonomyCategoryRequest]
 
 
 class BrowserOpenRequest(BaseModel):
@@ -910,7 +933,7 @@ def create_app() -> FastAPI:
         issueKeys: str = "",
         issueSortCol: str = "",
         issueLikeQuery: str = "",
-        insightsViewMode: str = "quincenal",
+        insightsViewMode: str = DEFAULT_INSIGHTS_VIEW_MODE,
         insightsStatus: str = "",
         insightsPriority: str = "",
         insightsFunctionality: str = "",
@@ -1376,6 +1399,38 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:
         return load_settings_payload()
+
+    @app.get("/api/functionality-taxonomies/{country}")
+    def get_functionality_taxonomy(country: str) -> dict[str, Any]:
+        try:
+            return functionality_taxonomy_payload(load_settings(), country)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/functionality-taxonomies/{country}")
+    def put_functionality_taxonomy(
+        country: str,
+        payload: FunctionalityTaxonomyUpdateRequest,
+    ) -> dict[str, Any]:
+        try:
+            result = save_functionality_taxonomy_override(
+                load_settings(),
+                country,
+                [category.model_dump() for category in payload.taxonomy],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        invalidate_scope_context_cache()
+        return result
+
+    @app.delete("/api/functionality-taxonomies/{country}")
+    def delete_functionality_taxonomy(country: str) -> dict[str, Any]:
+        try:
+            result = reset_functionality_taxonomy_override(load_settings(), country)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        invalidate_scope_context_cache()
+        return result
 
     @app.post("/api/telemetry/events")
     def post_telemetry_events(payload: TelemetryBatchRequest) -> dict[str, int]:

@@ -14,6 +14,7 @@ from bug_resolution_radar.analytics.status_semantics import effective_closed_mas
 
 INSIGHTS_VIEW_MODE_QUINCENAL = "quincenal"
 INSIGHTS_VIEW_MODE_ACCUMULATED = "acumulada"
+DEFAULT_INSIGHTS_VIEW_MODE = INSIGHTS_VIEW_MODE_ACCUMULATED
 INSIGHTS_VIEW_MODE_OPTIONS: tuple[str, str] = (
     INSIGHTS_VIEW_MODE_QUINCENAL,
     INSIGHTS_VIEW_MODE_ACCUMULATED,
@@ -140,9 +141,11 @@ def _order_priority_values(priorities: Iterable[object]) -> list[str]:
 
 def normalize_insights_view_mode(value: object) -> str:
     token = _normalize_token(value)
+    if token == INSIGHTS_VIEW_MODE_QUINCENAL:
+        return INSIGHTS_VIEW_MODE_QUINCENAL
     if token == INSIGHTS_VIEW_MODE_ACCUMULATED:
         return INSIGHTS_VIEW_MODE_ACCUMULATED
-    return INSIGHTS_VIEW_MODE_QUINCENAL
+    return DEFAULT_INSIGHTS_VIEW_MODE
 
 
 def resolve_insights_view_df(
@@ -232,6 +235,7 @@ def _functionality_options_from_df(
     df: pd.DataFrame,
     *,
     theme_col: str,
+    functionality_order: Sequence[str] | None = None,
 ) -> list[str]:
     safe = _safe_df(df)
     if safe.empty:
@@ -245,6 +249,11 @@ def _functionality_options_from_df(
     counts = counts[counts.index != ""]
     if counts.empty:
         return []
+    if functionality_order is not None:
+        present = set(counts.index.tolist())
+        ordered = [label for label in functionality_order if label in present]
+        ordered += [label for label in counts.index.tolist() if label not in set(ordered)]
+        return ordered
     order = build_theme_render_order(
         counts.index.tolist(),
         counts_by_label=counts,
@@ -265,6 +274,7 @@ def build_insights_combo_context(
     apply_default_status_when_empty: bool = False,
     excluded_status_tokens: Sequence[str] = _DEFAULT_EXCLUDED_STATUS_TOKENS,
     theme_col: str = "__insights_theme",
+    functionality_order: Sequence[str] | None = None,
 ) -> InsightsComboContext:
     mode = normalize_insights_view_mode(view_mode)
     scoped = resolve_insights_view_df(
@@ -323,7 +333,11 @@ def build_insights_combo_context(
 
     pre_functionality = scoped.loc[mask].copy(deep=False)
     functionality_options = tuple(
-        _functionality_options_from_df(pre_functionality, theme_col=theme_col)
+        _functionality_options_from_df(
+            pre_functionality,
+            theme_col=theme_col,
+            functionality_order=functionality_order,
+        )
     )
     functionalities = _sanitize_selection(selected_functionalities, functionality_options)
 

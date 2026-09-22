@@ -25,6 +25,7 @@ from bug_resolution_radar.analytics.topic_expandable_summary import (
     infer_root_cause_label,
     summarize_root_causes,
 )
+from bug_resolution_radar.config import Settings
 
 _MONTH_NAMES_ES: tuple[str, ...] = (
     "Enero",
@@ -283,7 +284,7 @@ def _rank_theme_rows(stats: pd.DataFrame) -> list[FunctionalityTopRow]:
     return out
 
 
-def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
+def _theme_root_cause_map(df: pd.DataFrame, *, settings: Settings | None = None) -> pd.DataFrame:
     safe = _safe_df(df)
     if safe.empty:
         return safe
@@ -292,7 +293,7 @@ def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
         work["summary"] = ""
         return work
 
-    work = ensure_issue_functionality_columns(safe, theme_col="__theme")
+    work = ensure_issue_functionality_columns(safe, settings=settings, theme_col="__theme")
     summary_series = work["summary"].fillna("").astype(str)
     description_series = (
         work["description"].fillna("").astype(str)
@@ -312,6 +313,7 @@ def _theme_root_cause_map(df: pd.DataFrame) -> pd.DataFrame:
 def build_period_functionality_followup_summary(
     *,
     scope_result: QuincenalScopeResult,
+    settings: Settings | None = None,
     jira_base_url: str = "",
     created_col: str = "created",
     status_col: str = "status",
@@ -330,7 +332,7 @@ def build_period_functionality_followup_summary(
     window = scope.summary.window
     period_label = _period_label_es(window.current_start, window.current_end)
 
-    open_base = _theme_root_cause_map(_safe_df(scope.open_df))
+    open_base = _theme_root_cause_map(_safe_df(scope.open_df), settings=settings)
     open_filtered, selected_statuses, selected_priorities, selected_functionalities = (
         _apply_combo_filters(
             open_df=open_base,

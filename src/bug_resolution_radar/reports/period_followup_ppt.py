@@ -38,7 +38,9 @@ from bug_resolution_radar.analytics.insights import (
     build_theme_fortnight_trend,
     build_theme_render_order,
     order_theme_labels_by_volume,
+    segment_text_color,
 )
+from bug_resolution_radar.analytics.issue_functionality import ensure_issue_functionality_columns
 from bug_resolution_radar.analytics.issues import normalize_text_col, priority_rank
 from bug_resolution_radar.analytics.kpis import (
     OPEN_AGE_BUCKET_LABELS,
@@ -81,7 +83,7 @@ from bug_resolution_radar.config import (
     resolve_period_ppt_template_path,
 )
 from bug_resolution_radar.reports.branding import apply_corporate_branding
-from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
+from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _render_chart_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
     KpiRow,
@@ -1806,7 +1808,7 @@ def _fig_to_png_exact(
         return b""
     safe_scale = max(float(scale or 0.0), 0.5)
     try:
-        return _kaleido_png_bytes(
+        return _render_chart_png_bytes(
             fig_obj=fig,
             scale=safe_scale,
             export_width=max(int(width), 640),
@@ -4503,13 +4505,7 @@ def _functionality_fortnight_trend_png(*, open_df: pd.DataFrame) -> bytes:
         values = values_series.astype(float).tolist()
         value_text = _safe_inside_bar_text(values, min_value=label_min_value)
         color_hex = str(theme_color_map.get(theme) or "#7784A0")
-        text_color = "#FFFFFF"
-        if _normalize_lookup_token(theme) in {
-            _normalize_lookup_token("Monetarias"),
-            _normalize_lookup_token("Transferencias"),
-            _normalize_lookup_token("Softoken"),
-        }:
-            text_color = "#0B1F3B"
+        text_color = segment_text_color(color_hex, dark_mode=False)
         fig.add_trace(
             go.Bar(
                 x=axis_labels,
@@ -4982,7 +4978,10 @@ def generate_country_period_followup_ppt(
     )
 
     risk_lists = build_period_risk_issue_lists(
-        _enrich_issue_owner_from_sources(aggregate.dff, settings),
+        ensure_issue_functionality_columns(
+            _enrich_issue_owner_from_sources(aggregate.dff, settings),
+            settings=settings,
+        ),
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     notes_by_key = _load_report_notes_by_key(settings)
@@ -4996,6 +4995,7 @@ def generate_country_period_followup_ppt(
     )
     functionality_followup = build_period_functionality_followup_summary(
         scope_result=aggregate,
+        settings=settings,
         jira_base_url=str(getattr(settings, "JIRA_BASE_URL", "") or "").strip(),
         status_filters=list(functionality_status_filters or []),
         priority_filters=list(functionality_priority_filters or []),
@@ -5008,7 +5008,7 @@ def generate_country_period_followup_ppt(
         prs,
         summary=functionality_followup,
         period_label=functionality_followup.period_label,
-        open_df=aggregate.open_df,
+        open_df=ensure_issue_functionality_columns(aggregate.open_df, settings=settings),
         slide_width=slide_width_emu,
         slide_height=slide_height_emu,
     )

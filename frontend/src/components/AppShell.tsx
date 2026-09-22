@@ -135,14 +135,6 @@ export function AppShell() {
     document.title = heroTitle;
   }, [heroTitle]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void import("../pages/ReportsPage");
-      void import("../pages/IngestPage");
-      void import("../pages/SettingsPage");
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     if (!workspace || !bootstrap.data || bootstrap.isPlaceholderData) {
@@ -435,6 +427,12 @@ export function AppShell() {
       </section>
 
       <main className="workspace-content">
+        {bootstrap.isError ? (
+          <section className="inline-notice inline-notice-error" role="alert">
+            <p>No se pudieron cargar los países y datos: {bootstrap.error.message}</p>
+            <button className="secondary-button" type="button" onClick={() => void bootstrap.refetch()}>Reintentar</button>
+          </section>
+        ) : null}
         <Outlet
           context={{
             bootstrap: bootstrap.data,

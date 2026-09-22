@@ -10,9 +10,6 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.duplicates import exact_title_duplicate_stats
 from bug_resolution_radar.analytics.insights import (
-    THEME_RULES as _CENTRAL_THEME_RULES,
-)
-from bug_resolution_radar.analytics.insights import (
     classify_theme as _classify_theme,
 )
 from bug_resolution_radar.analytics.insights import (
@@ -54,12 +51,6 @@ class TrendInsightPack:
     metrics: List[InsightMetric]
     cards: List[ActionInsight]
     executive_tip: str | None = None
-
-
-THEME_RULES: List[Tuple[str, List[str]]] = [
-    (str(theme), [str(kw) for kw in list(keywords or [])])
-    for theme, keywords in list(_CENTRAL_THEME_RULES)
-]
 
 
 CRITICAL_PRIORITY_FILTERS = ["Supone un impedimento", "Highest", "High"]

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from bug_resolution_radar import config as cfg
 from bug_resolution_radar.analytics.issues import open_issues_only
@@ -185,7 +186,6 @@ def test_config_restore_env_from_example_overwrites_env(monkeypatch: Any, tmp_pa
 
     monkeypatch.setattr(cfg, "ENV_PATH", env_path)
     monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
-    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
 
     restored_from = cfg.restore_env_from_example()
 
@@ -201,7 +201,6 @@ def test_config_restore_env_from_example_raises_when_example_missing(
 
     monkeypatch.setattr(cfg, "ENV_PATH", env_path)
     monkeypatch.setattr(cfg, "ENV_EXAMPLE_PATH", env_example)
-    monkeypatch.setattr(cfg, "_candidate_env_example_paths", lambda: [env_example])
 
     try:
         cfg.restore_env_from_example()
@@ -368,3 +367,45 @@ def test_sources_are_returned_sorted_by_country_alias() -> None:
         "España::Alpha",
         "México::Zulu",
     ]
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_release_defaults_ignore_stale_user_template(tmp_path: Path, frozen: bool) -> None:
+    """A pre-taxonomy install must retain its settings and data after an upgrade."""
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    home = tmp_path / "user"
+    home.mkdir()
+    original = "APP_TITLE=Existing workspace\nDATA_PATH=data/issues.json\n"
+    (home / ".env").write_text(original, encoding="utf-8")
+    (home / ".env.example").write_text("APP_TITLE=Obsolete template\n", encoding="utf-8")
+    data = home / "data" / "issues.json"
+    data.parent.mkdir()
+    data.write_text('{"issues": []}', encoding="utf-8")
+    code = f"""
+import sys
+from pathlib import Path
+sys.frozen = {frozen!r}
+sys._MEIPASS = {str(root)!r}
+from bug_resolution_radar.config import load_settings, ENV_EXAMPLE_PATH, FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY, default_functionality_taxonomy_for_country
+settings = load_settings()
+assert settings.APP_TITLE == "Existing workspace"
+assert settings.DATA_PATH == {str(data)!r}
+assert ENV_EXAMPLE_PATH == Path({str(root / ".env.example")!r})
+for country in FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY:
+    assert default_functionality_taxonomy_for_country(settings, country)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=home,
+        env={**os.environ, "PYTHONPATH": str(root / "src"), "BUG_RESOLUTION_RADAR_HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (home / ".env").read_text(encoding="utf-8") == original
+    assert data.read_text(encoding="utf-8") == '{"issues": []}'

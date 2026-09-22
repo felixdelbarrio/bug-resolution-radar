@@ -133,6 +133,21 @@ def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
     assert "DESIGN_TOKENS.effect.emailShadow" in newsletter
 
 
+def test_runtime_repairs_retired_report_share_expiry_column_before_use() -> None:
+    sheets = _source("40_Sheets.gs")
+    validate = _function_body(sheets, "_validateSheetContract_")
+    repair = _function_body(sheets, "_tryRepairCompatibleSheetContract_")
+
+    assert "REPORT_SHARES: Object.freeze(['expires_at'])" in sheets
+    assert "_tryRepairCompatibleSheetContract_(sheetName, sheet, actual, expected)" in validate
+    assert "expected.every(function (header) { return seen.has(header); })" in repair
+    assert "expected.indexOf(header) >= 0 || retired.has(header)" in repair
+    assert "expected.map(function (header)" in repair
+    assert "sourceIndex[header]" in repair
+    assert "clearContent();" in repair
+    assert "_forgetSheet_(sheetName)" in repair
+
+
 def test_setup_remaps_compatible_sheet_contract_changes_by_header_name() -> None:
     setup = _source("90_Setup.gs")
     migration = _function_body(setup, "_migrateSheetHeaders_")
@@ -304,6 +319,15 @@ def test_snapshot_parts_are_sectional_integrity_checked_and_sheet_safe() -> None
     assert "chunk_sha256" in reader
     assert "descriptor.sha256" in reader
     assert "MATERIALIZED_PARTS" in _source("00_Config.gs")
+
+
+def test_compact_trends_are_rehydrated_from_overview_during_materialization() -> None:
+    materialized = _function_body(_source("25_MaterializedSnapshots.gs"), "_projectionPartValues_")
+
+    assert "overviewChartsById" in materialized
+    assert "if (stored.chart)" in materialized
+    assert "delete chart.insights" in materialized
+    assert "Object.assign({}, stored, { chart: chart })" in materialized
 
 
 def test_issue_detail_uses_scope_and_composite_identity() -> None:
@@ -681,10 +705,20 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
     assert index.count("scope-admin-control") == 2
     assert '<div class="workspace-country-field hidden">' in index
+    reports_button = re.search(r'<button class="([^"]*)" data-route="reports"[^>]*>', index)
+    assert reports_button is not None
+    assert "admin-only" not in reports_button.group(1).split()
     assert ".scope-admin-control { display: none !important; }" in design
     assert ".is-admin .scope-admin-control" in design
     viewer_manifest = _function_body(main, "_viewerWorkspaceManifest_")
     assert "latestByCountry" in viewer_manifest
+    workspace_manifest = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_workspaceManifest_"
+    )
+    assert "slidesUrl: _text_(record.slides_url)" in workspace_manifest
+    app = _source("App.html")
+    assert "button.dataset.route === 'reports' && !isAdmin() && !isShared()" in app
+    assert "window.open(slidesUrl, '_blank', 'noopener,noreferrer')" in app
     assert "activatedAt > currentActivatedAt" in viewer_manifest
     assert "_workspaceManifestForUser_(user)" in _function_body(main, "getBootstrap")
     assert "_requireScopeAccess_(user, request && request.scopeKey)" in _function_body(
@@ -703,7 +737,7 @@ const manifest = {
   scopes: [
     { scopeKey: 'mx::old', country: 'México', sourceIds: ['mx-old'], dataVersion: '1', activatedAt: '2026-08-01T10:00:00Z' },
     { scopeKey: 'es::new', country: 'España', sourceIds: ['es-new'], dataVersion: '3', activatedAt: '2026-09-02T10:00:00Z' },
-    { scopeKey: 'mx::new', country: 'México', sourceIds: ['mx-new'], dataVersion: '2', activatedAt: '2026-09-01T10:00:00Z' },
+    { scopeKey: 'mx::new', country: 'México', sourceIds: ['mx-new'], dataVersion: '2', slidesUrl: 'https://docs.google.com/presentation/d/mx-new/edit', activatedAt: '2026-09-01T10:00:00Z' },
     { scopeKey: 'es::old', country: 'España', sourceIds: ['es-old'], dataVersion: '1', activatedAt: '2026-08-02T10:00:00Z' }
   ],
   sources: [
@@ -724,6 +758,7 @@ console.log(JSON.stringify(_viewerWorkspaceManifest_(manifest)));
     assert viewer["countries"] == ["España", "México"]
     assert [scope["scopeKey"] for scope in viewer["scopes"]] == ["es::new", "mx::new"]
     assert viewer["scopeVersions"] == {"es::new": "3", "mx::new": "2"}
+    assert viewer["scopes"][1]["slidesUrl"] == "https://docs.google.com/presentation/d/mx-new/edit"
     assert [source["source_id"] for source in viewer["sources"]] == ["es-new", "mx-new"]
 
 

@@ -7,12 +7,16 @@ import os
 import re
 import sys
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 from dotenv import dotenv_values
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
+from bug_resolution_radar.analytics.functionality_normalization import (
+    normalize_functionality_text,
+)
 from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.repositories.issues_store import (
     load_issues_workspace_index,
@@ -48,58 +52,10 @@ def _runtime_home() -> Path:
 
 DEFAULT_CONFIG_HOME = _runtime_home()
 ENV_PATH = DEFAULT_CONFIG_HOME / ".env"
-ENV_EXAMPLE_PATH = DEFAULT_CONFIG_HOME / ".env.example"
-
-
-def _candidate_env_example_paths() -> List[Path]:
-    out: List[Path] = []
-    out.append(ENV_EXAMPLE_PATH)
-
-    # Useful for local/dev runs (in case working dir differs).
-    try:
-        out.append(Path.cwd() / ".env.example")
-    except Exception:
-        pass
-
-    if getattr(sys, "frozen", False):
-        try:
-            exe = Path(sys.executable).resolve()
-            exe_dir = exe.parent
-            out.append(exe_dir / ".env.example")
-            out.append(exe_dir.parent / ".env.example")
-
-            # macOS app bundle: <App>.app/Contents/MacOS/<exe>
-            if (
-                sys.platform == "darwin"
-                and exe_dir.name == "MacOS"
-                and exe_dir.parent.name == "Contents"
-                and exe_dir.parent.parent.suffix.lower() == ".app"
-            ):
-                bundle_dir = exe_dir.parent.parent  # <App>.app
-                out.append(bundle_dir.parent / ".env.example")  # alongside .app
-                out.append(
-                    bundle_dir.parent.parent / ".env.example"
-                )  # bundle root (e.g. .../dist/..)
-        except Exception:
-            pass
-
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            try:
-                out.append(Path(meipass) / ".env.example")
-            except Exception:
-                pass
-
-    # De-dup preserving order.
-    seen: set[str] = set()
-    uniq: List[Path] = []
-    for path in out:
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        uniq.append(path)
-    return uniq
+# Defaults belong to the installed release, never to the writable user directory.
+ENV_EXAMPLE_PATH = (
+    Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+) / ".env.example"
 
 
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
@@ -110,6 +66,33 @@ DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
     "Argentina",
 ]
 DEFAULT_SUPPORTED_COUNTRIES_CSV = ",".join(DEFAULT_SUPPORTED_COUNTRIES)
+FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY: Dict[str, str] = {
+    "México": "FUNCTIONALITY_TAXONOMY_MEXICO",
+    "Argentina": "FUNCTIONALITY_TAXONOMY_ARGENTINA",
+    "España": "FUNCTIONALITY_TAXONOMY_SPAIN",
+    "Colombia": "FUNCTIONALITY_TAXONOMY_COLOMBIA",
+    "Perú": "FUNCTIONALITY_TAXONOMY_PERU",
+}
+FUNCTIONALITY_TAXONOMY_MAX_CATEGORIES = 30
+FUNCTIONALITY_TAXONOMY_MAX_KEYWORDS = 100
+FUNCTIONALITY_TAXONOMY_MAX_LABEL_LENGTH = 100
+FUNCTIONALITY_TAXONOMY_MAX_KEYWORD_LENGTH = 150
+
+
+@lru_cache(maxsize=1)
+def _functionality_taxonomy_defaults_from_example() -> Dict[str, str]:
+    values = dotenv_values(ENV_EXAMPLE_PATH)
+    return {
+        variable_name: str(values.get(variable_name) or "")
+        for variable_name in FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY.values()
+    }
+
+
+def _default_functionality_taxonomy_json(country: str) -> str:
+    variable_name = FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY[country]
+    return _functionality_taxonomy_defaults_from_example().get(variable_name, "")
+
+
 HELIX_OWNER_SUPPORT_COMPANY_BY_COUNTRY: Dict[str, str] = {
     "Argentina": "BBVA Argentina",
     "Colombia": "BBVA Colombia",
@@ -375,6 +358,76 @@ def build_source_id(source_type: str, country: str, alias: str) -> str:
     return f"{_slug_token(source_type)}:{_slug_token(country)}:{_slug_token(alias)}"
 
 
+def validate_functionality_taxonomy(
+    source_name: str,
+    value: object,
+) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    if isinstance(value, str):
+        try:
+            payload = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{source_name} no contiene JSON válido: {exc}") from exc
+    else:
+        payload = value
+    if not isinstance(payload, list):
+        raise ValueError(f"{source_name} debe ser una lista JSON")
+    if not payload:
+        raise ValueError(f"{source_name} debe contener al menos una categoría")
+    if len(payload) > FUNCTIONALITY_TAXONOMY_MAX_CATEGORIES:
+        raise ValueError(
+            f"{source_name} admite como máximo {FUNCTIONALITY_TAXONOMY_MAX_CATEGORIES} categorías"
+        )
+
+    rows: List[Tuple[str, Tuple[str, ...]]] = []
+    seen_labels: set[str] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise ValueError(f"{source_name}[{index}] debe ser un objeto")
+        raw_label = item.get("label")
+        label = _coerce_str(raw_label)
+        keywords_value = item.get("keywords")
+        if not isinstance(raw_label, str) or not label:
+            raise ValueError(f"{source_name}[{index}].label no puede estar vacío")
+        if len(label) > FUNCTIONALITY_TAXONOMY_MAX_LABEL_LENGTH:
+            raise ValueError(
+                f"{source_name}[{index}].label supera {FUNCTIONALITY_TAXONOMY_MAX_LABEL_LENGTH} caracteres"
+            )
+        label_key = normalize_functionality_text(label)
+        if label_key == normalize_functionality_text("Otros"):
+            raise ValueError(f"{source_name}[{index}].label usa la categoría reservada 'Otros'")
+        if label_key in seen_labels:
+            raise ValueError(f"{source_name} contiene el label duplicado '{label}'")
+        if not isinstance(keywords_value, list) or not keywords_value:
+            raise ValueError(f"{source_name}[{index}].keywords debe ser una lista no vacía")
+        if len(keywords_value) > FUNCTIONALITY_TAXONOMY_MAX_KEYWORDS:
+            raise ValueError(
+                f"{source_name}[{index}].keywords admite como máximo "
+                f"{FUNCTIONALITY_TAXONOMY_MAX_KEYWORDS} valores"
+            )
+        if any(not isinstance(value, str) or not _coerce_str(value) for value in keywords_value):
+            raise ValueError(f"{source_name}[{index}].keywords solo admite strings no vacíos")
+        keywords = tuple(_coerce_str(value) for value in keywords_value)
+        if any(len(keyword) > FUNCTIONALITY_TAXONOMY_MAX_KEYWORD_LENGTH for keyword in keywords):
+            raise ValueError(
+                f"{source_name}[{index}].keywords supera "
+                f"{FUNCTIONALITY_TAXONOMY_MAX_KEYWORD_LENGTH} caracteres"
+            )
+        normalized_keywords = [normalize_functionality_text(keyword) for keyword in keywords]
+        if len(set(normalized_keywords)) != len(normalized_keywords):
+            raise ValueError(f"{source_name}[{index}].keywords contiene valores duplicados")
+        seen_labels.add(label_key)
+        rows.append((label, keywords))
+    return tuple(rows)
+
+
+@lru_cache(maxsize=32)
+def _parse_functionality_taxonomy(
+    variable_name: str,
+    raw_json: str,
+) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    return validate_functionality_taxonomy(variable_name, raw_json)
+
+
 class Settings(BaseModel):
     APP_TITLE: str = "Cuadro de mando de incidencias"
     THEME: str = "auto"
@@ -455,13 +508,26 @@ class Settings(BaseModel):
     OPEN_ISSUES_FOCUS_MODE: str = "criticidad_alta"
     COUNTRY_ROLLUP_SOURCES_JSON: str = "[]"
     JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON: str = "[]"
+    FUNCTIONALITY_TAXONOMY_MEXICO: str = _default_functionality_taxonomy_json("México")
+    FUNCTIONALITY_TAXONOMY_ARGENTINA: str = _default_functionality_taxonomy_json("Argentina")
+    FUNCTIONALITY_TAXONOMY_SPAIN: str = _default_functionality_taxonomy_json("España")
+    FUNCTIONALITY_TAXONOMY_COLOMBIA: str = _default_functionality_taxonomy_json("Colombia")
+    FUNCTIONALITY_TAXONOMY_PERU: str = _default_functionality_taxonomy_json("Perú")
+
+    @model_validator(mode="after")
+    def validate_functionality_taxonomies(self) -> "Settings":
+        for variable_name in FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY.values():
+            _parse_functionality_taxonomy(
+                variable_name, str(getattr(self, variable_name, "") or "")
+            )
+        return self
 
 
 def ensure_env() -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not ENV_PATH.exists():
-        example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
-        if example_path is not None:
+        example_path = ENV_EXAMPLE_PATH
+        if example_path.is_file():
             ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
             return
         ENV_PATH.write_text("", encoding="utf-8")
@@ -470,8 +536,8 @@ def ensure_env() -> None:
 def restore_env_from_example() -> Path:
     """Overwrite the active config file with the first available example candidate."""
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
-    if example_path is None:
+    example_path = ENV_EXAMPLE_PATH
+    if not example_path.is_file():
         raise FileNotFoundError("No se encontró la plantilla de configuración para restaurar.")
     ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
     return example_path
@@ -557,6 +623,21 @@ def normalize_country_name(
     else:
         candidates = list(DEFAULT_SUPPORTED_COUNTRIES)
     return _normalize_country(_coerce_str(value), supported=candidates)
+
+
+def default_functionality_taxonomy_for_country(
+    settings: Settings,
+    country: object,
+) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    """Resolve one canonical geography to its validated default taxonomy."""
+    canonical = normalize_country_name(
+        country, supported=list(FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY)
+    )
+    if not canonical:
+        raise ValueError(f"Geografía sin taxonomía funcional configurada: {country!s}")
+    variable_name = FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY[canonical]
+    raw_json = str(getattr(settings, variable_name, "") or "")
+    return _parse_functionality_taxonomy(variable_name, raw_json)
 
 
 def jira_sources(settings: Settings) -> List[Dict[str, str]]:
