@@ -307,9 +307,7 @@ def test_snapshot_parts_are_sectional_integrity_checked_and_sheet_safe() -> None
 
 
 def test_compact_trends_are_rehydrated_from_overview_during_materialization() -> None:
-    materialized = _function_body(
-        _source("25_MaterializedSnapshots.gs"), "_projectionPartValues_"
-    )
+    materialized = _function_body(_source("25_MaterializedSnapshots.gs"), "_projectionPartValues_")
 
     assert "overviewChartsById" in materialized
     assert "if (stored.chart)" in materialized

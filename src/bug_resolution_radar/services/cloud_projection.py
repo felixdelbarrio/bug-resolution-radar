@@ -725,9 +725,7 @@ def build_cloud_projection_artifact(
     # Plotly figures (especially age_buckets) inside projection.json.
     compact_trend_details = {
         trend_id: {
-            str(key): value
-            for key, value in trend_details[trend_id].items()
-            if str(key) != "chart"
+            str(key): value for key, value in trend_details[trend_id].items() if str(key) != "chart"
         }
         for trend_id in TREND_IDS
     }
