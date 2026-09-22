@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useOutletContext } from "react-router-dom";
+import { useBlocker, useOutletContext } from "react-router-dom";
+import { invalidateDashboardQueries } from "../lib/queryCache";
 import type { ShellContextValue } from "../components/AppShell";
 import {
   deleteJson,
@@ -53,7 +54,9 @@ export function FunctionalityTaxonomiesPage() {
         `/api/functionality-taxonomies/${encodeURIComponent(selectedCountry)}`
       ),
     enabled: Boolean(selectedCountry),
-    staleTime: 30_000
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   });
 
   useEffect(() => {
@@ -71,6 +74,18 @@ export function FunctionalityTaxonomiesPage() {
     return JSON.stringify(persistedTaxonomy(draft)) !== JSON.stringify(taxonomy.data.taxonomy);
   }, [draft, taxonomy.data]);
 
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    dirty && (currentLocation.pathname !== nextLocation.pathname ||
+      new URLSearchParams(currentLocation.search).get("settingsTab") !==
+      new URLSearchParams(nextLocation.search).get("settingsTab"))
+  );
+
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (window.confirm("Hay cambios sin guardar. ¿Quieres descartarlos?")) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+
   useEffect(() => {
     if (!dirty) {
       return;
@@ -80,20 +95,20 @@ export function FunctionalityTaxonomiesPage() {
     return () => window.removeEventListener("beforeunload", confirmNavigation);
   }, [dirty]);
 
+  function applySavedTaxonomy(payload: FunctionalityTaxonomyPayload) {
+    queryClient.setQueryData(["functionality-taxonomy", payload.country], payload);
+    setDraft(toDraft(payload.taxonomy));
+    setError("");
+    void invalidateDashboardQueries(queryClient);
+  }
+
   const save = useMutation({
     mutationFn: (nextTaxonomy: FunctionalityTaxonomyCategory[]) =>
       putJson<FunctionalityTaxonomyPayload>(
         `/api/functionality-taxonomies/${encodeURIComponent(selectedCountry)}`,
         { taxonomy: nextTaxonomy }
       ),
-    onSuccess: (payload) => {
-      queryClient.setQueryData(["functionality-taxonomy", selectedCountry], payload);
-      setDraft(toDraft(payload.taxonomy));
-      setError("");
-      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      void queryClient.invalidateQueries({ queryKey: ["intelligence"] });
-      void queryClient.invalidateQueries({ queryKey: ["bootstrap-shell"] });
-    },
+    onSuccess: applySavedTaxonomy,
     onError: (reason) => {
       setError(reason instanceof Error ? reason.message : "No se pudo guardar la taxonomía.");
     }
@@ -104,20 +119,16 @@ export function FunctionalityTaxonomiesPage() {
       deleteJson<FunctionalityTaxonomyPayload>(
         `/api/functionality-taxonomies/${encodeURIComponent(selectedCountry)}`
       ),
-    onSuccess: (payload) => {
-      queryClient.setQueryData(["functionality-taxonomy", selectedCountry], payload);
-      setDraft(toDraft(payload.taxonomy));
-      setError("");
-      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      void queryClient.invalidateQueries({ queryKey: ["intelligence"] });
-      void queryClient.invalidateQueries({ queryKey: ["bootstrap-shell"] });
-    },
+    onSuccess: applySavedTaxonomy,
     onError: (reason) => {
-      setError(reason instanceof Error ? reason.message : "No se pudo restaurar el default.");
+      setError(reason instanceof Error ? reason.message : "No se pudo restaurar la taxonomía predeterminada.");
     }
   });
 
+  const busy = save.isPending || reset.isPending;
+
   function chooseCountry(country: string) {
+    if (busy) return;
     if (country === selectedCountry) {
       return;
     }
@@ -183,13 +194,14 @@ export function FunctionalityTaxonomiesPage() {
             <p className="inline-caption">Configura cómo se clasifican las incidencias.</p>
           </div>
           <span className="taxonomy-source-badge">
-            Usando: {taxonomy.data?.source === "override" ? "Override" : "Default"}
+            Usando: {taxonomy.data?.source === "override" ? "Personalizada" : "Predeterminada"}
           </span>
         </div>
         <label className="field taxonomy-country-field">
           <span>Geografía</span>
           <select
             aria-label="Geografía de la taxonomía"
+            disabled={busy}
             value={selectedCountry}
             onChange={(event) => chooseCountry(event.target.value)}
           >
@@ -208,7 +220,7 @@ export function FunctionalityTaxonomiesPage() {
       ) : null}
 
       {!loading && taxonomy.data ? (
-        <>
+        <fieldset className="page-stack taxonomy-editor" disabled={busy}>
           <section className="surface-panel taxonomy-priority-panel">
             <p className="section-kicker">Prioridad</p>
             <div className="taxonomy-category-list">
@@ -304,29 +316,29 @@ export function FunctionalityTaxonomiesPage() {
             <button
               type="button"
               className="secondary-button"
-              disabled={reset.isPending || taxonomy.data.source === "default"}
+              disabled={busy || taxonomy.data.source === "default"}
               onClick={() => {
                 if (window.confirm("¿Restaurar la taxonomía por defecto de esta geografía?")) {
                   reset.mutate();
                 }
               }}
-            >Restaurar default</button>
+            >Restaurar predeterminada</button>
             <div className="settings-actions-row">
               <button
                 type="button"
                 className="secondary-button"
-                disabled={!dirty || save.isPending}
+                disabled={!dirty || busy}
                 onClick={() => setDraft(toDraft(taxonomy.data.taxonomy))}
               >Cancelar</button>
               <button
                 type="button"
                 className="action-button"
-                disabled={!dirty || save.isPending}
+                disabled={!dirty || busy}
                 onClick={validateAndSave}
               >{save.isPending ? "Guardando..." : "Guardar"}</button>
             </div>
           </section>
-        </>
+        </fieldset>
       ) : null}
     </section>
   );

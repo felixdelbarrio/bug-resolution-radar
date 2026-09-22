@@ -199,3 +199,57 @@ def test_api_exposes_backend_validation_error(monkeypatch: pytest.MonkeyPatch) -
 
     assert response.status_code == 400
     assert "reservada" in response.json()["detail"]
+
+
+def test_parallel_updates_preserve_each_country(isolated_taxonomy_store: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    settings = _settings()
+    countries = ["España", "México", "Perú", "Colombia", "Argentina"]
+    taxonomy = [{"label": "Canal QR", "keywords": ["qr"]}]
+    with ThreadPoolExecutor(max_workers=len(countries)) as executor:
+        results = list(
+            executor.map(
+                lambda country: taxonomy_service.save_functionality_taxonomy_override(
+                    settings, country, taxonomy
+                ),
+                countries,
+            )
+        )
+    assert {row["country"] for row in results} == set(countries)
+    for country in countries:
+        assert (
+            taxonomy_service.functionality_taxonomy_payload(settings, country)["taxonomy"]
+            == taxonomy
+        )
+
+
+def test_report_cache_changes_on_taxonomy_edit_and_reset() -> None:
+    from bug_resolution_radar.reports.executive_ppt import _report_request_cache_key
+
+    settings = _settings()
+
+    def cache_key() -> str:
+        return _report_request_cache_key(
+            settings,
+            country="España",
+            source_id="jira:espana:core",
+            status_filters=None,
+            priority_filters=None,
+            assignee_filters=None,
+            dff_override=None,
+        )
+
+    original = cache_key()
+    taxonomy_service.save_functionality_taxonomy_override(
+        settings, "España", [{"label": "Canal QR", "keywords": ["qr"]}]
+    )
+    edited = cache_key()
+    assert edited != original
+    taxonomy_service.reset_functionality_taxonomy_override(settings, "España")
+    assert cache_key() != edited
+    before_default_change = cache_key()
+    settings.FUNCTIONALITY_TAXONOMY_SPAIN = json.dumps(
+        [{"label": "Nuevo default", "keywords": ["canal"]}]
+    )
+    assert cache_key() != before_default_change

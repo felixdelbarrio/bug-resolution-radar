@@ -12,7 +12,7 @@ type IssuesPanelProps = {
   sortCol: string;
   sortDir: string;
   issueLikeQuery: string;
-  queryParams: Record<string, string | string[] | boolean>;
+  queryParams: Record<string, string | string[] | boolean | number>;
   isRefreshing: boolean;
   onOpenIssue: (row: Record<string, string | number | undefined>) => void;
   onChange: (patch: Record<string, string | string[]>) => void;

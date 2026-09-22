@@ -94,7 +94,6 @@ export function AppShell() {
   const isReports = location.pathname === "/reports";
   const isIngest = location.pathname === "/ingest";
   const isSettings = location.pathname === "/settings";
-  const isFunctionalityTaxonomies = location.pathname === "/functionality-taxonomies";
   const reportMode = new URLSearchParams(location.search).get("reportMode") ?? "executive";
   const heroTitle = bootstrap.data?.appTitle?.trim() || "Cuadro de mando de incidencias";
 
@@ -136,15 +135,6 @@ export function AppShell() {
     document.title = heroTitle;
   }, [heroTitle]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void import("../pages/ReportsPage");
-      void import("../pages/IngestPage");
-      void import("../pages/SettingsPage");
-      void import("../pages/FunctionalityTaxonomiesPage");
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     if (!workspace || !bootstrap.data || bootstrap.isPlaceholderData) {
@@ -426,18 +416,6 @@ export function AppShell() {
           </button>
           <button
             type="button"
-            className={cn(
-              "workspace-action",
-              isFunctionalityTaxonomies && "workspace-action-active"
-            )}
-            title="Taxonomías de funcionalidades"
-            aria-label="Taxonomías de funcionalidades"
-            onClick={() => navigateWithParams("/functionality-taxonomies")}
-          >
-            <img src="/brand/icons/settings.svg" alt="" />
-          </button>
-          <button
-            type="button"
             className={cn("workspace-action", isSettings && "workspace-action-active")}
             title="Configuración"
             aria-label="Configuración"
@@ -449,6 +427,12 @@ export function AppShell() {
       </section>
 
       <main className="workspace-content">
+        {bootstrap.isError ? (
+          <section className="inline-notice inline-notice-error" role="alert">
+            <p>No se pudieron cargar los países y datos: {bootstrap.error.message}</p>
+            <button className="secondary-button" type="button" onClick={() => void bootstrap.refetch()}>Reintentar</button>
+          </section>
+        ) : null}
         <Outlet
           context={{
             bootstrap: bootstrap.data,

@@ -4031,3 +4031,10 @@ textarea::placeholder {
     grid-template-columns: 1fr;
   }
 }
+
+.taxonomy-editor {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from bug_resolution_radar.config import (
@@ -17,6 +18,7 @@ from bug_resolution_radar.config import (
 )
 
 FunctionalityTaxonomy = tuple[tuple[str, tuple[str, ...]], ...]
+_OVERRIDES_LOCK = Lock()
 _OVERRIDES_FILENAME = "functionality_taxonomy_overrides.json"
 
 
@@ -67,21 +69,28 @@ def _serialize_taxonomy(taxonomy: FunctionalityTaxonomy) -> list[dict[str, Any]]
     return [{"label": label, "keywords": list(keywords)} for label, keywords in taxonomy]
 
 
-def functionality_taxonomy_revision_token() -> tuple[str, int, int]:
-    return _revision(functionality_taxonomy_overrides_path())
+def functionality_taxonomy_revision_token(settings: Settings) -> tuple[Any, ...]:
+    return (
+        _revision(functionality_taxonomy_overrides_path()),
+        *(getattr(settings, name) for name in FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY.values()),
+    )
+
+
+def _resolve_taxonomy(settings: Settings, canonical: str) -> tuple[FunctionalityTaxonomy, str]:
+    raw_override = _load_overrides().get(canonical)
+    if raw_override is not None:
+        return (
+            validate_functionality_taxonomy(
+                f"override de taxonomía para {canonical}", raw_override
+            ),
+            "override",
+        )
+    return default_functionality_taxonomy_for_country(settings, canonical), "default"
 
 
 def functionality_taxonomy_payload(settings: Settings, country: object) -> dict[str, Any]:
     canonical = _canonical_country(country)
-    raw_override = _load_overrides().get(canonical)
-    if raw_override is not None:
-        taxonomy = validate_functionality_taxonomy(
-            f"override de taxonomía para {canonical}", raw_override
-        )
-        source = "override"
-    else:
-        taxonomy = default_functionality_taxonomy_for_country(settings, canonical)
-        source = "default"
+    taxonomy, source = _resolve_taxonomy(settings, canonical)
     return {
         "country": canonical,
         "taxonomy": _serialize_taxonomy(taxonomy),
@@ -93,11 +102,7 @@ def effective_functionality_taxonomy(
     settings: Settings,
     country: object,
 ) -> FunctionalityTaxonomy:
-    payload = functionality_taxonomy_payload(settings, country)
-    return tuple(
-        (str(row["label"]), tuple(str(keyword) for keyword in row["keywords"]))
-        for row in payload["taxonomy"]
-    )
+    return _resolve_taxonomy(settings, _canonical_country(country))[0]
 
 
 def _write_overrides(overrides: dict[str, Any]) -> None:
@@ -120,9 +125,10 @@ def save_functionality_taxonomy_override(
 ) -> dict[str, Any]:
     canonical = _canonical_country(country)
     taxonomy = validate_functionality_taxonomy(f"taxonomía para {canonical}", taxonomy_value)
-    overrides = _load_overrides()
-    overrides[canonical] = _serialize_taxonomy(taxonomy)
-    _write_overrides(overrides)
+    with _OVERRIDES_LOCK:
+        overrides = _load_overrides()
+        overrides[canonical] = _serialize_taxonomy(taxonomy)
+        _write_overrides(overrides)
     return functionality_taxonomy_payload(settings, canonical)
 
 
@@ -131,8 +137,9 @@ def reset_functionality_taxonomy_override(
     country: object,
 ) -> dict[str, Any]:
     canonical = _canonical_country(country)
-    overrides = _load_overrides()
-    if canonical in overrides:
-        del overrides[canonical]
-        _write_overrides(overrides)
+    with _OVERRIDES_LOCK:
+        overrides = _load_overrides()
+        if canonical in overrides:
+            del overrides[canonical]
+            _write_overrides(overrides)
     return functionality_taxonomy_payload(settings, canonical)

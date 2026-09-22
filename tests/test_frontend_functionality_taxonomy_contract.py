@@ -71,3 +71,21 @@ def test_taxonomy_backend_errors_are_visible() -> None:
     assert 'className="inline-notice inline-notice-error" role="alert"' in PAGE
     assert "taxonomy.error instanceof Error" in PAGE
     assert "setError(reason instanceof Error ? reason.message" in PAGE
+
+
+def test_taxonomy_is_a_settings_tab_without_a_separate_route_or_toolbar_action() -> None:
+    frontend = ROOT / "frontend" / "src"
+    settings = (frontend / "pages" / "SettingsPage.tsx").read_text(encoding="utf-8")
+    router = (frontend / "app" / "router.tsx").read_text(encoding="utf-8")
+    shell = (frontend / "components" / "AppShell.tsx").read_text(encoding="utf-8")
+    assert '{ id: "taxonomies", label: "Taxonomías" }' in settings
+    assert 'activeTab === "taxonomies"' in settings
+    assert 'path: "functionality-taxonomies"' not in router
+    assert 'navigateWithParams("/functionality-taxonomies")' not in shell
+
+
+def test_taxonomy_changes_refresh_actual_dashboard_queries_and_protect_pending_edits() -> None:
+    assert "invalidateDashboardQueries(queryClient)" in PAGE
+    assert "useBlocker" in PAGE
+    assert "disabled={busy}" in PAGE
+    assert "refetchOnWindowFocus: false" in PAGE

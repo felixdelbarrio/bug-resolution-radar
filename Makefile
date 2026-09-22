@@ -148,7 +148,7 @@ ci-quality: _ensure-frontend
 	PYTHONPATH=src $(PYTHON) scripts/check_dead_private_helpers.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_run_desktop_entrypoint.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_api_app.py
-	PYTHONPATH=src $(PYTEST) -q tests/test_executive_report_ppt.py -k "kaleido_png_bytes_uses_cache or prerender_section_images_populates_payload"
+	PYTHONPATH=src $(PYTEST) -q tests/test_executive_report_ppt.py -k "render_chart_png_bytes_uses_cache or prerender_section_images_populates_payload"
 
 ci-gpc: _ensure-backend _ensure-node
 	node scripts/check_gpc_quality.mjs

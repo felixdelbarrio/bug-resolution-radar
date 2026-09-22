@@ -6,9 +6,7 @@ import hashlib
 import json
 import logging
 import math
-import multiprocessing as mp
 import os
-import queue
 import re
 import threading
 import time
@@ -19,7 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -54,6 +52,9 @@ from bug_resolution_radar.config import Settings, all_configured_sources
 from bug_resolution_radar.reports.branding import apply_corporate_branding
 from bug_resolution_radar.reports.plotly_png import render_plotly_figure_png
 from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.services.functionality_taxonomies import (
+    functionality_taxonomy_revision_token,
+)
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_FONT_HEADLINE_PPT,
     BBVA_FONT_SANS_BOOK_PPT,
@@ -95,7 +96,6 @@ from bug_resolution_radar.theme.design_tokens import (
 from bug_resolution_radar.theme.plotly_style import apply_plotly_bbva
 
 LOGGER = logging.getLogger(__name__)
-_T = TypeVar("_T")
 _PPT_PNG_CACHE_VERSION = "v1"
 _PPT_PNG_CACHE_DEFAULT_MAX_ENTRIES = 24
 _PPT_PNG_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
@@ -1129,6 +1129,7 @@ def _report_request_cache_key(
         "analysis_lookback_months": int(getattr(settings, "ANALYSIS_LOOKBACK_MONTHS", 0) or 0),
         "data_path": str(data_path),
         "data_rev": data_rev,
+        "taxonomy_revision": functionality_taxonomy_revision_token(settings),
         # If callers provide prefiltered frames without backing file changes, keep a
         # compact signature to safely reuse cached report bytes.
         "dff_override_sig": _compact_df_signature(dff_override),
@@ -1237,79 +1238,10 @@ def _validate_plotly_fig_to_dict(fig_obj: go.Figure) -> dict[str, object]:
     return cast(dict[str, object], fig_dict)
 
 
-def _subprocess_call_worker(
-    result_queue: object,
-    target: Callable[..., object],
-    call_args: tuple[object, ...],
-    call_kwargs: dict[str, object],
-) -> None:
-    try:
-        result = target(*call_args, **call_kwargs)
-        cast(Any, result_queue).put(("ok", result))
-    except Exception as exc:
-        cast(Any, result_queue).put(("err", f"{exc.__class__.__name__}: {exc}"))
-
-
-def _call_in_subprocess_with_timeout(
-    fn: Callable[..., _T],
-    *args: object,
-    hard_timeout_s: float,
-    **kwargs: object,
-) -> _T:
-    """
-    Execute a callable in an isolated process and apply a hard timeout.
-
-    This protects the desktop/API caller from native/browser hangs (e.g. Chromium startup
-    inside Kaleido) that can block forever before library-level timeouts fire.
-    """
-
-    safe_timeout_s = max(1.0, float(hard_timeout_s))
-    # Keep a stable default method here. The packaged-app relaunch issue is solved
-    # at the binary entrypoint (run_desktop.py), so we do not need start-method
-    # branching or environment overrides in the report code anymore.
-    ctx = cast(Any, mp.get_context("spawn"))
-    result_queue = ctx.Queue(maxsize=1)
-    proc = ctx.Process(
-        target=_subprocess_call_worker, args=(result_queue, fn, tuple(args), dict(kwargs))
-    )
-    proc.start()
-
-    try:
-        try:
-            status, payload = result_queue.get(timeout=safe_timeout_s)
-        except queue.Empty as exc:
-            proc.terminate()
-            proc.join(timeout=2.0)
-            if proc.is_alive() and hasattr(proc, "kill"):
-                proc.kill()  # type: ignore[attr-defined]
-                proc.join(timeout=1.0)
-            raise TimeoutError(f"Timeout duro agotado tras {safe_timeout_s:.0f}s") from exc
-        finally:
-            proc.join(timeout=1.0)
-
-        if status == "ok":
-            return cast(_T, payload)
-        raise RuntimeError(str(payload or "Fallo desconocido en proceso de render"))
-    finally:
-        try:
-            result_queue.close()
-        except Exception:
-            pass
-        try:
-            result_queue.join_thread()
-        except Exception:
-            pass
-
-
-def _kaleido_png_bytes(
+def _render_chart_png_bytes(
     fig_obj: go.Figure, *, scale: float, export_width: int, export_height: int
 ) -> bytes:
-    """
-    Legacy name kept for compatibility.
-
-    Rendering is now resolved through the local Pillow backend, so report export
-    no longer needs Kaleido/Chromium.
-    """
+    """Render chart bytes with the local Pillow backend and bounded PNG cache."""
     fig_dict = _validate_plotly_fig_to_dict(fig_obj)
     cache_key = _ppt_png_cache_key(
         fig_dict,
@@ -1836,7 +1768,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                         color=f"#{PALETTE['ink']}",
                     )
 
-        return _kaleido_png_bytes(
+        return _render_chart_png_bytes(
             export_fig,
             scale=3,
             export_width=export_width,
@@ -1844,7 +1776,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
         )
     except Exception as primary_exc:
         try:
-            return _kaleido_png_bytes(
+            return _render_chart_png_bytes(
                 go.Figure(fig),
                 scale=2,
                 export_width=export_width,
@@ -1868,7 +1800,7 @@ def _fig_to_png(fig: Optional[go.Figure]) -> Optional[bytes]:
                                 trace.hovertemplate = None
                     except Exception:
                         continue
-                return _kaleido_png_bytes(
+                return _render_chart_png_bytes(
                     safe_fig,
                     scale=2,
                     export_width=export_width,
