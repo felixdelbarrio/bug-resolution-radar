@@ -133,6 +133,21 @@ def test_apps_script_design_tokens_are_centralized_and_complete() -> None:
     assert "DESIGN_TOKENS.effect.emailShadow" in newsletter
 
 
+def test_runtime_repairs_retired_report_share_expiry_column_before_use() -> None:
+    sheets = _source("40_Sheets.gs")
+    validate = _function_body(sheets, "_validateSheetContract_")
+    repair = _function_body(sheets, "_tryRepairCompatibleSheetContract_")
+
+    assert "REPORT_SHARES: Object.freeze(['expires_at'])" in sheets
+    assert "_tryRepairCompatibleSheetContract_(sheetName, sheet, actual, expected)" in validate
+    assert "expected.every(function (header) { return seen.has(header); })" in repair
+    assert "expected.indexOf(header) >= 0 || retired.has(header)" in repair
+    assert "expected.map(function (header)" in repair
+    assert "sourceIndex[header]" in repair
+    assert "clearContent();" in repair
+    assert "_forgetSheet_(sheetName)" in repair
+
+
 def test_setup_remaps_compatible_sheet_contract_changes_by_header_name() -> None:
     setup = _source("90_Setup.gs")
     migration = _function_body(setup, "_migrateSheetHeaders_")
