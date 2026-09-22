@@ -306,6 +306,15 @@ def test_snapshot_parts_are_sectional_integrity_checked_and_sheet_safe() -> None
     assert "MATERIALIZED_PARTS" in _source("00_Config.gs")
 
 
+def test_compact_trends_are_rehydrated_from_overview_during_materialization() -> None:
+    materialized = _function_body(_source("25_MaterializedSnapshots.gs"), "_projectionPartValues_")
+
+    assert "overviewChartsById" in materialized
+    assert "if (stored.chart)" in materialized
+    assert "delete chart.insights" in materialized
+    assert "Object.assign({}, stored, { chart: chart })" in materialized
+
+
 def test_issue_detail_uses_scope_and_composite_identity() -> None:
     main = _function_body(_source("10_Main.gs"), "getIssueDetail")
     app = _source("App.html")

@@ -15,6 +15,9 @@ from bug_resolution_radar.services.cloud_projection import (
     canonical_json_bytes,
 )
 from bug_resolution_radar.services.data_transfer import (
+    MAX_ARCHIVE_BYTES,
+    MAX_EXPANDED_BYTES,
+    MAX_PROJECTION_BYTES,
     TransferValidationError,
     _build_archive,
     _decode_archive,
@@ -271,3 +274,32 @@ def test_legacy_and_fake_desktop_import_contracts_are_not_exposed() -> None:
     assert not hasattr(transfer, "import_transfer_package")
     assert not hasattr(transfer, "list_transfer_packages")
     assert not hasattr(transfer, "optimize_transfer_archive")
+
+
+def test_desktop_transfer_limits_match_webapp_upload_contract() -> None:
+    assert MAX_ARCHIVE_BYTES == 32 * 1024 * 1024
+    assert MAX_EXPANDED_BYTES == 80 * 1024 * 1024
+
+
+def test_export_rejects_projection_that_webapp_cannot_accept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    artifact = _artifact(_pptx_bytes())
+    oversized = CloudProjectionArtifact(
+        projection=artifact.projection,
+        projection_content=b"x" * (MAX_PROJECTION_BYTES + 1),
+        report_content=artifact.report_content,
+    )
+    monkeypatch.setattr(
+        "bug_resolution_radar.services.data_transfer.build_cloud_projection_artifact",
+        lambda *_args, **_kwargs: oversized,
+    )
+
+    with pytest.raises(TransferValidationError, match="proyección supera 24 MB"):
+        export_business_data(
+            settings,
+            country="España",
+            source_ids=["jira:espana:core"],
+            scope_mode="source",
+        )

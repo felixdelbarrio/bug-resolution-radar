@@ -228,9 +228,17 @@ def _patch_materializers(
                     "issue_uid": "jira:espana:core::RAD-1",
                     "key": "RAD-1",
                     "summary": issue_summary,
+                    "description": "Descripción visible",
                     "url": "https://jira.example.com/browse/RAD-1",
                     "status": "Open",
                     "priority": "High",
+                    "updated": "2026-07-14T10:00:00Z",
+                    "source_id": "jira:espana:core",
+                    "source_type": "jira",
+                    "created": "2026-07-01T10:00:00Z",
+                    "resolved": None,
+                    "type": "Bug",
+                    "note": "",
                 },
                 {
                     "issue_uid": "jira:espana:core::RAD-2",
@@ -315,6 +323,13 @@ def test_projection_is_explicit_static_and_packages_exact_report_bytes(
     ]
     assert projection["views"]["issues"]["total"] == 1
     assert [row["status"] for row in projection["views"]["issues"]["rows"]] == ["Open"]
+    assert all("chart" not in detail for detail in projection["views"]["trends"]["byId"].values())
+    issue_row = projection["views"]["issues"]["rows"][0]
+    assert issue_row["description"] == "Descripción visible"
+    assert issue_row["updated"] == "2026-07-14T10:00:00Z"
+    assert not (
+        {"source_id", "source_type", "created", "resolved", "type", "note"} & set(issue_row)
+    )
     jira_source = projection["administration"]["jiraSources"][0]
     assert jira_source == {
         "sourceId": "jira:espana:core",

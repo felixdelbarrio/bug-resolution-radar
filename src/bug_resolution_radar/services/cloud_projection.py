@@ -82,6 +82,21 @@ _CLOUD_ACTION_KEYS = frozenset(
     }
 )
 _HIDDEN_WEBAPP_STATUS_TOKENS = frozenset({"discarded", "deleted"})
+_WEBAPP_ISSUE_FIELDS = (
+    "issue_uid",
+    "key",
+    "url",
+    "source_alias",
+    "country",
+    "summary",
+    "description",
+    "helix_executive_description",
+    "status",
+    "priority",
+    "assignee",
+    "functionality",
+    "updated",
+)
 
 
 @dataclass(frozen=True)
@@ -229,6 +244,11 @@ def _metric_int(value: Any) -> int:
 
 def _is_hidden_webapp_status(value: Any) -> bool:
     return str(value or "").strip().casefold() in _HIDDEN_WEBAPP_STATUS_TOKENS
+
+
+def _webapp_issue_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only issue fields that the read-only WebApp renders or indexes."""
+    return {field: row.get(field) for field in _WEBAPP_ISSUE_FIELDS if field in row}
 
 
 def _helix_dashboard_url(settings: Settings, source: Mapping[str, Any]) -> str:
@@ -699,6 +719,16 @@ def build_cloud_projection_artifact(
         }
         for trend_id in TREND_IDS
     ]
+    # The chart payload is already present, byte-for-byte, in overview.charts.
+    # Keep only the trend-specific detail here; Apps Script rehydrates the chart
+    # while materializing the sectional snapshot. This avoids duplicating large
+    # Plotly figures (especially age_buckets) inside projection.json.
+    compact_trend_details = {
+        trend_id: {
+            str(key): value for key, value in trend_details[trend_id].items() if str(key) != "chart"
+        }
+        for trend_id in TREND_IDS
+    }
     issues = build_issue_rows(
         settings,
         query=query,
@@ -712,16 +742,19 @@ def build_cloud_projection_artifact(
         for row in list(issues.get("rows") or [])
         if isinstance(row, Mapping) and not _is_hidden_webapp_status(row.get("status"))
     ]
-    issues = {**issues, "rows": visible_issue_rows, "total": len(visible_issue_rows)}
+    compact_issue_rows = [_webapp_issue_row(row) for row in visible_issue_rows]
+    issues = {**issues, "rows": compact_issue_rows, "total": len(compact_issue_rows)}
     if "totalRows" in issues:
-        issues["totalRows"] = len(visible_issue_rows)
+        issues["totalRows"] = len(compact_issue_rows)
     raw_views = {
         "overview": overview,
         "insights": insights,
-        "trends": {"catalog": trend_catalog, "byId": trend_details},
+        "trends": {"catalog": trend_catalog, "byId": compact_trend_details},
         "issues": issues,
     }
-    issue_rows = [row for row in list(issues.get("rows") or []) if isinstance(row, Mapping)]
+    # Resolve issue references from the original materialized rows independently
+    # from the slimmer issue-list transport contract.
+    issue_rows = [row for row in visible_issue_rows if isinstance(row, Mapping)]
     views = _propagate_issue_links(
         _strip_cloud_actions(_materialize_issue_references(raw_views, issue_rows))
     )
