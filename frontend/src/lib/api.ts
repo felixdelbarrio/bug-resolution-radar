@@ -705,7 +705,7 @@ export async function postBinary<T>(
       "Content-Type": contentType
     },
     credentials: "same-origin",
-    body
+    body: body instanceof Uint8Array ? new Uint8Array(body).buffer : body
   });
   if (!response.ok) {
     await parseError(response);

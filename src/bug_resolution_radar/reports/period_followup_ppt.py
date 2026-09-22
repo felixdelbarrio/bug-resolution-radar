@@ -83,7 +83,7 @@ from bug_resolution_radar.config import (
     resolve_period_ppt_template_path,
 )
 from bug_resolution_radar.reports.branding import apply_corporate_branding
-from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
+from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _render_chart_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
     PERIOD_FOLLOWUP_LAYOUT,
     KpiRow,
@@ -1808,7 +1808,7 @@ def _fig_to_png_exact(
         return b""
     safe_scale = max(float(scale or 0.0), 0.5)
     try:
-        return _kaleido_png_bytes(
+        return _render_chart_png_bytes(
             fig_obj=fig,
             scale=safe_scale,
             export_width=max(int(width), 640),

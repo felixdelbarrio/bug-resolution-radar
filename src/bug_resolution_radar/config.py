@@ -52,58 +52,10 @@ def _runtime_home() -> Path:
 
 DEFAULT_CONFIG_HOME = _runtime_home()
 ENV_PATH = DEFAULT_CONFIG_HOME / ".env"
-ENV_EXAMPLE_PATH = DEFAULT_CONFIG_HOME / ".env.example"
-
-
-def _candidate_env_example_paths() -> List[Path]:
-    out: List[Path] = []
-    out.append(ENV_EXAMPLE_PATH)
-
-    # Useful for local/dev runs (in case working dir differs).
-    try:
-        out.append(Path.cwd() / ".env.example")
-    except Exception:
-        pass
-
-    if getattr(sys, "frozen", False):
-        try:
-            exe = Path(sys.executable).resolve()
-            exe_dir = exe.parent
-            out.append(exe_dir / ".env.example")
-            out.append(exe_dir.parent / ".env.example")
-
-            # macOS app bundle: <App>.app/Contents/MacOS/<exe>
-            if (
-                sys.platform == "darwin"
-                and exe_dir.name == "MacOS"
-                and exe_dir.parent.name == "Contents"
-                and exe_dir.parent.parent.suffix.lower() == ".app"
-            ):
-                bundle_dir = exe_dir.parent.parent  # <App>.app
-                out.append(bundle_dir.parent / ".env.example")  # alongside .app
-                out.append(
-                    bundle_dir.parent.parent / ".env.example"
-                )  # bundle root (e.g. .../dist/..)
-        except Exception:
-            pass
-
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            try:
-                out.append(Path(meipass) / ".env.example")
-            except Exception:
-                pass
-
-    # De-dup preserving order.
-    seen: set[str] = set()
-    uniq: List[Path] = []
-    for path in out:
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        uniq.append(path)
-    return uniq
+# Defaults belong to the installed release, never to the writable user directory.
+ENV_EXAMPLE_PATH = (
+    Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+) / ".env.example"
 
 
 DEFAULT_SUPPORTED_COUNTRIES: List[str] = [
@@ -129,10 +81,7 @@ FUNCTIONALITY_TAXONOMY_MAX_KEYWORD_LENGTH = 150
 
 @lru_cache(maxsize=1)
 def _functionality_taxonomy_defaults_from_example() -> Dict[str, str]:
-    example_path = next((path for path in _candidate_env_example_paths() if path.exists()), None)
-    if example_path is None:
-        return {}
-    values = dotenv_values(example_path)
+    values = dotenv_values(ENV_EXAMPLE_PATH)
     return {
         variable_name: str(values.get(variable_name) or "")
         for variable_name in FUNCTIONALITY_TAXONOMY_ENV_BY_COUNTRY.values()
@@ -577,8 +526,8 @@ class Settings(BaseModel):
 def ensure_env() -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not ENV_PATH.exists():
-        example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
-        if example_path is not None:
+        example_path = ENV_EXAMPLE_PATH
+        if example_path.is_file():
             ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
             return
         ENV_PATH.write_text("", encoding="utf-8")
@@ -587,8 +536,8 @@ def ensure_env() -> None:
 def restore_env_from_example() -> Path:
     """Overwrite the active config file with the first available example candidate."""
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    example_path = next((p for p in _candidate_env_example_paths() if p.exists()), None)
-    if example_path is None:
+    example_path = ENV_EXAMPLE_PATH
+    if not example_path.is_file():
         raise FileNotFoundError("No se encontró la plantilla de configuración para restaurar.")
     ENV_PATH.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
     return example_path

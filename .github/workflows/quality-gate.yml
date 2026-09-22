@@ -55,4 +55,4 @@ jobs:
         run: |
           pytest -q tests/test_run_desktop_entrypoint.py
           pytest -q tests/test_api_app.py
-          pytest -q tests/test_executive_report_ppt.py -k "kaleido_png_bytes_uses_cache or prerender_section_images_populates_payload"
+          pytest -q tests/test_executive_report_ppt.py -k "render_chart_png_bytes_uses_cache or prerender_section_images_populates_payload"

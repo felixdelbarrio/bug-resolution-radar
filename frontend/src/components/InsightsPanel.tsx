@@ -249,6 +249,8 @@ function finalistIssueToRecord(
     key: issue.key,
     summary: issue.summary,
     description: issue.note || "",
+    functionality: "",
+    helix_executive_description: "",
     status: issue.status,
     priority: issue.priority,
     assignee: issue.assignee,

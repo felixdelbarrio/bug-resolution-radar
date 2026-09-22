@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactElement } from "react";
 import {
   createBrowserRouter,
   isRouteErrorResponse,
@@ -20,13 +20,8 @@ const IngestPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("../pages/SettingsPage").then((module) => ({ default: module.SettingsPage }))
 );
-const FunctionalityTaxonomiesPage = lazy(() =>
-  import("../pages/FunctionalityTaxonomiesPage").then((module) => ({
-    default: module.FunctionalityTaxonomiesPage
-  }))
-);
 
-function withSuspense(node: JSX.Element) {
+function withSuspense(node: ReactElement) {
   return <Suspense fallback={<div className="hero-panel"><h3>Cargando vista...</h3></div>}>{node}</Suspense>;
 }
 
@@ -70,11 +65,7 @@ export const router = createBrowserRouter([
       { path: "intelligence", element: <LegacyInsightsRedirect /> },
       { path: "reports", element: withSuspense(<ReportsPage />) },
       { path: "ingest", element: withSuspense(<IngestPage />) },
-      { path: "settings", element: withSuspense(<SettingsPage />) },
-      {
-        path: "functionality-taxonomies",
-        element: withSuspense(<FunctionalityTaxonomiesPage />)
-      }
+      { path: "settings", element: withSuspense(<SettingsPage />) }
     ]
   }
 ]);

@@ -770,17 +770,8 @@ def _scope_context_cache_key(
         str(query.issue_sort_col or "").strip(),
         str(query.issue_like_query or "").strip(),
         str(getattr(settings, "JIRA_ROOT_CAUSE_LABELS_BY_COUNTRY_JSON", "") or "").strip(),
-        tuple(
-            str(getattr(settings, variable_name, "") or "")
-            for variable_name in (
-                "FUNCTIONALITY_TAXONOMY_MEXICO",
-                "FUNCTIONALITY_TAXONOMY_ARGENTINA",
-                "FUNCTIONALITY_TAXONOMY_SPAIN",
-                "FUNCTIONALITY_TAXONOMY_COLOMBIA",
-                "FUNCTIONALITY_TAXONOMY_PERU",
-            )
-        ),
-        functionality_taxonomy_revision_token(),
+        int(settings.ANALYSIS_LOOKBACK_MONTHS),
+        functionality_taxonomy_revision_token(settings),
     )
 
 

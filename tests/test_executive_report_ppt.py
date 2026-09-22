@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -19,16 +18,15 @@ from bug_resolution_radar.reports import generate_scope_executive_ppt
 from bug_resolution_radar.reports.executive_ppt import (
     _best_actions,
     _build_sections,
-    _call_in_subprocess_with_timeout,
     _ChartSection,
     _clear_ppt_png_cache,
     _clear_ppt_result_cache,
     _fig_to_png,
     _FilterSnapshot,
     _is_finalist_status,
-    _kaleido_png_bytes,
     _open_closed,
     _prerender_section_images,
+    _render_chart_png_bytes,
     _ScopeContext,
     _select_actions_for_final_slide,
     _soften_insight_tone,
@@ -131,19 +129,6 @@ def _slide_text(slide: object) -> str:
         if txt:
             lines.append(txt)
     return "\n".join(lines)
-
-
-def test_call_in_subprocess_with_timeout_returns_result() -> None:
-    out = _call_in_subprocess_with_timeout(sum, [2, 3, 5], hard_timeout_s=5)
-    assert out == 10
-
-
-def test_call_in_subprocess_with_timeout_raises_timeout() -> None:
-    started = time.monotonic()
-    with pytest.raises(TimeoutError):
-        _call_in_subprocess_with_timeout(time.sleep, 5, hard_timeout_s=1)
-    elapsed = time.monotonic() - started
-    assert elapsed < 4.0
 
 
 def test_generate_scope_executive_ppt_is_scoped_and_valid_ppt(tmp_path: Path) -> None:
@@ -297,7 +282,7 @@ def test_fig_to_png_renders_open_priority_pie() -> None:
     assert len(image) > 1_000
 
 
-def test_kaleido_png_bytes_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_render_chart_png_bytes_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     fig = go.Figure(data=[go.Bar(x=["A"], y=[1])])
     calls = {"n": 0}
 
@@ -309,8 +294,8 @@ def test_kaleido_png_bytes_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_ppt_png_cache()
     monkeypatch.setattr(executive_ppt_module, "render_plotly_figure_png", _fake_render)
 
-    out1 = _kaleido_png_bytes(fig, scale=2, export_width=640, export_height=400)
-    out2 = _kaleido_png_bytes(fig, scale=2, export_width=640, export_height=400)
+    out1 = _render_chart_png_bytes(fig, scale=2, export_width=640, export_height=400)
+    out2 = _render_chart_png_bytes(fig, scale=2, export_width=640, export_height=400)
     assert out1 == b"fake-png-bytes"
     assert out2 == b"fake-png-bytes"
     assert calls["n"] == 1

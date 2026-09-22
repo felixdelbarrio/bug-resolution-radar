@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import type { ShellContextValue } from "../components/AppShell";
@@ -16,6 +16,7 @@ import {
   type SettingsPayload,
   type WorkspaceSource
 } from "../lib/api";
+import { invalidateDashboardQueries } from "../lib/queryCache";
 import { cn } from "../lib/cn";
 import {
   flushTelemetry,
@@ -23,7 +24,14 @@ import {
   type TelemetrySummary
 } from "../lib/telemetry";
 
+const FunctionalityTaxonomiesPage = lazy(() =>
+  import("./FunctionalityTaxonomiesPage").then((module) => ({
+    default: module.FunctionalityTaxonomiesPage
+  }))
+);
+
 type SettingsTabId =
+  | "taxonomies"
   | "preferences"
   | "jira"
   | "helix"
@@ -41,6 +49,7 @@ const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "jira", label: "Jira" },
   { id: "helix", label: "Helix" },
   { id: "rollups", label: "Agregados" },
+  { id: "taxonomies", label: "Taxonomías" },
   { id: "cache", label: "Cache" },
   { id: "telemetry", label: "Telemetría" }
 ];
@@ -389,11 +398,13 @@ export function SettingsPage() {
   });
   const cache = useQuery({
     queryKey: ["cache-inventory"],
-    queryFn: () => fetchJson<CacheInventoryRow[]>("/api/cache/inventory")
+    queryFn: () => fetchJson<CacheInventoryRow[]>("/api/cache/inventory"),
+    enabled: activeTab === "cache"
   });
   const downloadTarget = useQuery({
     queryKey: ["download-target"],
-    queryFn: () => fetchJson<DownloadTargetPayload>("/api/downloads/target")
+    queryFn: () => fetchJson<DownloadTargetPayload>("/api/downloads/target"),
+    enabled: activeTab === "preferences"
   });
   const [telemetryDays, setTelemetryDays] = useState<number>(30);
   const telemetrySummary = useQuery({
@@ -460,6 +471,10 @@ export function SettingsPage() {
     return out;
   }, [savedPayload?.rollupEligibleSourcesByCountry]);
 
+  if (settings.isError) {
+    return <section className="inline-notice inline-notice-error" role="alert">{settings.error.message}</section>;
+  }
+
   if (!draft || !savedPayload) {
     return (
       <section className="hero-panel">
@@ -485,7 +500,7 @@ export function SettingsPage() {
   const analysisLookbackOptions = Array.from(
     new Set([1, 3, 6, 12, 18, 24, Number.parseInt(asText(values.ANALYSIS_LOOKBACK_MONTHS), 10) || 12])
   ).sort((left, right) => left - right);
-  function setValue(key: string, next: string | number) {
+  const setValue = (key: string, next: string | number) => {
     setDraft({
       ...draft,
       values: {
@@ -495,7 +510,7 @@ export function SettingsPage() {
     });
   }
 
-  function labelsText(country: string) {
+  const labelsText = (country: string) => {
     return (draft.jiraRootCauseLabelsByCountry[country] ?? []).join("\n");
   }
 
@@ -514,7 +529,7 @@ export function SettingsPage() {
       });
   }
 
-  function setRootCauseLabels(country: string, raw: string) {
+  const setRootCauseLabels = (country: string, raw: string) => {
     const labels = parseLabelText(raw);
     const next = { ...draft.jiraRootCauseLabelsByCountry };
     if (labels.length > 0) {
@@ -535,17 +550,11 @@ export function SettingsPage() {
     setJiraRows(withSourceDrafts(normalized.jiraSources));
     setHelixRows(withSourceDrafts(normalized.helixSources));
     setFlashMessage(flash);
+    void invalidateDashboardQueries(queryClient);
     [
+      ["functionality-taxonomy"],
       ["settings"],
       ["settings-ingest"],
-      ["bootstrap-shell"],
-      ["dashboard-overview"],
-      ["dashboard-trend-detail"],
-      ["dashboard-intelligence"],
-      ["dashboard-issues"],
-      ["dashboard-kanban"],
-      ["dashboard-note-keys"],
-      ["dashboard-notes-list"],
       ["cache-inventory"]
     ].forEach((queryKey) => {
       void queryClient.invalidateQueries({ queryKey });
@@ -565,7 +574,7 @@ export function SettingsPage() {
     );
   }
 
-  async function savePreferences() {
+  const savePreferences = async () => {
     const summaryCsv = favorites.join(",");
     const payload: SettingsPayload = {
       ...savedPayload,
@@ -594,7 +603,7 @@ export function SettingsPage() {
     syncFromSaved(saved, "Preferencias guardadas.");
   }
 
-  async function saveJira() {
+  const saveJira = async () => {
     const deletedSourceIds = jiraRows
       .filter((row) => row.markedForDeletion)
       .map((row) => row.source_id);
@@ -624,7 +633,7 @@ export function SettingsPage() {
     );
   }
 
-  async function saveHelix() {
+  const saveHelix = async () => {
     const deletedSourceIds = helixRows
       .filter((row) => row.markedForDeletion)
       .map((row) => row.source_id);
@@ -755,7 +764,7 @@ export function SettingsPage() {
     }
   }
 
-  async function saveRollups() {
+  const saveRollups = async () => {
     const sanitizedRollups = Object.fromEntries(
       Object.entries(draft.countryRollupSources).flatMap(([country, sourceIds]) => {
         const allowedSourceIds = new Set(
@@ -826,6 +835,12 @@ export function SettingsPage() {
         </nav>
         {flashMessage ? <p className="inline-caption">{flashMessage}</p> : null}
       </section>
+
+      {activeTab === "taxonomies" ? (
+        <Suspense fallback={<section className="surface-panel empty-panel">Cargando taxonomía...</section>}>
+          <FunctionalityTaxonomiesPage />
+        </Suspense>
+      ) : null}
 
       {activeTab === "preferences" ? (
         <section className="page-stack">
