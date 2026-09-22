@@ -81,8 +81,24 @@ function _projectionPartValues_(projection) {
     parts['insights/' + id] = projection.views.insights.byId[id];
   });
   parts['trends/catalog'] = projection.views.trends.catalog;
+  const overviewChartsById = {};
+  (projection.views.overview.charts || []).forEach(function (chart) {
+    const id = _text_(chart && chart.id);
+    if (id) overviewChartsById[id] = chart;
+  });
   Object.keys(projection.views.trends.byId).sort().forEach(function (id) {
-    parts['trends/' + id] = projection.views.trends.byId[id];
+    const stored = projection.views.trends.byId[id] || {};
+    if (stored.chart) {
+      parts['trends/' + id] = stored;
+      return;
+    }
+    const overviewChart = overviewChartsById[id];
+    _assert_(overviewChart,
+      'La tendencia «' + id + '» no tiene un gráfico materializable.',
+      'TRANSFER_INVALID');
+    const chart = Object.assign({}, overviewChart);
+    delete chart.insights;
+    parts['trends/' + id] = Object.assign({}, stored, { chart: chart });
   });
   const issueRows = projection.views.issues.rows;
   const pageSize = RADAR.defaultPageSize;
