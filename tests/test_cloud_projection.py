@@ -315,9 +315,13 @@ def test_projection_is_explicit_static_and_packages_exact_report_bytes(
     ]
     assert projection["views"]["issues"]["total"] == 1
     assert [row["status"] for row in projection["views"]["issues"]["rows"]] == ["Open"]
-    assert projection["administration"]["jiraSources"][0]["dashboardUrl"] == (
-        "https://jira.example.com/dashboard/1"
-    )
+    jira_source = projection["administration"]["jiraSources"][0]
+    assert jira_source == {
+        "sourceId": "jira:espana:core",
+        "alias": "Core",
+        "poTeamLeader": "Ana Responsable",
+        "dashboardUrl": "https://jira.example.com/dashboard/1",
+    }
     assert projection["newsletterFacts"]["focusRollups"] == [
         {
             "sourceType": "jira",

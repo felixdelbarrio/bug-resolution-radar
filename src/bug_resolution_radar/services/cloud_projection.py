@@ -752,7 +752,16 @@ def build_cloud_projection_artifact(
         context=context,
         sources=focus_sources,
     )
-    jira_administration = [source for source in focus_sources if source.get("sourceType") == "jira"]
+    jira_administration = [
+        {
+            "sourceId": source["sourceId"],
+            "alias": source["alias"],
+            "poTeamLeader": source["poTeamLeader"],
+            "dashboardUrl": source["dashboardUrl"],
+        }
+        for source in focus_sources
+        if source.get("sourceType") == "jira"
+    ]
     facts_sha256 = sha256_bytes(canonical_json_bytes(newsletter))
     revision_payload = {
         "country": country_text,
