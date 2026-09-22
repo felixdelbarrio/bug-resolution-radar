@@ -44,6 +44,7 @@ from bug_resolution_radar.analytics.insights import (
     top_non_other_theme,
 )
 from bug_resolution_radar.analytics.insights_scope import (
+    DEFAULT_INSIGHTS_VIEW_MODE,
     INSIGHTS_VIEW_MODE_ACCUMULATED,
     INSIGHTS_VIEW_MODE_LABELS,
     INSIGHTS_VIEW_MODE_OPTIONS,
@@ -2681,7 +2682,7 @@ def _empty_functionality_payload(view_mode: str) -> dict[str, Any]:
     normalized_view_mode = (
         str(view_mode or "").strip()
         if str(view_mode or "").strip() in INSIGHTS_VIEW_MODE_OPTIONS
-        else "quincenal"
+        else DEFAULT_INSIGHTS_VIEW_MODE
     )
     return {
         "combo": {
@@ -2724,7 +2725,7 @@ def build_intelligence_snapshot(
     settings: Settings,
     *,
     query: DashboardQuery,
-    insights_view_mode: str = "quincenal",
+    insights_view_mode: str = DEFAULT_INSIGHTS_VIEW_MODE,
     insights_status_filters: Sequence[str] | None = None,
     insights_priority_filters: Sequence[str] | None = None,
     insights_functionality_filters: Sequence[str] | None = None,

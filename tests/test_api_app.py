@@ -542,6 +542,29 @@ def test_intelligence_endpoint_returns_react_aligned_payload(
     assert "brief" in payload["duplicates"]
 
 
+def test_intelligence_endpoint_defaults_functionality_to_accumulated_view(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    source_id = _seed_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+
+    client = TestClient(api_app.create_app())
+    response = client.get(
+        "/api/intelligence",
+        params={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "insightsTab": "functionality",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["functionality"]["combo"]["viewMode"] == "acumulada"
+
+
 def test_intelligence_endpoint_supports_lazy_summary_tab(
     monkeypatch,
     tmp_path: Path,

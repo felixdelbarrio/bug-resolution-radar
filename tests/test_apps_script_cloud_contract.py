@@ -705,10 +705,20 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
     assert index.count("scope-admin-control") == 2
     assert '<div class="workspace-country-field hidden">' in index
+    reports_button = re.search(r'<button class="([^"]*)" data-route="reports"[^>]*>', index)
+    assert reports_button is not None
+    assert "admin-only" not in reports_button.group(1).split()
     assert ".scope-admin-control { display: none !important; }" in design
     assert ".is-admin .scope-admin-control" in design
     viewer_manifest = _function_body(main, "_viewerWorkspaceManifest_")
     assert "latestByCountry" in viewer_manifest
+    workspace_manifest = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_workspaceManifest_"
+    )
+    assert "slidesUrl: _text_(record.slides_url)" in workspace_manifest
+    app = _source("App.html")
+    assert "button.dataset.route === 'reports' && !isAdmin() && !isShared()" in app
+    assert "window.open(slidesUrl, '_blank', 'noopener,noreferrer')" in app
     assert "activatedAt > currentActivatedAt" in viewer_manifest
     assert "_workspaceManifestForUser_(user)" in _function_body(main, "getBootstrap")
     assert "_requireScopeAccess_(user, request && request.scopeKey)" in _function_body(
@@ -727,7 +737,7 @@ const manifest = {
   scopes: [
     { scopeKey: 'mx::old', country: 'México', sourceIds: ['mx-old'], dataVersion: '1', activatedAt: '2026-08-01T10:00:00Z' },
     { scopeKey: 'es::new', country: 'España', sourceIds: ['es-new'], dataVersion: '3', activatedAt: '2026-09-02T10:00:00Z' },
-    { scopeKey: 'mx::new', country: 'México', sourceIds: ['mx-new'], dataVersion: '2', activatedAt: '2026-09-01T10:00:00Z' },
+    { scopeKey: 'mx::new', country: 'México', sourceIds: ['mx-new'], dataVersion: '2', slidesUrl: 'https://docs.google.com/presentation/d/mx-new/edit', activatedAt: '2026-09-01T10:00:00Z' },
     { scopeKey: 'es::old', country: 'España', sourceIds: ['es-old'], dataVersion: '1', activatedAt: '2026-08-02T10:00:00Z' }
   ],
   sources: [
@@ -748,6 +758,7 @@ console.log(JSON.stringify(_viewerWorkspaceManifest_(manifest)));
     assert viewer["countries"] == ["España", "México"]
     assert [scope["scopeKey"] for scope in viewer["scopes"]] == ["es::new", "mx::new"]
     assert viewer["scopeVersions"] == {"es::new": "3", "mx::new": "2"}
+    assert viewer["scopes"][1]["slidesUrl"] == "https://docs.google.com/presentation/d/mx-new/edit"
     assert [source["source_id"] for source in viewer["sources"]] == ["es-new", "mx-new"]
 
 

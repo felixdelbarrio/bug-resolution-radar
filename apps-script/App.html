@@ -309,7 +309,15 @@ const App = (() => {
     const reports = document.querySelector('[data-route="reports"]');
     const ingest = document.querySelector('[data-route="import"]');
     const settings = document.querySelector('[data-route="settings"]');
-    if (reports) reports.innerHTML = UI.icon('presentation');
+    if (reports) {
+      const adminReports = isAdmin() && !isShared();
+      reports.innerHTML = UI.icon('presentation');
+      reports.title = adminReports ? 'Newsletter' : 'Presentación';
+      reports.setAttribute(
+        'aria-label',
+        adminReports ? 'Probar o enviar newsletter' : 'Abrir presentación publicada'
+      );
+    }
     if (ingest) ingest.innerHTML = UI.icon('spherica-down-cloud');
     if (settings) settings.innerHTML = UI.icon('spherica-simulator');
     $('themeToggle').innerHTML = UI.icon(state.dark ? 'sun' : 'moon');
@@ -1554,6 +1562,17 @@ const App = (() => {
     });
     document.querySelectorAll('[data-route]').forEach(button => {
       button.addEventListener('click', async () => {
+        if (button.dataset.route === 'reports' && !isAdmin() && !isShared()) {
+          const scope = currentScope();
+          const slidesUrl = String(scope && scope.slidesUrl || '').trim();
+          if (!/^https:\/\//i.test(slidesUrl)) {
+            UI.message('Este snapshot no tiene una presentación publicada disponible.', 'warning');
+            return;
+          }
+          window.open(slidesUrl, '_blank', 'noopener,noreferrer');
+          trackEvent('presentation_open', { scopeKey: state.scopeKey });
+          return;
+        }
         if (!isAdmin() || isShared()) return;
         state.navigationEpoch += 1;
         state.route = button.dataset.route;

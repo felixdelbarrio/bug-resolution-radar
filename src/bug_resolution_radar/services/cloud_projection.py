@@ -16,6 +16,7 @@ import pandas as pd
 
 from bug_resolution_radar.analytics.analysis_window import parse_analysis_lookback_months
 from bug_resolution_radar.analytics.filtering import FilterState
+from bug_resolution_radar.analytics.insights_scope import INSIGHTS_VIEW_MODE_ACCUMULATED
 from bug_resolution_radar.analytics.issues import CRITICAL_PRIORITY_COMPACT_TOKENS
 from bug_resolution_radar.analytics.period_summary import (
     _quincena_last_finished_only,
@@ -685,7 +686,7 @@ def build_cloud_projection_artifact(
         settings,
         query=query,
         insights_tab="all",
-        insights_view_mode="accumulated",
+        insights_view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
     )
     cloud_insight_ids = {
         "evolution",

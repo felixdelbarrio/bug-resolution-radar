@@ -511,6 +511,7 @@ function _workspaceManifest_() {
       sourceIds: sourceIds,
       dataVersion: _text_(record.data_version),
       snapshotId: _text_(record.snapshot_id),
+      slidesUrl: _text_(record.slides_url),
       activatedAt: pointer.activated_at
     });
     versions[_text_(record.scope_key)] = _text_(record.data_version);

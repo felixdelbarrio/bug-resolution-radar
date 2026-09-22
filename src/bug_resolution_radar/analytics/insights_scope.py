@@ -14,6 +14,7 @@ from bug_resolution_radar.analytics.status_semantics import effective_closed_mas
 
 INSIGHTS_VIEW_MODE_QUINCENAL = "quincenal"
 INSIGHTS_VIEW_MODE_ACCUMULATED = "acumulada"
+DEFAULT_INSIGHTS_VIEW_MODE = INSIGHTS_VIEW_MODE_ACCUMULATED
 INSIGHTS_VIEW_MODE_OPTIONS: tuple[str, str] = (
     INSIGHTS_VIEW_MODE_QUINCENAL,
     INSIGHTS_VIEW_MODE_ACCUMULATED,
@@ -140,9 +141,11 @@ def _order_priority_values(priorities: Iterable[object]) -> list[str]:
 
 def normalize_insights_view_mode(value: object) -> str:
     token = _normalize_token(value)
+    if token == INSIGHTS_VIEW_MODE_QUINCENAL:
+        return INSIGHTS_VIEW_MODE_QUINCENAL
     if token == INSIGHTS_VIEW_MODE_ACCUMULATED:
         return INSIGHTS_VIEW_MODE_ACCUMULATED
-    return INSIGHTS_VIEW_MODE_QUINCENAL
+    return DEFAULT_INSIGHTS_VIEW_MODE
 
 
 def resolve_insights_view_df(

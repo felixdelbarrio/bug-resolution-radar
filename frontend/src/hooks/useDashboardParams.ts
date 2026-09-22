@@ -1,6 +1,8 @@
 import { startTransition, useDeferredValue } from "react";
 import { useSearchParams } from "react-router-dom";
 
+const DEFAULT_INSIGHTS_VIEW_MODE = "acumulada";
+
 type DashboardParams = {
   panel: string;
   country: string;
@@ -55,7 +57,7 @@ export function useDashboardParams(defaultPanel = "overview") {
     trendChart: searchParams.get("trendChart") ?? "",
     notesIssueKey: searchParams.get("notesIssueKey") ?? "",
     insightsTab: searchParams.get("insightsTab") ?? "evolution",
-    insightsViewMode: searchParams.get("insightsViewMode") ?? "quincenal",
+    insightsViewMode: searchParams.get("insightsViewMode") ?? DEFAULT_INSIGHTS_VIEW_MODE,
     insightsStatus: splitValue(searchParams.get("insightsStatus")),
     insightsPriority: splitValue(searchParams.get("insightsPriority")),
     insightsFunctionality: splitValue(searchParams.get("insightsFunctionality")),
