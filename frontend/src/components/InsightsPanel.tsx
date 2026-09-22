@@ -602,7 +602,7 @@ export function InsightsPanel({
             </div>
             <div className="evolution-timeline" role="table" aria-label="Evolución quincenal del año">
               <div className="evolution-timeline-row evolution-timeline-head" role="row">
-                <span>Quincena</span><span>Backlog</span><span>Media abierta</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>&gt;30 días</span>
+                <span>Quincena</span><span>Backlog</span><span>Media abierta</span><span>Δ backlog</span><span>Creadas</span><span>Cerradas</span><span>Resolución media</span><span>&gt;30 días</span>
               </div>
               {data.executionEvolution.timeline.map((row) => (
                 <div className="evolution-timeline-row" role="row" key={row.start}>
@@ -614,6 +614,7 @@ export function InsightsPanel({
                   </span>
                   <span>{row.created.toLocaleString("es-ES")}</span>
                   <span>{row.closed.toLocaleString("es-ES")}</span>
+                  <span>{row.resolutionDays == null ? "—" : `${row.resolutionDays.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} d`}</span>
                   <span>{row.aged30Open.toLocaleString("es-ES")}</span>
                 </div>
               ))}

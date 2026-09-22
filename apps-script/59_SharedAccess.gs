@@ -41,7 +41,6 @@ function _createReportShare_(context, user) {
   const token = _reportShareToken_();
   const shareId = _uuid_();
   const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + RADAR.shareTtlSeconds * 1000);
   _appendRecords_(RADAR.sheets.reportShares, [{
     share_id: shareId,
     token_sha256: _hash_(token),
@@ -53,12 +52,10 @@ function _createReportShare_(context, user) {
     data_version: _text_(record.data_version),
     active: true,
     created_at: createdAt,
-    expires_at: expiresAt,
     created_by: user.email
   }]);
   return {
     shareId: shareId,
-    expiresAt: expiresAt.toISOString(),
     url: _applicationBaseUrl_() + '?share=' + encodeURIComponent(token)
   };
 }
@@ -83,9 +80,6 @@ function _sharedReportContext_(rawToken) {
     return row.active === true && _text_(row.token_sha256) === _hash_(token);
   });
   _assert_(share, 'Este enlace compartido no existe o ya no está activo.', 'SHARE_INVALID');
-  const expiresAt = _date_(share.expires_at);
-  _assert_(expiresAt && expiresAt.getTime() > Date.now(),
-    'Este enlace compartido ha caducado.', 'SHARE_INVALID');
   const user = _requireDomainViewer_();
   const record = _snapshotRecordById_(share.snapshot_id, true);
   _assert_(

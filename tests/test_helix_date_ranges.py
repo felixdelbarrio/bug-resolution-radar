@@ -248,7 +248,7 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
         source_service_n1=["ENTERPRISE WEB"],
         source_service_n2=["WEB BBVA EMPRESAS", "APP - BBVA EMPRESAS"],
         incident_types=["User Service Restoration", "Security Incident"],
-        companies=["BBVA México"],
+        owner_support_companies=["BBVA México"],
     )
 
     assert "`HPD:Help Desk`.`Incident Number` AS `id`" in sql
@@ -262,7 +262,7 @@ def test_build_arsql_sql_contains_core_filters_and_pagination() -> None:
         "`HPD:Help Desk`.`BBVA_Tipo_de_Incidencia` IN ('User Service Restoration', "
         "'Security Incident')" in sql
     )
-    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`Owner Support Company` IN ('BBVA México')" in sql
     assert ", * FROM `HPD:Help Desk`" in sql
     assert "LIMIT 75 OFFSET 150" in sql
 
@@ -331,31 +331,30 @@ def test_build_arsql_sql_can_disable_wide_select() -> None:
     assert ", * FROM `HPD:Help Desk`" not in sql
 
 
-def test_build_arsql_sql_falls_back_company_filter_when_source_buug_field_missing() -> None:
+def test_build_arsql_sql_omits_owner_company_filter_when_field_is_missing() -> None:
     sql = _build_arsql_sql(
         create_start_ms=1000,
         create_end_ms=2000,
         limit=10,
         offset=0,
-        companies=["BBVA México"],
-        disabled_fields={"BBVA_SourceServiceBUUG"},
+        owner_support_companies=["BBVA México"],
+        disabled_fields={"Owner Support Company"},
     )
 
-    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA México')" not in sql
-    assert "`HPD:Help Desk`.`BBVA_SourceServiceCompany` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`Owner Support Company` IN ('BBVA México')" not in sql
 
 
-def test_build_arsql_sql_falls_back_company_filter_to_contact_company_as_last_resort() -> None:
+def test_build_arsql_sql_never_uses_contact_company_for_geography() -> None:
     sql = _build_arsql_sql(
         create_start_ms=1000,
         create_end_ms=2000,
         limit=10,
         offset=0,
-        companies=["BBVA México"],
-        disabled_fields={"BBVA_SourceServiceBUUG", "BBVA_SourceServiceCompany"},
+        owner_support_companies=["BBVA México"],
     )
 
-    assert "`HPD:Help Desk`.`Contact Company` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`Owner Support Company` IN ('BBVA México')" in sql
+    assert "`HPD:Help Desk`.`Contact Company` IN ('BBVA México')" not in sql
 
 
 def test_arsql_missing_field_name_from_payload_extracts_field_name() -> None:
@@ -363,11 +362,11 @@ def test_arsql_missing_field_name_from_payload_extracts_field_name() -> None:
         {
             "messageType": "ERROR",
             "messageText": "Field does not exist on current form",
-            "messageAppendedText": "HPD:Help Desk : <BBVA_SourceServiceBUUG>",
+            "messageAppendedText": "HPD:Help Desk : <Owner Support Company>",
             "messageNumber": 314,
         }
     ]
-    assert _arsql_missing_field_name_from_payload(payload) == "BBVA_SourceServiceBUUG"
+    assert _arsql_missing_field_name_from_payload(payload) == "Owner Support Company"
 
 
 def test_rows_to_dicts_uses_alias_fallback_for_extra_values() -> None:

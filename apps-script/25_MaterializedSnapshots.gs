@@ -12,18 +12,26 @@ function _isCurrentSnapshotRecord_(record) {
   );
 }
 
+function _isMaterializedSnapshotRecord_(record) {
+  return Boolean(
+    record &&
+    _text_(record.projection_contract) === RADAR.projectionContract &&
+    Number(record.projection_version) > 0
+  );
+}
+
 function _snapshotRecordById_(snapshotId, required) {
   const id = _text_(snapshotId);
   const record = _readRecords_(RADAR.sheets.snapshots).find(function (row) {
     return _text_(row.snapshot_id) === id;
   }) || null;
-  const current = _isCurrentSnapshotRecord_(record) ? record : null;
+  const materialized = _isMaterializedSnapshotRecord_(record) ? record : null;
   if (required !== false) {
-    _assert_(current,
-      'El snapshot solicitado no pertenece al contrato vigente. Importa un traslado v3.',
+    _assert_(materialized,
+      'El snapshot solicitado no pertenece a un contrato materializado verificable.',
       'SNAPSHOT_NOT_FOUND');
   }
-  return current;
+  return materialized;
 }
 
 function _activeSnapshotPointers_() {
@@ -43,7 +51,14 @@ function _activeSnapshotRecordForScope_(scopeKey, required) {
     }
     return null;
   }
-  return _snapshotRecordById_(pointer.snapshot_id, required);
+  const record = _snapshotRecordById_(pointer.snapshot_id, required);
+  const current = _isCurrentSnapshotRecord_(record) ? record : null;
+  if (required !== false) {
+    _assert_(current,
+      'No hay una proyección vigente para este ámbito. Importa un traslado v4 desde escritorio.',
+      'SNAPSHOT_NOT_FOUND');
+  }
+  return current;
 }
 
 function _projectionPartValues_(projection) {
@@ -287,8 +302,8 @@ function _snapshotHeader_(record) {
   const meta = _loadSnapshotPart_(record, 'meta');
   _assert_(
     meta.schema === RADAR.projectionContract &&
-    meta.schemaVersion === RADAR.projectionVersion &&
-    meta.semanticContract === RADAR.semanticContract &&
+    Number(meta.schemaVersion) === Number(record.projection_version) &&
+    meta.semanticContract === 'desktop-authoritative-v' + Number(record.projection_version) &&
     meta.scope && meta.scope.scopeKey === _text_(record.scope_key) &&
     meta.scope.dataVersion === _text_(record.data_version) &&
     meta.factsSha256 === _text_(record.facts_sha256),
@@ -610,46 +625,9 @@ function _garbageCollectOrphanSnapshotParts_() {
 }
 
 function _garbageCollectSnapshots_(scopeKey) {
-  const key = _text_(scopeKey);
-  const active = _activeSnapshotRecordForScope_(key, true);
-  const candidates = _readRecords_(RADAR.sheets.snapshots).filter(function (row) {
-    return _text_(row.scope_key) === key;
-  }).sort(function (left, right) {
-    return (_date_(right.created_at) || 0) - (_date_(left.created_at) || 0);
-  });
-  const keep = new Set([_text_(active.snapshot_id)]);
-  const previous = candidates.find(function (row) {
-    return !keep.has(_text_(row.snapshot_id));
-  });
-  if (previous) keep.add(_text_(previous.snapshot_id));
-  const remove = candidates.filter(function (row) {
-    return !keep.has(_text_(row.snapshot_id));
-  });
-  if (!remove.length) {
-    return {
-      removedSnapshots: 0,
-      removedChunks: _garbageCollectOrphanSnapshotChunks_(),
-      removedParts: _garbageCollectOrphanSnapshotParts_()
-    };
-  }
-  const removeIds = remove.map(function (row) { return _text_(row.snapshot_id); });
-  _readRecords_(RADAR.sheets.reportShares).filter(function (share) {
-    return removeIds.indexOf(_text_(share.snapshot_id)) >= 0 && share.active === true;
-  }).forEach(function (share) {
-    _upsertRecord_(RADAR.sheets.reportShares, Object.assign({}, share, { active: false }));
-  });
-  remove.forEach(function (record) {
-    _trashDriveFileQuietly_(record.pptx_file_id);
-    _trashDriveFileQuietly_(record.slides_file_id);
-  });
-  const removedChunks = _deleteSnapshotChunkRows_(removeIds);
-  const removedParts = _deleteSnapshotPartRows_(removeIds);
-  removeIds.forEach(function (snapshotId) {
-    _deleteRecord_(RADAR.sheets.snapshots, snapshotId);
-  });
   return {
-    removedSnapshots: removeIds.length,
-    removedChunks: removedChunks + _garbageCollectOrphanSnapshotChunks_(),
-    removedParts: removedParts + _garbageCollectOrphanSnapshotParts_()
+    removedSnapshots: 0,
+    removedChunks: _garbageCollectOrphanSnapshotChunks_(),
+    removedParts: _garbageCollectOrphanSnapshotParts_()
   };
 }

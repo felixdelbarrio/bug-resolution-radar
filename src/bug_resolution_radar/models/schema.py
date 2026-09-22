@@ -36,6 +36,9 @@ class NormalizedIssue(BaseModel):
     source_type: str = "jira"
     source_alias: str = ""
     source_id: str = ""
+    owner_support_company: str = ""
+    service_origin_n1: str = ""
+    service_origin_n2: str = ""
     helix_lookup_kind: str = ""
 
 

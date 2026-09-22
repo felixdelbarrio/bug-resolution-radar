@@ -198,10 +198,6 @@ function _newsletterContext_(reportId) {
     'La auditoría del informe no coincide con su snapshot.',
     'NEWSLETTER_VALIDATION_FAILED'
   );
-  const active = _activeSnapshotRecordForScope_(record.scope_key, true);
-  _assert_(_text_(active.snapshot_id) === _text_(record.snapshot_id),
-    'Este informe ya no es el snapshot activo. Usa el seguimiento de la última recarga.',
-    'NEWSLETTER_STALE');
   const header = _snapshotHeader_(record);
   const newsletter = _snapshotNewsletter_(record);
   _assert_(
@@ -332,7 +328,7 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
   const appLink = _sanitizeUrl_(applicationUrl);
   const metrics = newsletter.metrics || {};
   const evolution = newsletter.evolution || {};
-  const rollups = newsletter.responsibleRollups || [];
+  const rollups = newsletter.focusRollups || [];
   const scopeLabel = _text_(publication && publication.scopeLabel);
   const periodLabel = _newsletterPeriodOnly_(newsletter.periodLabel);
   const snapshotTimestamp = _newsletterSnapshotTimestamp_(publication && publication.generatedAt);
@@ -369,32 +365,37 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
       ';font-size:12px;line-height:16px">' + _newsletterEscapeHtml_(caption) + '</small></div></td>';
   }
 
-  const responsibleRows = rollups.map(function (row) {
+  const focusRows = rollups.map(function (row) {
     const name = _newsletterEscapeHtml_(row.name);
     const linkedName = _text_(row.dashboardUrl)
       ? '<a href="' + _newsletterEscapeHtml_(_sanitizeUrl_(row.dashboardUrl)) +
         '" style="color:' + color.electric + ';font-weight:700;text-decoration:none">' + name + '</a>'
       : '<strong>' + name + '</strong>';
+    const dashboardLabel = row.sourceType === 'helix' ? 'Abrir cuadro Helix' : 'Abrir cuadro JIRA';
     const dashboardAction = _text_(row.dashboardUrl)
       ? '<a href="' + _newsletterEscapeHtml_(_sanitizeUrl_(row.dashboardUrl)) +
-        '" style="color:' + color.electric + ';font-size:12px;line-height:16px;font-weight:700;text-decoration:none">Abrir cuadro JIRA&nbsp;↗</a>'
+        '" style="color:' + color.electric + ';font-size:12px;line-height:16px;font-weight:700;text-decoration:none">' +
+        dashboardLabel + '&nbsp;↗</a>'
       : '';
+    const detailCells = row.sourceType === 'helix'
+      ? '<td width="50%" style="padding-right:8px;color:' + color.grey600 + ';font-size:12px;line-height:16px">Abiertas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.openIssues) + '</strong></td>' +
+        '<td width="50%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Servicio Origen N2<br><strong style="color:' + color.midnight + ';font-size:16px;line-height:24px">' + _newsletterEscapeHtml_(row.serviceOriginN2 || '—') + '</strong></td>'
+      : '<td width="33%" style="padding-right:8px;color:' + color.grey600 + ';font-size:12px;line-height:16px">Abiertas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.openIssues) + '</strong></td>' +
+        '<td width="33%" style="padding:0 8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Causas raíz<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.rootCauseEvolutives) + '</strong></td>' +
+        '<td width="34%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Discrepancias estados finalistas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.finalistDiscrepancies) + '</strong></td>';
     return '<tr><td style="padding:0 0 12px"><table role="presentation" width="100%" style="border-collapse:separate;background:' +
       color.white + ';border:1px solid ' + color.grey300 + ';border-radius:' +
       DESIGN_TOKENS.radius.component + '"><tr><td style="padding:16px 20px">' +
       '<table role="presentation" width="100%"><tr><td style="color:' + color.midnight +
       ';font-size:15px;line-height:24px">' + linkedName + '</td><td align="right">' + dashboardAction + '</td></tr></table>' +
-      '<table role="presentation" width="100%" style="margin-top:12px;border-collapse:collapse"><tr>' +
-      '<td width="33%" style="padding-right:8px;color:' + color.grey600 + ';font-size:12px;line-height:16px">Abiertas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.openIssues) + '</strong></td>' +
-      '<td width="33%" style="padding:0 8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Causas raíz<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.rootCauseEvolutives) + '</strong></td>' +
-      '<td width="34%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Discrepancias estados finalistas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.finalistDiscrepancies) + '</strong></td>' +
+      '<table role="presentation" width="100%" style="margin-top:12px;border-collapse:collapse"><tr>' + detailCells +
       '</tr></table></td></tr></table></td></tr>';
   }).join('');
-  const responsibleSection = responsibleRows
+  const focusSection = focusRows
     ? '<div style="margin:0 0 16px"><p style="margin:0;color:' + color.midnight + ';font-family:' + headline +
       ';font-size:24px;line-height:32px">Responsables y focos de actuación</p><p style="margin:4px 0 0;color:' +
-      color.grey600 + '">' + _newsletterEscapeHtml_(draft.responsibleIntro) + '</p></div>' +
-      '<table role="presentation" width="100%" style="border-collapse:collapse">' + responsibleRows + '</table>'
+      color.grey600 + '">' + _newsletterEscapeHtml_(draft.focusIntro) + '</p></div>' +
+      '<table role="presentation" width="100%" style="border-collapse:collapse">' + focusRows + '</table>'
     : '';
 
   const preheader = 'Seguimiento quincenal de incidencias · ' + periodLabel;
@@ -435,7 +436,7 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
     '<td><a href="' + _newsletterEscapeHtml_(appLink) + '" style="display:inline-block;padding:11px 20px;border:1px solid ' +
     color.electric + ';border-radius:' + DESIGN_TOKENS.radius.component + ';color:' + color.electric +
     ';font-weight:700;text-decoration:none">Abrir Radar&nbsp;↗</a></td></tr></table>' +
-    responsibleSection +
+    focusSection +
     '<p style="margin:20px 0 0;color:' + color.grey700 + '">' + _newsletterEscapeHtml_(draft.closing) + '</p>' +
     '</td></tr><tr><td style="padding:20px 32px;border-top:1px solid ' + color.grey300 + ';background:' + color.grey200 +
     ';font-family:' + font + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">' +
@@ -453,7 +454,7 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
     evolution.title,
     evolution.summary || draft.summary,
     ...(evolution.focus || []),
-    ...(rollups.length ? ['', draft.responsibleIntro, ...(draft.responsibleParagraphs || [])] : []),
+    ...(rollups.length ? ['', draft.focusIntro, ...(draft.focusParagraphs || [])] : []),
     '',
     draft.closing,
     '',

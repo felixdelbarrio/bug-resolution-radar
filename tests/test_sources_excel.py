@@ -23,7 +23,7 @@ def _build_excel_bytes(frame: pd.DataFrame) -> bytes:
 def test_build_sources_export_dataframe_for_helix_keeps_expected_columns_and_order() -> None:
     settings = Settings(
         HELIX_SOURCES_JSON=(
-            '[{"country":"México","alias":"MX SmartIT","service_origin_buug":"BBVA México",'
+            '[{"country":"México","alias":"MX SmartIT","owner_support_company":"BBVA México",'
             '"service_origin_n1":"ENTERPRISE WEB"}]'
         )
     )
@@ -34,7 +34,7 @@ def test_build_sources_export_dataframe_for_helix_keeps_expected_columns_and_ord
         "source_id",
         "country",
         "alias",
-        "service_origin_buug",
+        "owner_support_company",
         "service_origin_n1",
         "service_origin_n2",
     ]
@@ -120,7 +120,7 @@ def test_build_sources_export_excel_bytes_includes_transversal_sheet() -> None:
         HELIX_SSL_VERIFY="false",
         HELIX_DASHBOARD_URL="https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/ticket-console",
         HELIX_SOURCES_JSON=(
-            '[{"country":"México","alias":"MX SmartIT","service_origin_buug":"BBVA México",'
+            '[{"country":"México","alias":"MX SmartIT","owner_support_company":"BBVA México",'
             '"service_origin_n1":"ENTERPRISE WEB"}]'
         ),
     )
@@ -145,7 +145,7 @@ def test_import_sources_from_excel_bytes_reads_transversal_values_sheet() -> Non
             {
                 "country": "México",
                 "alias": "MX SmartIT",
-                "service_origin_buug": "BBVA México",
+                "owner_support_company": "BBVA México",
                 "service_origin_n1": "ENTERPRISE WEB",
             }
         ]

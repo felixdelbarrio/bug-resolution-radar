@@ -190,12 +190,12 @@ def test_setup_keeps_the_control_sheet_visible() -> None:
     assert setup_application.index(show_control) < setup_application.index(hide_other_contracts)
 
 
-def test_cloud_transfer_is_strict_desktop_authoritative_v3() -> None:
+def test_cloud_transfer_is_strict_desktop_authoritative_v4() -> None:
     config = _source("00_Config.gs")
     adapters = _source("20_Adapters.gs")
 
     assert re.search(r"transferVersion:\s*3\b", config)
-    assert "desktop-authoritative-v3" in config
+    assert "desktop-authoritative-v4" in config
     assert "data/projection.json" in adapters
     assert "artifacts/period_followup.pptx" in adapters
     assert "data/issues.json" not in adapters
@@ -207,7 +207,26 @@ def test_cloud_transfer_is_strict_desktop_authoritative_v3() -> None:
     current_record = _function_body(snapshots, "_isCurrentSnapshotRecord_")
     assert "RADAR.projectionContract" in current_record
     assert "RADAR.projectionVersion" in current_record
-    assert "_isCurrentSnapshotRecord_(record)" in _function_body(snapshots, "_snapshotRecordById_")
+    assert "_isMaterializedSnapshotRecord_(record)" in _function_body(
+        snapshots, "_snapshotRecordById_"
+    )
+    assert "_isCurrentSnapshotRecord_(record)" in _function_body(
+        snapshots, "_activeSnapshotRecordForScope_"
+    )
+
+
+def test_newsletter_and_shared_links_keep_their_immutable_snapshot() -> None:
+    newsletter_context = _function_body(_source("56_Newsletter.gs"), "_newsletterContext_")
+    garbage_collection = _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_garbageCollectSnapshots_"
+    )
+
+    assert "_snapshotRecordById_(report.snapshot_id, true)" in newsletter_context
+    assert "_activeSnapshotRecordForScope_" not in newsletter_context
+    shared_context = _function_body(_source("59_SharedAccess.gs"), "_sharedReportContext_")
+    assert "expires_at" not in shared_context
+    assert "_deleteRecord_" not in garbage_collection
+    assert "_trashDriveFileQuietly_" not in garbage_collection
 
 
 def test_dashboard_rpc_cannot_accept_incident_filters_or_recalculate_business_rules() -> None:
@@ -475,9 +494,9 @@ def test_newsletter_and_webapp_apply_the_corporate_brand_and_bbva_email_hierarch
         "@media only screen and (max-width:620px)",
     ):
         assert expected in newsletter
-    assert "newsletter.responsibleRollups" in newsletter
-    assert "const responsibleSection = responsibleRows" in newsletter
-    assert "responsibleSection +" in newsletter
+    assert "newsletter.focusRollups" in newsletter
+    assert "const focusSection = focusRows" in newsletter
+    assert "focusSection +" in newsletter
     assert "rollups.length ?" in newsletter
     assert "DESIGN_TOKENS.radius.container" in newsletter
     assert "_newsletterEmailFont_(DESIGN_TOKENS.font.webBody)" in newsletter

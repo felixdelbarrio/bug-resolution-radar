@@ -222,7 +222,7 @@ function _validateProjectionNewsletter_(newsletter) {
     newsletter,
     [
       'periodLabel', 'focusLabel', 'metrics', 'previousOpen', 'backlogDelta',
-      'criticalOpen', 'evolution', 'responsibleRollups', 'draft'
+      'criticalOpen', 'evolution', 'focusRollups', 'draft'
     ],
     'projection.newsletterFacts'
   );
@@ -286,15 +286,20 @@ function _validateProjectionNewsletter_(newsletter) {
   _assert_(Array.isArray(newsletter.evolution.focus),
     'projection.newsletterFacts.evolution.focus debe ser una lista.', 'TRANSFER_INVALID');
   newsletter.evolution.focus.forEach(function (line) { _sanitizeText_(line, 1000); });
-  _assert_(Array.isArray(newsletter.responsibleRollups),
-    'projection.newsletterFacts.responsibleRollups debe ser una lista.', 'TRANSFER_INVALID');
-  newsletter.responsibleRollups.forEach(function (row) {
+  _assert_(Array.isArray(newsletter.focusRollups),
+    'projection.newsletterFacts.focusRollups debe ser una lista.', 'TRANSFER_INVALID');
+  newsletter.focusRollups.forEach(function (row) {
     _assertExactFields_(
       row,
-      ['name', 'dashboardUrl', 'openIssues', 'rootCauseEvolutives', 'finalistDiscrepancies'],
-      'projection.newsletterFacts.responsibleRollups'
+      [
+        'sourceType', 'name', 'serviceOriginN2', 'dashboardUrl', 'openIssues',
+        'rootCauseEvolutives', 'finalistDiscrepancies'
+      ],
+      'projection.newsletterFacts.focusRollups'
     );
-    _assert_(_sanitizeText_(row.name, 300), 'El responsable de newsletter está vacío.', 'TRANSFER_INVALID');
+    _assert_(['jira', 'helix'].indexOf(_text_(row.sourceType)) >= 0,
+      'El tipo de origen del foco no es válido.', 'TRANSFER_INVALID');
+    _assert_(_sanitizeText_(row.name, 300), 'El foco de newsletter está vacío.', 'TRANSFER_INVALID');
     ['openIssues', 'rootCauseEvolutives', 'finalistDiscrepancies'].forEach(function (key) {
       _assert_(Number.isInteger(row[key]) && row[key] >= 0,
         'Un conteo por responsable no es válido.', 'TRANSFER_INVALID');
@@ -305,17 +310,17 @@ function _validateProjectionNewsletter_(newsletter) {
     newsletter.draft,
     [
       'subject', 'greeting', 'intro', 'reportLinkLabel', 'summary',
-      'responsibleIntro', 'responsibleParagraphs', 'closing'
+      'focusIntro', 'focusParagraphs', 'closing'
     ],
     'projection.newsletterFacts.draft'
   );
-  ['subject', 'greeting', 'intro', 'reportLinkLabel', 'summary', 'responsibleIntro', 'closing']
+  ['subject', 'greeting', 'intro', 'reportLinkLabel', 'summary', 'focusIntro', 'closing']
     .forEach(function (key) {
       _assert_(_sanitizeText_(newsletter.draft[key], 4000),
         'El borrador local de newsletter está incompleto.', 'TRANSFER_INVALID');
     });
-  _assert_(Array.isArray(newsletter.draft.responsibleParagraphs),
-    'Los párrafos por responsable no son válidos.', 'TRANSFER_INVALID');
+  _assert_(Array.isArray(newsletter.draft.focusParagraphs),
+    'Los párrafos por foco no son válidos.', 'TRANSFER_INVALID');
   _assertCanonicalFactScalars_(newsletter, 'projection.newsletterFacts');
 }
 
@@ -340,7 +345,7 @@ function _validateProjection_(projection, manifest, reportDescriptor) {
     'La proyección no pertenece al contrato GPC vigente.', 'TRANSFER_INVALID');
   _assert_(projection.semanticContract === RADAR.semanticContract &&
     manifest.semanticContract === RADAR.semanticContract,
-  'El contrato semántico debe ser desktop-authoritative-v3.', 'TRANSFER_INVALID');
+  'El contrato semántico debe ser desktop-authoritative-v4.', 'TRANSFER_INVALID');
   _assert_(_date_(projection.generatedAt), 'projection.generatedAt no es una fecha válida.', 'TRANSFER_INVALID');
   const scope = _normalizeProjectionScope_(projection.scope, 'projection.scope');
   const manifestScope = _normalizeManifestScope_(manifest.scope, 'manifest.scope');

@@ -8,7 +8,7 @@ export type WorkspaceSource = {
   jql?: string;
   po_team_leader?: string;
   dashboard_url?: string;
-  service_origin_buug?: string;
+  owner_support_company?: string;
   service_origin_n1?: string;
   service_origin_n2?: string;
 };
