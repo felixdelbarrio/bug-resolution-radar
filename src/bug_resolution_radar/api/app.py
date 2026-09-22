@@ -66,6 +66,7 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_kanban_columns,
     build_trend_detail,
+    invalidate_scope_context_cache,
     load_scope_context,
 )
 from bug_resolution_radar.services.data_transfer import (
@@ -76,6 +77,11 @@ from bug_resolution_radar.services.data_transfer import (
 from bug_resolution_radar.services.downloads import (
     resolve_download_target,
     save_download_content,
+)
+from bug_resolution_radar.services.functionality_taxonomies import (
+    functionality_taxonomy_payload,
+    reset_functionality_taxonomy_override,
+    save_functionality_taxonomy_override,
 )
 from bug_resolution_radar.services.ingest_async import (
     get_ingest_progress,
@@ -624,6 +630,15 @@ def _finalist_discrepancies_export_bytes(settings: Settings, *, query: Dashboard
 
 class SourceSelectionRequest(BaseModel):
     sourceIds: list[str] = Field(default_factory=list)
+
+
+class FunctionalityTaxonomyCategoryRequest(BaseModel):
+    label: str
+    keywords: list[str]
+
+
+class FunctionalityTaxonomyUpdateRequest(BaseModel):
+    taxonomy: list[FunctionalityTaxonomyCategoryRequest]
 
 
 class BrowserOpenRequest(BaseModel):
@@ -1383,6 +1398,38 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:
         return load_settings_payload()
+
+    @app.get("/api/functionality-taxonomies/{country}")
+    def get_functionality_taxonomy(country: str) -> dict[str, Any]:
+        try:
+            return functionality_taxonomy_payload(load_settings(), country)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/functionality-taxonomies/{country}")
+    def put_functionality_taxonomy(
+        country: str,
+        payload: FunctionalityTaxonomyUpdateRequest,
+    ) -> dict[str, Any]:
+        try:
+            result = save_functionality_taxonomy_override(
+                load_settings(),
+                country,
+                [category.model_dump() for category in payload.taxonomy],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        invalidate_scope_context_cache()
+        return result
+
+    @app.delete("/api/functionality-taxonomies/{country}")
+    def delete_functionality_taxonomy(country: str) -> dict[str, Any]:
+        try:
+            result = reset_functionality_taxonomy_override(load_settings(), country)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        invalidate_scope_context_cache()
+        return result
 
     @app.post("/api/telemetry/events")
     def post_telemetry_events(payload: TelemetryBatchRequest) -> dict[str, int]:

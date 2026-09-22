@@ -19,7 +19,10 @@ from bug_resolution_radar.analytics.time_windows import (
     FIRST_FORTNIGHT_END_DAY,
     SECOND_FORTNIGHT_START_DAY,
 )
-from bug_resolution_radar.config import Settings, functionality_taxonomy_for_country
+from bug_resolution_radar.config import Settings
+from bug_resolution_radar.services.functionality_taxonomies import (
+    effective_functionality_taxonomy,
+)
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_DARK,
     BBVA_GOAL_ACCENT_7,
@@ -427,7 +430,7 @@ def classify_theme(
     taxonomy = (
         tuple((str(label), tuple(str(key) for key in keys)) for label, keys in theme_rules)
         if theme_rules is not None
-        else functionality_taxonomy_for_country(Settings(), "México")
+        else effective_functionality_taxonomy(Settings(), "México")
     )
     return classify_functionality_text(summary, taxonomy=taxonomy, default=default_theme)
 

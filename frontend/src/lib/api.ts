@@ -61,6 +61,17 @@ export type BootstrapPayload = {
   permissionsPolicy: Record<string, string>;
 };
 
+export type FunctionalityTaxonomyCategory = {
+  label: string;
+  keywords: string[];
+};
+
+export type FunctionalityTaxonomyPayload = {
+  country: string;
+  taxonomy: FunctionalityTaxonomyCategory[];
+  source: "default" | "override";
+};
+
 export type DashboardPayload = {
   stats: Record<string, string | number>;
   overviewKpis: Array<{
