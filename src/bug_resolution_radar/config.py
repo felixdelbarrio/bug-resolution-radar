@@ -145,6 +145,7 @@ def _default_functionality_taxonomy_json(country: str) -> str:
 
 
 HELIX_OWNER_SUPPORT_COMPANY_BY_COUNTRY: Dict[str, str] = {
+    "Argentina": "BBVA Argentina",
     "Colombia": "BBVA Colombia",
     "España": "BBVA España",
     "México": "BBVA México",
