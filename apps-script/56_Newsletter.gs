@@ -390,6 +390,12 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
       '<td width="34%" style="padding-left:8px;border-left:1px solid ' + color.grey300 + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">Discrepancias estados finalistas<br><strong style="color:' + color.midnight + ';font-size:20px;line-height:24px">' + _newsletterEscapeHtml_(row.finalistDiscrepancies) + '</strong></td>' +
       '</tr></table></td></tr></table></td></tr>';
   }).join('');
+  const responsibleSection = responsibleRows
+    ? '<div style="margin:0 0 16px"><p style="margin:0;color:' + color.midnight + ';font-family:' + headline +
+      ';font-size:24px;line-height:32px">Responsables y focos de actuación</p><p style="margin:4px 0 0;color:' +
+      color.grey600 + '">' + _newsletterEscapeHtml_(draft.responsibleIntro) + '</p></div>' +
+      '<table role="presentation" width="100%" style="border-collapse:collapse">' + responsibleRows + '</table>'
+    : '';
 
   const preheader = 'Seguimiento quincenal de incidencias · ' + periodLabel;
   const html =
@@ -429,10 +435,7 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
     '<td><a href="' + _newsletterEscapeHtml_(appLink) + '" style="display:inline-block;padding:11px 20px;border:1px solid ' +
     color.electric + ';border-radius:' + DESIGN_TOKENS.radius.component + ';color:' + color.electric +
     ';font-weight:700;text-decoration:none">Abrir Radar&nbsp;↗</a></td></tr></table>' +
-    '<div style="margin:0 0 16px"><p style="margin:0;color:' + color.midnight + ';font-family:' + headline +
-    ';font-size:24px;line-height:32px">Responsables y focos de actuación</p><p style="margin:4px 0 0;color:' +
-    color.grey600 + '">' + _newsletterEscapeHtml_(draft.responsibleIntro) + '</p></div>' +
-    '<table role="presentation" width="100%" style="border-collapse:collapse">' + responsibleRows + '</table>' +
+    responsibleSection +
     '<p style="margin:20px 0 0;color:' + color.grey700 + '">' + _newsletterEscapeHtml_(draft.closing) + '</p>' +
     '</td></tr><tr><td style="padding:20px 32px;border-top:1px solid ' + color.grey300 + ';background:' + color.grey200 +
     ';font-family:' + font + ';color:' + color.grey600 + ';font-size:12px;line-height:16px">' +
@@ -450,9 +453,7 @@ function _newsletterRender_(newsletter, reportUrl, applicationUrl, publication) 
     evolution.title,
     evolution.summary || draft.summary,
     ...(evolution.focus || []),
-    '',
-    draft.responsibleIntro,
-    ...(draft.responsibleParagraphs || []),
+    ...(rollups.length ? ['', draft.responsibleIntro, ...(draft.responsibleParagraphs || [])] : []),
     '',
     draft.closing,
     '',

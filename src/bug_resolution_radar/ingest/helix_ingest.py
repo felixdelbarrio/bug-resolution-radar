@@ -670,11 +670,19 @@ def _build_arsql_sql(
             token = re.sub(r"\s+", " ", txt.strip().lower())
             mapped: List[str]
             if token in {"incidencia", "incident", "incidence"}:
-                mapped = ["Incident"]
+                mapped = ["Incidencia", "Incident"]
             elif token in {"evento monitorizacion", "evento monitorización", "monitoring event"}:
-                mapped = ["Monitoring Event", "Event", "Incident", "Evento Monitorización"]
+                mapped = ["Evento Monitorización", "Monitoring Event", "Event"]
             elif token in {"consulta", "consultation", "query", "question", "inquiry"}:
-                mapped = ["Question", "Consultation", "Request", "Service Request"]
+                mapped = [
+                    "Consulta",
+                    "Question",
+                    "Consultation",
+                    "Query",
+                    "Inquiry",
+                    "Request",
+                    "Service Request",
+                ]
             else:
                 mapped = [txt]
             for candidate in mapped:
