@@ -1,72 +1,155 @@
-"""Centralized issue functionality classification helpers."""
+"""Centralized, geography-aware issue functionality classification."""
 
 from __future__ import annotations
 
-from typing import Iterable
+import re
+import unicodedata
+from functools import lru_cache
+from typing import Pattern, Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.analytics.insights import classify_theme
+from bug_resolution_radar.config import Settings, functionality_taxonomy_for_country
 
 FUNCTIONALITY_COL = "functionality"
 HELIX_EXECUTIVE_DESCRIPTION_COL = "helix_executive_description"
+_DESCRIPTION_COL = "description"
+_FALLBACK_FUNCTIONALITY = "Otros"
+_DEFAULT_COUNTRY = "México"
+
+FunctionalityTaxonomy = tuple[tuple[str, tuple[str, ...]], ...]
+CompiledFunctionalityTaxonomy = tuple[tuple[str, tuple[Pattern[str], ...]], ...]
 
 
-def _text(value: object) -> str:
-    return str(value or "").strip()
+def normalize_functionality_text(value: object) -> str:
+    """Normalize configured keywords and issue text identically."""
+    text = unicodedata.normalize("NFKD", str(value or "").casefold())
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return " ".join(text.split())
 
 
-def _series_text(df: pd.DataFrame, column: str) -> pd.Series:
+@lru_cache(maxsize=32)
+def _compile_taxonomy(taxonomy: FunctionalityTaxonomy) -> CompiledFunctionalityTaxonomy:
+    compiled: list[tuple[str, tuple[Pattern[str], ...]]] = []
+    for label, keywords in taxonomy:
+        patterns = tuple(
+            re.compile(rf"(?<!\w){re.escape(normalize_functionality_text(keyword))}(?!\w)")
+            for keyword in keywords
+        )
+        compiled.append((label, patterns))
+    return tuple(compiled)
+
+
+def classify_functionality_text(
+    text: object,
+    *,
+    taxonomy: FunctionalityTaxonomy,
+    default: str = _FALLBACK_FUNCTIONALITY,
+) -> str:
+    """Classify normalized issue text; the first configured category match wins."""
+    normalized = normalize_functionality_text(text)
+    if not normalized:
+        return default
+    for label, patterns in _compile_taxonomy(taxonomy):
+        if any(pattern.search(normalized) for pattern in patterns):
+            return label
+    return default
+
+
+def _text_series(df: pd.DataFrame, column: str) -> pd.Series:
     if column not in df.columns:
         return pd.Series([""] * len(df), index=df.index, dtype=str)
     return df[column].fillna("").astype(str).str.strip()
 
 
-def _classification_text(row: pd.Series) -> str:
-    parts: Iterable[str] = (
-        _text(row.get("summary", "")),
-        _text(row.get(HELIX_EXECUTIVE_DESCRIPTION_COL, "")),
-    )
-    return " ".join(part for part in parts if part)
+def build_issue_classification_text(df: pd.DataFrame) -> pd.Series:
+    """Build functional text only from normalized descriptive issue fields."""
+    parts = [
+        _text_series(df, "summary"),
+        _text_series(df, _DESCRIPTION_COL),
+        _text_series(df, HELIX_EXECUTIVE_DESCRIPTION_COL),
+    ]
+    combined = parts[0]
+    for part in parts[1:]:
+        combined = combined.str.cat(part, sep=" ")
+    return combined.str.replace(r"\s+", " ", regex=True).str.strip()
 
 
-def classify_issue_functionality(row: pd.Series) -> str:
-    """Classify an issue row into the shared functionality/theme bucket."""
-    return classify_theme(_classification_text(row))
+def functionality_order(
+    settings: Settings,
+    *,
+    country: object,
+    include_other: bool = False,
+) -> tuple[str, ...]:
+    labels = tuple(label for label, _ in functionality_taxonomy_for_country(settings, country))
+    return labels + ((_FALLBACK_FUNCTIONALITY,) if include_other else ())
+
+
+def classify_issue_functionality(
+    issue: pd.Series,
+    *,
+    settings: Settings | None = None,
+    country: object = "",
+) -> str:
+    """Classify one normalized issue with the taxonomy selected by geography."""
+    frame = pd.DataFrame([issue])
+    text = build_issue_classification_text(frame).iloc[0]
+    issue_country = country or issue.get("country", "") or _DEFAULT_COUNTRY
+    taxonomy = functionality_taxonomy_for_country(settings or Settings(), issue_country)
+    return classify_functionality_text(text, taxonomy=taxonomy)
 
 
 def ensure_issue_functionality_columns(
     df: pd.DataFrame | None,
     *,
+    settings: Settings | None = None,
+    country: object = "",
     functionality_col: str = FUNCTIONALITY_COL,
     theme_col: str | None = None,
 ) -> pd.DataFrame:
-    """Return a frame with shared functionality columns used by UI and Insights."""
+    """Classify each normalized issue once and expose shared functionality columns."""
     if not isinstance(df, pd.DataFrame):
         return pd.DataFrame()
     if df.empty:
         return df.copy(deep=False)
 
     work = df.copy(deep=False)
-    if HELIX_EXECUTIVE_DESCRIPTION_COL not in work.columns:
-        work[HELIX_EXECUTIVE_DESCRIPTION_COL] = ""
-    else:
-        work[HELIX_EXECUTIVE_DESCRIPTION_COL] = _series_text(
-            work,
-            HELIX_EXECUTIVE_DESCRIPTION_COL,
-        ).to_numpy(copy=False)
-
     target_col = str(theme_col or functionality_col or FUNCTIONALITY_COL).strip()
+    if functionality_col and functionality_col in work.columns:
+        existing_functionality = _text_series(work, functionality_col)
+        if existing_functionality.ne("").all():
+            if target_col and target_col != functionality_col:
+                work[target_col] = existing_functionality.to_numpy(copy=False)
+            return work
     if target_col and target_col in work.columns:
-        existing = _series_text(work, target_col)
+        existing = _text_series(work, target_col)
         if existing.ne("").all():
             if functionality_col and functionality_col not in work.columns:
                 work[functionality_col] = existing.to_numpy(copy=False)
             return work
 
-    functionality = work.apply(classify_issue_functionality, axis=1)
+    active_settings = settings or Settings()
+    texts = build_issue_classification_text(work).tolist()
+    if country:
+        countries: Sequence[object] = [country] * len(work)
+    elif "country" in work.columns:
+        countries = work["country"].fillna("").astype(str).tolist()
+    else:
+        countries = [_DEFAULT_COUNTRY] * len(work)
+
+    taxonomy_by_country: dict[str, FunctionalityTaxonomy] = {}
+    classified: list[str] = []
+    for text, raw_country in zip(texts, countries):
+        country_key = str(raw_country or _DEFAULT_COUNTRY).strip() or _DEFAULT_COUNTRY
+        taxonomy = taxonomy_by_country.get(country_key)
+        if taxonomy is None:
+            taxonomy = functionality_taxonomy_for_country(active_settings, country_key)
+            taxonomy_by_country[country_key] = taxonomy
+        classified.append(classify_functionality_text(text, taxonomy=taxonomy))
+
+    values = pd.Series(classified, index=work.index, dtype=str)
     if functionality_col:
-        work[functionality_col] = functionality.to_numpy(copy=False)
+        work[functionality_col] = values.to_numpy(copy=False)
     if theme_col and theme_col != functionality_col:
-        work[theme_col] = functionality.to_numpy(copy=False)
+        work[theme_col] = values.to_numpy(copy=False)
     return work

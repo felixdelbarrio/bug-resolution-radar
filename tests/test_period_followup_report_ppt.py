@@ -1810,7 +1810,7 @@ def test_generate_country_period_followup_ppt_zoom_table_matches_issue_count() -
     assert not _table_intersects_picture(dashboard_slide, dashboard_tables[0])
     _assert_native_table_font_floor(dashboard_tables[0])
 
-    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Login y acceso, abiertas")
+    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Acceso y seguridad, abiertas")
     for slide_idx in (first_zoom_idx, first_zoom_idx + 1, first_zoom_idx + 2):
         slide = prs.slides[slide_idx]
         zoom_tables = [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
@@ -1983,7 +1983,7 @@ def test_generate_country_period_followup_ppt_functionality_color_contrast_is_re
         mitigation_panel.top + mitigation_panel.height
     )
 
-    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas")
+    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos y nómina, abiertas")
     root_cause_shape = next(
         shape
         for shape in prs.slides[first_zoom_idx].shapes
@@ -2056,7 +2056,10 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     )
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == 14
-    first_zoom_idx = _find_slide_index(prs, "Incidencias, en Pagos, abiertas en la quincena (I)")
+    first_zoom_idx = _find_slide_index(
+        prs,
+        "Incidencias, en Pagos y nómina, abiertas en la quincena (I)",
+    )
     zoom_titles = [
         str(getattr(shape, "text", "") or "").strip()
         for slide_idx in (first_zoom_idx, first_zoom_idx + 1)
@@ -2067,8 +2070,8 @@ def test_generate_country_period_followup_ppt_zoom_paginates_when_overflow() -> 
     deck_text = " ".join(_slide_text(slide) for slide in prs.slides)
     assert "Incidencias abiertas por criticidad alta" not in deck_text
     assert "Incidencias abiertas con más de 30 días" not in deck_text
-    assert "Incidencias, en Pagos, abiertas en la quincena (I)" in joined_titles
-    assert "Incidencias, en Pagos, abiertas en la quincena (II)" in joined_titles
+    assert "Incidencias, en Pagos y nómina, abiertas en la quincena (I)" in joined_titles
+    assert "Incidencias, en Pagos y nómina, abiertas en la quincena (II)" in joined_titles
 
 
 def test_period_followup_risk_sections_use_native_tables_after_functionality() -> None:

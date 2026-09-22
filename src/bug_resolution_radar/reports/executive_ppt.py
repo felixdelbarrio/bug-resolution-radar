@@ -674,7 +674,7 @@ def _build_sections(
             )
         )
 
-    quality = _build_quality_insights_section(open_df=open_df)
+    quality = _build_quality_insights_section(settings=settings, open_df=open_df)
     if quality is not None:
         insert_at = len(sections)
         for idx, sec in enumerate(sections):
@@ -685,7 +685,11 @@ def _build_sections(
     return sections
 
 
-def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_ChartSection]:
+def _build_quality_insights_section(
+    *,
+    settings: Settings,
+    open_df: pd.DataFrame,
+) -> Optional[_ChartSection]:
     """
     Report-only slide: visualiza "Por funcionalidad".
     Mantiene la señal de duplicados en la narrativa de insights (panel derecho).
@@ -699,6 +703,10 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
             prepare_open_theme_payload,
             sort_theme_table_by_volume,
         )
+        from bug_resolution_radar.analytics.issue_functionality import (
+            ensure_issue_functionality_columns,
+            functionality_order,
+        )
     except Exception:
         return None
 
@@ -706,7 +714,17 @@ def _build_quality_insights_section(*, open_df: pd.DataFrame) -> Optional[_Chart
         # Both "Por funcionalidad" and duplicates rely on `summary`.
         return None
 
-    topics_payload = prepare_open_theme_payload(open_df, top_n=10)
+    country = str(open_df.iloc[0].get("country", "") or "").strip() or "México"
+    classified_open = ensure_issue_functionality_columns(
+        open_df,
+        settings=settings,
+        country=country,
+    )
+    topics_payload = prepare_open_theme_payload(
+        classified_open,
+        top_n=10,
+        theme_order=functionality_order(settings, country=country, include_other=True),
+    )
     top_tbl = topics_payload.get("top_tbl") if isinstance(topics_payload, dict) else None
     if not isinstance(top_tbl, pd.DataFrame):
         top_tbl = pd.DataFrame(columns=["tema", "open_count", "pct_open"])

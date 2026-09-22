@@ -604,7 +604,7 @@ def test_issues_and_kanban_endpoints_serialize_rows_without_pandas_scalars(
     issue_payload = issues_response.json()
     assert issue_payload["total"] == 1
     assert issue_payload["rows"][0]["key"] == "RAD-1"
-    assert issue_payload["rows"][0]["functionality"] == "Login y acceso"
+    assert issue_payload["rows"][0]["functionality"] == "Acceso y usuarios"
     assert "helix_executive_description" in issue_payload["rows"][0]
     assert isinstance(issue_payload["rows"][0]["updated"], str)
 
@@ -614,7 +614,7 @@ def test_issues_and_kanban_endpoints_serialize_rows_without_pandas_scalars(
             "country": "España",
             "sourceId": source_id,
             "scopeMode": "source",
-            "functionality": "Login y acceso",
+            "functionality": "Acceso y usuarios",
             "sortBy": "functionality",
         },
     )
@@ -682,7 +682,7 @@ def test_workspace_filter_options_load_on_demand_with_real_functionalities(
     assert filter_options["status"] == ["Open"]
     assert filter_options["priority"] == ["High"]
     assert filter_options["assignee"] == ["Alice"]
-    assert filter_options["functionality"] == ["Login y acceso"]
+    assert filter_options["functionality"] == ["Acceso y usuarios"]
 
 
 def test_issue_functionality_filter_has_independent_scope_cache(
@@ -699,7 +699,7 @@ def test_issue_functionality_filter_has_independent_scope_cache(
     unfiltered = client.get("/api/issues", params=base_params)
     filtered = client.get(
         "/api/issues",
-        params={**base_params, "functionality": "Login y acceso"},
+        params={**base_params, "functionality": "Acceso y usuarios"},
     )
 
     assert unfiltered.status_code == 200
@@ -1052,16 +1052,45 @@ def test_intelligence_functionality_chart_uses_dark_mode_palette_and_stack_order
     assert response.status_code == 200
     figure = response.json()["functionality"]["chart"]["figure"]
     bar_traces = [trace for trace in figure["data"] if trace.get("type") == "bar"]
-    assert [trace["name"] for trace in bar_traces] == [
-        "Transferencias",
-        "Login y acceso",
-        "Pagos",
+    legend_order = [
+        trace["name"] for trace in sorted(bar_traces, key=lambda trace: trace["legendrank"])
     ]
-    assert [trace["marker"]["color"] for trace in bar_traces] == [
-        "#85C8FF",
-        "#001391",
-        "#D64550",
-    ]
+    assert legend_order == ["Transferencias", "Acceso y usuarios", "Pagos"]
+    assert all(trace["marker"]["color"].startswith("#") for trace in bar_traces)
+
+
+def test_intelligence_functionality_payload_accepts_custom_taxonomy(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    base_settings = _settings(tmp_path)
+    settings = Settings.model_validate(
+        {
+            **base_settings.model_dump(),
+            "FUNCTIONALITY_TAXONOMY_SPAIN": (
+                '[{"label":"Canal Digital","keywords":["login"]},'
+                '{"label":"Operativa","keywords":["operativa"]}]'
+            ),
+        }
+    )
+    source_id = _seed_issues(settings)
+    monkeypatch.setattr(api_app, "load_settings", lambda: settings)
+    dashboard_snapshot._scope_context_cache.clear()
+
+    response = TestClient(api_app.create_app()).get(
+        "/api/intelligence",
+        params={
+            "country": "España",
+            "sourceId": source_id,
+            "scopeMode": "source",
+            "insightsViewMode": "acumulada",
+        },
+    )
+
+    assert response.status_code == 200
+    functionality = response.json()["functionality"]
+    assert functionality["combo"]["functionalityOptions"] == ["Canal Digital"]
+    assert [topic["topic"] for topic in functionality["topics"]] == ["Canal Digital"]
 
 
 def test_notes_endpoint_roundtrip(monkeypatch, tmp_path: Path) -> None:

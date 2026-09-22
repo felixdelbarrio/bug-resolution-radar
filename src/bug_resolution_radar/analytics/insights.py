@@ -10,10 +10,16 @@ from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
 
+from bug_resolution_radar.analytics.issue_functionality import (
+    FUNCTIONALITY_COL,
+    classify_functionality_text,
+    ensure_issue_functionality_columns,
+)
 from bug_resolution_radar.analytics.time_windows import (
     FIRST_FORTNIGHT_END_DAY,
     SECOND_FORTNIGHT_START_DAY,
 )
+from bug_resolution_radar.config import Settings, functionality_taxonomy_for_country
 from bug_resolution_radar.theme.design_tokens import (
     BBVA_DARK,
     BBVA_GOAL_ACCENT_7,
@@ -71,26 +77,6 @@ _STOPWORDS = {
     "y",
 }
 
-THEME_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Softoken", ("softoken", "token", "firma", "otp")),
-    ("Cr\u00e9dito", ("credito", "cr\u00e9dito", "cvv", "tarjeta", "tdc")),
-    ("Monetarias", ("monetarias", "saldo", "nomina", "n\u00f3mina")),
-    ("Tareas", ("tareas", "task", "acciones", "dashboard")),
-    ("Pagos", ("pago", "pagos", "tpv", "cobranza")),
-    ("Transferencias", ("transferencia", "spei", "swift", "divisas")),
-    ("Login y acceso", ("login", "acceso", "face id", "biometr", "password", "tokenbnc")),
-    ("Notificaciones", ("notificacion", "notificaci\u00f3n", "push", "mensaje")),
-)
-
-THEME_LEGEND_PRIORITY: tuple[str, ...] = (
-    "Pagos",
-    "Monetarias",
-    "Login y acceso",
-    "Transferencias",
-    "Notificaciones",
-    "Otros",
-)
-
 _EMPTY_THEME_TREND_COLUMNS: tuple[str, ...] = (
     "quincena_start",
     "quincena_end",
@@ -108,7 +94,6 @@ _EMPTY_THEME_DAILY_COLUMNS: tuple[str, ...] = (
     "issues_value",
 )
 _OTHER_THEME_TOKENS: tuple[str, ...] = ("otros", "other")
-_HELIX_EXECUTIVE_DESCRIPTION_COL = "helix_executive_description"
 
 
 def _safe_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -438,41 +423,22 @@ def classify_theme(
     theme_rules: Sequence[tuple[str, Sequence[str]]] | None = None,
     default_theme: str = "Otros",
 ) -> str:
-    """Map an issue summary to a functional theme bucket."""
-    text = _normalize_theme_token(summary)
-    if not text:
-        return default_theme
-
-    rules = list(theme_rules or THEME_RULES)
-    for theme_name, keys in rules:
-        for kw in list(keys or []):
-            token = _normalize_theme_token(kw)
-            if token and re.search(rf"\b{re.escape(token)}\b", text):
-                return str(theme_name)
-    return default_theme
-
-
-def _issue_theme_text(df: pd.DataFrame) -> pd.Series:
-    if "summary" in df.columns:
-        summary = df["summary"].fillna("").astype(str).str.strip()
-    else:
-        summary = pd.Series([""] * len(df), index=df.index, dtype=str)
-    if _HELIX_EXECUTIVE_DESCRIPTION_COL not in df.columns:
-        return summary
-    executive = df[_HELIX_EXECUTIVE_DESCRIPTION_COL].fillna("").astype(str).str.strip()
-    return (summary + " " + executive).str.strip()
+    """Compatibility entrypoint backed by the single functionality classifier."""
+    taxonomy = (
+        tuple((str(label), tuple(str(key) for key in keys)) for label, keys in theme_rules)
+        if theme_rules is not None
+        else functionality_taxonomy_for_country(Settings(), "México")
+    )
+    return classify_functionality_text(summary, taxonomy=taxonomy, default=default_theme)
 
 
 def theme_counts(open_df: pd.DataFrame) -> pd.Series:
     """Count open issues by classified theme, excluding blank summaries."""
     df = _safe_df(open_df)
-    if df.empty or "summary" not in df.columns:
+    if df.empty:
         return pd.Series(dtype="int64")
-    summaries = _issue_theme_text(df)
-    summaries = summaries[summaries != ""]
-    if summaries.empty:
-        return pd.Series(dtype="int64")
-    return summaries.map(classify_theme).value_counts()
+    themed = ensure_issue_functionality_columns(df)
+    return themed[FUNCTIONALITY_COL].fillna("").astype(str).value_counts()
 
 
 def top_non_other_theme(open_df: pd.DataFrame) -> tuple[str, int]:
@@ -502,7 +468,7 @@ def order_theme_labels(
     if not unique:
         return []
 
-    preferred = list(priority or THEME_LEGEND_PRIORITY)
+    preferred = list(priority or unique)
     head = [theme for theme in preferred if theme in seen]
     tail = [theme for theme in unique if theme not in set(head)]
     return head + tail
@@ -512,6 +478,7 @@ def prepare_open_theme_payload(
     open_df: pd.DataFrame,
     *,
     top_n: int = 10,
+    theme_order: Sequence[str] | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Build top-theme payload for open issues (shared by UI and reports)."""
     tmp_open = _safe_df(open_df).copy(deep=False)
@@ -519,17 +486,16 @@ def prepare_open_theme_payload(
     if tmp_open.empty:
         return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
 
-    if "summary" not in tmp_open.columns:
-        return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
-
-    tmp_open["summary"] = tmp_open["summary"].fillna("").astype(str)
-    tmp_open["__theme"] = _issue_theme_text(tmp_open).map(classify_theme)
+    tmp_open = ensure_issue_functionality_columns(tmp_open, theme_col="__theme")
     counts = tmp_open["__theme"].value_counts().sort_values(ascending=False)
     if counts.empty:
         return {"tmp_open": tmp_open, "top_tbl": empty_tbl}
 
     top_n_safe = max(int(top_n or 10), 1)
-    labels = [str(t) for t in counts.index.tolist()]
+    labels = order_theme_labels(
+        counts.index.tolist(),
+        priority=list(theme_order or counts.index.tolist()),
+    )
     non_other = [theme for theme in labels if not is_other_theme_label(theme)]
     other_labels = [theme for theme in labels if is_other_theme_label(theme)]
     if other_labels:
@@ -553,7 +519,11 @@ def prepare_open_theme_payload(
             ],
         }
     )
-    top_tbl = sort_theme_table_by_volume(top_tbl)
+    configured_order = [label for label in list(theme_order or top_themes) if label in top_themes]
+    configured_order += [label for label in top_themes if label not in configured_order]
+    order_map = {label: index for index, label in enumerate(configured_order)}
+    top_tbl["__order"] = top_tbl["tema"].map(order_map).fillna(len(order_map)).astype(int)
+    top_tbl = top_tbl.sort_values("__order", kind="mergesort").drop(columns="__order")
     return {"tmp_open": tmp_open, "top_tbl": top_tbl}
 
 
@@ -610,7 +580,6 @@ def build_theme_daily_trend(
     df: pd.DataFrame,
     *,
     theme_whitelist: Sequence[str] | None = None,
-    theme_rules: Sequence[tuple[str, Sequence[str]]] | None = None,
 ) -> pd.DataFrame:
     """
     Build daily trend points by theme for the analyzed fortnight scope.
@@ -622,14 +591,12 @@ def build_theme_daily_trend(
     - issues_value (alias for charting)
     """
     safe = _safe_df(df)
-    if safe.empty or "created" not in safe.columns or "summary" not in safe.columns:
+    if safe.empty or "created" not in safe.columns:
         return pd.DataFrame(columns=list(_EMPTY_THEME_DAILY_COLUMNS))
 
-    cols = ["created", "summary"]
-    if _HELIX_EXECUTIVE_DESCRIPTION_COL in safe.columns:
-        cols.append(_HELIX_EXECUTIVE_DESCRIPTION_COL)
+    safe = ensure_issue_functionality_columns(safe)
+    cols = ["created", FUNCTIONALITY_COL]
     work = safe.loc[:, cols].copy(deep=False)
-    work["summary"] = work["summary"].fillna("").astype(str)
     created = _to_dt_naive(work["created"])
     valid = created.notna()
     if not bool(valid.any()):
@@ -638,13 +605,14 @@ def build_theme_daily_trend(
     work = work.loc[valid].copy(deep=False)
     created = created.loc[valid]
     work["date"] = created.dt.floor("D").to_numpy(copy=False)
-    work["tema"] = [
-        classify_theme(text, theme_rules=theme_rules) for text in _issue_theme_text(work).tolist()
-    ]
+    work["tema"] = work[FUNCTIONALITY_COL].fillna("").astype(str).to_numpy(copy=False)
 
     theme_order: list[str]
     if theme_whitelist is not None:
-        requested_order = order_theme_labels_by_volume(theme_whitelist, others_last=True)
+        requested_order = order_theme_labels(theme_whitelist, priority=theme_whitelist)
+        requested_order = [
+            theme for theme in requested_order if not is_other_theme_label(theme)
+        ] + [theme for theme in requested_order if is_other_theme_label(theme)]
         present = set(work["tema"].unique().tolist())
         theme_order = [theme for theme in requested_order if theme in present]
         if not theme_order:
@@ -689,7 +657,6 @@ def build_theme_fortnight_trend(
     *,
     theme_whitelist: Sequence[str] | None = None,
     cumulative: bool = False,
-    theme_rules: Sequence[tuple[str, Sequence[str]]] | None = None,
 ) -> pd.DataFrame:
     """
     Build fortnight trend points by theme.
@@ -702,14 +669,12 @@ def build_theme_fortnight_trend(
     - issues_value (issues or issues_cumulative based on `cumulative`)
     """
     safe = _safe_df(df)
-    if safe.empty or "created" not in safe.columns or "summary" not in safe.columns:
+    if safe.empty or "created" not in safe.columns:
         return pd.DataFrame(columns=list(_EMPTY_THEME_TREND_COLUMNS))
 
-    cols = ["created", "summary"]
-    if _HELIX_EXECUTIVE_DESCRIPTION_COL in safe.columns:
-        cols.append(_HELIX_EXECUTIVE_DESCRIPTION_COL)
+    safe = ensure_issue_functionality_columns(safe)
+    cols = ["created", FUNCTIONALITY_COL]
     work = safe.loc[:, cols].copy(deep=False)
-    work["summary"] = work["summary"].fillna("").astype(str)
     created = _to_dt_naive(work["created"])
     valid = created.notna()
     if not bool(valid.any()):
@@ -721,13 +686,14 @@ def build_theme_fortnight_trend(
     work["quincena_start"] = axis["quincena_start"].to_numpy(copy=False)
     work["quincena_end"] = axis["quincena_end"].to_numpy(copy=False)
     work["quincena_label"] = axis["quincena_label"].to_numpy(copy=False)
-    work["tema"] = [
-        classify_theme(text, theme_rules=theme_rules) for text in _issue_theme_text(work).tolist()
-    ]
+    work["tema"] = work[FUNCTIONALITY_COL].fillna("").astype(str).to_numpy(copy=False)
 
     theme_order: list[str]
     if theme_whitelist is not None:
-        requested_order = order_theme_labels_by_volume(theme_whitelist, others_last=True)
+        requested_order = order_theme_labels(theme_whitelist, priority=theme_whitelist)
+        requested_order = [
+            theme for theme in requested_order if not is_other_theme_label(theme)
+        ] + [theme for theme in requested_order if is_other_theme_label(theme)]
         present = set(work["tema"].unique().tolist())
         theme_order = [theme for theme in requested_order if theme in present]
         if not theme_order:
