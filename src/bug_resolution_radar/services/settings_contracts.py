@@ -10,7 +10,7 @@ from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.config import (
     Settings,
     country_rollup_sources,
-    helix_service_origin_buug_for_country,
+    helix_owner_support_company_for_country,
     helix_sources,
     jira_root_cause_labels_by_country,
     jira_sources,
@@ -67,11 +67,11 @@ def _normalize_source_rows(
                 continue
             clean["jql"] = jql
         else:
-            clean["service_origin_buug"] = helix_service_origin_buug_for_country(country)
-            for key in ("service_origin_buug", "service_origin_n1", "service_origin_n2"):
+            clean["owner_support_company"] = helix_owner_support_company_for_country(country)
+            for key in ("owner_support_company", "service_origin_n1", "service_origin_n2"):
                 value = str(raw.get(key) or "").strip()
-                if key == "service_origin_buug":
-                    value = clean["service_origin_buug"]
+                if key == "owner_support_company":
+                    value = clean["owner_support_company"]
                 if value:
                     clean[key] = value
         out.append(clean)

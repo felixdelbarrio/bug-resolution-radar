@@ -24,7 +24,7 @@ from bug_resolution_radar.common.utils import now_iso
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
-    helix_service_origin_buug_for_country,
+    helix_owner_support_company_for_country,
     normalize_country_name,
 )
 from bug_resolution_radar.ingest.helix_ingest import (
@@ -118,20 +118,20 @@ def _historical_lookup_items_by_incident(
     doc: HelixDocument,
     *,
     country: str,
-    service_origin_buug: str,
+    owner_support_company: str,
 ) -> Dict[str, HelixWorkItem]:
     country_txt = normalize_country_name(country) or str(country or "").strip()
-    service_origin_buug_txt = str(service_origin_buug or "").strip()
+    owner_support_company_txt = str(owner_support_company or "").strip()
     out: Dict[str, HelixWorkItem] = {}
     for item in getattr(doc, "items", []) or ():
         item_country = normalize_country_name(item.country) or str(item.country or "").strip()
         if country_txt and item_country != country_txt:
             continue
-        item_buug = str(item.service_origin_buug or "").strip()
+        item_company = str(item.owner_support_company or "").strip()
         if (
-            service_origin_buug_txt
-            and item_buug
-            and item_buug.casefold() != service_origin_buug_txt.casefold()
+            owner_support_company_txt
+            and item_company
+            and item_company.casefold() != owner_support_company_txt.casefold()
         ):
             continue
         inc_id = str(item.id or "").strip().upper()
@@ -247,7 +247,7 @@ def _historical_item_to_finalist_lookup_item(
     item: HelixWorkItem,
     *,
     country: str,
-    service_origin_buug: str,
+    owner_support_company: str,
     source_id: str,
     source_alias: str,
     matched_jira_keys: List[str],
@@ -266,8 +266,8 @@ def _historical_item_to_finalist_lookup_item(
         update={
             "status": status,
             "country": str(country or "").strip(),
-            "service_origin_buug": str(
-                service_origin_buug or item.service_origin_buug or ""
+            "owner_support_company": str(
+                owner_support_company or item.owner_support_company or ""
             ).strip(),
             "source_id": str(source_id or "").strip(),
             "source_alias": str(source_alias or "").strip(),
@@ -285,7 +285,7 @@ def _lookup_diagnostic_item(
     *,
     inc_id: str,
     country: str,
-    service_origin_buug: str,
+    owner_support_company: str,
     source_id: str,
     source_alias: str,
     matched_jira_keys: List[str],
@@ -297,7 +297,7 @@ def _lookup_diagnostic_item(
     return HelixWorkItem(
         id=str(inc_id or "").strip().upper(),
         country=str(country or "").strip(),
-        service_origin_buug=str(service_origin_buug or "").strip(),
+        owner_support_company=str(owner_support_company or "").strip(),
         source_id=str(source_id or "").strip(),
         source_alias=str(source_alias or "").strip(),
         helix_lookup_kind=POST_JQL_LOOKUP_HELIX_KIND,
@@ -372,13 +372,13 @@ def _run_finalist_status_lookup(
     pending_by_country: Dict[str, Dict[str, List[str]]] = {}
     for country, inc_map in inc_by_country.items():
         country_txt = normalize_country_name(country) or str(country or "").strip()
-        service_origin_buug = helix_service_origin_buug_for_country(country_txt)
+        owner_support_company = helix_owner_support_company_for_country(country_txt)
         source_alias = POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS
         source_id = _finalist_lookup_source_id(country_txt)
         historical_items = _historical_lookup_items_by_incident(
             merged_helix,
             country=country_txt,
-            service_origin_buug=service_origin_buug,
+            owner_support_company=owner_support_company,
         )
         pending: Dict[str, List[str]] = {}
         for inc_id, jira_keys in inc_map.items():
@@ -389,7 +389,7 @@ def _run_finalist_status_lookup(
                     _historical_item_to_finalist_lookup_item(
                         historical_item,
                         country=country_txt,
-                        service_origin_buug=service_origin_buug,
+                        owner_support_company=owner_support_company,
                         source_id=source_id,
                         source_alias=source_alias,
                         matched_jira_keys=jira_keys,
@@ -445,7 +445,7 @@ def _run_finalist_status_lookup(
 
     for country, inc_map in pending_by_country.items():
         country_txt = str(country or "").strip()
-        service_origin_buug = helix_service_origin_buug_for_country(country_txt)
+        owner_support_company = helix_owner_support_company_for_country(country_txt)
         source_alias = POST_JQL_LOOKUP_HELIX_SOURCE_ALIAS
         source_id = _finalist_lookup_source_id(country_txt)
         inc_ids = list(inc_map.keys())
@@ -467,7 +467,7 @@ def _run_finalist_status_lookup(
                 ok, msg, lookup_doc = lookup_helix_incidents_by_arsql(
                     settings,
                     country=country_txt,
-                    service_origin_buug=service_origin_buug,
+                    owner_support_company=owner_support_company,
                     incident_ids=batch,
                     source_alias=source_alias,
                     source_id=source_id,
@@ -501,7 +501,7 @@ def _run_finalist_status_lookup(
                             _lookup_diagnostic_item(
                                 inc_id=inc_id,
                                 country=country_txt,
-                                service_origin_buug=service_origin_buug,
+                                owner_support_company=owner_support_company,
                                 source_id=source_id,
                                 source_alias=source_alias,
                                 matched_jira_keys=inc_map.get(inc_id, []),
@@ -538,7 +538,7 @@ def _run_finalist_status_lookup(
                         _lookup_diagnostic_item(
                             inc_id=inc_id,
                             country=country_txt,
-                            service_origin_buug=service_origin_buug,
+                            owner_support_company=owner_support_company,
                             source_id=source_id,
                             source_alias=source_alias,
                             matched_jira_keys=inc_map.get(inc_id, []),
@@ -557,7 +557,7 @@ def _run_finalist_status_lookup(
                 extra={
                     "run_id": run_id,
                     "country": country_txt,
-                    "service_origin_buug": service_origin_buug,
+                    "owner_support_company": owner_support_company,
                     "inc_total": len(inc_ids),
                     "inc_batch_size": batch_size,
                     "batch_index": batch_index,
@@ -589,7 +589,7 @@ def _run_finalist_status_lookup(
                             _lookup_diagnostic_item(
                                 inc_id=inc_id,
                                 country=country_txt,
-                                service_origin_buug=service_origin_buug,
+                                owner_support_company=owner_support_company,
                                 source_id=source_id,
                                 source_alias=source_alias,
                                 matched_jira_keys=inc_map.get(inc_id, []),
@@ -757,7 +757,7 @@ def run_helix_ingest(
             source_id=str(src.get("source_id", "")).strip(),
             proxy=helix_proxy,
             ssl_verify=helix_ssl_verify,
-            service_origin_buug=src.get("service_origin_buug"),
+            owner_support_company=src.get("owner_support_company"),
             service_origin_n1=src.get("service_origin_n1"),
             service_origin_n2=src.get("service_origin_n2"),
             dry_run=False,

@@ -74,7 +74,12 @@ from bug_resolution_radar.common.issue_links import (
     build_issue_url_maps,
     linkify_issue_references,
 )
-from bug_resolution_radar.config import Settings, jira_sources, resolve_period_ppt_template_path
+from bug_resolution_radar.config import (
+    Settings,
+    helix_sources,
+    jira_sources,
+    resolve_period_ppt_template_path,
+)
 from bug_resolution_radar.reports.branding import apply_corporate_branding
 from bug_resolution_radar.reports.executive_ppt import _fig_to_png, _kaleido_png_bytes
 from bug_resolution_radar.reports.period_followup_layout import (
@@ -150,7 +155,7 @@ _FUNCTIONALITY_ISSUE_TABLE_HEADERS: tuple[str, ...] = (
 _RISK_ASSIGNEE_TABLE_HEADERS: tuple[str, ...] = (
     "ID",
     "Descripción",
-    "Responsable",
+    "Responsable / Origen N1",
     "Estado",
     "Criticidad",
     "Días abierta",
@@ -384,8 +389,7 @@ def _clean_source_ids(source_ids: Sequence[str]) -> List[str]:
 
 
 def _show_source_breakdown(source_ids: Sequence[str]) -> bool:
-    clean = _clean_source_ids(source_ids)
-    return len(clean) > 1 and any(source_id.casefold().startswith("jira:") for source_id in clean)
+    return len(_clean_source_ids(source_ids)) > 1
 
 
 def _resolve_template_path(settings: Settings, explicit_path: str | None = None) -> Path:
@@ -3590,17 +3594,19 @@ def _assignee_with_po_text(
     return f"{assignee_text}\n({po_text})"
 
 
-def _enrich_po_team_leader_from_sources(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+def _enrich_issue_owner_from_sources(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     safe = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
     if safe.empty or "source_id" not in safe.columns:
         return safe
-    source_po = {
-        str(source.get("source_id") or "").strip(): str(source.get("po_team_leader") or "").strip()
-        for source in jira_sources(settings)
+    source_owner = {
+        str(source.get("source_id") or "").strip(): str(
+            source.get("po_team_leader") or source.get("service_origin_n1") or ""
+        ).strip()
+        for source in jira_sources(settings) + helix_sources(settings)
         if str(source.get("source_id") or "").strip()
-        and str(source.get("po_team_leader") or "").strip()
+        and str(source.get("po_team_leader") or source.get("service_origin_n1") or "").strip()
     }
-    if not source_po:
+    if not source_owner:
         return safe
     out = safe.copy(deep=False)
     if "po_team_leader" not in out.columns:
@@ -3608,7 +3614,7 @@ def _enrich_po_team_leader_from_sources(df: pd.DataFrame, settings: Settings) ->
     current_po = out["po_team_leader"].fillna("").astype(str).str.strip()
     source_ids = out["source_id"].fillna("").astype(str).str.strip()
     out["po_team_leader"] = [
-        po or source_po.get(source_id, "")
+        po or source_owner.get(source_id, "")
         for po, source_id in zip(current_po.tolist(), source_ids.tolist())
     ]
     return out
@@ -4832,6 +4838,20 @@ def generate_country_period_followup_ppt(
         raise ValueError("No hay incidencias para generar el informe de seguimiento.")
 
     labels = source_label_map(settings, country=country_txt, source_ids=clean_source_ids)
+    labels.update(
+        {
+            str(source.get("source_id") or ""): " · ".join(
+                part
+                for part in (
+                    str(source.get("service_origin_n1") or "").strip(),
+                    str(source.get("service_origin_n2") or "").strip(),
+                )
+                if part
+            )
+            for source in helix_sources(settings)
+            if str(source.get("source_id") or "") in clean_source_ids
+        }
+    )
     quincenal = build_country_quincenal_result(
         df=dff,
         settings=settings,
@@ -4962,7 +4982,7 @@ def generate_country_period_followup_ppt(
     )
 
     risk_lists = build_period_risk_issue_lists(
-        _enrich_po_team_leader_from_sources(aggregate.dff, settings),
+        _enrich_issue_owner_from_sources(aggregate.dff, settings),
         fallback_analysis_day=pd.Timestamp(aggregate.summary.window.current_end),
     )
     notes_by_key = _load_report_notes_by_key(settings)

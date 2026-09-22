@@ -74,7 +74,7 @@ function buildSourceId(sourceType: string, country: string, alias: string) {
   return `${slugToken(sourceType)}:${slugToken(country)}:${slugToken(alias)}`;
 }
 
-function helixServiceOriginBuugForCountry(country: string) {
+function helixOwnerSupportCompanyForCountry(country: string) {
   const byCountry: Record<string, string> = {
     argentina: "BBVA Argentina",
     colombia: "BBVA Colombia",
@@ -160,7 +160,7 @@ function emptyHelixRow(country: string): SourceDraftRow {
     source_type: "helix",
     country,
     alias: "",
-    service_origin_buug: helixServiceOriginBuugForCountry(country),
+    owner_support_company: helixOwnerSupportCompanyForCountry(country),
     service_origin_n1: "ENTERPRISE WEB",
     service_origin_n2: "",
     markedForDeletion: false
@@ -192,7 +192,7 @@ function SourceTable({
         }
         const nextRow = { ...row, ...patch };
         if (!nextRow.source_type || nextRow.source_type === "helix") {
-          nextRow.service_origin_buug = helixServiceOriginBuugForCountry(nextRow.country);
+          nextRow.owner_support_company = helixOwnerSupportCompanyForCountry(nextRow.country);
         }
         return {
           ...nextRow,
@@ -224,7 +224,7 @@ function SourceTable({
           {isJira ? <span>PO / Team Leader</span> : null}
           {isJira ? <span>Cuadro de mando JIRA</span> : null}
           {isJira ? <span>JQL</span> : null}
-          {!isJira ? <span>Servicio Origen BU/UG</span> : null}
+          {!isJira ? <span>Owner Support Company</span> : null}
           {!isJira ? <span>Servicio Origen N1</span> : null}
           {!isJira ? <span>Servicio Origen N2</span> : null}
         </div>
@@ -274,7 +274,7 @@ function SourceTable({
             ) : null}
             {!isJira ? (
               <input
-                value={row.service_origin_buug ?? ""}
+                value={row.owner_support_company ?? ""}
                 readOnly
                 aria-readonly="true"
               />
@@ -641,6 +641,7 @@ export function SettingsPage() {
         HELIX_BROWSER: asText(values.HELIX_BROWSER || "chrome"),
         HELIX_SSL_VERIFY: normalizeBool(values.HELIX_SSL_VERIFY, true) ? "true" : "false",
         HELIX_DASHBOARD_URL: asText(values.HELIX_DASHBOARD_URL),
+        HELIX_ARSQL_DASHBOARD_URL: asText(values.HELIX_ARSQL_DASHBOARD_URL),
         HELIX_COOKIE_SOURCE: normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser"),
         HELIX_COOKIE_HEADER: asText(values.HELIX_COOKIE_HEADER)
       },
@@ -1202,6 +1203,13 @@ export function SettingsPage() {
                 <input
                   value={asText(values.HELIX_DASHBOARD_URL)}
                   onChange={(event) => setValue("HELIX_DASHBOARD_URL", event.target.value)}
+                />
+              </label>
+              <label className="field field-wide">
+                <span>Cuadro de mando de incidencias Helix</span>
+                <input
+                  value={asText(values.HELIX_ARSQL_DASHBOARD_URL)}
+                  onChange={(event) => setValue("HELIX_ARSQL_DASHBOARD_URL", event.target.value)}
                 />
               </label>
               {normalizeCookieSource(values.HELIX_COOKIE_SOURCE, "browser") !== "browser" ? (

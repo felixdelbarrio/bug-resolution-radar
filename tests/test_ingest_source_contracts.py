@@ -16,7 +16,7 @@ from bug_resolution_radar.config import (
     Settings,
     all_configured_sources,
     country_rollup_sources,
-    helix_service_origin_buug_for_country,
+    helix_owner_support_company_for_country,
     jira_sources,
     rollup_source_ids,
     save_settings,
@@ -49,16 +49,16 @@ def _excel_bytes(frame: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
-def test_helix_service_origin_buug_mapping_preserves_accents() -> None:
-    assert helix_service_origin_buug_for_country("Argentina") == "BBVA Argentina"
-    assert helix_service_origin_buug_for_country("Colombia") == "BBVA Colombia"
-    assert helix_service_origin_buug_for_country("España") == "BBVA España"
-    assert helix_service_origin_buug_for_country("México") == "BBVA México"
-    assert helix_service_origin_buug_for_country("Perú") == "BBVA Perú"
-    assert helix_service_origin_buug_for_country("Peru") == "BBVA Perú"
+def test_helix_owner_support_company_mapping_preserves_accents() -> None:
+    assert helix_owner_support_company_for_country("Argentina") == "BBVA Argentina"
+    assert helix_owner_support_company_for_country("Colombia") == "BBVA Colombia"
+    assert helix_owner_support_company_for_country("España") == "BBVA España"
+    assert helix_owner_support_company_for_country("México") == "BBVA México"
+    assert helix_owner_support_company_for_country("Perú") == "BBVA Perú"
+    assert helix_owner_support_company_for_country("Peru") == "BBVA Perú"
 
 
-def test_helix_service_origin_buug_is_normalized_before_persist(
+def test_helix_owner_support_company_is_normalized_before_persist(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
     env_path = tmp_path / ".env"
@@ -69,7 +69,7 @@ def test_helix_service_origin_buug_is_normalized_before_persist(
         SUPPORTED_COUNTRIES="México,España,Peru,Colombia,Argentina",
         HELIX_SOURCES_JSON=(
             '[{"country":"Peru","alias":"PE SmartIT",'
-            '"service_origin_buug":"BBVA Peru","service_origin_n1":"ENTERPRISE WEB"}]'
+            '"owner_support_company":"BBVA Peru","service_origin_n1":"ENTERPRISE WEB"}]'
         ),
     )
 
@@ -154,7 +154,7 @@ def test_sources_excel_corrects_imported_helix_buug_for_peru() -> None:
     )
 
     assert imported.rows[0]["country"] == "Perú"
-    assert imported.rows[0]["service_origin_buug"] == "BBVA Perú"
+    assert imported.rows[0]["owner_support_company"] == "BBVA Perú"
 
 
 def test_country_rollups_allow_three_or_more_sources_and_validate_country() -> None:
@@ -394,7 +394,7 @@ def test_jira_inc_lookup_extracts_only_non_finalist_description_incidents() -> N
     }
 
 
-def test_helix_lookup_batches_are_configurable_and_arsql_filters_buug() -> None:
+def test_helix_lookup_batches_are_configurable_and_arsql_filters_owner_company() -> None:
     inc_ids = [f"INC{idx:012d}" for idx in range(100)]
     assert [len(batch) for batch in _chunked(inc_ids, size=25)] == [25, 25, 25, 25]
     assert _chunk_count(len(inc_ids), size=25) == 4
@@ -407,7 +407,7 @@ def test_helix_lookup_batches_are_configurable_and_arsql_filters_buug() -> None:
         source_service_n1=["ENTERPRISE WEB"],
         incident_types=["Incidencia"],
         incident_ids=["INC000104216018", "INC000104216019"],
-        companies=["BBVA Perú"],
+        owner_support_companies=["BBVA Perú"],
         environments=["Production"],
         time_fields=["Submit Date"],
         incident_ids_only=True,
@@ -416,7 +416,7 @@ def test_helix_lookup_batches_are_configurable_and_arsql_filters_buug() -> None:
     assert "INC000104216018" in sql
     assert "INC000104216019" in sql
     assert "BBVA Perú" in sql
-    assert "`HPD:Help Desk`.`BBVA_SourceServiceBUUG` IN ('BBVA Perú')" in sql
+    assert "`HPD:Help Desk`.`Owner Support Company` IN ('BBVA Perú')" in sql
 
 
 def test_shared_helix_item_mapping_preserves_lookup_metadata() -> None:
@@ -496,7 +496,7 @@ def test_finalist_lookup_ingest_persists_helix_internal_id_and_partial_progress(
 
     def _fake_helix(*_: Any, **kwargs: Any) -> tuple[bool, str, HelixDocument]:
         batch = list(kwargs.get("incident_ids") or [])
-        assert kwargs["service_origin_buug"] == "BBVA México"
+        assert kwargs["owner_support_company"] == "BBVA México"
         assert kwargs["allow_interactive_bootstrap"] is False
         assert kwargs["helix_lookup_kind"] == POST_JQL_LOOKUP_HELIX_KIND
         if batch == ["INC000104216019"]:
@@ -511,7 +511,7 @@ def test_finalist_lookup_ingest_persists_helix_internal_id_and_partial_progress(
             last_modified="2026-05-21T00:00:00+00:00",
             url="https://helix.example/smartit/app/#/incident/IDGAA5V0HK7ZIAQ0ABCDEF12345678",
             country="México",
-            service_origin_buug="BBVA México",
+            owner_support_company="BBVA México",
             source_id=kwargs["source_id"],
             source_alias=kwargs["source_alias"],
             matched_jira_keys=["MEX-1"],
@@ -675,7 +675,7 @@ def test_lookup_reuses_historical_finalist_helix_items_without_arsql(
                     id="INC000102885426",
                     status="Closed",
                     country="México",
-                    service_origin_buug="BBVA México",
+                    owner_support_company="BBVA México",
                     source_id="helix:mexico:mx-smartit",
                     source_alias="MX SmartIT",
                     lookup_at="2026-05-20T00:00:00+00:00",

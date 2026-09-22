@@ -14,7 +14,7 @@ from bug_resolution_radar.common.security import validate_navigation_url
 from bug_resolution_radar.config import (
     Settings,
     build_source_id,
-    helix_service_origin_buug_for_country,
+    helix_owner_support_company_for_country,
     helix_sources,
     jira_sources,
     supported_countries,
@@ -27,7 +27,7 @@ _EXPORT_COLUMNS: dict[str, list[str]] = {
         "source_id",
         "country",
         "alias",
-        "service_origin_buug",
+        "owner_support_company",
         "service_origin_n1",
         "service_origin_n2",
     ],
@@ -48,6 +48,7 @@ _TRANSVERSAL_KEYS_BY_SOURCE: dict[str, list[str]] = {
         "HELIX_BROWSER",
         "HELIX_SSL_VERIFY",
         "HELIX_DASHBOARD_URL",
+        "HELIX_ARSQL_DASHBOARD_URL",
         "HELIX_COOKIE_SOURCE",
     ],
 }
@@ -81,13 +82,9 @@ _HEADER_ALIASES: dict[str, dict[str, str]] = {
         "country": "country",
         "pais": "country",
         "alias": "alias",
-        "service_origin_buug": "service_origin_buug",
-        "serviceoriginbuug": "service_origin_buug",
-        "service_origin_bu_ug": "service_origin_buug",
-        "serviceoriginbuug_": "service_origin_buug",
-        "servicio_origen_bu_ug": "service_origin_buug",
-        "servicio_origen_buug": "service_origin_buug",
-        "servicioorigenbuug": "service_origin_buug",
+        "owner_support_company": "owner_support_company",
+        "ownersupportcompany": "owner_support_company",
+        "owner_support_company_": "owner_support_company",
         "service_origin_n1": "service_origin_n1",
         "serviceoriginn1": "service_origin_n1",
         "servicio_origen_n1": "service_origin_n1",
@@ -167,7 +164,7 @@ def _build_export_rows(settings: Settings, *, source_type: str) -> list[dict[str
             payload["dashboard_url"] = _as_text(row.get("dashboard_url"))
             payload["jql"] = _as_text(row.get("jql"))
         else:
-            payload["service_origin_buug"] = helix_service_origin_buug_for_country(
+            payload["owner_support_company"] = helix_owner_support_company_for_country(
                 _as_text(row.get("country"))
             )
             payload["service_origin_n1"] = _as_text(row.get("service_origin_n1"))
@@ -186,7 +183,7 @@ def _rows_frame_from_source_rows(
     for row in list(source_rows or []):
         payload = {column: _as_text(row.get(column)) for column in cols}
         if source_type == "helix":
-            payload["service_origin_buug"] = helix_service_origin_buug_for_country(
+            payload["owner_support_company"] = helix_owner_support_company_for_country(
                 payload.get("country", "")
             )
         out_rows.append(payload)
@@ -386,11 +383,11 @@ def _parse_source_rows_from_frame(
                 clean["dashboard_url"] = ""
             clean["jql"] = _as_text(row_data.get("jql", ""))
         else:
-            clean["service_origin_buug"] = helix_service_origin_buug_for_country(country)
-            for key in ("service_origin_buug", "service_origin_n1", "service_origin_n2"):
+            clean["owner_support_company"] = helix_owner_support_company_for_country(country)
+            for key in ("owner_support_company", "service_origin_n1", "service_origin_n2"):
                 val = _as_text(row_data.get(key, ""))
-                if key == "service_origin_buug":
-                    val = clean["service_origin_buug"]
+                if key == "owner_support_company":
+                    val = clean["owner_support_company"]
                 if val:
                     clean[key] = val
         rows.append(clean)

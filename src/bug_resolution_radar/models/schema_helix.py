@@ -32,9 +32,10 @@ class HelixWorkItem(BaseModel):
     closed_date: Optional[str] = None
     matrix_service_n1: str = ""
     source_service_n1: str = ""
+    source_service_n2: str = ""
     url: str = ""
     country: str = ""
-    service_origin_buug: str = ""
+    owner_support_company: str = ""
     source_alias: str = ""
     source_id: str = ""
     helix_lookup_kind: str = ""
