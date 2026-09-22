@@ -100,6 +100,9 @@ from bug_resolution_radar.analytics.trend_insights import (
 )
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.repositories.issues_store import load_issues_df
+from bug_resolution_radar.services.functionality_taxonomies import (
+    functionality_taxonomy_revision_token,
+)
 from bug_resolution_radar.services.insights_history import record_scope_measurement
 from bug_resolution_radar.services.issue_enrichment import (
     enrich_issue_dataframe_with_helix,
@@ -126,6 +129,13 @@ _INSIGHTS_TABS = (
     {"id": "people", "label": "Personas"},
     {"id": "opsHealth", "label": "Salud operativa"},
 )
+
+
+def invalidate_scope_context_cache() -> None:
+    with _scope_context_cache_lock:
+        _scope_context_cache.clear()
+
+
 _INSIGHTS_TAB_IDS = {str(tab["id"]) for tab in _INSIGHTS_TABS}
 
 
@@ -769,6 +779,7 @@ def _scope_context_cache_key(
                 "FUNCTIONALITY_TAXONOMY_PERU",
             )
         ),
+        functionality_taxonomy_revision_token(),
     )
 
 

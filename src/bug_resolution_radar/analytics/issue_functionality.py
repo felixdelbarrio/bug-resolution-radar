@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from functools import lru_cache
 from typing import Pattern, Sequence
 
 import pandas as pd
 
-from bug_resolution_radar.config import Settings, functionality_taxonomy_for_country
+from bug_resolution_radar.analytics.functionality_normalization import (
+    normalize_functionality_text,
+)
+from bug_resolution_radar.config import Settings
+from bug_resolution_radar.services.functionality_taxonomies import (
+    effective_functionality_taxonomy,
+)
 
 FUNCTIONALITY_COL = "functionality"
 HELIX_EXECUTIVE_DESCRIPTION_COL = "helix_executive_description"
@@ -19,13 +24,6 @@ _DEFAULT_COUNTRY = "México"
 
 FunctionalityTaxonomy = tuple[tuple[str, tuple[str, ...]], ...]
 CompiledFunctionalityTaxonomy = tuple[tuple[str, tuple[Pattern[str], ...]], ...]
-
-
-def normalize_functionality_text(value: object) -> str:
-    """Normalize configured keywords and issue text identically."""
-    text = unicodedata.normalize("NFKD", str(value or "").casefold())
-    text = "".join(char for char in text if not unicodedata.combining(char))
-    return " ".join(text.split())
 
 
 @lru_cache(maxsize=32)
@@ -81,7 +79,7 @@ def functionality_order(
     country: object,
     include_other: bool = False,
 ) -> tuple[str, ...]:
-    labels = tuple(label for label, _ in functionality_taxonomy_for_country(settings, country))
+    labels = tuple(label for label, _ in effective_functionality_taxonomy(settings, country))
     return labels + ((_FALLBACK_FUNCTIONALITY,) if include_other else ())
 
 
@@ -95,7 +93,7 @@ def classify_issue_functionality(
     frame = pd.DataFrame([issue])
     text = build_issue_classification_text(frame).iloc[0]
     issue_country = country or issue.get("country", "") or _DEFAULT_COUNTRY
-    taxonomy = functionality_taxonomy_for_country(settings or Settings(), issue_country)
+    taxonomy = effective_functionality_taxonomy(settings or Settings(), issue_country)
     return classify_functionality_text(text, taxonomy=taxonomy)
 
 
@@ -143,7 +141,7 @@ def ensure_issue_functionality_columns(
         country_key = str(raw_country or _DEFAULT_COUNTRY).strip() or _DEFAULT_COUNTRY
         taxonomy = taxonomy_by_country.get(country_key)
         if taxonomy is None:
-            taxonomy = functionality_taxonomy_for_country(active_settings, country_key)
+            taxonomy = effective_functionality_taxonomy(active_settings, country_key)
             taxonomy_by_country[country_key] = taxonomy
         classified.append(classify_functionality_text(text, taxonomy=taxonomy))
 

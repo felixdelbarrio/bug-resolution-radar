@@ -3577,6 +3577,128 @@ textarea::placeholder {
   gap: 0.75rem;
 }
 
+.taxonomy-admin-head,
+.taxonomy-category-heading,
+.taxonomy-category-actions,
+.taxonomy-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.taxonomy-source-badge,
+.taxonomy-keyword-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--bbva-border);
+  border-radius: var(--bbva-radius-component);
+  background: var(--bbva-surface-2);
+  color: var(--bbva-text);
+  font-weight: 700;
+}
+
+.taxonomy-source-badge {
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+
+.taxonomy-country-field {
+  max-width: 24rem;
+  margin-top: 1rem;
+}
+
+.taxonomy-priority-panel,
+.taxonomy-category-list,
+.taxonomy-category-card {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.taxonomy-category-card {
+  padding: 1rem;
+}
+
+.taxonomy-category-heading > strong {
+  display: grid;
+  flex: 0 0 2rem;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--bbva-primary);
+  color: var(--bbva-on-primary);
+}
+
+.taxonomy-label-field {
+  flex: 1;
+}
+
+.taxonomy-keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.taxonomy-keyword-chip {
+  padding: 0.3rem 0.35rem 0.3rem 0.65rem;
+}
+
+.taxonomy-keyword-chip button {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--bbva-text-muted);
+  cursor: pointer;
+}
+
+.taxonomy-keyword-chip button:hover {
+  background: var(--bbva-surface);
+  color: var(--bbva-danger);
+}
+
+.taxonomy-keyword-input {
+  max-width: 28rem;
+}
+
+.taxonomy-category-actions {
+  justify-content: flex-start;
+}
+
+.taxonomy-category-actions .secondary-button {
+  min-width: 2.5rem;
+}
+
+.taxonomy-delete-button {
+  margin-left: auto;
+  color: var(--bbva-danger);
+}
+
+.taxonomy-add-button {
+  justify-self: center;
+}
+
+.taxonomy-other-card {
+  border-style: dashed;
+}
+
+@media (max-width: 700px) {
+  .taxonomy-admin-head,
+  .taxonomy-footer-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .taxonomy-source-badge {
+    align-self: flex-start;
+  }
+}
+
 .source-table-grid {
   display: grid;
   gap: 0.6rem;

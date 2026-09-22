@@ -30,7 +30,6 @@ from bug_resolution_radar.analytics.status_semantics import (
 from bug_resolution_radar.config import (
     DEFAULT_HELIX_INCIDENT_DASHBOARD_URL,
     Settings,
-    functionality_taxonomy_for_country,
     helix_sources,
     jira_root_cause_labels_by_country,
     jira_sources,
@@ -48,6 +47,9 @@ from bug_resolution_radar.services.dashboard_snapshot import (
     build_issue_rows,
     build_trend_detail,
     load_scope_context,
+)
+from bug_resolution_radar.services.functionality_taxonomies import (
+    effective_functionality_taxonomy,
 )
 from bug_resolution_radar.services.workspace import WorkspaceSelection
 
@@ -230,7 +232,7 @@ def _semantic_trace(settings: Settings) -> dict[str, Any]:
         "functionalityRulesByCountry": {
             country: [
                 {"label": label, "tokens": list(tokens)}
-                for label, tokens in functionality_taxonomy_for_country(settings, country)
+                for label, tokens in effective_functionality_taxonomy(settings, country)
             ]
             for country in supported_countries(settings)
         },
