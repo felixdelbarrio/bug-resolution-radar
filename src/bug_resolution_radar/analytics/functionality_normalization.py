@@ -7,5 +7,7 @@ import unicodedata
 
 def normalize_functionality_text(value: object) -> str:
     text = unicodedata.normalize("NFKD", str(value or "").casefold())
-    text = "".join(char for char in text if not unicodedata.combining(char))
+    if not text.isascii():
+        marks = {ord(char): None for char in set(text) if unicodedata.combining(char)}
+        text = text.translate(marks)
     return " ".join(text.split())

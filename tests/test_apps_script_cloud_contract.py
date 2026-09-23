@@ -867,3 +867,134 @@ def test_plotly_is_loaded_on_demand_and_navigation_discards_stale_responses() ->
     assert "navigationEpoch" in app
     assert "expectedEpoch !== state.navigationEpoch" in app
     assert "showRouteLoading" in _function_body(app, "openPanel")
+
+
+def test_dashboard_cache_coalesces_requests_and_ignores_other_panel_options() -> None:
+    app = _source("App.html")
+    script = _source("99_Core.gs") + _source("25_MaterializedSnapshots.gs")
+    for name, args in [("requestKey", "request"), ("fetchDashboard", "request")]:
+        prefix = "async " if name == "fetchDashboard" else ""
+        script += f"\n{prefix}function {name}({args}) {{" + _function_body(app, name) + "}\n"
+    script += r"""
+const assert = require('node:assert/strict');
+const RADAR = { defaultPageSize: 50 };
+const state = {
+  bootstrap: { app: { contractVersion: '8', cacheEpoch: 'e', dataVersion: 'v' },
+    scopes: [{ scopeKey: 'es::*', snapshotId: 's', dataVersion: 'v' }] },
+  memory: new Map(), inFlight: new Map()
+};
+const base = { scopeKey: 'es::*', view: 'overview', chartId: 'a', insightsId: 'b',
+  page: 1, pageSize: 50, sortId: 'default' };
+const other = { ...base, chartId: 'c', insightsId: 'd', page: 3 };
+assert.equal(requestKey(base), requestKey(other));
+assert.deepEqual(_normalizeMaterializedRequest_(base), _normalizeMaterializedRequest_(other));
+for (const [view, field, value] of [['trends', 'chartId', 'z'], ['insights', 'insightsId', 'z'], ['issues', 'page', 2]]) {
+  assert.notEqual(requestKey({ ...base, view }), requestKey({ ...base, view, [field]: value }));
+}
+assert.notEqual(requestKey(base), requestKey({ ...base, scopeKey: 'mx::*' }));
+const originalKey = requestKey(base);
+state.bootstrap.scopes[0].snapshotId = 'new';
+assert.notEqual(originalKey, requestKey(base));
+let reads = 0, calls = 0, fail = false;
+const writes = [];
+const PersistentCache = {
+  read: async () => { reads++; await new Promise(r => setImmediate(r)); return null; },
+  write: async (key, value) => { writes.push([key, value]); }
+};
+const RPC = { call: async () => { calls++; if (fail) throw Error('offline'); return { total: 3 }; } };
+const isShared = () => false;
+const deadline = promise => promise;
+(async () => {
+  const results = await Promise.all([fetchDashboard(base), fetchDashboard(other)]);
+  assert.deepEqual(results, [{ total: 3 }, { total: 3 }]);
+  assert.equal(reads, 1); assert.equal(calls, 1); assert.equal(writes.length, 1);
+  assert.equal(state.inFlight.size, 0);
+  await fetchDashboard(base); assert.equal(calls, 1);
+  state.memory.clear(); fail = true;
+  await assert.rejects(fetchDashboard(base), /offline/);
+  assert.equal(state.inFlight.size, 0);
+  fail = false; await fetchDashboard(base); assert.equal(calls, 3);
+  state.memory.clear();
+  PersistentCache.read = async () => { throw Error('IndexedDB unavailable'); };
+  await fetchDashboard(base); assert.equal(calls, 4);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_transfer_staging_does_not_hold_lock_and_cleans_up_on_failure() -> None:
+    script = (
+        _source("10_Main.gs")
+        + r"""
+const assert = require('node:assert/strict');
+const RADAR = { sheets: { importRuns: 'runs' } };
+let locked = false, failLock = false, failAudit = false, discarded = 0;
+let tokenStored = false, audited = false;
+const meta = { runId: 'run', expiresAt: Date.now() + 100000 };
+function _rpc_(fn) { return fn(); }
+function _requireAdmin_() { return { email: 'admin' }; }
+function _configuredReportDriveFolder_() {}
+function _cleanupExpiredTransfers_() {}
+function _decodeTransferPackage_() { return { fileName: 'sample.brr' }; }
+function _transferPreview_() { return { valid: true }; }
+function _uuid_() { return 'token'; }
+function _nowIso_() { return new Date().toISOString(); }
+function _safeJsonStringify_(value) { return JSON.stringify(value); }
+function _stageDecodedTransfer_() { assert.equal(locked, false); return meta; }
+function _withApplicationLock_(fn) {
+  if (failLock) throw Object.assign(Error('busy'), { code: 'LOCK_TIMEOUT' });
+  locked = true; try { return fn(); } finally { locked = false; }
+}
+const PropertiesService = { getScriptProperties: () => ({ setProperty: () => {
+  assert.equal(locked, true); tokenStored = true;
+} }) };
+function _appendRecords_() {
+  assert.equal(locked, true);
+  if (failAudit) throw Error('Sheets unavailable');
+  audited = true;
+}
+function _discardTransfer_(token, value) {
+  assert.equal(token, 'token'); assert.equal(value, meta); discarded++; tokenStored = false;
+}
+assert.equal(validateTransferImport({}).token, 'token');
+assert.equal(audited, true); assert.equal(tokenStored, true); assert.equal(discarded, 0);
+failLock = true;
+assert.throws(() => validateTransferImport({}), { code: 'LOCK_TIMEOUT' });
+assert.equal(discarded, 1);
+failLock = false; failAudit = true;
+assert.throws(() => validateTransferImport({}), { code: 'TRANSFER_STAGING_FAILED' });
+assert.equal(discarded, 2); assert.equal(tokenStored, false);
+"""
+    )
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_idle_version_registration_skips_known_version_and_retries_failures() -> None:
+    script = (
+        "function runIdleMaintenance() {"
+        + _function_body(_source("App.html"), "runIdleMaintenance")
+        + r"""}
+const assert = require('node:assert/strict');
+let admin = true, shared = false, calls = 0, fail = false;
+const state = { bootstrap: { administration: { appVersionRegistered: true } } };
+const isAdmin = () => admin;
+const isShared = () => shared;
+const RPC = { call: async () => { calls++; if (fail) throw Error('offline'); } };
+const tick = () => new Promise(resolve => setImmediate(resolve));
+(async () => {
+  runIdleMaintenance(); await tick(); assert.equal(calls, 0);
+  state.bootstrap.administration.appVersionRegistered = false;
+  fail = true; runIdleMaintenance(); await tick();
+  assert.equal(state.bootstrap.administration.appVersionRegistered, false);
+  fail = false; runIdleMaintenance(); await tick(); assert.equal(calls, 2);
+  runIdleMaintenance(); await tick(); assert.equal(calls, 2);
+  state.bootstrap.administration.appVersionRegistered = false;
+  admin = false; runIdleMaintenance(); shared = true; admin = true;
+  runIdleMaintenance(); await tick(); assert.equal(calls, 2);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    )
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr

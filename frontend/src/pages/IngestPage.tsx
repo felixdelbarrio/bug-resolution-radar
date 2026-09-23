@@ -34,7 +34,8 @@ const INGEST_TABS: IngestTab[] = [
 
 function activeProgressPolling(query: { state: { data: unknown } }) {
   const progress = query.state.data as IngestProgressPayload | undefined;
-  return progress?.active ? 1500 : false;
+  if (!progress?.active) return false;
+  return (progress.elapsedSeconds ?? 0) < 30 ? 1500 : 5000;
 }
 
 function ingestTabLabel(tab: IngestTab): string {

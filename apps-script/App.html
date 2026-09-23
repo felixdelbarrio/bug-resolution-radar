@@ -264,9 +264,9 @@ const App = (() => {
       scopeVersion: scope.dataVersion || state.bootstrap.app.dataVersion,
       snapshotId: scope.snapshotId || '',
       view: request.view,
-      chartId: request.chartId,
-      insightsId: request.insightsId,
-      page: request.page,
+      chartId: request.view === 'trends' ? request.chartId : '',
+      insightsId: request.view === 'insights' ? request.insightsId : '',
+      page: request.view === 'issues' ? request.page : 1,
       pageSize: request.pageSize,
       sortId: request.sortId
     });
@@ -1397,22 +1397,26 @@ const App = (() => {
     const key = requestKey(request);
     if (state.memory.has(key)) return state.memory.get(key);
     if (state.inFlight.has(key)) return state.inFlight.get(key);
-    const persistent = await PersistentCache.read(cacheKey(request));
-    if (persistent) {
-      state.memory.set(key, persistent);
-      return persistent;
-    }
-    const remote = deadline(
-      isShared()
-        ? RPC.call('querySharedDashboard', state.sharedToken, request)
-        : RPC.call('queryDashboard', request),
-      30000,
-      'El snapshot no respondió en 30 segundos.'
-    ).then(payload => {
+    const persistentKey = `dashboard:${key}`;
+    // Reserve the request before awaiting IndexedDB, which can yield to another
+    // navigation. Both the durable lookup and RPC belong to the same promise.
+    const remote = (async () => {
+      const persistent = await PersistentCache.read(persistentKey).catch(() => null);
+      if (persistent) {
+        state.memory.set(key, persistent);
+        return persistent;
+      }
+      const payload = await deadline(
+        isShared()
+          ? RPC.call('querySharedDashboard', state.sharedToken, request)
+          : RPC.call('queryDashboard', request),
+        30000,
+        'El snapshot no respondió en 30 segundos.'
+      );
       state.memory.set(key, payload);
-      PersistentCache.write(cacheKey(request), payload).catch(() => {});
+      PersistentCache.write(persistentKey, payload).catch(() => {});
       return payload;
-    }).finally(() => state.inFlight.delete(key));
+    })().finally(() => state.inFlight.delete(key));
     state.inFlight.set(key, remote);
     return remote;
   }
@@ -1449,8 +1453,11 @@ const App = (() => {
   }
 
   function runIdleMaintenance() {
-    if (isAdmin() && !isShared()) {
-      RPC.call('registerAppVersion').catch(() => {});
+    if (isAdmin() && !isShared() &&
+        !(state.bootstrap.administration || {}).appVersionRegistered) {
+      RPC.call('registerAppVersion').then(() => {
+        state.bootstrap.administration.appVersionRegistered = true;
+      }).catch(() => {});
     }
   }
 

@@ -126,7 +126,8 @@ function getBootstrap() {
       sources: manifest.sources,
       administration: user.role === 'admin' ? {
         reportDriveFolder: reportDriveFolder,
-        importReady: Boolean(reportDriveFolder)
+        importReady: Boolean(reportDriveFolder),
+        appVersionRegistered: _text_(_getConfigMap_().APP_VERSION) === RADAR.appVersion
       } : null,
       initialState: initialState,
       dashboard: dashboard
@@ -346,11 +347,13 @@ function validateTransferImport(form) {
     _cleanupExpiredTransfers_();
     const decoded = _decodeTransferPackage_(form && form.transferFile);
     const preview = _transferPreview_(decoded);
-    return _withApplicationLock_(function () {
-      const token = _uuid_();
-      let meta = null;
-      try {
-        meta = _stageDecodedTransfer_(decoded, token, user);
+    const token = _uuid_();
+    let meta = null;
+    try {
+      // Unique staging files need no application lock. Only publish their token
+      // and audit row under the lock, after both Drive uploads have succeeded.
+      meta = _stageDecodedTransfer_(decoded, token, user);
+      return _withApplicationLock_(function () {
         PropertiesService.getScriptProperties().setProperty(
           'transfer:' + token,
           _safeJsonStringify_(meta)
@@ -376,13 +379,13 @@ function validateTransferImport(form) {
           checkedAt: _nowIso_(),
           expiresAt: new Date(meta.expiresAt).toISOString()
         });
-      } catch (err) {
-        if (meta) _discardTransfer_(token, meta);
-        if (err && err.code) throw err;
-        throw Object.assign(new Error('No se pudo conservar temporalmente el traslado.'),
-          { code: 'TRANSFER_STAGING_FAILED' });
-      }
-    });
+      });
+    } catch (err) {
+      if (meta) _discardTransfer_(token, meta);
+      if (err && err.code) throw err;
+      throw Object.assign(new Error('No se pudo conservar temporalmente el traslado.'),
+        { code: 'TRANSFER_STAGING_FAILED' });
+    }
   });
 }
 
