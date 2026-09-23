@@ -414,7 +414,6 @@ def _workspace_payload(
             df_all = load_issues_df(settings.DATA_PATH)
         except Exception:
             df_all = pd.DataFrame()
-        df_all = enrich_issue_dataframe_with_helix(df_all, settings=settings)
         if isinstance(df_all, pd.DataFrame) and not df_all.empty:
             has_data = True
             sources_by_country = merge_sources_by_country(
@@ -460,6 +459,8 @@ def _workspace_payload(
             apply_workspace_source_scope(df_all, settings=settings, selection=workspace),
             settings=settings,
         )
+    if include_filter_options:
+        scoped_df = enrich_issue_dataframe_with_helix(scoped_df, settings=settings)
     active_source_ids = (
         [selected_source_id]
         if workspace.scope_mode == "source" and selected_source_id

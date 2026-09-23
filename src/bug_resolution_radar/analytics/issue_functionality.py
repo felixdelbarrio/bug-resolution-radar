@@ -23,19 +23,22 @@ _FALLBACK_FUNCTIONALITY = "Otros"
 _DEFAULT_COUNTRY = "México"
 
 FunctionalityTaxonomy = tuple[tuple[str, tuple[str, ...]], ...]
-CompiledFunctionalityTaxonomy = tuple[tuple[str, tuple[Pattern[str], ...]], ...]
+CompiledFunctionalityTaxonomy = tuple[tuple[str, Pattern[str]], ...]
 
 
 @lru_cache(maxsize=32)
 def _compile_taxonomy(taxonomy: FunctionalityTaxonomy) -> CompiledFunctionalityTaxonomy:
-    compiled: list[tuple[str, tuple[Pattern[str], ...]]] = []
-    for label, keywords in taxonomy:
-        patterns = tuple(
-            re.compile(rf"(?<!\w){re.escape(normalize_functionality_text(keyword))}(?!\w)")
-            for keyword in keywords
+    return tuple(
+        (
+            label,
+            re.compile(
+                r"(?<!\w)(?:"
+                + "|".join(re.escape(normalize_functionality_text(keyword)) for keyword in keywords)
+                + r")(?!\w)"
+            ),
         )
-        compiled.append((label, patterns))
-    return tuple(compiled)
+        for label, keywords in taxonomy
+    )
 
 
 def classify_functionality_text(
@@ -48,8 +51,8 @@ def classify_functionality_text(
     normalized = normalize_functionality_text(text)
     if not normalized:
         return default
-    for label, patterns in _compile_taxonomy(taxonomy):
-        if any(pattern.search(normalized) for pattern in patterns):
+    for label, pattern in _compile_taxonomy(taxonomy):
+        if pattern.search(normalized):
             return label
     return default
 
