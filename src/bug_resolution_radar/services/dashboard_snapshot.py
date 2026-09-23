@@ -696,8 +696,9 @@ class DashboardScopeContext:
 
 
 def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd.DataFrame:
-    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
-    scoped_df = apply_workspace_source_scope(df, settings=settings, selection=query.workspace)
+    scoped_df = apply_workspace_source_scope(
+        load_issues_df(settings.DATA_PATH), settings=settings, selection=query.workspace
+    )
     explicit_source_ids = tuple(
         sorted(
             {
@@ -711,27 +712,29 @@ def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd
         scoped_df = scoped_df.loc[
             scoped_df["source_id"].fillna("").astype(str).isin(explicit_source_ids)
         ].copy(deep=False)
-    return apply_analysis_depth_filter(scoped_df, settings=settings)
+    scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
+    return enrich_issue_dataframe_with_helix(scoped_df, settings=settings)
 
 
 def load_country_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
-    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
+    df = load_issues_df(settings.DATA_PATH)
     if df.empty:
         return df
     country_txt = str(country or "").strip()
     if country_txt and "country" in df.columns:
         df = df.loc[df["country"].fillna("").astype(str).eq(country_txt)].copy(deep=False)
-    return apply_analysis_depth_filter(df, settings=settings)
+    df = apply_analysis_depth_filter(df, settings=settings)
+    return enrich_issue_dataframe_with_helix(df, settings=settings)
 
 
 def load_country_history_dataframe(settings: Settings, *, country: str) -> pd.DataFrame:
-    df = enrich_issue_dataframe_with_helix(load_issues_df(settings.DATA_PATH), settings=settings)
+    df = load_issues_df(settings.DATA_PATH)
     if df.empty:
         return df
     country_txt = str(country or "").strip()
     if country_txt and "country" in df.columns:
-        return df.loc[df["country"].fillna("").astype(str).eq(country_txt)].copy(deep=False)
-    return df.copy(deep=False)
+        df = df.loc[df["country"].fillna("").astype(str).eq(country_txt)].copy(deep=False)
+    return enrich_issue_dataframe_with_helix(df, settings=settings)
 
 
 def _data_revision_key(settings: Settings) -> tuple[str, int, int]:

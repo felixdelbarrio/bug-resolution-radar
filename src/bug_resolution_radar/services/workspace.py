@@ -48,7 +48,17 @@ def inferred_sources_by_country(
 
     grouped: Dict[str, List[Dict[str, str]]] = {}
     seen: set[tuple[str, str]] = set()
-    for row in df_all.to_dict(orient="records"):
+    # Source metadata is tiny; never materialize issue descriptions or normalize
+    # the same country once for every incident.
+    columns = [
+        column
+        for column in ("country", "source_id", "source_alias", "alias", "source_type")
+        if column in df_all.columns
+    ]
+    sources = df_all.loc[:, columns].drop_duplicates(
+        subset=["country", "source_id"] if "country" in columns else ["source_id"]
+    )
+    for row in sources.to_dict(orient="records"):
         source_id = str(row.get("source_id") or "").strip()
         country = _canonical_country(row.get("country"), settings=settings)
         if not source_id or not country:
@@ -232,12 +242,11 @@ def apply_workspace_source_scope(
     mask = pd.Series(True, index=df.index)
     country_values: pd.Series | None = None
     if selected_country and "country" in df.columns:
-        country_values = (
-            df["country"]
-            .fillna("")
-            .astype(str)
-            .map(lambda value: _canonical_country(value, settings=settings))
-        )
+        raw_countries = df["country"].fillna("").astype(str)
+        country_lookup = {
+            value: _canonical_country(value, settings=settings) for value in raw_countries.unique()
+        }
+        country_values = raw_countries.map(country_lookup)
         mask &= country_values.eq(selected_country)
     if "source_id" in df.columns:
         source_values = df["source_id"].fillna("").astype(str)

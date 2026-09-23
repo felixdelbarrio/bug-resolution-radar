@@ -100,3 +100,43 @@ def test_trend_reuses_classification_and_preserves_configured_order() -> None:
     )
 
     assert trend["tema"].drop_duplicates().tolist() == ["Transferencias", "Pagos", "Otros"]
+
+
+@pytest.mark.parametrize(
+    "text", ["NÓMINA\t  remesa", "abc\u1ab0 def", "a\u05b0", "中文 Ω", "STRASSE ß", "ASCII  text"]
+)
+def test_fast_normalization_preserves_unicode_semantics(text: str) -> None:
+    import unicodedata
+
+    from bug_resolution_radar.analytics.functionality_normalization import (
+        normalize_functionality_text,
+    )
+
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    expected = " ".join(
+        "".join(char for char in decomposed if not unicodedata.combining(char)).split()
+    )
+    assert normalize_functionality_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("segundo después primero", "Prioridad"),
+        ("preprimero posterior", "Otros"),
+        ("pago (a+b)", "Literal"),
+        ("pago aaab", "Otros"),
+        ("REMESA\n urgente", "Prioridad"),
+    ],
+)
+def test_compiled_category_preserves_priority_boundaries_and_literal_keywords(
+    text: str, expected: str
+) -> None:
+    from bug_resolution_radar.analytics.issue_functionality import classify_functionality_text
+
+    taxonomy = (
+        ("Prioridad", ("primero", "remesa urgente")),
+        ("Posterior", ("segundo",)),
+        ("Literal", ("a+b",)),
+    )
+    assert classify_functionality_text(text, taxonomy=taxonomy) == expected
