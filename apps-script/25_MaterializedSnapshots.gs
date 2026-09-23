@@ -395,9 +395,9 @@ function _normalizeMaterializedRequest_(request, fixedScopeKey) {
   return {
     scopeKey: scopeKey,
     view: view,
-    chartId: _text_(input.chartId),
-    insightsId: _text_(input.insightsId),
-    page: page,
+    chartId: view === 'trends' ? _text_(input.chartId) : '',
+    insightsId: view === 'insights' ? _text_(input.insightsId) : '',
+    page: view === 'issues' ? page : 1,
     pageSize: pageSize,
     sortId: sortId
   };
