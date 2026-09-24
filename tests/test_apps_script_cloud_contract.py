@@ -697,11 +697,11 @@ def test_domain_access_and_configuration_are_separated_by_role() -> None:
 
     assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_DEPLOYING"}
     require_user = _function_body(main, "_requireUser_")
-    assert "email.endsWith('@' + RADAR.allowedDomain)" in require_user
+    assert "email.endsWith('@' + RADAR.allowedDomain)" in _function_body(main, "_domainViewer_")
     assert "? 'admin' : 'viewer'" in require_user
     assert "_upsertRecord_" not in require_user
     assert "user && user.active === true" in require_user
-    assert "email.split('@')[0]" in require_user
+    assert "email.split('@')[0]" in _function_body(main, "_domainViewer_")
     assert "user.role === 'admin'" in _function_body(main, "_requireAdmin_")
     assert index.count("scope-admin-control") == 2
     assert '<div class="workspace-country-field hidden">' in index
@@ -872,7 +872,7 @@ def test_plotly_is_loaded_on_demand_and_navigation_discards_stale_responses() ->
 def test_dashboard_cache_coalesces_requests_and_ignores_other_panel_options() -> None:
     app = _source("App.html")
     script = _source("99_Core.gs") + _source("25_MaterializedSnapshots.gs")
-    for name, args in [("requestKey", "request"), ("fetchDashboard", "request")]:
+    for name, args in [("requestKey", "request"), ("cacheKey", "request"), ("fetchDashboard", "request")]:
         prefix = "async " if name == "fetchDashboard" else ""
         script += f"\n{prefix}function {name}({args}) {{" + _function_body(app, name) + "}\n"
     script += r"""

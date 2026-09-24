@@ -1,21 +1,36 @@
 /** Application orchestration, authorization and atomic transfer publication. */
 function _activeEmail_() {
-  return _canonicalEmail_(Session.getActiveUser().getEmail());
+  try {
+    return _canonicalEmail_(Session.getActiveUser().getEmail());
+  } catch (error) {
+    console.warn('radar_identity_unavailable');
+    return '';
+  }
+}
+
+function _domainViewer_() {
+  const email = _activeEmail_();
+  // DOMAIN deployment authenticates membership even when Google withholds email.
+  _assert_(!email || email.endsWith('@' + RADAR.allowedDomain),
+    'La cuenta no pertenece al dominio autorizado.', 'FORBIDDEN');
+  return { email: email, role: 'viewer', displayName: email.split('@')[0] || 'Lector' };
 }
 
 function _requireUser_() {
-  const email = _activeEmail_();
-  _assert_(email, 'Debes abrir la aplicación con tu cuenta corporativa.', 'AUTH_REQUIRED');
-  _assert_(email.endsWith('@' + RADAR.allowedDomain),
-    'La cuenta no pertenece al dominio autorizado.', 'FORBIDDEN');
-  const user = _readRecords_(RADAR.sheets.users).find(function (row) {
-    return _canonicalEmail_(row.email) === email;
-  });
-  return {
-    email: email,
-    role: user && user.active === true && _text_(user.role) === 'admin' ? 'admin' : 'viewer',
-    displayName: _text_(user && user.display_name) || email.split('@')[0]
-  };
+  const viewer = _domainViewer_();
+  if (!viewer.email) return viewer;
+  try {
+    const user = _readRecords_(RADAR.sheets.users).find(function (row) {
+      return _canonicalEmail_(row.email) === viewer.email;
+    });
+    return Object.assign({}, viewer, {
+      role: user && user.active === true && _text_(user.role) === 'admin' ? 'admin' : 'viewer',
+      displayName: _text_(user && user.display_name) || viewer.displayName
+    });
+  } catch (error) {
+    console.warn('radar_roles_unavailable');
+    return viewer;
+  }
 }
 
 function _requireAdmin_() {
@@ -92,20 +107,48 @@ function _requireScopeAccess_(user, scopeKey) {
 function getBootstrap() {
   return _rpc_(function () {
     const user = _requireUser_();
-    const manifest = _workspaceManifestForUser_(user);
-    const reportDriveFolder = user.role === 'admin' ? _reportDriveFolderSetting_() : null;
+    let manifest = { scopes: [], countries: [], sources: [], scopeVersions: {} };
+    let dataError = null;
+    let dataVersion = '';
+    let administration = null;
+    try {
+      manifest = _workspaceManifestForUser_(user);
+      dataVersion = _dataVersion_();
+    } catch (error) {
+      console.error('radar_manifest_unavailable', error);
+      dataError = _publicError_(error).error;
+    }
+    if (user.role === 'admin') {
+      try {
+        const folder = _reportDriveFolderSetting_();
+        administration = {
+          reportDriveFolder: folder,
+          importReady: Boolean(folder),
+          appVersionRegistered: _text_(_getConfigMap_().APP_VERSION) === RADAR.appVersion
+        };
+      } catch (error) {
+        console.warn('radar_administration_unavailable');
+        user.role = 'viewer';
+        manifest = _viewerWorkspaceManifest_(manifest);
+      }
+    }
     const initialState = _initialDashboardState_(manifest);
     let dashboard = null;
     if (initialState.scopeKey) {
-      dashboard = _dashboardPayload_({
-        scopeKey: initialState.scopeKey,
-        view: initialState.panel,
-        chartId: initialState.trendChart,
-        insightsId: initialState.insightsId,
-        page: 1,
-        pageSize: RADAR.defaultPageSize,
-        sortId: 'default'
-      });
+      try {
+        dashboard = _dashboardPayload_({
+          scopeKey: initialState.scopeKey,
+          view: initialState.panel,
+          chartId: initialState.trendChart,
+          insightsId: initialState.insightsId,
+          page: 1,
+          pageSize: RADAR.defaultPageSize,
+          sortId: 'default'
+        });
+      } catch (error) {
+        console.error('radar_initial_snapshot_unavailable', error);
+        dataError = _publicError_(error).error;
+      }
     }
     return {
       app: {
@@ -113,7 +156,7 @@ function getBootstrap() {
         version: RADAR.appVersion,
         contractVersion: RADAR.contractVersion,
         semanticContract: RADAR.semanticContract,
-        dataVersion: _dataVersion_(),
+        dataVersion: dataVersion,
         cacheEpoch: _cacheEpoch_(),
         maxTransferBytes: RADAR.maxTransferBytes,
         scopeVersions: manifest.scopeVersions,
@@ -124,11 +167,8 @@ function getBootstrap() {
       scopes: manifest.scopes,
       countries: manifest.countries,
       sources: manifest.sources,
-      administration: user.role === 'admin' ? {
-        reportDriveFolder: reportDriveFolder,
-        importReady: Boolean(reportDriveFolder),
-        appVersionRegistered: _text_(_getConfigMap_().APP_VERSION) === RADAR.appVersion
-      } : null,
+      administration: administration,
+      dataError: dataError,
       initialState: initialState,
       dashboard: dashboard
     };

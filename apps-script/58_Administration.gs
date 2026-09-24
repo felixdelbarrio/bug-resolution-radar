@@ -138,7 +138,7 @@ function getAdminConsole(scopeKey) {
 
 function recordAnalyticsEvents(events) {
   return _rpc_(function () {
-    const user = _requireUser_();
+    const user = _domainViewer_();
     const batch = Array.isArray(events) ? events.slice(0, 20) : [];
     if (!batch.length) return { accepted: 0 };
     const rows = batch.map(function (event) {

@@ -1,15 +1,6 @@
 /** Domain-authenticated bearer links pinned to one immutable snapshot. */
 function _requireDomainViewer_() {
-  const email = _activeEmail_();
-  _assert_(email, 'Debes abrir el enlace con tu cuenta corporativa.', 'AUTH_REQUIRED');
-  _assert_(email.endsWith('@' + RADAR.allowedDomain),
-    'La cuenta no pertenece al dominio autorizado.', 'FORBIDDEN');
-  return {
-    email: email,
-    role: 'shared',
-    displayName: email.split('@')[0],
-    shared: true
-  };
+  return Object.assign({}, _domainViewer_(), { role: 'shared', shared: true });
 }
 
 function _applicationBaseUrl_() {
