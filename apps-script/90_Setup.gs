@@ -143,7 +143,7 @@ function _migrateSheetHeaders_(sheetName, sheet) {
 /** Idempotent setup and compatible contract migration. Run manually as spreadsheet owner. */
 function setupApplication() {
   _resetRuntimeMemo_();
-  const email = _activeEmail_() || RADAR.initialAdmin;
+  const email = _activeEmail_();
   _assert_(email === RADAR.initialAdmin, 'La inicialización debe ejecutarla el administrador inicial.', 'FORBIDDEN');
   return _withApplicationLock_(function () {
     const ss = _spreadsheet_();
