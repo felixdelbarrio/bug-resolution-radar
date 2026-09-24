@@ -1611,7 +1611,7 @@ const App = (() => {
         if (button.dataset.route === 'reports' && !isAdmin() && !isShared()) {
           const scope = currentScope();
           const slidesUrl = String(scope && scope.slidesUrl || '').trim();
-          if (!/^https:\/\//i.test(slidesUrl)) {
+          if (!/^https:[/][/]/i.test(slidesUrl)) {
             UI.message('Este snapshot no tiene una presentación publicada disponible.', 'warning');
             return;
           }

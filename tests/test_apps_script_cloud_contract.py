@@ -872,7 +872,11 @@ def test_plotly_is_loaded_on_demand_and_navigation_discards_stale_responses() ->
 def test_dashboard_cache_coalesces_requests_and_ignores_other_panel_options() -> None:
     app = _source("App.html")
     script = _source("99_Core.gs") + _source("25_MaterializedSnapshots.gs")
-    for name, args in [("requestKey", "request"), ("cacheKey", "request"), ("fetchDashboard", "request")]:
+    for name, args in [
+        ("requestKey", "request"),
+        ("cacheKey", "request"),
+        ("fetchDashboard", "request"),
+    ]:
         prefix = "async " if name == "fetchDashboard" else ""
         script += f"\n{prefix}function {name}({args}) {{" + _function_body(app, name) + "}\n"
     script += r"""

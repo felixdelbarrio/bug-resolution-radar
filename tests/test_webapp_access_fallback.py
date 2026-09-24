@@ -1,21 +1,24 @@
 """Executable regressions for the Apps Script WebApp permission boundary."""
+
 import subprocess
 from pathlib import Path
 
 from test_apps_script_cloud_contract import _function_body
 
 ROOT = Path(__file__).resolve().parents[1]
-APPS = ROOT / 'apps-script'
+APPS = ROOT / "apps-script"
 
 
 def run_node(script: str) -> None:
-    result = subprocess.run(['node', '-'], input=script, text=True, capture_output=True)
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
 
 
 def test_identity_fallback_never_grants_administration_and_rejects_outside_domain():
-    sources = '\n'.join(p.read_text() for p in sorted(APPS.glob('*.gs')))
-    run_node(sources + r"""
+    sources = "\n".join(p.read_text() for p in sorted(APPS.glob("*.gs")))
+    run_node(
+        sources
+        + r"""
 const assert = require('node:assert/strict');
 let email = '', identityFails = false, rolesFail = false, reads = 0;
 let rows = [];
@@ -60,13 +63,18 @@ email = 'attacker@outside.invalid';
 assert.throws(() => _requireUser_(), { code: 'FORBIDDEN' });
 assert.throws(() => _requireDomainViewer_(), { code: 'FORBIDDEN' });
 assert.equal(getBootstrap().error.code, 'FORBIDDEN');
-""")
+"""
+    )
 
 
 def test_bootstrap_survives_missing_identity_roles_storage_and_initial_view():
-    sources = '\n'.join((APPS / name).read_text() for name in
-                        ['00_Config.gs', '10_Main.gs', '40_Sheets.gs', '99_Core.gs'])
-    run_node(sources + r"""
+    sources = "\n".join(
+        (APPS / name).read_text()
+        for name in ["00_Config.gs", "10_Main.gs", "40_Sheets.gs", "99_Core.gs"]
+    )
+    run_node(
+        sources
+        + r"""
 const assert = require('node:assert/strict');
 const Session = { getActiveUser: () => ({ getEmail: () => '' }) };
 let storageFails = false, viewFails = false;
@@ -101,13 +109,16 @@ response = getBootstrap();
 assert.equal(response.ok, true);
 assert.deepEqual(response.data.scopes, []);
 assert.equal(response.data.dataError.code, 'INTERNAL_ERROR');
-""")
+"""
+    )
 
 
 def test_stale_dashboard_error_cannot_replace_current_route_and_failure_is_retryable():
-    app = (APPS / 'App.html').read_text()
-    run_node('async function refreshDashboard(expectedEpoch = state.navigationEpoch) {' +
-             _function_body(app, 'refreshDashboard') + r"""}
+    app = (APPS / "App.html").read_text()
+    run_node(
+        "async function refreshDashboard(expectedEpoch = state.navigationEpoch) {"
+        + _function_body(app, "refreshDashboard")
+        + r"""}
 const assert = require('node:assert/strict');
 const state = { scopeKey: 'es::*', route: 'dashboard', navigationEpoch: 1, dashboard: null };
 let reject, messages = [], busy = 0, retry;
@@ -126,26 +137,36 @@ const renderDataUnavailable = (message, action) => { messages.push(message); ret
   assert.deepEqual(messages, ['temporary failure']);
   assert.equal(typeof retry, 'function'); assert.equal(busy, 0);
 })().catch(error => { console.error(error); process.exitCode = 1; });
-""")
+"""
+    )
 
 
 def test_owner_scopes_are_explicit_and_do_not_include_unused_trigger_management():
     import json
-    manifest = json.loads((APPS / 'appsscript.json').read_text())
-    assert manifest['webapp'] == {'access': 'DOMAIN', 'executeAs': 'USER_DEPLOYING'}
-    assert set(manifest['oauthScopes']) == {
-        'https://www.googleapis.com/auth/' + scope for scope in
-        ['spreadsheets', 'userinfo.email', 'presentations', 'drive',
-         'gmail.send', 'gmail.settings.basic']
+
+    manifest = json.loads((APPS / "appsscript.json").read_text())
+    assert manifest["webapp"] == {"access": "DOMAIN", "executeAs": "USER_DEPLOYING"}
+    assert set(manifest["oauthScopes"]) == {
+        "https://www.googleapis.com/auth/" + scope
+        for scope in [
+            "spreadsheets",
+            "userinfo.email",
+            "presentations",
+            "drive",
+            "gmail.send",
+            "gmail.settings.basic",
+        ]
     }
 
 
 def test_bootstrap_never_relabels_another_scope_and_does_not_wait_for_telemetry():
-    app = (APPS / 'App.html').read_text()
-    script = 'async function boot() {' + _function_body(app, 'boot') + '}\n'
-    for name in ['requestKey']:
-        script += f'function {name}(request) {{' + _function_body(app, name) + '}\n'
-    run_node(script + r"""
+    app = (APPS / "App.html").read_text()
+    script = "async function boot() {" + _function_body(app, "boot") + "}\n"
+    for name in ["requestKey"]:
+        script += f"function {name}(request) {{" + _function_body(app, name) + "}\n"
+    run_node(
+        script
+        + r"""
 const assert = require('node:assert/strict');
 const bootstrap = {
   user: { role: 'admin' }, app: { name: 'Radar', contractVersion: '8', cacheEpoch: 'e', dataVersion: 'v' },
@@ -188,13 +209,17 @@ const watchdog = setTimeout(() => { console.error('boot blocked on telemetry'); 
   await boot();
   assert.equal(unavailable, 1); assert.equal(refreshed, 1);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
-""")
+"""
+    )
 
 
 def test_app_starts_immediately_when_dom_is_already_ready_and_only_once_when_loading():
-    app = (APPS / 'App.html').read_text()
-    start_body = _function_body(app, 'startApp')
-    run_node('function startApp() {' + start_body + r'''}
+    app = (APPS / "App.html").read_text()
+    start_body = _function_body(app, "startApp")
+    run_node(
+        "function startApp() {"
+        + start_body
+        + r"""}
 const assert = require('node:assert/strict');
 let initCalls = 0, listener = null, options = null;
 const App = { init: () => { initCalls++; } };
@@ -211,30 +236,42 @@ assert.equal(typeof listener, 'function');
 assert.deepEqual(options, { once: true });
 listener();
 assert.equal(initCalls, 2);
-''')
+"""
+    )
 
 
 def test_startup_watchdog_remains_armed_until_boot_settles():
-    index = (APPS / 'Index.html').read_text()
-    app = (APPS / 'App.html').read_text()
-    assert '__RADAR_STARTUP_WATCHDOG__' in index
+    index = (APPS / "Index.html").read_text()
+    app = (APPS / "App.html").read_text()
+    assert "__RADAR_STARTUP_WATCHDOG__" in index
     assert "document.body.classList.contains('auth-pending')" in index
     assert "retry.onclick = function () { window.location.reload(); };" in index
-    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' in _function_body(app, 'boot')
-    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' in _function_body(app, 'showAccessError')
-    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' not in app[app.index('    init() {'):]
-    assert 'accessRetry.onclick = null' in app
+    assert "window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)" in _function_body(app, "boot")
+    assert "window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)" in _function_body(
+        app, "showAccessError"
+    )
+    assert (
+        "window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)"
+        not in app[app.index("    init() {") :]
+    )
+    assert "accessRetry.onclick = null" in app
 
 
 def test_unanswered_bootstrap_opens_empty_reader_shell_without_privilege_or_telemetry():
-    app = (APPS / 'App.html').read_text()
-    script = ''
-    for name, args in [('boot', ''), ('unavailableBootstrap', 'error'),
-                       ('deadline', 'promise, milliseconds, message'), ('requestKey', 'request'),
-                       ('refreshDashboard', 'expectedEpoch = state.navigationEpoch')]:
-        prefix = 'async ' if name in ['boot', 'refreshDashboard'] else ''
-        script += f'{prefix}function {name}({args}) {{' + _function_body(app, name) + '}\n'
-    run_node(script + r"""
+    app = (APPS / "App.html").read_text()
+    script = ""
+    for name, args in [
+        ("boot", ""),
+        ("unavailableBootstrap", "error"),
+        ("deadline", "promise, milliseconds, message"),
+        ("requestKey", "request"),
+        ("refreshDashboard", "expectedEpoch = state.navigationEpoch"),
+    ]:
+        prefix = "async " if name in ["boot", "refreshDashboard"] else ""
+        script += f"{prefix}function {name}({args}) {{" + _function_body(app, name) + "}\n"
+    run_node(
+        script
+        + r"""
 const assert = require('node:assert/strict');
 let timers = [], resolveRpc, rejected = '', shared = false, rendered = 0, telemetry = 0;
 const state = { memory: new Map(), dashboard: null, navigationEpoch: 0 };
@@ -286,14 +323,17 @@ const watchdog = setTimeout(() => { console.error('unfinished startup regression
   response = () => Promise.reject(Object.assign(Error('offline'), {code: 'APPS_SCRIPT_FAILURE'}));
   await boot(); assert.equal(document.body.className, 'auth-denied');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
-""")
+"""
+    )
 
 
 def test_independent_watchdog_exposes_pre_app_javascript_error_and_stops_spinner():
     import re
-    index = (APPS / 'Index.html').read_text()
-    watchdog = re.search(r'<script>(.*?)</script>', index, re.S).group(1)
-    run_node(r"""
+
+    index = (APPS / "Index.html").read_text()
+    watchdog = re.search(r"<script>(.*?)</script>", index, re.S).group(1)
+    run_node(
+        r"""
 const assert = require('node:assert/strict');
 let timer, errors, reloads = 0;
 const message = {}, retry = {classList: {remove() {}}}, version = {};
@@ -308,7 +348,9 @@ const window = {
   setTimeout(fn) { timer = fn; }, clearTimeout() {},
   location: { reload() { reloads++; } }
 };
-""" + watchdog + r"""
+"""
+        + watchdog
+        + r"""
 assert.equal(version.textContent, 'Radar · test');
 errors({message: 'SyntaxError in App.html'});
 assert.equal(document.body.className, 'auth-denied');
@@ -319,13 +361,72 @@ assert.equal(document.body.className, 'auth-denied');
 assert.match(message.textContent, /no terminó/);
 document.body.className = 'auth-ready'; errors({message: 'later'});
 assert.equal(document.body.className, 'auth-ready');
-""")
+"""
+    )
 
 
 def test_missing_google_bridge_is_a_recoverable_transport_failure():
-    source = (APPS / 'App.html').read_text().split('<script>', 1)[1].split('const App =', 1)[0]
-    run_node('const window = {};\n' + source + r"""
+    source = (APPS / "App.html").read_text().split("<script>", 1)[1].split("const App =", 1)[0]
+    run_node(
+        "const window = {};\n"
+        + source
+        + r"""
 const assert = require('node:assert/strict');
 assert.rejects(RPC.call('getBootstrap'), {code: 'APPS_SCRIPT_FAILURE'})
   .catch(error => { console.error(error); process.exitCode = 1; });
-""")
+"""
+    )
+
+
+def test_served_regex_truncation_is_reproduced_and_avoided():
+    import json
+
+    app = (APPS / "App.html").read_text().removeprefix("<script>").removesuffix("</script>\n")
+    # Captured from the authenticated .3 iframe: HtmlService cut the line at //.
+    broken_line = "          if (!/^https:" + "\\/\\"
+    check_line = next(line for line in app.splitlines() if "test(slidesUrl)" in line)
+    assert r"\/\//" not in app
+    broken = app.replace(check_line, broken_line)
+    run_node(
+        "const vm = require('node:vm');\nconst assert = require('node:assert/strict');\n"
+        + "assert.throws(() => new vm.Script("
+        + json.dumps(broken)
+        + "), /Invalid regular expression/);\n"
+        + "new vm.Script("
+        + json.dumps(app)
+        + ");\n"
+    )
+
+
+def test_reader_presentation_still_accepts_only_https_after_regex_fix():
+    app = (APPS / "App.html").read_text()
+    run_node(
+        "function bindShell() {"
+        + _function_body(app, "bindShell")
+        + r"""}
+const assert = require('node:assert/strict');
+let click, scope = {}, messages = [], opened = [];
+const isAdmin = () => false, isShared = () => false;
+const currentScope = () => scope;
+const button = {dataset: {route: 'reports'}, addEventListener: (name, handler) => {click = handler;}};
+const document = {querySelectorAll: selector => selector === '[data-route]' ? [button] : []};
+const $ = () => ({addEventListener() {}});
+const boot = () => {};
+const window = {open: (...args) => opened.push(args)};
+const UI = {message: message => messages.push(message)};
+const trackEvent = () => {};
+const state = {scopeKey: 'es::*'};
+bindShell();
+(async () => {
+  for (const slidesUrl of ['', 'http://example.com', 'javascript:alert(1)', 'https:/example.com', 'ftp://example.com']) {
+    scope = {slidesUrl}; await click();
+  }
+  assert.equal(messages.length, 5); assert.equal(opened.length, 0);
+  for (const slidesUrl of ['https://docs.google.com/presentation/d/example/edit', 'HTTPS://example.com', ' https://example.com ']) {
+    scope = {slidesUrl}; await click();
+    assert.deepEqual(opened.at(-1), [slidesUrl.trim(), '_blank', 'noopener,noreferrer']);
+  }
+  assert.equal(opened.length, 3);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    )

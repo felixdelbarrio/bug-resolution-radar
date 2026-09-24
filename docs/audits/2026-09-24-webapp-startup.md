@@ -35,3 +35,26 @@ Navegador sobre HTML real, con servicios Google simulados:
 - Respuesta `FORBIDDEN`: acceso denegado; no entra en modo de lectura.
 
 No se ha desplegado ni verificado la URL de producción. Para comprobar esta publicación hay que actualizar juntos los archivos modificados de Apps Script y abrir la URL `/exec`. La pantalla de acceso debe identificar la versión .3. Si permanece en el mensaje inicial más de 35 segundos, la captura, URL y consola del iframe de la aplicación son necesarias para identificar el bloqueo previo al código probado.
+
+## Causa confirmada en producción y corrección .4
+
+El 24/09/2026 se inspeccionó la publicación autenticada `.3`, dentro de `#sandboxFrame > #userHtmlFrame`. La consola registraba `SyntaxError: Invalid regular expression: missing /`. Se extrajo el texto de los scripts del DOM, sin ejecutarlos, y se comprobó su sintaxis con `vm.Script`.
+
+Los scripts de metadatos, recursos, watchdog, componentes, dominio, caché y gráficos eran válidos. El script de App fallaba en la línea 1614, en la validación del enlace de presentación:
+
+```javascript
+// Repositorio .3
+if (!/^https:\/\//i.test(slidesUrl)) {
+```
+
+La línea recibida terminaba después de `if (!/^https:` y los caracteres `\/\`: faltaban el cierre de la expresión regular y el resto de la condición. La comparación completa con App.html solo encontró esa diferencia. No se trataba de una denegación de identidad, acceso a Sheets ni una respuesta lenta: el script principal no podía interpretarse.
+
+La versión `.4` utiliza una expresión equivalente sin la secuencia de barras escapadas adyacentes:
+
+```javascript
+if (!/^https:[/][/]/i.test(slidesUrl)) {
+```
+
+Al sustituir únicamente esa línea en el script capturado, el script completo compila y coincide exactamente con el código local corregido. Las pruebas reproducen el SyntaxError de la línea truncada, validan el script completo y comprueban que el lector sigue pudiendo abrir enlaces HTTPS (incluidas mayúsculas), pero no HTTP, javascript, FTP ni una URL con una sola barra.
+
+Esta comprobación confirma la reparación del código observado. La versión `.4` todavía debe publicarse para verificar que HtmlService la entrega intacta y que el arranque y la lectura de datos funcionan en producción. No se han cambiado permisos, roles, datos ni estilos.
