@@ -2,7 +2,13 @@
 const RPC = (() => {
   const call = (name, ...args) => new Promise((resolve, reject) => {
     const startedAt = performance.now();
-    google.script.run
+    const bridge = window.google && window.google.script && window.google.script.run;
+    if (!bridge) {
+      reject(Object.assign(new Error('No se pudo conectar con Google Apps Script.'),
+        { code: 'APPS_SCRIPT_FAILURE' }));
+      return;
+    }
+    bridge
       .withSuccessHandler(response => {
         if (response && response.ok) {
           if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
@@ -124,6 +130,7 @@ const App = (() => {
   }
 
   function showAccessError(error) {
+    window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
     document.body.className = 'auth-denied';
     const message = $('accessGateMessage');
     const retry = $('accessGateRetry');
@@ -1494,18 +1501,38 @@ const App = (() => {
     schedulePreferenceSave();
   }
 
+  function unavailableBootstrap(error) {
+    return {
+      app: { ...window.__RADAR_APP__, scopeVersions: {}, cacheEpoch: '', dataVersion: '' },
+      user: { role: 'viewer', email: '', displayName: 'Lector' },
+      scopes: [], countries: [], sources: [], administration: null,
+      initialState: { pageSize: window.__RADAR_APP__.defaultPageSize }, dashboard: null,
+      dataError: { code: error.code, message: error.message }
+    };
+  }
+
   async function boot() {
     document.body.className = 'auth-pending';
     state.dashboard = null;
+    $('accessGateRetry').classList.add('hidden');
     $('accessGateMessage').textContent = 'Verificando identidad y snapshot…';
     try {
-      const bootstrap = await deadline(
-        isShared()
-          ? RPC.call('getSharedBootstrap', state.sharedToken)
-          : RPC.call('getBootstrap'),
-        30000,
-        'La aplicación no respondió en 30 segundos.'
-      );
+      let bootstrap;
+      try {
+        bootstrap = await deadline(
+          isShared()
+            ? RPC.call('getSharedBootstrap', state.sharedToken)
+            : RPC.call('getBootstrap'),
+          30000,
+          'La aplicación no respondió en 30 segundos.'
+        );
+      } catch (error) {
+        if (isShared() || !['REQUEST_TIMEOUT', 'APPS_SCRIPT_FAILURE', 'INTERNAL_ERROR'].includes(error.code)) {
+          throw error;
+        }
+        console.warn('radar_bootstrap_unavailable', error);
+        bootstrap = unavailableBootstrap(error);
+      }
       state.bootstrap = bootstrap;
       const initial = bootstrap.initialState || {};
       const local = readLocalPreferences();
@@ -1527,6 +1554,7 @@ const App = (() => {
         isShared() ? 'shared-view' : '',
         isAdmin() && !isShared() ? 'is-admin' : ''
       ].filter(Boolean).join(' ');
+      window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
       $('appTitle').textContent = bootstrap.app.name;
       syncScope();
       syncNavigation();
@@ -1547,6 +1575,7 @@ const App = (() => {
       } else {
         await refreshDashboard();
       }
+      if (!bootstrap.scopes.length && bootstrap.dataError) return;
       trackEvent('app_open', {
         role: bootstrap.user.role,
         shared: isShared(),
@@ -1640,7 +1669,6 @@ const App = (() => {
 
   return {
     init() {
-      window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
       const accessRetry = $('accessGateRetry');
       if (accessRetry) accessRetry.onclick = null;
       try {

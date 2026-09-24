@@ -158,7 +158,7 @@ const node = { classList: { add() {}, remove() {} } };
 const $ = () => node;
 const view = () => node;
 const document = { body: {}, documentElement: { dataset: {} } };
-const window = { setTimeout() {} };
+const window = { setTimeout() {}, clearTimeout() {} };
 const RPC = { call: async () => bootstrap };
 const deadline = promise => promise;
 const isShared = () => false;
@@ -214,11 +214,118 @@ assert.equal(initCalls, 2);
 ''')
 
 
-def test_index_has_independent_startup_watchdog_and_app_clears_it():
+def test_startup_watchdog_remains_armed_until_boot_settles():
     index = (APPS / 'Index.html').read_text()
     app = (APPS / 'App.html').read_text()
     assert '__RADAR_STARTUP_WATCHDOG__' in index
     assert "document.body.classList.contains('auth-pending')" in index
     assert "retry.onclick = function () { window.location.reload(); };" in index
-    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' in app
+    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' in _function_body(app, 'boot')
+    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' in _function_body(app, 'showAccessError')
+    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' not in app[app.index('    init() {'):]
     assert 'accessRetry.onclick = null' in app
+
+
+def test_unanswered_bootstrap_opens_empty_reader_shell_without_privilege_or_telemetry():
+    app = (APPS / 'App.html').read_text()
+    script = ''
+    for name, args in [('boot', ''), ('unavailableBootstrap', 'error'),
+                       ('deadline', 'promise, milliseconds, message'), ('requestKey', 'request'),
+                       ('refreshDashboard', 'expectedEpoch = state.navigationEpoch')]:
+        prefix = 'async ' if name in ['boot', 'refreshDashboard'] else ''
+        script += f'{prefix}function {name}({args}) {{' + _function_body(app, name) + '}\n'
+    run_node(script + r"""
+const assert = require('node:assert/strict');
+let timers = [], resolveRpc, rejected = '', shared = false, rendered = 0, telemetry = 0;
+const state = { memory: new Map(), dashboard: null, navigationEpoch: 0 };
+const node = { classList: { add() {}, remove() {} } };
+const $ = () => node;
+const view = () => node;
+const document = { body: {}, documentElement: { dataset: {} } };
+const window = {
+  __RADAR_APP__: {name: 'Radar', version: 'test', contractVersion: '8', defaultPageSize: 50},
+  setTimeout(fn, ms) { const timer = {fn, ms}; timers.push(timer); return timer; },
+  clearTimeout(timer) { timers = timers.filter(item => item !== timer); }
+};
+let response = () => new Promise(resolve => { resolveRpc = resolve; });
+const RPC = { call: () => response() };
+const isShared = () => shared;
+const isAdmin = () => state.bootstrap?.user.role === 'admin';
+const readLocalPreferences = () => ({scopeKey: 'private-admin-scope'});
+const requestFor = () => ({scopeKey: state.scopeKey, view: state.panel});
+const syncScope = () => {};
+const syncNavigation = () => {};
+const renderDataUnavailable = () => { rendered++; };
+const trackEvent = () => { telemetry++; };
+const showAccessError = error => { rejected = error.code; document.body.className = 'auth-denied'; };
+const watchdog = setTimeout(() => { console.error('unfinished startup regression'); process.exitCode = 1; }, 1000);
+(async () => {
+  const pending = boot();
+  assert.equal(document.body.className, 'auth-pending');
+  timers.find(timer => timer.ms === 30000).fn();
+  await pending;
+  assert.equal(document.body.className, 'auth-ready');
+  assert.equal(state.bootstrap.user.role, 'viewer');
+  assert.equal(state.scopeKey, '');
+  assert.equal(state.bootstrap.administration, null);
+  assert.equal(state.bootstrap.app.version, 'test');
+  assert.equal(rendered, 1); assert.equal(telemetry, 0);
+  resolveRpc({user: {role: 'admin'}});
+  await Promise.resolve();
+  assert.equal(state.bootstrap.user.role, 'viewer');
+  for (const code of ['APPS_SCRIPT_FAILURE', 'INTERNAL_ERROR']) {
+    response = () => Promise.reject(Object.assign(Error('offline'), {code}));
+    await boot(); assert.equal(document.body.className, 'auth-ready');
+  }
+  for (const code of ['FORBIDDEN', 'SHARE_INVALID', 'INVALID_RESPONSE']) {
+    response = () => Promise.reject(Object.assign(Error('denied'), {code}));
+    await boot(); assert.equal(rejected, code);
+    assert.equal(document.body.className, 'auth-denied');
+  }
+  shared = true;
+  response = () => Promise.reject(Object.assign(Error('offline'), {code: 'APPS_SCRIPT_FAILURE'}));
+  await boot(); assert.equal(document.body.className, 'auth-denied');
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
+""")
+
+
+def test_independent_watchdog_exposes_pre_app_javascript_error_and_stops_spinner():
+    import re
+    index = (APPS / 'Index.html').read_text()
+    watchdog = re.search(r'<script>(.*?)</script>', index, re.S).group(1)
+    run_node(r"""
+const assert = require('node:assert/strict');
+let timer, errors, reloads = 0;
+const message = {}, retry = {classList: {remove() {}}}, version = {};
+const document = {
+  body: { className: 'auth-pending', classList: { contains: value => document.body.className === value } },
+  getElementById: id => id === 'accessGateMessage' ? message : retry,
+  querySelector: () => version
+};
+const window = {
+  __RADAR_APP__: {name: 'Radar', version: 'test'},
+  addEventListener(name, fn) { errors = fn; },
+  setTimeout(fn) { timer = fn; }, clearTimeout() {},
+  location: { reload() { reloads++; } }
+};
+""" + watchdog + r"""
+assert.equal(version.textContent, 'Radar · test');
+errors({message: 'SyntaxError in App.html'});
+assert.equal(document.body.className, 'auth-denied');
+assert.match(message.textContent, /SyntaxError/);
+retry.onclick(); assert.equal(reloads, 1);
+document.body.className = 'auth-pending'; timer();
+assert.equal(document.body.className, 'auth-denied');
+assert.match(message.textContent, /no terminó/);
+document.body.className = 'auth-ready'; errors({message: 'later'});
+assert.equal(document.body.className, 'auth-ready');
+""")
+
+
+def test_missing_google_bridge_is_a_recoverable_transport_failure():
+    source = (APPS / 'App.html').read_text().split('<script>', 1)[1].split('const App =', 1)[0]
+    run_node('const window = {};\n' + source + r"""
+const assert = require('node:assert/strict');
+assert.rejects(RPC.call('getBootstrap'), {code: 'APPS_SCRIPT_FAILURE'})
+  .catch(error => { console.error(error); process.exitCode = 1; });
+""")
