@@ -15,15 +15,10 @@ function source(name) {
 }
 
 function designTokenMarkup() {
-  const web = JSON.parse(
-    new vm.Script(`${source("00_Config.gs")}\nJSON.stringify(DESIGN_TOKENS.web)`)
-      .runInNewContext({})
-  );
-  const declarations = (tokens) =>
-    Object.entries(tokens).map(([name, value]) => `${name}:${value}`).join(";");
-  return `<script>window.__RADAR_SHARE_TOKEN__="";window.__RADAR_LOCAL__=true;</script>` +
-    `<style id="radar-design-tokens">:root{${declarations(web.light)}}` +
-    `:root[data-theme="dark"]{${declarations(web.dark)}}</style>`;
+  const markup = new vm.Script(
+    `${source("00_Config.gs")}\n${source("99_Core.gs")}\n${source("60_WebApp.gs")}\n_clientBootstrapMarkup_('')`
+  ).runInNewContext({});
+  return markup + '<script>window.__RADAR_LOCAL__=true;</script>';
 }
 
 function localRuntimeMarkup() {

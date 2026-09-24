@@ -79,6 +79,28 @@
     </main>
   </div>
   <div id="issueDrawerRoot"></div>
+  <script>
+  (function () {
+    function fail(message) {
+      if (!document.body.classList.contains('auth-pending')) return;
+      window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
+      document.body.className = 'auth-denied';
+      document.getElementById('accessGateMessage').textContent = message;
+      var retry = document.getElementById('accessGateRetry');
+      retry.classList.remove('hidden');
+      retry.onclick = function () { window.location.reload(); };
+    }
+    window.addEventListener('error', function (event) {
+      fail('No se pudo iniciar la interfaz: ' + (event.message || 'Error de JavaScript.'));
+    });
+    window.__RADAR_STARTUP_WATCHDOG__ = window.setTimeout(function () {
+      fail('La interfaz no terminó de arrancar. Recarga la aplicación para reintentar.');
+    }, 35000);
+    var app = window.__RADAR_APP__ || {};
+    document.querySelector('.access-gate-kicker').textContent =
+      (app.name || 'Bug Resolution Radar') + (app.version ? ' · ' + app.version : '');
+  })();
+  </script>
   <?!= _include_('Components'); ?>
   <?!= _include_('Domain'); ?>
   <?!= _include_('Cache'); ?>

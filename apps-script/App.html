@@ -2,7 +2,13 @@
 const RPC = (() => {
   const call = (name, ...args) => new Promise((resolve, reject) => {
     const startedAt = performance.now();
-    google.script.run
+    const bridge = window.google && window.google.script && window.google.script.run;
+    if (!bridge) {
+      reject(Object.assign(new Error('No se pudo conectar con Google Apps Script.'),
+        { code: 'APPS_SCRIPT_FAILURE' }));
+      return;
+    }
+    bridge
       .withSuccessHandler(response => {
         if (response && response.ok) {
           if (name !== 'recordAnalyticsEvents' && window.__RADAR_TELEMETRY__) {
@@ -124,6 +130,7 @@ const App = (() => {
   }
 
   function showAccessError(error) {
+    window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
     document.body.className = 'auth-denied';
     const message = $('accessGateMessage');
     const retry = $('accessGateRetry');
@@ -1388,7 +1395,8 @@ const App = (() => {
     state.dark = Boolean(dark);
     document.documentElement.dataset.theme = state.dark ? 'dark' : 'light';
     setActionIcons();
-    if (state.route === 'dashboard') renderCurrent();
+    if (state.route === 'dashboard' && state.dashboard &&
+        state.dashboard === state.memory.get(requestKey(requestFor()))) renderCurrent();
     else if (state.route === 'settings') await renderSettings();
     schedulePreferenceSave();
   }
@@ -1397,7 +1405,7 @@ const App = (() => {
     const key = requestKey(request);
     if (state.memory.has(key)) return state.memory.get(key);
     if (state.inFlight.has(key)) return state.inFlight.get(key);
-    const persistentKey = `dashboard:${key}`;
+    const persistentKey = cacheKey(request);
     // Reserve the request before awaiting IndexedDB, which can yield to another
     // navigation. Both the durable lookup and RPC belong to the same promise.
     const remote = (async () => {
@@ -1421,12 +1429,21 @@ const App = (() => {
     return remote;
   }
 
+  function renderDataUnavailable(message, retry) {
+    Charts.begin(view());
+    view().innerHTML = UI.empty('Datos temporalmente no disponibles', message) +
+      '<button id="retrySnapshot" class="secondary-button" type="button">Reintentar</button>';
+    $('retrySnapshot').addEventListener('click', retry);
+  }
+
   async function refreshDashboard(expectedEpoch = state.navigationEpoch) {
     if (!state.scopeKey) {
-      view().innerHTML = UI.empty(
-        'No hay snapshots publicados',
-        'Un administrador debe importar un traslado .brr v3 desde escritorio.'
-      );
+      if (state.bootstrap.dataError) {
+        renderDataUnavailable('Puedes seguir navegando mientras se recuperan los datos.', boot);
+      } else {
+        view().innerHTML = UI.empty('No hay snapshots publicados',
+          'Todavía no hay datos publicados para consultar.');
+      }
       return;
     }
     const request = requestFor();
@@ -1439,7 +1456,9 @@ const App = (() => {
       syncNavigation();
       renderCurrent();
     } catch (error) {
-      view().innerHTML = UI.empty('No se pudo cargar el snapshot', error.message);
+      if (expectedEpoch !== state.navigationEpoch || state.route !== 'dashboard') return;
+      state.dashboard = null;
+      renderDataUnavailable(error.message, () => refreshDashboard());
     } finally {
       setBusy(false);
     }
@@ -1470,14 +1489,7 @@ const App = (() => {
     if (panel === 'trends') state.trendChart = 'timeseries';
     if (panel === 'issues') state.issuesView = 'Cards';
     syncNavigation();
-    const request = requestFor();
-    const key = requestKey(request);
-    let cached = state.memory.get(key);
-    if (!cached) {
-      cached = await PersistentCache.read(cacheKey(request));
-      if (cached) state.memory.set(key, cached);
-    }
-    if (epoch !== state.navigationEpoch) return;
+    const cached = state.memory.get(requestKey(requestFor()));
     if (cached) {
       state.dashboard = cached;
       renderCurrent();
@@ -1489,17 +1501,38 @@ const App = (() => {
     schedulePreferenceSave();
   }
 
+  function unavailableBootstrap(error) {
+    return {
+      app: { ...window.__RADAR_APP__, scopeVersions: {}, cacheEpoch: '', dataVersion: '' },
+      user: { role: 'viewer', email: '', displayName: 'Lector' },
+      scopes: [], countries: [], sources: [], administration: null,
+      initialState: { pageSize: window.__RADAR_APP__.defaultPageSize }, dashboard: null,
+      dataError: { code: error.code, message: error.message }
+    };
+  }
+
   async function boot() {
     document.body.className = 'auth-pending';
+    state.dashboard = null;
+    $('accessGateRetry').classList.add('hidden');
     $('accessGateMessage').textContent = 'Verificando identidad y snapshot…';
     try {
-      const bootstrap = await deadline(
-        isShared()
-          ? RPC.call('getSharedBootstrap', state.sharedToken)
-          : RPC.call('getBootstrap'),
-        30000,
-        'La aplicación no respondió en 30 segundos.'
-      );
+      let bootstrap;
+      try {
+        bootstrap = await deadline(
+          isShared()
+            ? RPC.call('getSharedBootstrap', state.sharedToken)
+            : RPC.call('getBootstrap'),
+          30000,
+          'La aplicación no respondió en 30 segundos.'
+        );
+      } catch (error) {
+        if (isShared() || !['REQUEST_TIMEOUT', 'APPS_SCRIPT_FAILURE', 'INTERNAL_ERROR'].includes(error.code)) {
+          throw error;
+        }
+        console.warn('radar_bootstrap_unavailable', error);
+        bootstrap = unavailableBootstrap(error);
+      }
       state.bootstrap = bootstrap;
       const initial = bootstrap.initialState || {};
       const local = readLocalPreferences();
@@ -1521,6 +1554,7 @@ const App = (() => {
         isShared() ? 'shared-view' : '',
         isAdmin() && !isShared() ? 'is-admin' : ''
       ].filter(Boolean).join(' ');
+      window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
       $('appTitle').textContent = bootstrap.app.name;
       syncScope();
       syncNavigation();
@@ -1529,20 +1563,25 @@ const App = (() => {
       view().classList.remove('hidden');
       if (bootstrap.dashboard && requestKey(requestFor()) === requestKey({
         ...requestFor(),
+        scopeKey: initial.scopeKey,
         view: initial.panel || 'overview'
       })) {
         state.dashboard = bootstrap.dashboard;
         state.memory.set(requestKey(requestFor()), bootstrap.dashboard);
         renderCurrent();
+      } else if (bootstrap.dataError && state.scopeKey === initial.scopeKey) {
+        renderDataUnavailable('Puedes abrir las demás pestañas o reintentar la carga.',
+          () => state.scopeKey ? refreshDashboard() : boot());
       } else {
         await refreshDashboard();
       }
+      if (!bootstrap.scopes.length && bootstrap.dataError) return;
       trackEvent('app_open', {
         role: bootstrap.user.role,
         shared: isShared(),
         dataVersion: bootstrap.app.dataVersion
       });
-      await deadline(
+      deadline(
         flushAnalytics(),
         30000,
         'No se pudo confirmar la telemetría de apertura.'
@@ -1572,7 +1611,7 @@ const App = (() => {
         if (button.dataset.route === 'reports' && !isAdmin() && !isShared()) {
           const scope = currentScope();
           const slidesUrl = String(scope && scope.slidesUrl || '').trim();
-          if (!/^https:\/\//i.test(slidesUrl)) {
+          if (!/^https:[/][/]/i.test(slidesUrl)) {
             UI.message('Este snapshot no tiene una presentación publicada disponible.', 'warning');
             return;
           }
@@ -1630,6 +1669,8 @@ const App = (() => {
 
   return {
     init() {
+      const accessRetry = $('accessGateRetry');
+      if (accessRetry) accessRetry.onclick = null;
       try {
         assertShellContract();
         bindShell();
@@ -1645,7 +1686,7 @@ const App = (() => {
             message: String(event.reason && event.reason.message || event.reason || 'Promesa rechazada')
           }, 0, 'error');
         });
-        window.addEventListener('pagehide', flushAnalytics);
+        window.addEventListener('pagehide', () => { flushAnalytics().catch(() => {}); });
         boot();
       } catch (error) {
         showAccessError(error);
@@ -1654,5 +1695,13 @@ const App = (() => {
   };
 })();
 
-window.addEventListener('DOMContentLoaded', App.init);
+function startApp() {
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', App.init, { once: true });
+    return;
+  }
+  App.init();
+}
+
+startApp();
 </script>

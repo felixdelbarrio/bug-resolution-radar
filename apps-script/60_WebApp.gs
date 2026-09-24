@@ -12,9 +12,14 @@ function _designTokenDeclarations_(tokens) {
 
 function _clientBootstrapMarkup_(sharedToken) {
   const shareJson = _safeJsonStringify_(_text_(sharedToken)).replace(/</g, '\\u003c');
+  const appJson = _safeJsonStringify_({
+    name: RADAR.appName, version: RADAR.appVersion,
+    contractVersion: RADAR.contractVersion, semanticContract: RADAR.semanticContract,
+    defaultPageSize: RADAR.defaultPageSize
+  }).replace(/</g, '\\u003c');
   const light = _designTokenDeclarations_(DESIGN_TOKENS.web.light);
   const dark = _designTokenDeclarations_(DESIGN_TOKENS.web.dark);
-  return '<script>window.__RADAR_SHARE_TOKEN__=' + shareJson + ';</script>' +
+  return '<script>window.__RADAR_SHARE_TOKEN__=' + shareJson + ';window.__RADAR_APP__=' + appJson + ';</script>' +
     '<style id="radar-design-tokens">:root{' + light + '}' +
     ':root[data-theme="dark"]{' + dark + '}</style>';
 }
