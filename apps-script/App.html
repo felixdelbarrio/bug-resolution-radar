@@ -1640,6 +1640,9 @@ const App = (() => {
 
   return {
     init() {
+      window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
+      const accessRetry = $('accessGateRetry');
+      if (accessRetry) accessRetry.onclick = null;
       try {
         assertShellContract();
         bindShell();
@@ -1664,5 +1667,13 @@ const App = (() => {
   };
 })();
 
-window.addEventListener('DOMContentLoaded', App.init);
+function startApp() {
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', App.init, { once: true });
+    return;
+  }
+  App.init();
+}
+
+startApp();
 </script>

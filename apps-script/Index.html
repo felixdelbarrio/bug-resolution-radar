@@ -79,6 +79,20 @@
     </main>
   </div>
   <div id="issueDrawerRoot"></div>
+  <script>
+  window.__RADAR_STARTUP_WATCHDOG__ = window.setTimeout(function () {
+    if (!document.body.classList.contains('auth-pending')) return;
+    var message = document.getElementById('accessGateMessage');
+    var retry = document.getElementById('accessGateRetry');
+    if (message) {
+      message.textContent = 'No se pudo iniciar la interfaz. Recarga la aplicación o reintenta.';
+    }
+    if (retry) {
+      retry.classList.remove('hidden');
+      retry.onclick = function () { window.location.reload(); };
+    }
+  }, 10000);
+  </script>
   <?!= _include_('Components'); ?>
   <?!= _include_('Domain'); ?>
   <?!= _include_('Cache'); ?>

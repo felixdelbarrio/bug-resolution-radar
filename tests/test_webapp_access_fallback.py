@@ -189,3 +189,36 @@ const watchdog = setTimeout(() => { console.error('boot blocked on telemetry'); 
   assert.equal(unavailable, 1); assert.equal(refreshed, 1);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));
 """)
+
+
+def test_app_starts_immediately_when_dom_is_already_ready_and_only_once_when_loading():
+    app = (APPS / 'App.html').read_text()
+    start_body = _function_body(app, 'startApp')
+    run_node('function startApp() {' + start_body + r'''}
+const assert = require('node:assert/strict');
+let initCalls = 0, listener = null, options = null;
+const App = { init: () => { initCalls++; } };
+const window = { addEventListener: (name, fn, opts) => {
+  assert.equal(name, 'DOMContentLoaded'); listener = fn; options = opts;
+} };
+const document = { readyState: 'complete' };
+startApp();
+assert.equal(initCalls, 1);
+document.readyState = 'loading';
+startApp();
+assert.equal(initCalls, 1);
+assert.equal(typeof listener, 'function');
+assert.deepEqual(options, { once: true });
+listener();
+assert.equal(initCalls, 2);
+''')
+
+
+def test_index_has_independent_startup_watchdog_and_app_clears_it():
+    index = (APPS / 'Index.html').read_text()
+    app = (APPS / 'App.html').read_text()
+    assert '__RADAR_STARTUP_WATCHDOG__' in index
+    assert "document.body.classList.contains('auth-pending')" in index
+    assert "retry.onclick = function () { window.location.reload(); };" in index
+    assert 'window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__)' in app
+    assert 'accessRetry.onclick = null' in app
