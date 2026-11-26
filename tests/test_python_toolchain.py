@@ -55,3 +55,30 @@ def test_make_checks_existing_python_environment() -> None:
     )
     assert result.returncode != 0
     assert f"BRR requiere Python {wrong_series}" in result.stderr
+
+
+@pytest.mark.skipif(os.name != "posix" or shutil.which("make") is None, reason="POSIX Make")
+def test_make_setup_handles_make_path_with_spaces(tmp_path: Path) -> None:
+    make = shutil.which("make")
+    assert make is not None
+    tool_dir = tmp_path / "Xcode Corporate.app" / "usr" / "bin"
+    tool_dir.mkdir(parents=True)
+    make_path = tool_dir / "make"
+    make_path.symlink_to(make)
+
+    # Exercise setup and its recursive make without installing dependencies.
+    result = subprocess.run(
+        [
+            make,
+            "setup",
+            f"MAKE={make_path}",
+            f"VENV={sys.prefix}",
+            "PIP=true",
+            "NPM=true",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

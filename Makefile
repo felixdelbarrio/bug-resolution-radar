@@ -2,11 +2,11 @@ SHELL := /bin/bash
 PYTHON_VERSION := $(strip $(shell cat .python-version))
 PY ?= python$(PYTHON_VERSION)
 VENV ?= .venv
-PIP = $(VENV)/bin/pip
+PIP = "$(PYTHON)" -m pip
 PYTHON = $(VENV)/bin/python
 PYTHON_VERSION_CHECK = import sys; sys.exit(0 if ".".join(map(str, sys.version_info[:2])) == sys.argv[1] else f"BRR requiere Python {sys.argv[1]}; detectado {sys.version.split()[0]}. Usa un entorno virtual compatible.")
-PYTEST = $(VENV)/bin/pytest
-PYINSTALLER = $(VENV)/bin/pyinstaller
+PYTEST = "$(PYTHON)" -m pytest
+PYINSTALLER = "$(PYTHON)" -m PyInstaller
 NPM ?= npm
 ALLOW_STALE_SOURCE ?= 0
 FRONTEND_DIR := frontend
@@ -62,9 +62,9 @@ help:
 	@echo ""
 setup:
 	@if [ ! -d "$(VENV)" ]; then \
-		$(PY) -c '$(PYTHON_VERSION_CHECK)' "$(PYTHON_VERSION)" && $(PY) -m venv "$(VENV)"; \
+		"$(PY)" -c '$(PYTHON_VERSION_CHECK)' "$(PYTHON_VERSION)" && "$(PY)" -m venv "$(VENV)"; \
 	fi
-	@$(MAKE) --no-print-directory _ensure-backend
+	@"$(MAKE)" --no-print-directory _ensure-backend
 	$(PIP) install -U pip
 	$(PIP) install -e ".[dev]"
 	$(NPM) --prefix $(FRONTEND_DIR) install
@@ -90,7 +90,7 @@ _ensure-frontend: _ensure-backend
 	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then echo "Faltan dependencias frontend. Ejecuta: make setup"; exit 1; fi
 
 _ensure-build: _ensure-backend
-	@if [ ! -x "$(PYINSTALLER)" ]; then echo "Falta pyinstaller. Ejecuta: make setup"; exit 1; fi
+	@$(PYINSTALLER) --version >/dev/null 2>&1 || { echo "Falta pyinstaller o no se puede ejecutar. Ejecuta: make setup"; exit 1; }
 	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then echo "Faltan dependencias frontend. Ejecuta: make setup"; exit 1; fi
 
 _ensure-node:
@@ -98,7 +98,7 @@ _ensure-node:
 _ensure-icon-assets: _ensure-backend
 	@if [ ! -f "$(ICON_PNG)" ] || [ ! -f "$(ICON_ICO)" ] || [ ! -f "$(ICON_ICNS)" ]; then \
 		if [ ! -f "$(ICON_SOURCE)" ]; then echo "Falta icono fuente: $(ICON_SOURCE)"; exit 1; fi; \
-		PYTHONPATH=src $(PYTHON) scripts/update_app_icon.py --input "$(ICON_SOURCE)" --png-out "$(ICON_PNG)" --ico-out "$(ICON_ICO)" --icns-out "$(ICON_ICNS)"; \
+		PYTHONPATH=src "$(PYTHON)" scripts/update_app_icon.py --input "$(ICON_SOURCE)" --png-out "$(ICON_PNG)" --ico-out "$(ICON_ICO)" --icns-out "$(ICON_ICNS)"; \
 	fi
 test: _ensure-backend
 	PYTHONPATH=src $(PYTEST) -q \
@@ -114,13 +114,13 @@ test: _ensure-backend
 		tests/test_security.py
 
 format: _ensure-backend
-	PYTHONPATH=src $(PYTHON) -m ruff format .
+	PYTHONPATH=src "$(PYTHON)" -m ruff format .
 lint: _ensure-backend
-	PYTHONPATH=src $(PYTHON) -m ruff check .
-	PYTHONPATH=src $(PYTHON) -m mypy src
+	PYTHONPATH=src "$(PYTHON)" -m ruff check .
+	PYTHONPATH=src "$(PYTHON)" -m mypy src
 
 run: _ensure-source-current _ensure-frontend _ensure-icon-assets build-frontend
-	PYTHONPATH=src $(PYTHON) run_desktop.py
+	PYTHONPATH=src "$(PYTHON)" run_desktop.py
 
 runWebapp: _ensure-source-current _ensure-node
 	node scripts/run_webapp_local.mjs --host "$(WEBAPP_HOST)" --port "$(WEBAPP_PORT)" $(WEBAPP_ARGS)
@@ -129,18 +129,18 @@ ci: ci-format ci-typecheck ci-coverage ci-quality ci-gpc
 
 CI: ci
 ci-format: _ensure-backend
-	PYTHONPATH=src $(PYTHON) -m ruff format --check .
+	PYTHONPATH=src "$(PYTHON)" -m ruff format --check .
 
 ci-typecheck: _ensure-backend
-	PYTHONPATH=src $(PYTHON) -m mypy src
+	PYTHONPATH=src "$(PYTHON)" -m mypy src
 
 ci-coverage: _ensure-backend
 	PYTHONPATH=src $(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml
 ci-quality: _ensure-frontend
-	$(PYTHON) -m pip check
+	"$(PYTHON)" -m pip check
 	$(NPM) --prefix $(FRONTEND_DIR) run build
-	PYTHONPATH=src $(PYTHON) scripts/check_docs_references.py
-	PYTHONPATH=src $(PYTHON) scripts/check_dead_private_helpers.py
+	PYTHONPATH=src "$(PYTHON)" scripts/check_docs_references.py
+	PYTHONPATH=src "$(PYTHON)" scripts/check_dead_private_helpers.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_run_desktop_entrypoint.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_api_app.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_executive_report_ppt.py -k "render_chart_png_bytes_uses_cache or prerender_section_images_populates_payload"
@@ -159,8 +159,8 @@ build-frontend: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run build
 build: _ensure-source-current _ensure-build _ensure-icon-assets build-frontend test
 	@case "$(HOST_UNAME)" in \
-		Darwin) $(MAKE) _build-macos ;; \
-		Linux) $(MAKE) _build-linux ;; \
+		Darwin) "$(MAKE)" _build-macos ;; \
+		Linux) "$(MAKE)" _build-linux ;; \
 		*) echo "OS no soportado para make build: $(HOST_UNAME)"; exit 1 ;; \
 	esac
 _build-macos:
@@ -177,7 +177,7 @@ _build-macos:
 		--add-data "$(PWD)/frontend/dist:frontend_dist" \
 		--add-data "$(PWD)/.env.example:." \
 		$(PYINSTALLER_COLLECT_ARGS) \
-		$(PWD)/run_desktop.py
+		"$(PWD)/run_desktop.py"
 	@mkdir -p build_bundle/bug-resolution-radar-macos/dist
 	@cp -R dist_app/bug-resolution-radar.app build_bundle/bug-resolution-radar-macos/dist/bug-resolution-radar.app
 	@cp README.md build_bundle/bug-resolution-radar-macos/README.md
@@ -198,7 +198,7 @@ _build-linux:
 		--add-data "$(PWD)/frontend/dist:frontend_dist" \
 		--add-data "$(PWD)/.env.example:." \
 		$(PYINSTALLER_COLLECT_ARGS) \
-		$(PWD)/run_desktop.py
+		"$(PWD)/run_desktop.py"
 	@mkdir -p build_bundle/bug-resolution-radar-linux/dist
 	@cp dist/bug-resolution-radar build_bundle/bug-resolution-radar-linux/dist/bug-resolution-radar
 	@cp README.md build_bundle/bug-resolution-radar-linux/README.md
@@ -216,4 +216,4 @@ kill:
 	pkill -f "vite --host 127.0.0.1 --port 5173" 2>/dev/null || true; \
 	echo "Puertos de desarrollo liberados."
 clean:
-	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache .coverage htmlcov $(FRONTEND_DIR)/node_modules $(FRONTEND_DIST) dist dist_app build build_app build_bundle
+	rm -rf "$(VENV)" .mypy_cache .pytest_cache .ruff_cache .coverage htmlcov $(FRONTEND_DIR)/node_modules $(FRONTEND_DIST) dist dist_app build build_app build_bundle
