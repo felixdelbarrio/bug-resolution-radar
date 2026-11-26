@@ -1010,6 +1010,7 @@ function _text_(value) { return value == null ? '' : String(value); }
 function _date_(value) { const date = new Date(value); return isNaN(date) ? null : date; }
 const reads = [];
 function _snapshotRecordById_(id) { reads.push(id); return { id: id }; }
+function _snapshotReportRecords_() { return []; }
 function _snapshotHeader_(record) {
   if (record.id === 'missing') throw new Error('missing');
   return { semantics: record.id === 'ar-new' ? { contactCenterEnabled: true, contactCenterMaterialized: true } :

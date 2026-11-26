@@ -2748,6 +2748,7 @@ def build_intelligence_snapshot(
     insights_functionality_filters: Sequence[str] | None = None,
     insights_status_manual: bool = False,
     insights_tab: str = "all",
+    reference_day: pd.Timestamp | str | None = None,
 ) -> dict[str, Any]:
     active_tab = _normalize_insights_tab(insights_tab)
     build_all_tabs = active_tab == "all"
@@ -2766,6 +2767,7 @@ def build_intelligence_snapshot(
     if build_all_tabs or active_tab == "evolution":
         execution_evolution = build_execution_evolution(
             dff=context.scoped_df,
+            reference_day=reference_day,
             last_finished_only=_quincena_last_finished_only(settings),
         )
         measurement = dict(execution_evolution.pop("learningMeasurement", {}) or {})
@@ -2788,6 +2790,7 @@ def build_intelligence_snapshot(
             country=country_txt,
             source_ids=source_ids,
             source_label_by_id=labels,
+            reference_day=pd.Timestamp(reference_day) if reference_day is not None else None,
         )
         if needs_quincenal and not dff.empty
         else None

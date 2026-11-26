@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from io import BytesIO
+
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.util import Inches, Pt
 from typing import Sequence
 
 import pandas as pd
@@ -333,6 +339,7 @@ def generate_period_followup_report_artifact(
     functionality_filters: Sequence[str] | None = None,
     df_all: pd.DataFrame | None = None,
     reference_day: pd.Timestamp | str | None = None,
+    allow_empty: bool = False,
 ) -> PeriodFollowupReportResult:
     context = _build_context_for_scope(
         settings,
@@ -341,7 +348,35 @@ def generate_period_followup_report_artifact(
         filters=filters,
         df_all=df_all,
     )
+    segment = active_contact_center(settings, country, filters.contact_center)
     if context.dff.empty:
+        if allow_empty and segment:
+            # Never fall back to the unfiltered scope for an empty segment.
+            deck = Presentation()
+            deck.slide_width = Inches(13.333)
+            deck.slide_height = Inches(7.5)
+            slide = deck.slides.add_slide(deck.slide_layouts[6])
+            slide.background.fill.solid()
+            slide.background.fill.fore_color.rgb = RGBColor.from_string("070E46")
+            for y, text, size in (
+                (0.7, "BBVA | Banca de Empresas e Instituciones", 22),
+                (2.1, f"Seguimiento de incidencias - {country} | {segment}", 34),
+                (3.5, f"Fecha de referencia: {str(reference_day or '')[:10]}", 22),
+                (4.3, "Sin incidencias en el segmento y periodo analizado.", 24),
+            ):
+                box = slide.shapes.add_textbox(Inches(0.8), Inches(y), Inches(11.7), Inches(0.9))
+                paragraph = box.text_frame.paragraphs[0]
+                paragraph.text = text
+                paragraph.font.size = Pt(size)
+                paragraph.font.color.rgb = RGBColor.from_string("FFFFFF")
+            buffer = BytesIO()
+            deck.save(buffer)
+            return PeriodFollowupReportResult(
+                file_name=f"seguimiento-{segment.lower()}-{datetime.now(timezone.utc):%Y%m%d-%H%M}.pptx",
+                content=buffer.getvalue(), slide_count=1, total_issues=0, open_issues=0,
+                closed_issues=0, country=country, source_ids=tuple(source_ids),
+                applied_filter_summary=f"Contact center: {segment}",
+            )
         raise ValueError("No hay incidencias en la ventana temporal y filtros seleccionados.")
 
     current_snapshot = build_operational_snapshot(
@@ -370,4 +405,5 @@ def generate_period_followup_report_artifact(
         functionality_filters=functionality_filters,
         reference_day=reference_day,
         evolution_insight=build_evolution_insight(current_snapshot, baseline_snapshot),
+        contact_center=segment,
     )

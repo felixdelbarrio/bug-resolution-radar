@@ -61,6 +61,20 @@ function _activeSnapshotRecordForScope_(scopeKey, required) {
   return current;
 }
 
+function _contactCenterReportHeaders_(projection) {
+  if (!projection.contactCenterReports) return null;
+  const result = {};
+  ['PYME', 'BEI'].forEach(function (segment) {
+    const variant = projection.contactCenterReports[segment];
+    result[segment] = {
+      report: variant.report,
+      factsSha256: variant.factsSha256,
+      rowCount: projection.views.contactCenter[segment].issues.total
+    };
+  });
+  return result;
+}
+
 function _projectionPartValues_(projection) {
   const parts = {};
   parts.meta = {
@@ -75,6 +89,10 @@ function _projectionPartValues_(projection) {
   };
   parts.administration = projection.administration;
   parts.newsletter = projection.newsletterFacts;
+  if (projection.contactCenterReports && projection.views.contactCenter) {
+    parts.meta.contactCenterReports = _contactCenterReportHeaders_(projection);
+    parts['contact-center/BEI/newsletter'] = projection.contactCenterReports.BEI.newsletterFacts;
+  }
   parts.overview = projection.views.overview;
   parts['insights/catalog'] = projection.views.insights.catalog;
   Object.keys(projection.views.insights.byId).sort().forEach(function (id) {
@@ -153,8 +171,9 @@ function _projectionPartValues_(projection) {
   return parts;
 }
 
-function _appendSnapshotParts_(snapshotId, projection, createdAt) {
+function _appendSnapshotParts_(snapshotId, projection, createdAt, publications) {
   const values = _projectionPartValues_(projection);
+  if (publications) values.meta.reportPublications = publications;
   const keys = Object.keys(values).sort();
   const rows = [];
   const descriptors = [];
@@ -342,9 +361,64 @@ function _snapshotHeader_(record) {
   return meta;
 }
 
-function _snapshotNewsletter_(record) {
-  const newsletter = _loadSnapshotPart_(record, 'newsletter');
-  _assert_(_hash_(_stableJsonStringify_(newsletter)) === _text_(record.facts_sha256),
+/** The snapshot pointer stays at the full scope; report identities are separate. */
+function _snapshotReportRecords_(record, header) {
+  const meta = header || _snapshotHeader_(record);
+  if (!meta.semantics || meta.semantics.contactCenterEnabled !== true) {
+    return [Object.assign({}, record, { base_scope_key: _text_(record.scope_key), contact_center: '' })];
+  }
+  // An old aggregate report must never be exposed as either new segment.
+  if (!meta.contactCenterReports || !meta.reportPublications) return [];
+  const reports = ['PYME', 'BEI'].map(function (segment) {
+    const variant = meta.contactCenterReports[segment];
+    const publication = meta.reportPublications[segment];
+    _assert_(variant && publication && publication.reportId && publication.slidesFileId && publication.pptxFileId &&
+      publication.pptxSha256 === variant.report.sha256 && Number(publication.pptxBytes) === Number(variant.report.bytes) &&
+      Number(publication.slideCount) === Number(variant.report.slideCount) &&
+      publication.reportName === variant.report.fileName &&
+      Number.isInteger(variant.rowCount) && variant.rowCount >= 0,
+      'Los informes segmentados no coinciden con el snapshot.', 'SNAPSHOT_CORRUPT');
+    return Object.assign({}, record, {
+      base_scope_key: _text_(record.scope_key),
+      scope_key: _text_(record.scope_key) + '::contact-center:' + segment,
+      scope_label: _text_(record.scope_label) + ' · ' + segment,
+      contact_center: segment,
+      report_id: publication.reportId,
+      report_name: publication.reportName,
+      pptx_file_id: publication.pptxFileId,
+      pptx_sha256: publication.pptxSha256,
+      pptx_bytes: publication.pptxBytes,
+      slides_file_id: publication.slidesFileId,
+      slides_url: publication.slidesUrl,
+      slide_count: publication.slideCount,
+      row_count: variant.rowCount,
+      facts_sha256: variant.factsSha256
+    });
+  });
+  const primary = reports[0];
+  _assert_(primary.report_id === _text_(record.report_id) && primary.facts_sha256 === _text_(record.facts_sha256) &&
+    primary.pptx_sha256 === _text_(record.pptx_sha256) && primary.slides_file_id === _text_(record.slides_file_id) &&
+    reports[0].report_id !== reports[1].report_id && reports[0].pptx_sha256 !== reports[1].pptx_sha256 &&
+    reports[0].slides_file_id !== reports[1].slides_file_id && reports[0].pptx_file_id !== reports[1].pptx_file_id &&
+    reports[0].row_count + reports[1].row_count === Number(record.row_count),
+    'El índice de informes no coincide con el snapshot.', 'SNAPSHOT_CORRUPT');
+  return reports;
+}
+
+function _snapshotReportRecord_(record, contactCenter) {
+  const records = _snapshotReportRecords_(record);
+  const segment = _text_(contactCenter);
+  const selected = records.find(function (item) {
+    return item.contact_center === '' || item.contact_center === (segment || 'PYME');
+  });
+  _assert_(selected, 'No existe un informe para este Contact center. Republica el traslado desde Desktop.', 'VIEW_NOT_MATERIALIZED');
+  return selected;
+}
+
+function _snapshotNewsletter_(record, contactCenter) {
+  const report = _snapshotReportRecord_(record, contactCenter);
+  const newsletter = _loadSnapshotPart_(record, report.contact_center === 'BEI' ? 'contact-center/BEI/newsletter' : 'newsletter');
+  _assert_(_hash_(_stableJsonStringify_(newsletter)) === _text_(report.facts_sha256),
     'Los hechos de newsletter no coinciden con el snapshot.', 'SNAPSHOT_CORRUPT');
   return newsletter;
 }

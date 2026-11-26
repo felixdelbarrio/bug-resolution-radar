@@ -903,12 +903,12 @@ const App = (() => {
 
   function reportSuccess(job) {
     const senderReady = job.newsletterSenderReady !== false;
-    const canSend = senderReady && job.newsletterTested && !job.newsletterSent;
+    const canSend = senderReady && job.newsletterTested && !job.newsletterSent && job.recipientCount > 0;
     const sendLabel = job.newsletterSent
       ? 'Newsletter enviada ✓'
       : 'Enviar newsletter';
     return `<div class="report-success">
-      <strong>Presentación exacta publicada</strong>
+      <strong>Presentación exacta publicada${job.contactCenter ? ` · ${UI.escape(job.contactCenter)}` : ''}</strong>
       <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
       <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
       ${senderReady ? `<div class="newsletter-sender-ready"><strong>Remitente corporativo</strong><span>${UI.escape(job.newsletterSender || '')}</span></div>` : `<div class="newsletter-sender-blocked" role="alert"><strong>Canal corporativo no disponible</strong><span>${UI.escape(job.newsletterSender || '')} no está aceptado en «Enviar correo como» para ${UI.escape(job.newsletterSenderExecutor || 'el propietario del despliegue')}. Estado: ${UI.escape(job.newsletterSenderStatus || 'no disponible')}.</span><button id="revalidateNewsletterSenderReport" class="ghost-button" type="button">Revalidar buzón</button></div>`}
@@ -922,9 +922,10 @@ const App = (() => {
 
   async function deliverNewsletter(mode) {
     const job = state.lastPeriodReport;
+    const epoch = state.navigationEpoch;
     if (!job) return;
     if (mode === 'send' && !window.confirm(
-      'Se enviará la newsletter a todos los destinatarios activos de este ámbito. ¿Continuar?'
+      `Se enviará la newsletter ${job.contactCenter || ''} a todos los destinatarios activos de este ámbito. ¿Continuar?`
     )) return;
     const testButton = $('testPeriodNewsletter');
     const sendButton = $('sendPeriodNewsletter');
@@ -948,7 +949,7 @@ const App = (() => {
         'success'
       );
       if (mode === 'send') job.newsletterSent = true;
-      await renderReports();
+      if (epoch === state.navigationEpoch && state.route === 'reports') await renderReports();
     } catch (error) {
       UI.message(error.message, 'error');
     } finally {
@@ -980,15 +981,16 @@ const App = (() => {
 
   async function renderReports() {
     const epoch = state.navigationEpoch;
+    state.lastPeriodReport = null;
     view().innerHTML = `<section class="page-stack">
       <section class="surface-panel report-intro"><div>
         <p class="section-kicker">Reports</p><h3>Presentación y newsletter</h3>
-        <p class="minor-copy">La presentación y la newsletter corresponden al ámbito completo del traslado (PYME + BEI cuando aplica). Las seis vistas del cuadro de mando sí se consultan por Contact center. GPC no recalcula el PPTX.</p>
+        <p class="minor-copy">${state.contactCenterCountry ? `Informe y newsletter exclusivos de ${UI.escape(state.contactCenter)}.` : 'Informe y newsletter del ámbito completo.'} GPC conserva el PPTX autoritativo del escritorio.</p>
       </div></section>
       <section class="surface-panel"><div id="periodReportResult">Consultando snapshot…</div></section>
     </section>`;
     try {
-      const status = await RPC.call('getPeriodReportStatus', state.scopeKey);
+      const status = await RPC.call('getPeriodReportStatus', state.scopeKey, state.contactCenterCountry ? state.contactCenter : '');
       if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
       state.lastPeriodReport = status.job;
       $('periodReportResult').innerHTML = reportSuccess(status.job);
@@ -1161,7 +1163,7 @@ const App = (() => {
     state.settingsTab = activeTab;
     const needsAdminConsole = ['health', 'drive', 'sources', 'summary'].includes(activeTab);
     if (needsAdminConsole && !state.adminConsole) {
-      state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey);
+      state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey, state.contactCenterCountry ? state.contactCenter : '');
     }
     if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
     let body = '';
@@ -1214,7 +1216,7 @@ const App = (() => {
       const reports = newsletter.reports || [];
       let selectedReport = reports.find(report => report.reportId === state.newsletterReportId);
       if (!selectedReport) {
-        selectedReport = reports.find(report => report.scopeKey === state.scopeKey) || reports[0] || null;
+        selectedReport = reports.find(report => report.baseScopeKey === state.scopeKey && report.contactCenter === (state.contactCenterCountry ? state.contactCenter : '')) || null;
       }
       state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
       const recipients = (newsletter.recipients || []).filter(
@@ -1229,7 +1231,7 @@ const App = (() => {
             <span>${UI.escape(newsletter.sender.effective || newsletter.sender.requested)} · ${UI.escape(newsletter.sender.mode)}</span>
             ${newsletter.sender.ready ? '' : `<small>${UI.escape(newsletter.sender.executor || 'El propietario de la WebApp')} debe tener aceptado este remitente en «Enviar correo como». Hasta entonces el envío permanece bloqueado.</small><button id="revalidateNewsletterSenderSettings" class="ghost-button" type="button">Revalidar buzón</button>`}
           </div>
-          <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
+          <label class="field"><span>Informe cargado</span><select id="recipientReport"><option value="" ${selectedReport ? '' : 'selected'} disabled>Selecciona un informe</option>${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
           ).join('')}</select></label>
           <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} persistidos para este ámbito</span></div>
@@ -1590,6 +1592,9 @@ const App = (() => {
       state.contactCenter = 'PYME';
       state.contactCenterCountry = '';
       const initial = bootstrap.initialState || {};
+      state.newsletterSettings = null;
+      state.newsletterReportId = '';
+      state.lastPeriodReport = null;
       const local = readLocalPreferences();
       const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
       state.scopeKey = isAdmin() && validScopeKeys.has(local.scopeKey)
@@ -1611,6 +1616,10 @@ const App = (() => {
       ].filter(Boolean).join(' ');
       window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
       $('appTitle').textContent = bootstrap.app.name;
+      if (isShared() && initial.contactCenter && currentScope()) {
+        state.contactCenterCountry = currentScope().country;
+        state.contactCenter = initial.contactCenter;
+      }
       syncScope();
       syncNavigation();
       $('loadingView').classList.add('hidden');
@@ -1671,6 +1680,8 @@ const App = (() => {
       await renderReports();
     } else if (state.route === 'settings') {
       state.adminConsole = null;
+      state.newsletterSettings = null;
+      state.newsletterReportId = '';
       await renderSettings();
     }
     schedulePreferenceSave();
@@ -1684,7 +1695,8 @@ const App = (() => {
       button.addEventListener('click', async () => {
         if (button.dataset.route === 'reports' && !isAdmin() && !isShared()) {
           const scope = currentScope();
-          const slidesUrl = String(scope && scope.slidesUrl || '').trim();
+          const urls = scope && scope.contactCenterReportUrls;
+          const slidesUrl = String(scope && (scope.contactCenterEnabled ? (urls || {})[state.contactCenter] : scope.slidesUrl) || '').trim();
           if (!/^https:[/][/]/i.test(slidesUrl)) {
             UI.message('Este snapshot no tiene una presentación publicada disponible.', 'warning');
             return;

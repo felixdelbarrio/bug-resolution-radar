@@ -73,9 +73,12 @@ function _sharedReportContext_(rawToken) {
   _assert_(share, 'Este enlace compartido no existe o ya no está activo.', 'SHARE_INVALID');
   const user = _requireDomainViewer_();
   const record = _snapshotRecordById_(share.snapshot_id, true);
-  _assert_(
-    _text_(record.scope_key) === _text_(share.scope_key) &&
-    _text_(record.report_id) === _text_(share.report_id) &&
+  const header = _snapshotHeader_(record);
+  const selected = _snapshotReportRecords_(record, header).find(function (item) {
+    return _text_(item.report_id) === _text_(share.report_id);
+  });
+  _assert_(selected &&
+    _text_(selected.scope_key) === _text_(share.scope_key) &&
     _text_(record.projection_sha256) === _text_(share.projection_sha256) &&
     _text_(record.data_version) === _text_(share.data_version),
     'El enlace no coincide con el snapshot publicado.', 'SHARE_INVALID'
@@ -83,17 +86,19 @@ function _sharedReportContext_(rawToken) {
   const report = _readRecords_(RADAR.sheets.reportAudit).find(function (row) {
     return _text_(row.report_id) === _text_(share.report_id);
   });
-  _assert_(
-    report &&
+  _assert_(report &&
     _text_(report.snapshot_id) === _text_(record.snapshot_id) &&
-    _text_(report.projection_sha256) === _text_(record.projection_sha256),
+    _text_(report.scope_key) === _text_(selected.scope_key) &&
+    _text_(report.projection_sha256) === _text_(record.projection_sha256) &&
+    _text_(report.facts_sha256) === _text_(selected.facts_sha256) &&
+    _text_(report.slides_file_id) === _text_(selected.slides_file_id),
     'La presentación asociada al enlace ya no es verificable.', 'SHARE_INVALID'
   );
-  _snapshotHeader_(record);
   return {
     share: share,
     record: record,
     report: report,
+    contactCenter: selected.contact_center,
     user: Object.assign({}, user, {
       scopeLabel: _text_(share.scope_label)
     })
@@ -102,7 +107,7 @@ function _sharedReportContext_(rawToken) {
 
 function _sharedDashboardRequest_(context, request) {
   return _normalizeMaterializedRequest_(
-    request || { view: 'overview' },
+    Object.assign({ view: 'overview', contactCenter: context.contactCenter || '' }, request || {}),
     context.record.scope_key
   );
 }
@@ -114,6 +119,7 @@ function getSharedBootstrap(token) {
     const scope = header.scope;
     const initialState = {
       panel: 'overview',
+      contactCenter: context.contactCenter,
       scopeKey: scope.scopeKey,
       trendChart: 'open_status_bar',
       insightsId: 'evolution',
@@ -166,6 +172,7 @@ function getSharedBootstrap(token) {
         context.record.snapshot_id,
         {
           view: 'overview',
+          contactCenter: context.contactCenter,
           page: 1,
           pageSize: RADAR.defaultPageSize,
           sortId: 'default'
@@ -187,7 +194,7 @@ function querySharedDashboard(token, request) {
 function getSharedIssueDetail(token, issueUid, contactCenter) {
   return _rpc_(function () {
     const context = _sharedReportContext_(token);
-    const row = _snapshotIssueDetail_(context.record, _text_(issueUid), contactCenter);
+    const row = _snapshotIssueDetail_(context.record, _text_(issueUid), contactCenter || context.contactCenter);
     _assert_(row, 'No existe la incidencia en este snapshot.', 'NOT_FOUND');
     return row;
   });

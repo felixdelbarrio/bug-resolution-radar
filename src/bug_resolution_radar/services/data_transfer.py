@@ -41,10 +41,12 @@ MAX_REPORT_BYTES = 20 * 1024 * 1024
 _DATASET_FILES = {
     "projection": "data/projection.json",
     "report": "artifacts/period_followup.pptx",
+    "reportBei": "artifacts/period_followup_bei.pptx",
 }
 _DATASET_LABELS = {
     "projection": "Proyección canónica",
     "report": "Presentación de seguimiento",
+    "reportBei": "Presentación de seguimiento BEI",
 }
 _PROJECTION_FIELDS = {
     "schema",
@@ -99,7 +101,7 @@ def _manifest(
     scope: dict[str, Any],
     files: dict[str, bytes],
 ) -> dict[str, Any]:
-    if set(files) != set(_DATASET_FILES):
+    if set(files) not in ({"projection", "report"}, set(_DATASET_FILES)):
         raise TransferValidationError("Los artefactos del traslado v3 están incompletos.")
     return {
         "format": TRANSFER_FORMAT,
@@ -114,7 +116,7 @@ def _manifest(
                 "bytes": len(files[key]),
                 "records": 1,
             }
-            for key in _DATASET_FILES
+            for key in files
         },
     }
 
@@ -142,10 +144,11 @@ def _build_archive(files: dict[str, bytes], manifest: dict[str, Any]) -> bytes:
             compresslevel=9,
         )
         # PPTX is already a ZIP; storing it avoids costly, ineffective double compression.
-        archive.writestr(
-            _zip_info(_DATASET_FILES["report"], compression=zipfile.ZIP_STORED),
-            files["report"],
-        )
+        for key in ("report", "reportBei"):
+            if key in files:
+                archive.writestr(
+                    _zip_info(_DATASET_FILES[key], compression=zipfile.ZIP_STORED), files[key]
+                )
     content = buffer.getvalue()
     if len(content) > MAX_ARCHIVE_BYTES:
         raise TransferValidationError(
@@ -243,11 +246,13 @@ def export_business_data(
             "projection": artifact.projection_content,
             "report": artifact.report_content,
         }
+        if artifact.report_bei_content:
+            files["reportBei"] = artifact.report_bei_content
         if len(files["projection"]) > MAX_PROJECTION_BYTES:
             raise TransferValidationError(
                 "La proyección supera 24 MB; reduce el ámbito antes de publicarlo en GPC."
             )
-        if len(files["report"]) > MAX_REPORT_BYTES:
+        if any(len(files[key]) > MAX_REPORT_BYTES for key in files if key != "projection"):
             raise TransferValidationError(
                 "La presentación supera 20 MB; reduce su contenido antes de publicarla en GPC."
             )
@@ -264,16 +269,19 @@ def export_business_data(
             f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}{TRANSFER_EXTENSION}"
         )
         saved_path = save_download_content(settings, file_name=file_name, content=archive_content)
-        stats = [{"key": key, "label": _DATASET_LABELS[key], "count": 1} for key in _DATASET_FILES]
+        stats = [
+            {"key": key, "label": "Presentación de seguimiento PYME" if key == "report" and "reportBei" in files else _DATASET_LABELS[key], "count": 1}
+            for key in files
+        ]
         payload = {
             "operation": "export",
-            "summary": "Proyección GPC y presentación local exacta preparadas.",
+            "summary": ("Proyección GPC y presentaciones PYME y BEI preparadas." if "reportBei" in files else "Proyección GPC y presentación local exacta preparadas."),
             "completedAt": created_at,
             "fileName": saved_path.name,
             "savedPath": str(saved_path),
             "savedDir": str(saved_path.parent),
             "fileSize": len(archive_content),
-            "totalRecords": 2,
+            "totalRecords": len(files),
             "stats": stats,
             "scope": scope,
             "semanticContract": SEMANTIC_CONTRACT,
@@ -288,7 +296,7 @@ def export_business_data(
                 "operation": "export",
                 "completedAt": created_at,
                 "fileName": saved_path.name,
-                "totalRecords": 2,
+                "totalRecords": len(files),
                 "headline": f"Vista {scope['scopeLabel']} exportada a GPC",
                 "stats": stats,
                 "scope": scope,
@@ -421,10 +429,15 @@ def _validate_projection(
     *,
     manifest: dict[str, Any],
     report_content: bytes,
+    report_bei_content: bytes = b"",
 ) -> dict[str, Any]:
-    payload = _require_exact_fields(
-        projection, _PROJECTION_FIELDS, label=_DATASET_LABELS["projection"]
-    )
+    semantics_value = projection.get("semantics") if isinstance(projection, dict) else None
+    enabled = isinstance(semantics_value, dict) and semantics_value.get("contactCenterEnabled") is True
+    fields = _PROJECTION_FIELDS | ({"contactCenterReports"} if enabled else set())
+    payload = _require_exact_fields(projection, fields, label=_DATASET_LABELS["projection"])
+    expected_datasets = {"projection", "report", "reportBei"} if enabled else {"projection", "report"}
+    if set(manifest["datasets"]) != expected_datasets or bool(report_bei_content) != enabled:
+        raise TransferValidationError("Los informes no coinciden con la configuración Contact Center.")
     if (
         payload.get("schema") != PROJECTION_SCHEMA
         or payload.get("schemaVersion") != PROJECTION_SCHEMA_VERSION
@@ -506,6 +519,29 @@ def _validate_projection(
         or int(report["slideCount"]) <= 0
     ):
         raise TransferValidationError("Los metadatos de la presentación no son coherentes.")
+    if enabled:
+        if not materialized:
+            raise TransferValidationError("Se requieren ambas vistas Contact Center.")
+        reports = _require_exact_fields(payload["contactCenterReports"], {"PYME", "BEI"}, label="contactCenterReports")
+        for segment, key, content in (("PYME", "report", report_content), ("BEI", "reportBei", report_bei_content)):
+            variant = _require_exact_fields(reports[segment], {"report", "newsletterFacts", "factsSha256"}, label=segment)
+            facts = variant["newsletterFacts"]
+            if not isinstance(facts, dict) or sha256_bytes(canonical_json_bytes(facts)) != variant["factsSha256"]:
+                raise TransferValidationError(f"Huella de newsletter {segment} inválida.")
+            draft = facts.get("draft")
+            if not isinstance(draft, dict) or not str(draft.get("subject", "")).startswith(f"[{segment}] "):
+                raise TransferValidationError(f"Newsletter {segment} no identificada.")
+            desc = _require_exact_fields(variant["report"], set(report), label=f"report.{segment}")
+            dataset = manifest["datasets"][key]
+            if (desc["mimeType"] != REPORT_MIME_TYPE or not str(desc["fileName"]).lower().endswith(".pptx")
+                or desc["bytes"] != len(content) or desc["bytes"] != dataset["bytes"]
+                or desc["sha256"] != dataset["sha256"] or desc["sha256"] != sha256_bytes(content)
+                or type(desc["slideCount"]) is not int or desc["slideCount"] <= 0):
+                raise TransferValidationError(f"PPTX {segment} incoherente.")
+        if reports["PYME"] != {"report": report, "newsletterFacts": newsletter, "factsSha256": payload["factsSha256"]}:
+            raise TransferValidationError("El índice principal no coincide con PYME.")
+        if reports["PYME"]["report"]["sha256"] == reports["BEI"]["report"]["sha256"]:
+            raise TransferValidationError("Los PPTX PYME y BEI deben ser distintos.")
     return payload
 
 
@@ -514,7 +550,9 @@ def _decode_archive(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         with zipfile.ZipFile(path, mode="r") as archive:
             infos = archive.infolist()
             names = [info.filename for info in infos]
-            required = {"manifest.json", *_DATASET_FILES.values()}
+            required = {"manifest.json", _DATASET_FILES["projection"], _DATASET_FILES["report"]}
+            if _DATASET_FILES["reportBei"] in names:
+                required.add(_DATASET_FILES["reportBei"])
             if len(names) != len(set(names)):
                 raise TransferValidationError("El traslado contiene elementos duplicados.")
             if set(names) != required:
@@ -544,11 +582,13 @@ def _decode_archive(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
             ):
                 raise TransferValidationError("Solo se admite el traslado GPC v3 vigente.")
             _validate_scope(manifest.get("scope"))
+            expected_keys = {key for key, member in _DATASET_FILES.items() if member in required}
             datasets = _require_exact_fields(
-                manifest.get("datasets"), set(_DATASET_FILES), label="manifest.datasets"
+                manifest.get("datasets"), expected_keys, label="manifest.datasets"
             )
             files: dict[str, bytes] = {}
-            for key, member_name in _DATASET_FILES.items():
+            for key in expected_keys:
+                member_name = _DATASET_FILES[key]
                 descriptor = _require_exact_fields(
                     datasets.get(key),
                     {"path", "sha256", "bytes", "records"},
@@ -573,6 +613,8 @@ def _decode_archive(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     if len(files["projection"]) > MAX_PROJECTION_BYTES:
         raise TransferValidationError("La proyección supera el tamaño máximo admitido.")
     _validate_pptx(files["report"])
+    if "reportBei" in files:
+        _validate_pptx(files["reportBei"])
     try:
         projection = json.loads(files["projection"].decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -581,8 +623,9 @@ def _decode_archive(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         projection,
         manifest=manifest,
         report_content=files["report"],
+        report_bei_content=files.get("reportBei", b""),
     )
-    return manifest, {"projection": projection, "report": files["report"]}
+    return manifest, {**files, "projection": projection}
 
 
 def validate_transfer_package(settings: Settings, file_name: str) -> dict[str, Any]:
@@ -602,7 +645,7 @@ def validate_transfer_package(settings: Settings, file_name: str) -> dict[str, A
             "mode": "inspect-only",
             "scope": scope,
             "semanticContract": SEMANTIC_CONTRACT,
-            "totalSourceRecords": 2,
+            "totalSourceRecords": len(manifest["datasets"]),
             "stats": [
                 {
                     "key": key,
@@ -611,7 +654,7 @@ def validate_transfer_package(settings: Settings, file_name: str) -> dict[str, A
                     "sha256": manifest["datasets"][key]["sha256"],
                     "bytes": manifest["datasets"][key]["bytes"],
                 }
-                for key in _DATASET_FILES
+                for key in manifest["datasets"]
             ],
             "warnings": [],
         }

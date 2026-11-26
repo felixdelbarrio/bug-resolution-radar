@@ -113,6 +113,7 @@ class CloudProjectionArtifact:
     projection: dict[str, Any]
     projection_content: bytes
     report_content: bytes
+    report_bei_content: bytes = b""
 
 
 def _json_safe(value: Any) -> Any:
@@ -609,7 +610,8 @@ def _materialize_issue_references(value: Any, issue_rows: Sequence[Mapping[str, 
 
 
 def _materialize_views(
-    settings: Settings, *, query: DashboardQuery, context: DashboardScopeContext
+    settings: Settings, *, query: DashboardQuery, context: DashboardScopeContext,
+    reference_day: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Reuse exactly the same builders for full scope and each Contact Center."""
     overview = build_dashboard_snapshot(settings, query=query)
@@ -655,6 +657,7 @@ def _materialize_views(
         query=query,
         insights_tab="all",
         insights_view_mode=INSIGHTS_VIEW_MODE_ACCUMULATED,
+        reference_day=reference_day,
     )
     cloud_insight_ids = {
         "evolution",
@@ -757,6 +760,15 @@ def _materialize_views(
     return views, intelligence
 
 
+def _report_descriptor(result: PeriodFollowupReportResult) -> dict[str, Any]:
+    content = bytes(result.content)
+    return {
+        "fileName": str(result.file_name), "mimeType": REPORT_MIME_TYPE,
+        "sha256": sha256_bytes(content), "bytes": len(content),
+        "slideCount": int(result.slide_count),
+    }
+
+
 def build_cloud_projection_artifact(
     settings: Settings,
     *,
@@ -765,6 +777,7 @@ def build_cloud_projection_artifact(
     scope_mode: str,
     generated_at: datetime | str | None = None,
     report_result: PeriodFollowupReportResult | None = None,
+    contact_center_report_results: Mapping[str, PeriodFollowupReportResult] | None = None,
 ) -> CloudProjectionArtifact:
     """Materialize every cloud view and attach the exact local PPTX bytes."""
     country_text = str(country or "").strip()
@@ -803,14 +816,56 @@ def build_cloud_projection_artifact(
         normalize_country_name(country_text, settings=settings)
         in contact_center_enabled_countries(settings)
     )
+    focus_sources = _focus_source_catalog(
+        settings, country=country_text, source_ids=clean_source_ids,
+    )
+    contact_center_reports: dict[str, Any] = {}
+    report_bei_content = b""
     if contact_center_enabled:
+        if report_result is not None:
+            raise ValueError("Un ámbito segmentado requiere dos informes independientes.")
+        if contact_center_report_results is not None and set(contact_center_report_results) != set(CONTACT_CENTERS):
+            raise ValueError("Se requieren los informes PYME y BEI.")
         variants: dict[str, Any] = {}
         for segment in CONTACT_CENTERS:
             segment_query = replace(query, contact_center=segment)
             segment_context = load_scope_context(settings, query=segment_query, include_kpis=True)
-            variants[segment], _ = _materialize_views(
-                settings, query=segment_query, context=segment_context
+            variants[segment], segment_intelligence = _materialize_views(
+                settings, query=segment_query, context=segment_context, reference_day=reference_date
             )
+            result = (
+                contact_center_report_results[segment] if contact_center_report_results is not None
+                else generate_period_followup_report_artifact(
+                    settings, country=country_text, source_ids=clean_source_ids,
+                    filters=build_report_filters(contact_center=segment),
+                    applied_filter_summary=f"Contact center: {segment}",
+                    reference_day=reference_date, allow_empty=True,
+                )
+            )
+            segment_content = bytes(result.content)
+            facts = _newsletter_facts(
+                insights=segment_intelligence, context=segment_context, sources=focus_sources,
+            )
+            if segment_context.dff.empty:
+                # Some empty analytics do not publish a period caption or summary.
+                summary = "Sin incidencias en el segmento y periodo analizado."
+                facts["periodLabel"] = facts["periodLabel"] or facts["evolution"]["fortnightLabel"] or f"Referencia {reference_date}"
+                facts["evolution"]["summary"] = summary
+                facts["evolution"]["yearLabel"] = facts["evolution"]["yearLabel"] or str(reference_date)[:4]
+                facts["evolution"]["fortnightLabel"] = facts["evolution"]["fortnightLabel"] or facts["periodLabel"]
+                facts["draft"]["summary"] = summary
+                facts["draft"]["subject"] = f"Seguimiento quincenal de incidencias · {facts['periodLabel']}"
+            facts["draft"]["subject"] = f"[{segment}] {facts['draft']['subject']}"
+            facts["draft"]["intro"] = f"Contact center: {segment}. " + facts["draft"]["intro"]
+            contact_center_reports[segment] = {
+                "report": _report_descriptor(result),
+                "newsletterFacts": facts,
+                "factsSha256": sha256_bytes(canonical_json_bytes(facts)),
+            }
+            if segment == "PYME":
+                report_result = result
+            else:
+                report_bei_content = segment_content
         # Refuse to publish a partial, overlapping or inconsistent partition.
         full_uids = {row["issue_uid"] for row in views["issues"]["rows"]}
         pyme_uids = {row["issue_uid"] for row in variants["PYME"]["issues"]["rows"]}
@@ -819,6 +874,8 @@ def build_cloud_projection_artifact(
             raise ValueError("Contact Center PYME/BEI no particiona el ámbito completo.")
         views["contactCenter"] = variants
 
+    if not contact_center_enabled and contact_center_report_results is not None:
+        raise ValueError("No se admiten informes segmentados para un ámbito no habilitado.")
     if report_result is None:
         report_result = generate_period_followup_report_artifact(
             settings,
@@ -828,23 +885,13 @@ def build_cloud_projection_artifact(
             reference_day=reference_date,
         )
     report_content = bytes(report_result.content)
-    report = {
-        "fileName": str(report_result.file_name),
-        "mimeType": REPORT_MIME_TYPE,
-        "sha256": sha256_bytes(report_content),
-        "bytes": len(report_content),
-        "slideCount": int(report_result.slide_count),
-    }
-    focus_sources = _focus_source_catalog(
-        settings,
-        country=country_text,
-        source_ids=clean_source_ids,
+    report = _report_descriptor(report_result)
+    newsletter = (
+        contact_center_reports["PYME"]["newsletterFacts"] if contact_center_enabled
+        else _newsletter_facts(insights=intelligence, context=context, sources=focus_sources)
     )
-    newsletter = _newsletter_facts(
-        insights=intelligence,
-        context=context,
-        sources=focus_sources,
-    )
+    if contact_center_enabled and report["sha256"] == contact_center_reports["BEI"]["report"]["sha256"]:
+        raise ValueError("Los informes PYME y BEI deben ser artefactos independientes.")
     jira_administration = [
         {
             "sourceId": source["sourceId"],
@@ -870,6 +917,8 @@ def build_cloud_projection_artifact(
         "newsletterFacts": newsletter,
         "report": report,
     }
+    if contact_center_enabled:
+        revision_payload["contactCenterReports"] = contact_center_reports
     data_version = sha256_bytes(canonical_json_bytes(revision_payload))[:24]
     scope = {
         "scopeKey": _scope_key(country_text, clean_source_ids),
@@ -899,9 +948,12 @@ def build_cloud_projection_artifact(
         "report": report,
         "factsSha256": facts_sha256,
     }
+    if contact_center_enabled:
+        projection["contactCenterReports"] = contact_center_reports
     projection_content = canonical_json_bytes(projection)
     return CloudProjectionArtifact(
         projection=_json_safe(projection),
         projection_content=projection_content,
         report_content=report_content,
+        report_bei_content=report_bei_content,
     )
