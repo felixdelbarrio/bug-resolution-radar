@@ -45,6 +45,10 @@ from bug_resolution_radar.services.downloads import (
 from bug_resolution_radar.services.downloads import (
     unique_download_path as unique_report_export_path,
 )
+from bug_resolution_radar.services.contact_center_scope import (
+    active_contact_center,
+    apply_contact_center_filter,
+)
 from bug_resolution_radar.services.insights_history import record_scope_measurement
 
 __all__ = (
@@ -68,6 +72,7 @@ class ReportFilters:
     priority: tuple[str, ...] = ()
     assignee: tuple[str, ...] = ()
     quincenal_scope: str = QUINCENAL_SCOPE_ALL
+    contact_center: str = ""
 
 
 @dataclass(frozen=True)
@@ -97,12 +102,14 @@ def build_report_filters(
     priority_filters: Sequence[str] | None = None,
     assignee_filters: Sequence[str] | None = None,
     quincenal_scope: object = QUINCENAL_SCOPE_ALL,
+    contact_center: str = "",
 ) -> ReportFilters:
     return ReportFilters(
         status=_normalize_tokens(status_filters),
         priority=_normalize_tokens(priority_filters),
         assignee=_normalize_tokens(assignee_filters),
         quincenal_scope=normalize_quincenal_scope_label(quincenal_scope),
+        contact_center=contact_center,
     )
 
 
@@ -245,6 +252,14 @@ def _build_context_for_scope(
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
     country_history_df = _scope_country_df(base_df, country=country)
     country_df = apply_analysis_depth_filter(country_history_df, settings=settings)
+    segmented = active_contact_center(settings, country, filters.contact_center)
+    if segmented:
+        scoped_df, country_df, country_history_df = (
+            apply_contact_center_filter(
+                frame, settings=settings, country=country, selection=filters.contact_center
+            )
+            for frame in (scoped_df, country_df, country_history_df)
+        )
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
     scoped_df, finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
         scoped_df,
@@ -265,7 +280,7 @@ def _build_context_for_scope(
     closed_mask = effective_closed_mask(dff) if not dff.empty else pd.Series(dtype=bool)
     open_df = dff.loc[~closed_mask].copy(deep=False) if not dff.empty else pd.DataFrame()
     return PreparedReportContext(
-        all_df=base_df,
+        all_df=country_history_df if segmented else base_df,
         scoped_df=scoped_df,
         dff=dff,
         open_df=open_df,
@@ -338,6 +353,7 @@ def generate_period_followup_report_artifact(
         country=country,
         source_ids=source_ids,
         snapshot=current_snapshot,
+        contact_center=active_contact_center(settings, country, filters.contact_center),
     )
 
     return generate_country_period_followup_ppt(

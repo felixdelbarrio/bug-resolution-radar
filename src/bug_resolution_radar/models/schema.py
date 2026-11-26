@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 # -----------------------------
@@ -27,6 +27,7 @@ class NormalizedIssue(BaseModel):
     assignee: str = ""
     po_team_leader: str = ""
     reporter: str = ""
+    submitter: str = Field(default="", validation_alias=AliasChoices("submitter", "Submitter"))
     labels: List[str] = Field(default_factory=list)
     components: List[str] = Field(default_factory=list)
     resolution: str = ""

@@ -1098,4 +1098,7 @@ input::placeholder, textarea::placeholder { color: var(--bbva-text-muted); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+/* Read-only, materialized Contact Center views. */
+.contact-center-kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; align-items: start; }
+.contact-center-note { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

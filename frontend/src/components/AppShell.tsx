@@ -59,8 +59,11 @@ function applyThemeContract(
   }
 }
 
-function WorkspaceContactCenter({ disabled }: { disabled: boolean }) {
-  const [contactCenter, setContactCenter] = useState<"PYME" | "BEI">("PYME");
+function WorkspaceContactCenter({ disabled, contactCenter, onChange }: {
+  disabled: boolean;
+  contactCenter: "PYME" | "BEI";
+  onChange: (value: "PYME" | "BEI") => void;
+}) {
   return (
     <div className="workspace-contact-center-field">
       <label className="field-label" htmlFor="workspace-contact-center">
@@ -70,7 +73,7 @@ function WorkspaceContactCenter({ disabled }: { disabled: boolean }) {
         id="workspace-contact-center"
         value={contactCenter}
         disabled={disabled}
-        onChange={(event) => setContactCenter(event.target.value === "BEI" ? "BEI" : "PYME")}
+        onChange={(event) => onChange(event.target.value === "BEI" ? "BEI" : "PYME")}
       >
         <option value="PYME">PYME</option>
         <option value="BEI">BEI</option>
@@ -221,6 +224,9 @@ export function AppShell() {
   function handleScopeChange(patch: Record<string, string>) {
     dashboardState.update({
       ...patch,
+      ...(patch.country && patch.country !== dashboardState.params.country ? { contactCenter: "PYME" as const } : {}),
+      issuePage: "1",
+      notesIssueKey: "",
       status: [],
       priority: [],
       assignee: [],
@@ -316,7 +322,13 @@ export function AppShell() {
 
         {contactCenterEnabled ? (
           <WorkspaceContactCenter
-            key={selectedCountryValue}
+            contactCenter={dashboardState.params.contactCenter}
+            onChange={(contactCenter) => dashboardState.update({
+              contactCenter, issuePage: "1", notesIssueKey: "",
+              status: [], priority: [], assignee: [], functionality: [],
+              quincenalScope: "Todas", insightsStatus: [], insightsPriority: [],
+              insightsFunctionality: [], insightsStatusManual: ""
+            })}
             disabled={workspaceLoading || workspaceRefreshing}
           />
         ) : null}

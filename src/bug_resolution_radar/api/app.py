@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, MutableMapping, Sequence
+from typing import Any, Dict, Iterator, MutableMapping, Sequence, Literal
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -57,6 +57,10 @@ from bug_resolution_radar.reports.service import (
 from bug_resolution_radar.repositories.issues_store import (
     load_issues_df,
     load_issues_workspace_index,
+)
+from bug_resolution_radar.services.contact_center_scope import (
+    active_contact_center,
+    apply_contact_center_filter,
 )
 from bug_resolution_radar.services.contact_center_pyme import (
     ContactCenterStorageError,
@@ -273,6 +277,7 @@ def _dashboard_query(
     country: str = "",
     source_id: str = "",
     scope_mode: str = "source",
+    contact_center: str = "",
     status: str = "",
     priority: str = "",
     assignee: str = "",
@@ -302,6 +307,7 @@ def _dashboard_query(
         issue_like_query=str(issue_like_query or "").strip(),
         chart_ids=tuple(_split_csv_param(chart_ids)),
         dark_mode=bool(dark_mode),
+        contact_center=contact_center,
     )
 
 
@@ -399,6 +405,7 @@ def _workspace_payload(
     country: str = "",
     source_id: str = "",
     scope_mode: str = "source",
+    contact_center: str = "",
     include_filter_options: bool = True,
 ) -> dict[str, Any]:
     df_all = pd.DataFrame()
@@ -465,6 +472,9 @@ def _workspace_payload(
             settings=settings,
         )
     if include_filter_options:
+        scoped_df = apply_contact_center_filter(
+            scoped_df, settings=settings, country=selected_country, selection=contact_center,
+        )
         scoped_df = enrich_issue_dataframe_with_helix(scoped_df, settings=settings)
     active_source_ids = (
         [selected_source_id]
@@ -576,8 +586,13 @@ def _notes_list_payload(
                 "source_alias": _note_meta_text(row, "source_alias"),
             }
     rows: list[dict[str, Any]] = []
+    segmented = bool(query and active_contact_center(
+        settings, query.workspace.country, query.contact_center,
+    ))
     for key, entries in store.entry_items():
         meta = issue_meta.get(str(key or "").strip().upper(), {})
+        if segmented and not meta:
+            continue
         note = store.get(key) or ""
         latest_created_at = store.latest_created_at(key)
         rows.append(
@@ -671,6 +686,7 @@ class ReportRequest(BaseModel):
     sourceId: str = ""
     sourceIds: list[str] = Field(default_factory=list)
     scopeMode: str = "source"
+    contactCenter: Literal["", "PYME", "BEI"] = ""
     status: list[str] = Field(default_factory=list)
     priority: list[str] = Field(default_factory=list)
     assignee: list[str] = Field(default_factory=list)
@@ -696,6 +712,7 @@ class DashboardExportSaveRequest(BaseModel):
     country: str = ""
     sourceId: str = ""
     scopeMode: str = "source"
+    contactCenter: Literal["", "PYME", "BEI"] = ""
     status: list[str] = Field(default_factory=list)
     priority: list[str] = Field(default_factory=list)
     assignee: list[str] = Field(default_factory=list)
@@ -836,6 +853,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
     ) -> dict[str, Any]:
         settings = load_settings()
         try:
@@ -856,6 +874,7 @@ def create_app() -> FastAPI:
                 country=country,
                 source_id=sourceId,
                 scope_mode=scopeMode,
+                contact_center=contactCenter,
                 include_filter_options=False,
             ),
             "chartsCatalog": [
@@ -883,6 +902,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
     ) -> dict[str, Any]:
         settings = load_settings()
         return _workspace_payload(
@@ -890,6 +910,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
         )
 
     @app.get("/api/dashboard")
@@ -897,6 +918,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -913,6 +935,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -939,6 +962,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -960,6 +984,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -987,6 +1012,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1002,6 +1028,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1019,6 +1046,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1037,6 +1065,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1060,6 +1089,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1074,6 +1104,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1091,6 +1122,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1105,6 +1137,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1135,6 +1168,7 @@ def create_app() -> FastAPI:
             country=payload.country,
             source_id=payload.sourceId,
             scope_mode=payload.scopeMode,
+            contact_center=payload.contactCenter,
             status=_csv_join(payload.status),
             priority=_csv_join(payload.priority),
             assignee=_csv_join(payload.assignee),
@@ -1159,6 +1193,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1173,6 +1208,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1197,6 +1233,7 @@ def create_app() -> FastAPI:
             country=payload.country,
             source_id=payload.sourceId,
             scope_mode=payload.scopeMode,
+            contact_center=payload.contactCenter,
             status=_csv_join(payload.status),
             priority=_csv_join(payload.priority),
             assignee=_csv_join(payload.assignee),
@@ -1216,6 +1253,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1230,6 +1268,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1256,6 +1295,7 @@ def create_app() -> FastAPI:
             country=payload.country,
             source_id=payload.sourceId,
             scope_mode=payload.scopeMode,
+            contact_center=payload.contactCenter,
             status=_csv_join(payload.status),
             priority=_csv_join(payload.priority),
             assignee=_csv_join(payload.assignee),
@@ -1275,6 +1315,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1289,6 +1330,7 @@ def create_app() -> FastAPI:
             country=country,
             source_id=sourceId,
             scope_mode=scopeMode,
+            contact_center=contactCenter,
             status=status,
             priority=priority,
             assignee=assignee,
@@ -1305,6 +1347,7 @@ def create_app() -> FastAPI:
         country: str = "",
         sourceId: str = "",
         scopeMode: str = "source",
+        contactCenter: Literal["", "PYME", "BEI"] = "",
         status: str = "",
         priority: str = "",
         assignee: str = "",
@@ -1321,6 +1364,7 @@ def create_app() -> FastAPI:
                 country=country,
                 source_id=sourceId,
                 scope_mode=scopeMode,
+                contact_center=contactCenter,
                 status=status,
                 priority=priority,
                 assignee=assignee,
@@ -1850,6 +1894,7 @@ def create_app() -> FastAPI:
                     priority_filters=payload.priority,
                     assignee_filters=payload.assignee,
                     quincenal_scope=payload.quincenalScope,
+                    contact_center=payload.contactCenter,
                 ),
             )
         except Exception as exc:
@@ -1881,6 +1926,7 @@ def create_app() -> FastAPI:
                     priority_filters=payload.priority,
                     assignee_filters=payload.assignee,
                     quincenal_scope=payload.quincenalScope,
+                    contact_center=payload.contactCenter,
                 ),
             )
             export_path = save_report_content(
@@ -1921,6 +1967,7 @@ def create_app() -> FastAPI:
                     priority_filters=payload.priority,
                     assignee_filters=payload.assignee,
                     quincenal_scope=payload.quincenalScope,
+                    contact_center=payload.contactCenter,
                 ),
                 applied_filter_summary=str(payload.appliedFilterSummary or "").strip(),
                 functionality_status_filters=payload.functionalityStatusFilters,
@@ -1958,6 +2005,7 @@ def create_app() -> FastAPI:
                     priority_filters=payload.priority,
                     assignee_filters=payload.assignee,
                     quincenal_scope=payload.quincenalScope,
+                    contact_center=payload.contactCenter,
                 ),
                 applied_filter_summary=str(payload.appliedFilterSummary or "").strip(),
                 functionality_status_filters=payload.functionalityStatusFilters,

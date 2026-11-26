@@ -8,6 +8,7 @@ type DashboardParams = {
   country: string;
   sourceId: string;
   scopeMode: string;
+  contactCenter: "PYME" | "BEI";
   status: string[];
   priority: string[];
   assignee: string[];
@@ -44,6 +45,7 @@ export function useDashboardParams(defaultPanel = "overview") {
     country: searchParams.get("country") ?? "",
     sourceId: searchParams.get("sourceId") ?? "",
     scopeMode: searchParams.get("scopeMode") ?? "source",
+    contactCenter: searchParams.get("contactCenter") === "BEI" ? "BEI" : "PYME",
     status: splitValue(searchParams.get("status")),
     priority: splitValue(searchParams.get("priority")),
     assignee: splitValue(searchParams.get("assignee")),

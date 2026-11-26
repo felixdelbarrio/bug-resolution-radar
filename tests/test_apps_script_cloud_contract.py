@@ -680,7 +680,7 @@ def test_cloud_removes_retired_views_and_generative_newsletter_code() -> None:
         if path.is_file() and path.name != "BrandAssets.html"
     )
     folded = cloud_code.casefold()
-    assert "kanban" not in folded
+    assert 'data-contact-center-panel' in _source("Index.html")
     assert "opshealth" not in folded
     assert "salud operativa" not in folded
     runtime_newsletter = _source("56_Newsletter.gs").casefold()
@@ -1004,7 +1004,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     assert result.returncode == 0, result.stderr
 
 
-def test_contact_center_bootstrap_reads_latest_authorized_country_flag() -> None:
+def test_contact_center_bootstrap_reads_each_authorized_scope_flag() -> None:
     script = _source("10_Main.gs") + r"""
 function _text_(value) { return value == null ? '' : String(value); }
 function _date_(value) { const date = new Date(value); return isNaN(date) ? null : date; }
@@ -1012,7 +1012,7 @@ const reads = [];
 function _snapshotRecordById_(id) { reads.push(id); return { id: id }; }
 function _snapshotHeader_(record) {
   if (record.id === 'missing') throw new Error('missing');
-  return { semantics: record.id === 'ar-new' ? { contactCenterEnabled: true } :
+  return { semantics: record.id === 'ar-new' ? { contactCenterEnabled: true, contactCenterMaterialized: true } :
     record.id === 'mx-new' ? { contactCenterEnabled: false } :
     record.id === 'es-old' ? {} : { contactCenterEnabled: 'true' } };
 }
@@ -1031,7 +1031,7 @@ console.log(JSON.stringify({ countries: _contactCenterEnabledCountries_(manifest
     )
     response = json.loads(result.stdout)
     assert response["countries"] == ["Argentina"]
-    assert sorted(response["reads"]) == ["ar-new", "es-old", "invalid", "missing", "mx-new"]
+    assert sorted(response["reads"]) == ["ar-new", "ar-old", "es-old", "invalid", "missing", "mx-new"]
     assert "_contactCenterEnabledCountries_(manifest)" in _function_body(
         _source("10_Main.gs"), "getBootstrap"
     )
@@ -1043,7 +1043,7 @@ console.log(JSON.stringify({ countries: _contactCenterEnabledCountries_(manifest
     )
 
 
-def test_contact_center_selector_is_between_country_and_rollup_and_is_not_a_query_filter() -> None:
+def test_contact_center_selector_is_between_country_and_rollup_and_filters_materialized_views() -> None:
     index = _source("Index.html")
     app = _source("App.html")
     assert index.index('id="workspaceCountry"') < index.index('id="workspaceContactCenter"')
@@ -1051,11 +1051,12 @@ def test_contact_center_selector_is_between_country_and_rollup_and_is_not_a_quer
     assert '<option value="PYME" selected>PYME</option>' in index
     assert '<option value="BEI">BEI</option>' in index
     sync = _function_body(app, "syncScope")
-    assert "contactCenterEnabledCountries" in sync
+    assert "active.contactCenterEnabled === true" in sync
     assert "state.contactCenter = 'PYME'" in sync
     assert "'hidden', !contactCenterEnabled" in sync
-    assert "contactCenter" not in _function_body(app, "requestFor")
-    assert "contactCenterEnabled" not in _function_body(
+    assert "contactCenter" in _source("Domain.html")
+    assert "contactCenter" in _function_body(app, "requestKey")
+    assert "contactCenter" in _function_body(
         _source("25_MaterializedSnapshots.gs"), "_normalizeMaterializedRequest_"
     )
 
@@ -1072,12 +1073,12 @@ const makeNode = () => {
 };
 const nodes = new Map();
 const $ = id => { if (!nodes.has(id)) nodes.set(id, makeNode()); return nodes.get(id); };
-const document = { querySelector: selector => $(selector) };
+const document = { querySelector: selector => $(selector), querySelectorAll: () => [] };
 const UI = { escape: String, formatDate: String };
 const state = { contactCenter: 'PYME', contactCenterCountry: '', scopeKey: 'ar::*',
   bootstrap: { contactCenterEnabledCountries: ['Argentina'], scopes: [
-    {country: 'Argentina', scopeKey: 'ar::*', scopeLabel: 'Argentina agregado'},
-    {country: 'Argentina', scopeKey: 'ar::core', scopeLabel: 'Argentina Core'},
+    {country: 'Argentina', scopeKey: 'ar::*', scopeLabel: 'Argentina agregado', contactCenterEnabled: true},
+    {country: 'Argentina', scopeKey: 'ar::core', scopeLabel: 'Argentina Core', contactCenterEnabled: true},
     {country: 'España', scopeKey: 'es::*', scopeLabel: 'España agregado'}
   ] } };
 const isAdmin = () => true;
@@ -1104,7 +1105,7 @@ assert($('workspaceContactCenterField').classList.contains('hidden'), 'Spain hid
 state.scopeKey = 'ar::*';
 syncScope();
 assert($('workspaceContactCenter').value === 'PYME', 'reset on return');
-state.bootstrap.contactCenterEnabledCountries = [];
+state.bootstrap.scopes[0].contactCenterEnabled = false;
 syncScope();
 assert($('workspaceContactCenterField').classList.contains('hidden'), 'disabled hidden');
 """

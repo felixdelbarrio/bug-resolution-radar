@@ -137,6 +137,19 @@ function _projectionPartValues_(projection) {
     if (keyOccurrences[issueKey].length === 1) byKey[issueKey] = keyOccurrences[issueKey][0];
   });
   parts['issues/index'] = { byUid: byUid, byKey: byKey };
+  if (Array.isArray(projection.views.kanban)) parts.kanban = projection.views.kanban;
+  if (Array.isArray(projection.views.notes)) parts.notes = projection.views.notes;
+  const variants = projection.views.contactCenter;
+  if (variants) {
+    ['PYME', 'BEI'].forEach(function (segment) {
+      const sectional = _projectionPartValues_(Object.assign({}, projection, { views: variants[segment] }));
+      Object.keys(sectional).forEach(function (key) {
+        if (['meta', 'administration', 'newsletter'].indexOf(key) < 0) {
+          parts['contact-center/' + segment + '/' + key] = sectional[key];
+        }
+      });
+    });
+  }
   return parts;
 }
 
@@ -340,9 +353,19 @@ function _snapshotAdministration_(record) {
   return _loadSnapshotPart_(record, 'administration');
 }
 
-function _snapshotIssueDetail_(record, issueKey) {
+function _snapshotContactCenterPrefix_(record, requested) {
+  const semantics = _snapshotHeader_(record).semantics || {};
+  if (semantics.contactCenterEnabled !== true || semantics.contactCenterMaterialized !== true) return '';
+  const segment = _text_(requested) || 'PYME';
+  _assert_(['PYME', 'BEI'].indexOf(segment) >= 0,
+    'Contact center debe ser PYME o BEI.', 'VIEW_NOT_MATERIALIZED');
+  return 'contact-center/' + segment + '/';
+}
+
+function _snapshotIssueDetail_(record, issueKey, contactCenter) {
   const key = _text_(issueKey);
-  const index = _loadSnapshotPart_(record, 'issues/index');
+  const prefix = _snapshotContactCenterPrefix_(record, contactCenter);
+  const index = _loadSnapshotPart_(record, prefix + 'issues/index');
   const page = Number(
     index && (
       (index.byUid && index.byUid[key]) ||
@@ -350,7 +373,7 @@ function _snapshotIssueDetail_(record, issueKey) {
     )
   );
   if (!page) return null;
-  const payload = _loadSnapshotPart_(record, 'issues/page/' + page);
+  const payload = _loadSnapshotPart_(record, prefix + 'issues/page/' + page);
   return (payload.rows || []).find(function (row) {
     return _text_(row.issue_uid || row.issueUid) === key || _text_(row.key) === key;
   }) || null;
@@ -368,7 +391,7 @@ function _publishSnapshotPointer_(record, user) {
 
 function _normalizeMaterializedRequest_(request, fixedScopeKey) {
   const input = request || {};
-  const allowed = new Set(['scopeKey', 'view', 'chartId', 'insightsId', 'page', 'pageSize', 'sortId']);
+  const allowed = new Set(['scopeKey', 'contactCenter', 'view', 'chartId', 'insightsId', 'page', 'pageSize', 'sortId']);
   Object.keys(input).forEach(function (key) {
     _assert_(allowed.has(key),
       'La vista materializada no admite el parámetro «' + key + '».',
@@ -381,8 +404,11 @@ function _normalizeMaterializedRequest_(request, fixedScopeKey) {
       'El enlace compartido no permite cambiar de ámbito.', 'FORBIDDEN');
   }
   const view = _text_(input.view) || 'overview';
-  _assert_(['overview', 'insights', 'trends', 'issues'].indexOf(view) >= 0,
+  _assert_(['overview', 'insights', 'trends', 'issues', 'kanban', 'notes'].indexOf(view) >= 0,
     'La vista solicitada no está materializada.', 'VIEW_NOT_MATERIALIZED');
+  const contactCenter = _text_(input.contactCenter);
+  _assert_(['', 'PYME', 'BEI'].indexOf(contactCenter) >= 0,
+    'Contact center debe ser PYME o BEI.', 'VIEW_NOT_MATERIALIZED');
   const page = Math.max(1, Math.floor(Number(input.page || 1)));
   const pageSize = Number(input.pageSize == null ? RADAR.defaultPageSize : input.pageSize);
   _assert_(pageSize === RADAR.defaultPageSize,
@@ -394,6 +420,7 @@ function _normalizeMaterializedRequest_(request, fixedScopeKey) {
     'VIEW_NOT_MATERIALIZED');
   return {
     scopeKey: scopeKey,
+    contactCenter: contactCenter,
     view: view,
     chartId: view === 'trends' ? _text_(input.chartId) : '',
     insightsId: view === 'insights' ? _text_(input.insightsId) : '',
@@ -424,9 +451,12 @@ function _materializedCommonPayload_(record, input) {
 }
 
 function _materializedViewPayload_(record, input) {
-  const common = _materializedCommonPayload_(record, input);
+  const prefix = _snapshotContactCenterPrefix_(record, input.contactCenter);
+  const common = Object.assign(_materializedCommonPayload_(record, input), {
+    contactCenter: prefix ? prefix.split('/')[1] : ''
+  });
   if (input.view === 'overview') {
-    const storedOverview = _loadSnapshotPart_(record, 'overview');
+    const storedOverview = _loadSnapshotPart_(record, prefix + 'overview');
     const overview = Object.assign({}, storedOverview);
     const availableCharts = Array.isArray(storedOverview.charts)
       ? storedOverview.charts
@@ -440,9 +470,9 @@ function _materializedViewPayload_(record, input) {
     return Object.assign({}, common, overview);
   }
   if (input.view === 'insights') {
-    const catalog = _loadSnapshotPart_(record, 'insights/catalog');
+    const catalog = _loadSnapshotPart_(record, prefix + 'insights/catalog');
     const activeId = _materializedCatalogId_(catalog, input.insightsId, 'evolution');
-    const selected = _loadSnapshotPart_(record, 'insights/' + activeId);
+    const selected = _loadSnapshotPart_(record, prefix + 'insights/' + activeId);
     const insights = {
       tabs: catalog,
       activeTab: activeId
@@ -453,9 +483,9 @@ function _materializedViewPayload_(record, input) {
     return Object.assign({}, common, { insights: insights });
   }
   if (input.view === 'trends') {
-    const catalog = _loadSnapshotPart_(record, 'trends/catalog');
+    const catalog = _loadSnapshotPart_(record, prefix + 'trends/catalog');
     const chartId = _materializedCatalogId_(catalog, input.chartId, 'open_status_bar');
-    const selected = _loadSnapshotPart_(record, 'trends/' + chartId);
+    const selected = _loadSnapshotPart_(record, prefix + 'trends/' + chartId);
     return Object.assign({}, common, {
       trends: Object.assign({
         chartCatalog: catalog,
@@ -464,10 +494,14 @@ function _materializedViewPayload_(record, input) {
     });
   }
   if (input.view === 'issues') {
-    const meta = _loadSnapshotPart_(record, 'issues/meta');
+    const meta = _loadSnapshotPart_(record, prefix + 'issues/meta');
     _assert_(input.page <= Number(meta.pageCount),
       'Esa página no fue materializada.', 'VIEW_NOT_MATERIALIZED');
-    return Object.assign({}, common, _loadSnapshotPart_(record, 'issues/page/' + input.page));
+    return Object.assign({}, common, _loadSnapshotPart_(record, prefix + 'issues/page/' + input.page));
+  }
+  if (input.view === 'kanban' || input.view === 'notes') {
+    _assert_(prefix, 'Esta vista no fue materializada para el ámbito.', 'VIEW_NOT_MATERIALIZED');
+    return Object.assign({}, common, { [input.view]: _loadSnapshotPart_(record, prefix + input.view) });
   }
   _assert_(false, 'La vista solicitada no está materializada.', 'VIEW_NOT_MATERIALIZED');
 }

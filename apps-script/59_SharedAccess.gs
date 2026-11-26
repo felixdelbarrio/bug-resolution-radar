@@ -147,6 +147,8 @@ function getSharedBootstrap(token) {
         sourceIds: scope.sourceIds,
         dataVersion: scope.dataVersion,
         snapshotId: context.record.snapshot_id,
+        contactCenterEnabled: _snapshotContactCenterEnabled_(header),
+        contactCenterPending: Boolean(header.semantics && header.semantics.contactCenterEnabled === true && !_snapshotContactCenterEnabled_(header)),
         activatedAt: context.share.created_at
       }],
       countries: [scope.country],
@@ -182,10 +184,10 @@ function querySharedDashboard(token, request) {
   });
 }
 
-function getSharedIssueDetail(token, issueUid) {
+function getSharedIssueDetail(token, issueUid, contactCenter) {
   return _rpc_(function () {
     const context = _sharedReportContext_(token);
-    const row = _snapshotIssueDetail_(context.record, _text_(issueUid));
+    const row = _snapshotIssueDetail_(context.record, _text_(issueUid), contactCenter);
     _assert_(row, 'No existe la incidencia en este snapshot.', 'NOT_FOUND');
     return row;
   });

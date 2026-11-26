@@ -480,11 +480,18 @@ def test_data_version_changes_when_materialized_detail_changes(
     assert first != second
 
 
-def test_contact_center_flag_is_metadata_and_changes_data_version(
+def test_contact_center_materializes_both_variants_and_changes_data_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_materializers(monkeypatch)
-    monkeypatch.setattr(cloud_projection, "contact_center_enabled_countries", lambda settings: [])
+    original_rows = cloud_projection.build_issue_rows
+
+    def rows(*args, query, **kwargs):
+        result = original_rows(*args, query=query, **kwargs)
+        return {**result, "rows": result["rows"] if query.contact_center != "BEI" else []}
+
+    monkeypatch.setattr(cloud_projection, "build_issue_rows", rows)
+    monkeypatch.setattr(cloud_projection, "build_kanban_columns", lambda *args, **kwargs: [])
 
     def projection() -> dict:
         return build_cloud_projection_artifact(
@@ -501,10 +508,12 @@ def test_contact_center_flag_is_metadata_and_changes_data_version(
         cloud_projection, "contact_center_enabled_countries", lambda settings: ["España"]
     )
     second = projection()
-    assert first["semantics"]["contactCenterEnabled"] is False
-    assert second["semantics"]["contactCenterEnabled"] is True
+    assert first["semantics"]["contactCenterMaterialized"] is False
+    assert second["semantics"]["contactCenterMaterialized"] is True
     assert first["scope"]["dataVersion"] != second["scope"]["dataVersion"]
-    assert first["views"] == second["views"]
+    full = second["views"]
+    assert full["contactCenter"]["PYME"]["issues"] == first["views"]["issues"]
+    assert full["contactCenter"]["BEI"]["issues"]["rows"] == []
+    assert all(name in full["contactCenter"]["BEI"] for name in ("kanban", "notes"))
     assert first["newsletterFacts"] == second["newsletterFacts"]
     assert first["report"] == second["report"]
-    assert set(second["semantics"]) == set(first["semantics"])

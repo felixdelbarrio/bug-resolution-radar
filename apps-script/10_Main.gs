@@ -105,20 +105,27 @@ function _requireScopeAccess_(user, scopeKey) {
 }
 
 function _snapshotContactCenterEnabled_(header) {
-  return Boolean(header && header.semantics && header.semantics.contactCenterEnabled === true);
+  return Boolean(header && header.semantics && header.semantics.contactCenterEnabled === true &&
+    header.semantics.contactCenterMaterialized === true);
 }
 
 function _contactCenterEnabledCountries_(manifest) {
-  // Read only the latest authorized snapshot per country, and only during bootstrap.
-  return _viewerWorkspaceManifest_(manifest).scopes.filter(function (scope) {
+  // Only authorized scopes. Decorate each one so an old individual source
+  // cannot accidentally display the new combo with unfiltered legacy data.
+  const countries = new Set();
+  (manifest.scopes || []).forEach(function (scope) {
+    scope.contactCenterEnabled = false;
     try {
       const record = _snapshotRecordById_(scope.snapshotId, true);
-      return _snapshotContactCenterEnabled_(_snapshotHeader_(record));
+      const header = _snapshotHeader_(record);
+      scope.contactCenterEnabled = _snapshotContactCenterEnabled_(header);
+      scope.contactCenterPending = Boolean(header.semantics && header.semantics.contactCenterEnabled === true && !scope.contactCenterEnabled);
+      if (scope.contactCenterEnabled) countries.add(scope.country);
     } catch (error) {
       console.warn('radar_contact_center_metadata_unavailable');
-      return false;
     }
-  }).map(function (scope) { return scope.country; });
+  });
+  return Array.from(countries);
 }
 
 function getBootstrap() {
@@ -149,6 +156,7 @@ function getBootstrap() {
         manifest = _viewerWorkspaceManifest_(manifest);
       }
     }
+    const contactCenterEnabledCountries = _contactCenterEnabledCountries_(manifest);
     const initialState = _initialDashboardState_(manifest);
     let dashboard = null;
     if (initialState.scopeKey) {
@@ -183,7 +191,7 @@ function getBootstrap() {
       user: user,
       scopes: manifest.scopes,
       countries: manifest.countries,
-      contactCenterEnabledCountries: _contactCenterEnabledCountries_(manifest),
+      contactCenterEnabledCountries: contactCenterEnabledCountries,
       sources: manifest.sources,
       administration: administration,
       dataError: dataError,
@@ -205,10 +213,12 @@ function getIssueDetail(request) {
   return _rpc_(function () {
     const user = _requireUser_();
     const input = request || {};
-    _assertExactFields_(input, ['scopeKey', 'issueUid'], 'issueDetail');
+    const fields = ['scopeKey', 'issueUid'];
+    if (Object.prototype.hasOwnProperty.call(input, 'contactCenter')) fields.push('contactCenter');
+    _assertExactFields_(input, fields, 'issueDetail');
     _requireScopeAccess_(user, input.scopeKey);
     const record = _activeSnapshotRecordForScope_(_text_(input.scopeKey), true);
-    const row = _snapshotIssueDetail_(record, _text_(input.issueUid));
+    const row = _snapshotIssueDetail_(record, _text_(input.issueUid), input.contactCenter);
     _assert_(row, 'No existe la incidencia en el snapshot publicado.', 'NOT_FOUND');
     return row;
   });

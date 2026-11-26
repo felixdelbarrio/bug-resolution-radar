@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class HelixWorkItem(BaseModel):
@@ -25,6 +25,7 @@ class HelixWorkItem(BaseModel):
     impacted_service: str = ""
     assignee: str = ""
     customer_name: str = ""
+    submitter: str = Field(default="", validation_alias=AliasChoices("submitter", "Submitter"))
     sla_status: str = ""
     target_date: Optional[str] = None
     last_modified: Optional[str] = None

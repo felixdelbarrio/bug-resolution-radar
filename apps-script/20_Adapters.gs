@@ -336,6 +336,64 @@ function _validateProjectionReport_(report, descriptor) {
     'projection.report.slideCount no es válido.', 'TRANSFER_INVALID');
 }
 
+function _validateMaterializedViews_(views, segmented) {
+  const fields = ['overview', 'insights', 'trends', 'issues'];
+  if (segmented) fields.push('kanban', 'notes');
+  _assertExactFields_(views, fields, 'projection.views');
+  ['overview', 'insights', 'trends', 'issues'].forEach(function (view) {
+    _assert_(views[view] && typeof views[view] === 'object',
+      'La vista materializada «' + view + '» no está disponible.', 'TRANSFER_INVALID');
+  });
+  const expectedChartIds = [
+    'timeseries', 'age_buckets', 'open_status_bar', 'open_priority_pie', 'resolution_hist'
+  ];
+  const overviewCharts = views.overview.charts;
+  _assert_(Array.isArray(overviewCharts) &&
+    overviewCharts.map(function (chart) { return _text_(chart && chart.id); })
+      .every(function (id, index) { return id === expectedChartIds[index]; }) &&
+    overviewCharts.length === expectedChartIds.length,
+  'El catálogo de gráficos de Resumen está incompleto.', 'TRANSFER_INVALID');
+  _assertExactFields_(views.trends, ['catalog', 'byId'], 'views.trends');
+  _assert_(Array.isArray(views.trends.catalog), 'views.trends.catalog no es una lista.', 'TRANSFER_INVALID');
+  _assertObject_(views.trends.byId, 'views.trends.byId no es un objeto.');
+  _assert_(
+    views.trends.catalog.length === expectedChartIds.length &&
+    views.trends.catalog.every(function (item, index) {
+      return _text_(item && item.id) === expectedChartIds[index];
+    }) &&
+    Object.keys(views.trends.byId).sort().join('|') ===
+      expectedChartIds.slice().sort().join('|'),
+    'El catálogo de Tendencias está incompleto.',
+    'TRANSFER_INVALID'
+  );
+  _assertExactFields_(views.issues, ['total', 'rows'], 'views.issues');
+  _assert_(Number.isInteger(views.issues.total) && views.issues.total >= 0 &&
+    Array.isArray(views.issues.rows) &&
+    views.issues.total === views.issues.rows.length,
+  'views.issues debe contener todas sus filas materializadas.', 'TRANSFER_INVALID');
+  const issueUids = new Set();
+  views.issues.rows.forEach(function (row) {
+    _assertObject_(row, 'views.issues contiene una fila no válida.');
+    const issueUid = _text_(row.issue_uid);
+    _assert_(issueUid && issueUid.indexOf('::') > 0 && !issueUids.has(issueUid),
+      'Cada incidencia debe incluir un issue_uid compuesto y único.',
+      'TRANSFER_INVALID');
+    issueUids.add(issueUid);
+  });
+  _validateNoCloudActionsDeep_(views, 'views');
+  if (segmented) {
+    _assert_(Array.isArray(views.kanban) && Array.isArray(views.notes),
+      'Kanban y Notas deben estar materializados.', 'TRANSFER_INVALID');
+    const member = function (row) { return row && issueUids.has(_text_(row.issue_uid)); };
+    views.kanban.forEach(function (column) {
+      _assert_(column && Array.isArray(column.items) && column.items.every(member),
+        'Kanban contiene incidencias de otro segmento.', 'TRANSFER_INVALID');
+    });
+    _assert_(views.notes.every(member), 'Notas contiene incidencias de otro segmento.', 'TRANSFER_INVALID');
+  }
+  return issueUids;
+}
+
 function _validateProjection_(projection, manifest, reportDescriptor) {
   _assertExactFields_(projection, [
     'schema', 'schemaVersion', 'semanticContract', 'generatedAt', 'scope',
@@ -376,54 +434,41 @@ function _validateProjection_(projection, manifest, reportDescriptor) {
     _sanitizeText_(row.poTeamLeader, 300);
     if (_text_(row.dashboardUrl)) _sanitizeUrl_(row.dashboardUrl);
   });
-  _assertExactFields_(projection.views, ['overview', 'insights', 'trends', 'issues'], 'projection.views');
-  ['overview', 'insights', 'trends', 'issues'].forEach(function (view) {
-    _assert_(projection.views[view] && typeof projection.views[view] === 'object',
-      'La vista materializada «' + view + '» no está disponible.', 'TRANSFER_INVALID');
-  });
-  const expectedChartIds = [
-    'timeseries', 'age_buckets', 'open_status_bar', 'open_priority_pie', 'resolution_hist'
-  ];
-  const overviewCharts = projection.views.overview.charts;
-  _assert_(Array.isArray(overviewCharts) &&
-    overviewCharts.map(function (chart) { return _text_(chart && chart.id); })
-      .every(function (id, index) { return id === expectedChartIds[index]; }) &&
-    overviewCharts.length === expectedChartIds.length,
-  'El catálogo de gráficos de Resumen está incompleto.', 'TRANSFER_INVALID');
-  _assertExactFields_(projection.views.trends, ['catalog', 'byId'], 'projection.views.trends');
-  _assert_(Array.isArray(projection.views.trends.catalog), 'projection.views.trends.catalog no es una lista.', 'TRANSFER_INVALID');
-  _assertObject_(projection.views.trends.byId, 'projection.views.trends.byId no es un objeto.');
-  _assert_(
-    projection.views.trends.catalog.length === expectedChartIds.length &&
-    projection.views.trends.catalog.every(function (item, index) {
-      return _text_(item && item.id) === expectedChartIds[index];
-    }) &&
-    Object.keys(projection.views.trends.byId).sort().join('|') ===
-      expectedChartIds.slice().sort().join('|'),
-    'El catálogo de Tendencias está incompleto.',
-    'TRANSFER_INVALID'
-  );
-  _assertExactFields_(projection.views.issues, ['total', 'rows'], 'projection.views.issues');
-  _assert_(Number.isInteger(projection.views.issues.total) && projection.views.issues.total >= 0 &&
-    Array.isArray(projection.views.issues.rows) &&
-    projection.views.issues.total === projection.views.issues.rows.length,
-  'projection.views.issues debe contener todas sus filas materializadas.', 'TRANSFER_INVALID');
-  const issueUids = new Set();
-  projection.views.issues.rows.forEach(function (row) {
-    _assertObject_(row, 'projection.views.issues contiene una fila no válida.');
-    const issueUid = _text_(row.issue_uid);
-    _assert_(issueUid && issueUid.indexOf('::') > 0 && !issueUids.has(issueUid),
-      'Cada incidencia debe incluir un issue_uid compuesto y único.',
-      'TRANSFER_INVALID');
-    issueUids.add(issueUid);
-  });
+  _assertObject_(projection.views, 'projection.views no es un objeto.');
+  const fullViews = Object.assign({}, projection.views);
+  const variants = fullViews.contactCenter;
+  const hasVariants = Object.prototype.hasOwnProperty.call(fullViews, 'contactCenter');
+  delete fullViews.contactCenter;
+  const full = _validateMaterializedViews_(fullViews, false);
+  const materialized = projection.semantics.contactCenterMaterialized;
+  _assert_((materialized === undefined || typeof materialized === 'boolean') &&
+    (materialized === true) === hasVariants,
+    'Contact Center: incoherencia entre metadatos y vistas.', 'TRANSFER_INVALID');
+  if (hasVariants) {
+    _assert_(projection.semantics.contactCenterEnabled === true,
+      'Contact Center no está habilitado.', 'TRANSFER_INVALID');
+    _assertExactFields_(variants, ['PYME', 'BEI'], 'contactCenter');
+    const pyme = _validateMaterializedViews_(variants.PYME, true);
+    const bei = _validateMaterializedViews_(variants.BEI, true);
+    _assert_(pyme.size + bei.size === full.size &&
+      Array.from(pyme).every(function (uid) { return full.has(uid) && !bei.has(uid); }) &&
+      Array.from(bei).every(function (uid) { return full.has(uid); }),
+      'PYME/BEI no particiona todas las incidencias del traslado.', 'TRANSFER_INVALID');
+  }
   _validateNoCloudActionsDeep_(projection.views, 'projection.views');
   _validateProjectionNewsletter_(projection.newsletterFacts);
   _validateProjectionReport_(projection.report, reportDescriptor);
   _assert_(/^[a-f0-9]{64}$/i.test(_text_(projection.factsSha256)) &&
     _hash_(_stableJsonStringify_(projection.newsletterFacts)) === _text_(projection.factsSha256).toLowerCase(),
   'projection.factsSha256 no coincide con newsletterFacts.', 'TRANSFER_INVALID');
-  _validateNoSecretsDeep_(projection, 0, { count: 0 });
+  // Keep the existing depth/node budget per complete projection; segment
+  // payloads are independently bounded and validated, not unlimited nesting.
+  _validateNoSecretsDeep_(Object.assign({}, projection, { views: fullViews }), 0, { count: 0 });
+  if (hasVariants) {
+    ['PYME', 'BEI'].forEach(function (segment) {
+      _validateNoSecretsDeep_({ views: variants[segment] }, 0, { count: 0 });
+    });
+  }
   return scope;
 }
 

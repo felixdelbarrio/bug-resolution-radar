@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from bug_resolution_radar.common.submitter import submitter_login
 from bug_resolution_radar.models.schema import IssuesDocument, NormalizedIssue
 from bug_resolution_radar.models.schema_helix import HelixDocument, HelixWorkItem
 
@@ -90,6 +91,7 @@ def helix_item_to_issue(item: HelixWorkItem) -> NormalizedIssue:
         resolved=resolved,
         assignee=str(item.assignee or "").strip(),
         reporter=str(item.customer_name or "").strip(),
+        submitter=item.submitter or submitter_login(item.raw_fields),
         labels=[label] if label else [],
         components=components,
         resolution="",

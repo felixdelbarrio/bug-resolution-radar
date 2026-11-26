@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from "react";
 import {
-  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient
@@ -42,6 +41,7 @@ function queryParams(
     country: params.country,
     sourceId: params.sourceId,
     scopeMode: params.scopeMode,
+    contactCenter: params.contactCenter,
     status: params.status,
     priority: params.priority,
     assignee: params.assignee,
@@ -111,6 +111,12 @@ export function DashboardPage() {
   const queryClient = useQueryClient();
   const darkMode = themeMode === "dark";
   const activePanel = dashboardState.params.panel;
+  const contactCenterEnabled = Boolean(bootstrap?.contactCenterEnabledCountries.includes(dashboardState.params.country));
+  const scopeReady = Boolean(workspace?.selectedCountry) &&
+    workspace?.selectedCountry === dashboardState.params.country &&
+    workspace?.selectedSourceId === dashboardState.params.sourceId &&
+    workspace?.scopeMode === dashboardState.params.scopeMode;
+
   const pageSize = 30;
   const currentPage = Math.max(1, Number.parseInt(dashboardState.params.issuePage, 10) || 1);
   const trendChartId =
@@ -120,7 +126,8 @@ export function DashboardPage() {
     gcTime: 300_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    placeholderData: keepPreviousData
+    // Do not display previous country/segment results under the new selector.
+    placeholderData: undefined
   } as const;
   const sharedScopeParams = useMemo(
     () =>
@@ -133,6 +140,7 @@ export function DashboardPage() {
       dashboardState.params.country,
       dashboardState.params.sourceId,
       dashboardState.params.scopeMode,
+      dashboardState.params.contactCenter,
       dashboardState.params.status,
       dashboardState.params.priority,
       dashboardState.params.assignee,
@@ -148,12 +156,14 @@ export function DashboardPage() {
       country: dashboardState.params.country,
       sourceId: dashboardState.params.sourceId,
       scopeMode: dashboardState.params.scopeMode,
+      contactCenter: dashboardState.params.contactCenter,
       darkMode
     }),
     [
       dashboardState.params.country,
       dashboardState.params.sourceId,
       dashboardState.params.scopeMode,
+      dashboardState.params.contactCenter,
       darkMode
     ]
   );
@@ -204,6 +214,7 @@ export function DashboardPage() {
       dashboardState.params.country,
       dashboardState.params.sourceId,
       dashboardState.params.scopeMode,
+      dashboardState.params.contactCenter,
       dashboardState.params.status,
       dashboardState.params.priority,
       dashboardState.params.assignee,
@@ -223,16 +234,18 @@ export function DashboardPage() {
       "dashboard-filter-workspace",
       dashboardState.params.country,
       dashboardState.params.sourceId,
-      dashboardState.params.scopeMode
+      dashboardState.params.scopeMode,
+      dashboardState.params.contactCenter
     ],
     queryFn: () =>
       fetchJson<WorkspaceData>("/api/workspace", {
         country: dashboardState.params.country,
         sourceId: dashboardState.params.sourceId,
-        scopeMode: dashboardState.params.scopeMode
+        scopeMode: dashboardState.params.scopeMode,
+        contactCenter: dashboardState.params.contactCenter
       }),
     enabled:
-      Boolean(workspace?.selectedCountry) &&
+      scopeReady &&
       (activePanel === "issues" || activePanel === "kanban"),
     ...commonQueryOptions
   });
@@ -256,7 +269,7 @@ export function DashboardPage() {
   const overview = useQuery({
     queryKey: ["dashboard-overview", overviewQueryParams],
     queryFn: () => fetchJson<DashboardPayload>("/api/dashboard", overviewQueryParams),
-    enabled: Boolean(workspace?.selectedCountry) && activePanel === "overview",
+    enabled: scopeReady && activePanel === "overview",
     ...commonQueryOptions
   });
 
@@ -265,7 +278,7 @@ export function DashboardPage() {
     queryFn: () =>
       fetchJson<TrendDetailPayload>("/api/trends/detail", trendDetailQueryParams),
     enabled:
-      Boolean(workspace?.selectedCountry) &&
+      scopeReady &&
       activePanel === "trends" &&
       Boolean(trendChartId),
     ...commonQueryOptions
@@ -275,7 +288,7 @@ export function DashboardPage() {
     queryKey: ["dashboard-intelligence", intelligenceQueryParams],
     queryFn: () =>
       fetchJson<IntelligencePayload>("/api/intelligence", intelligenceQueryParams),
-    enabled: Boolean(workspace?.selectedCountry) && activePanel === "insights",
+    enabled: scopeReady && activePanel === "insights",
     ...commonQueryOptions,
     placeholderData: undefined
   });
@@ -284,7 +297,7 @@ export function DashboardPage() {
     queryKey: ["dashboard-issues", issuesPanelQueryParams],
     queryFn: () =>
       fetchJson<IssuesPayload>("/api/issues", issuesPanelQueryParams),
-    enabled: Boolean(workspace?.selectedCountry) && activePanel === "issues",
+    enabled: scopeReady && activePanel === "issues",
     ...commonQueryOptions
   });
 
@@ -292,7 +305,7 @@ export function DashboardPage() {
     queryKey: ["dashboard-kanban", sharedScopeParams],
     queryFn: () =>
       fetchJson<KanbanPayload>("/api/kanban", sharedScopeParams),
-    enabled: Boolean(workspace?.selectedCountry) && activePanel === "kanban",
+    enabled: scopeReady && activePanel === "kanban",
     ...commonQueryOptions
   });
 
@@ -300,7 +313,7 @@ export function DashboardPage() {
     queryKey: ["dashboard-note-keys", notesScopeParams],
     queryFn: () =>
       fetchJson<IssueKeysPayload>("/api/issues/keys", notesScopeParams),
-    enabled: Boolean(workspace?.selectedCountry) && activePanel === "notes"
+    enabled: scopeReady && activePanel === "notes"
   });
 
   useEffect(() => {
@@ -308,15 +321,16 @@ export function DashboardPage() {
       return;
     }
     const keys = issueKeys.data?.keys ?? [];
-    if (keys.length === 0) {
+    if (!issueKeys.isSuccess || (!contactCenterEnabled && keys.length === 0)) {
       return;
     }
     if (!dashboardState.params.notesIssueKey || keys.includes(dashboardState.params.notesIssueKey)) {
       return;
     }
     dashboardState.update({ notesIssueKey: "" });
-  }, [activePanel, dashboardState, dashboardState.params.notesIssueKey, issueKeys.data?.keys]);
+  }, [activePanel, dashboardState, dashboardState.params.notesIssueKey, issueKeys.data?.keys, issueKeys.isSuccess, contactCenterEnabled]);
 
+  const noteInScope = !contactCenterEnabled || Boolean(issueKeys.data?.keys.includes(dashboardState.params.notesIssueKey));
   const note = useQuery({
     queryKey: ["dashboard-note", dashboardState.params.notesIssueKey],
     queryFn: () =>
@@ -324,15 +338,16 @@ export function DashboardPage() {
         `/api/notes/${encodeURIComponent(dashboardState.params.notesIssueKey)}`
       ),
     enabled:
-      Boolean(workspace?.selectedCountry) &&
+      scopeReady &&
       activePanel === "notes" &&
-      Boolean(dashboardState.params.notesIssueKey)
+      Boolean(dashboardState.params.notesIssueKey) &&
+      (!contactCenterEnabled || Boolean(issueKeys.data?.keys.includes(dashboardState.params.notesIssueKey)))
   });
 
   const notesList = useQuery({
     queryKey: ["dashboard-notes-list", notesScopeParams],
     queryFn: () => fetchJson<NoteListPayload>("/api/notes", notesScopeParams),
-    enabled: Boolean(workspace?.selectedCountry) && activePanel === "notes"
+    enabled: scopeReady && activePanel === "notes"
   });
 
   const saveNote = useMutation({
@@ -482,6 +497,10 @@ export function DashboardPage() {
         description="El workspace no ha podido resolver país y origen con la configuración actual."
       />
     );
+  }
+
+  if (!scopeReady) {
+    return <EmptyState title="Cargando alcance operativo" description="Actualizando país y origen." />;
   }
 
   if (activePanel === "overview") {
@@ -806,9 +825,10 @@ export function DashboardPage() {
 
     return (
       <NotesEditor
+        key={`${dashboardState.params.country}:${dashboardState.params.sourceId}:${dashboardState.params.scopeMode}:${dashboardState.params.contactCenter}`}
         issueKeys={issueKeys.data?.keys ?? []}
-        selectedIssueKey={dashboardState.params.notesIssueKey}
-        entries={note.data?.entries ?? []}
+        selectedIssueKey={noteInScope ? dashboardState.params.notesIssueKey : ""}
+        entries={noteInScope ? note.data?.entries ?? [] : []}
         notes={notesList.data?.rows ?? []}
         isLoading={issueKeys.isLoading || note.isLoading || notesList.isLoading}
         isSaving={saveNote.isPending || updateNoteEntry.isPending}

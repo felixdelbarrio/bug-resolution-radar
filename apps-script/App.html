@@ -272,6 +272,7 @@ const App = (() => {
       contract: state.bootstrap.app.contractVersion,
       cacheGeneration: state.bootstrap.app.cacheEpoch,
       scopeKey: request.scopeKey,
+      contactCenter: request.contactCenter || '',
       scopeVersion: scope.dataVersion || state.bootstrap.app.dataVersion,
       snapshotId: scope.snapshotId || '',
       view: request.view,
@@ -323,7 +324,7 @@ const App = (() => {
     if (reports) {
       const adminReports = isAdmin() && !isShared();
       reports.innerHTML = UI.icon('presentation');
-      reports.title = adminReports ? 'Newsletter' : 'Presentación';
+      reports.title = adminReports ? 'Newsletter del ámbito completo' : 'Presentación del ámbito completo';
       reports.setAttribute(
         'aria-label',
         adminReports ? 'Probar o enviar newsletter' : 'Abrir presentación publicada'
@@ -369,8 +370,7 @@ const App = (() => {
       `${UI.escape(country)}</option>`
     )).join('') || '<option value="">Sin ámbitos publicados</option>';
 
-    const contactCenterEnabled = Boolean(active.country &&
-      (state.bootstrap.contactCenterEnabledCountries || []).includes(active.country));
+    const contactCenterEnabled = active.contactCenterEnabled === true;
     if (!contactCenterEnabled || state.contactCenterCountry !== active.country) {
       state.contactCenter = 'PYME';
     }
@@ -379,6 +379,8 @@ const App = (() => {
     $('workspaceContactCenter').disabled = !contactCenterEnabled;
     $('workspaceContactCenter').value = state.contactCenter;
     $('scopeBar').classList.toggle('has-contact-center', contactCenterEnabled);
+    document.querySelectorAll('[data-contact-center-panel]').forEach(button => button.classList.toggle('hidden', !contactCenterEnabled));
+    if (!contactCenterEnabled && ['kanban', 'notes'].includes(state.panel)) state.panel = 'overview';
     $('scopeBar').classList.toggle('has-visible-country', !countryField.classList.contains('hidden'));
 
     const related = countryScopes(active.country);
@@ -406,7 +408,8 @@ const App = (() => {
     banner.textContent = isShared()
       ? `Vista compartida de solo lectura · ${active.scopeLabel || ''}`
       : '';
-    $('scopeDescription').textContent = active.scopeLabel || active.country || 'Sin ámbito';
+    $('scopeDescription').textContent = (active.scopeLabel || active.country || 'Sin ámbito') +
+      (contactCenterEnabled ? ` · ${state.contactCenter}` : active.contactCenterPending ? ' · Republicar para segmentar' : '');
     $('dataVersion').textContent = active.activatedAt
       ? `Última importación: ${UI.formatDate(active.activatedAt)}`
       : 'Sin importación';
@@ -827,10 +830,36 @@ const App = (() => {
     bindIssueLinks();
   }
 
+  function renderKanban() {
+    const columns = (state.dashboard && state.dashboard.kanban) || [];
+    Charts.begin(view());
+    view().innerHTML = columns.length ? `<section class="page-stack">
+      <div class="panel-head"><div><h3>Kanban · ${UI.escape(state.contactCenter)}</h3><p class="minor-copy">Estado al publicar el snapshot.</p></div></div>
+      <div class="contact-center-kanban">${columns.map(column => `<article class="surface-card">
+        <h4>${UI.chip(column.status)} · ${UI.formatNumber(column.count)}</h4>
+        ${issueList(column.items || [])}
+      </article>`).join('')}</div></section>` : UI.empty('Sin incidencias abiertas', 'No hay incidencias Kanban en este segmento.');
+    bindIssueLinks();
+  }
+
+  function renderNotes() {
+    const rows = (state.dashboard && state.dashboard.notes) || [];
+    Charts.begin(view());
+    view().innerHTML = `<section class="page-stack"><div class="surface-panel panel-head"><div>
+      <h3>Notas · ${UI.escape(state.contactCenter)}</h3><p class="minor-copy">Solo lectura · ${UI.formatNumber(rows.length)} incidencias con notas al publicar.</p>
+      </div></div>${rows.length ? rows.map(row => `<article class="surface-card notes-index-card"><div>
+        <h4>${UI.issueKey(row)} · ${UI.escape(row.summary)}</h4>
+        <div class="issue-card-meta">${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}</div>
+        <p class="contact-center-note">${UI.escape(row.note)}</p></div></article>`).join('') : UI.empty('Sin notas', 'No hay notas publicadas para este segmento.')}</section>`;
+    bindIssueLinks();
+  }
+
   function renderCurrent() {
     if (state.panel === 'overview') renderOverview();
     else if (state.panel === 'insights') renderInsights();
     else if (state.panel === 'trends') renderTrends();
+    else if (state.panel === 'kanban') renderKanban();
+    else if (state.panel === 'notes') renderNotes();
     else renderIssues();
   }
 
@@ -841,9 +870,12 @@ const App = (() => {
     }
     try {
       setBusy(true);
+      const epoch = state.navigationEpoch;
+      const contactCenter = state.contactCenterCountry ? state.contactCenter : '';
       const issue = isShared()
-        ? await RPC.call('getSharedIssueDetail', state.sharedToken, issueUid)
-        : await RPC.call('getIssueDetail', { scopeKey: state.scopeKey, issueUid });
+        ? await RPC.call('getSharedIssueDetail', state.sharedToken, issueUid, contactCenter)
+        : await RPC.call('getIssueDetail', { scopeKey: state.scopeKey, issueUid, contactCenter });
+      if (epoch !== state.navigationEpoch) return;
       const root = $('issueDrawerRoot');
       root.innerHTML = `<aside class="issue-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
         <button id="drawerBackdrop" class="issue-drawer-backdrop" aria-label="Cerrar detalle" type="button"></button>
@@ -951,7 +983,7 @@ const App = (() => {
     view().innerHTML = `<section class="page-stack">
       <section class="surface-panel report-intro"><div>
         <p class="section-kicker">Reports</p><h3>Presentación y newsletter</h3>
-        <p class="minor-copy">La publicación reutiliza el PPTX autoritativo del escritorio; GPC no vuelve a calcular ni reconstruir el informe.</p>
+        <p class="minor-copy">La presentación y la newsletter corresponden al ámbito completo del traslado (PYME + BEI cuando aplica). Las seis vistas del cuadro de mando sí se consultan por Contact center. GPC no recalcula el PPTX.</p>
       </div></section>
       <section class="surface-panel"><div id="periodReportResult">Consultando snapshot…</div></section>
     </section>`;
@@ -1469,6 +1501,9 @@ const App = (() => {
       setBusy(true);
       const dashboard = await fetchDashboard(request);
       if (expectedEpoch !== state.navigationEpoch || state.route !== 'dashboard') return;
+      if ((dashboard.contactCenter || '') !== (request.contactCenter || '')) {
+        throw new Error('La variante del snapshot no coincide con el Contact center. Recarga la aplicación.');
+      }
       state.dashboard = dashboard;
       state.route = 'dashboard';
       syncNavigation();
@@ -1512,7 +1547,7 @@ const App = (() => {
       state.dashboard = cached;
       renderCurrent();
     } else {
-      showRouteLoading(`Abriendo ${panel === 'overview' ? 'Resumen' : panel === 'insights' ? 'Insights' : panel === 'trends' ? 'Tendencias' : 'Issues'}…`);
+      showRouteLoading(`Abriendo ${({ overview: 'Resumen', insights: 'Insights', trends: 'Tendencias', issues: 'Issues', kanban: 'Kanban', notes: 'Notas' })[panel] || 'Sección'}…`);
     }
     trackEvent('navigation', { target: panel });
     await refreshDashboard(epoch);
@@ -1584,6 +1619,7 @@ const App = (() => {
       if (bootstrap.dashboard && requestKey(requestFor()) === requestKey({
         ...requestFor(),
         scopeKey: initial.scopeKey,
+        contactCenter: bootstrap.dashboard.contactCenter || '',
         view: initial.panel || 'overview'
       })) {
         state.dashboard = bootstrap.dashboard;
@@ -1622,6 +1658,24 @@ const App = (() => {
     }
   }
 
+  async function refreshScopeSelection(epoch) {
+    state.dashboard = null;
+    const drawer = $('issueDrawerRoot');
+    if (drawer) drawer.innerHTML = '';
+    syncScope();
+    syncNavigation();
+    if (state.route === 'dashboard') {
+      showRouteLoading('Actualizando ámbito…');
+      await refreshDashboard(epoch);
+    } else if (state.route === 'reports') {
+      await renderReports();
+    } else if (state.route === 'settings') {
+      state.adminConsole = null;
+      await renderSettings();
+    }
+    schedulePreferenceSave();
+  }
+
   function bindShell() {
     document.querySelectorAll('[data-panel]').forEach(button => {
       button.addEventListener('click', () => openPanel(button.dataset.panel));
@@ -1656,13 +1710,14 @@ const App = (() => {
       const scopes = countryScopes(event.target.value);
       state.scopeKey = (aggregateScope(scopes) || scopes[0] || {}).scopeKey || '';
       state.page = 1;
-      syncScope();
-      await refreshDashboard(epoch);
-      schedulePreferenceSave();
+      await refreshScopeSelection(epoch);
     });
-    $('workspaceContactCenter').addEventListener('change', event => {
+    $('workspaceContactCenter').addEventListener('change', async event => {
+      if (!state.contactCenterCountry) return;
+      const epoch = ++state.navigationEpoch;
       state.contactCenter = event.target.value === 'BEI' ? 'BEI' : 'PYME';
-      event.target.value = state.contactCenter;
+      state.page = 1;
+      await refreshScopeSelection(epoch);
     });
     $('workspaceRollup').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;
@@ -1674,17 +1729,13 @@ const App = (() => {
         ? aggregate.scopeKey
         : (individual && individual.scopeKey) || (aggregate && aggregate.scopeKey) || '';
       state.page = 1;
-      syncScope();
-      await refreshDashboard(epoch);
-      schedulePreferenceSave();
+      await refreshScopeSelection(epoch);
     });
     $('workspaceSource').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;
       state.scopeKey = event.target.value;
       state.page = 1;
-      syncScope();
-      await refreshDashboard(epoch);
-      schedulePreferenceSave();
+      await refreshScopeSelection(epoch);
     });
     $('themeToggle').addEventListener('click', () => setTheme(!state.dark));
     $('accessGateRetry').addEventListener('click', boot);

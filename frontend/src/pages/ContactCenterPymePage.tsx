@@ -82,6 +82,9 @@ function CountryEditor({ country, countries, onCountryChange }: {
     onSuccess: (payload) => {
       queryClient.setQueryData(queryKey, payload);
       void queryClient.invalidateQueries({ queryKey: ["bootstrap-shell"] });
+      void queryClient.invalidateQueries({ predicate: (query) =>
+        String(query.queryKey[0] ?? "").startsWith("dashboard-")
+      });
       setDraft(toDraft(payload));
       setSaved({ enabled: payload.enabled, people: payload.people });
       setError("");

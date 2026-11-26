@@ -7,7 +7,7 @@ import json
 import math
 import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -43,11 +43,14 @@ from bug_resolution_radar.reports.service import (
     generate_period_followup_report_artifact,
 )
 from bug_resolution_radar.services.contact_center_pyme import contact_center_enabled_countries
+from bug_resolution_radar.services.contact_center_scope import CONTACT_CENTERS
 from bug_resolution_radar.services.dashboard_snapshot import (
     DashboardQuery,
+    DashboardScopeContext,
     build_dashboard_snapshot,
     build_intelligence_snapshot,
     build_issue_rows,
+    build_kanban_columns,
     build_trend_detail,
     load_scope_context,
 )
@@ -605,47 +608,10 @@ def _materialize_issue_references(value: Any, issue_rows: Sequence[Mapping[str, 
     return convert(value)
 
 
-def build_cloud_projection_artifact(
-    settings: Settings,
-    *,
-    country: str,
-    source_ids: Sequence[str],
-    scope_mode: str,
-    generated_at: datetime | str | None = None,
-    report_result: PeriodFollowupReportResult | None = None,
-) -> CloudProjectionArtifact:
-    """Materialize every cloud view and attach the exact local PPTX bytes."""
-    country_text = str(country or "").strip()
-    clean_source_ids = tuple(
-        sorted(
-            {
-                str(source_id or "").strip()
-                for source_id in source_ids
-                if str(source_id or "").strip()
-            }
-        )
-    )
-    mode = str(scope_mode or "").strip().casefold()
-    if not country_text:
-        raise ValueError("Selecciona un país antes de exportar la vista.")
-    if mode not in {"country", "source"}:
-        raise ValueError("El modo de ámbito no es válido.")
-    if not clean_source_ids:
-        raise ValueError("Selecciona al menos un origen antes de exportar la vista.")
-    if mode == "source" and len(clean_source_ids) != 1:
-        raise ValueError("La vista por origen debe contener exactamente un origen.")
-
-    stamp = _normalized_generated_at(generated_at)
-    query = _projection_query(
-        country=country_text,
-        scope_mode=mode,
-        source_ids=clean_source_ids,
-    )
-    context = load_scope_context(settings, query=query, include_kpis=True)
-    if context.dff.empty:
-        raise ValueError("La vista seleccionada no contiene incidencias para exportar.")
-    reference_date = _scope_reference_date(context.dff)
-
+def _materialize_views(
+    settings: Settings, *, query: DashboardQuery, context: DashboardScopeContext
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reuse exactly the same builders for full scope and each Contact Center."""
     overview = build_dashboard_snapshot(settings, query=query)
     overview_chart_ids = [
         str(chart.get("id") or "")
@@ -769,6 +735,90 @@ def build_cloud_projection_artifact(
         _strip_cloud_actions(_materialize_issue_references(raw_views, issue_rows))
     )
 
+    if query.contact_center:
+        # These two panels were previously desktop-only. Export immutable views
+        # from the same scoped dataframe; never transport the operators table.
+        visible_uids = {str(row.get("issue_uid") or "") for row in compact_issue_rows}
+        columns = []
+        for column in build_kanban_columns(settings, query=query):
+            if _is_hidden_webapp_status(column.get("status")):
+                continue
+            items = [
+                item for item in column.get("items", [])
+                if str(item.get("issue_uid") or "") in visible_uids
+            ]
+            columns.append({**column, "items": items})
+        views["kanban"] = _strip_cloud_actions(columns)
+        views["notes"] = [
+            {**_webapp_issue_row(row), "note": str(row.get("note") or "")}
+            for row in issue_rows
+            if str(row.get("note") or "").strip()
+        ]
+    return views, intelligence
+
+
+def build_cloud_projection_artifact(
+    settings: Settings,
+    *,
+    country: str,
+    source_ids: Sequence[str],
+    scope_mode: str,
+    generated_at: datetime | str | None = None,
+    report_result: PeriodFollowupReportResult | None = None,
+) -> CloudProjectionArtifact:
+    """Materialize every cloud view and attach the exact local PPTX bytes."""
+    country_text = str(country or "").strip()
+    clean_source_ids = tuple(
+        sorted(
+            {
+                str(source_id or "").strip()
+                for source_id in source_ids
+                if str(source_id or "").strip()
+            }
+        )
+    )
+    mode = str(scope_mode or "").strip().casefold()
+    if not country_text:
+        raise ValueError("Selecciona un país antes de exportar la vista.")
+    if mode not in {"country", "source"}:
+        raise ValueError("El modo de ámbito no es válido.")
+    if not clean_source_ids:
+        raise ValueError("Selecciona al menos un origen antes de exportar la vista.")
+    if mode == "source" and len(clean_source_ids) != 1:
+        raise ValueError("La vista por origen debe contener exactamente un origen.")
+
+    stamp = _normalized_generated_at(generated_at)
+    query = _projection_query(
+        country=country_text,
+        scope_mode=mode,
+        source_ids=clean_source_ids,
+    )
+    context = load_scope_context(settings, query=query, include_kpis=True)
+    if context.dff.empty:
+        raise ValueError("La vista seleccionada no contiene incidencias para exportar.")
+    reference_date = _scope_reference_date(context.dff)
+
+    views, intelligence = _materialize_views(settings, query=query, context=context)
+    contact_center_enabled = (
+        normalize_country_name(country_text, settings=settings)
+        in contact_center_enabled_countries(settings)
+    )
+    if contact_center_enabled:
+        variants: dict[str, Any] = {}
+        for segment in CONTACT_CENTERS:
+            segment_query = replace(query, contact_center=segment)
+            segment_context = load_scope_context(settings, query=segment_query, include_kpis=True)
+            variants[segment], _ = _materialize_views(
+                settings, query=segment_query, context=segment_context
+            )
+        # Refuse to publish a partial, overlapping or inconsistent partition.
+        full_uids = {row["issue_uid"] for row in views["issues"]["rows"]}
+        pyme_uids = {row["issue_uid"] for row in variants["PYME"]["issues"]["rows"]}
+        bei_uids = {row["issue_uid"] for row in variants["BEI"]["issues"]["rows"]}
+        if pyme_uids & bei_uids or pyme_uids | bei_uids != full_uids:
+            raise ValueError("Contact Center PYME/BEI no particiona el ámbito completo.")
+        views["contactCenter"] = variants
+
     if report_result is None:
         report_result = generate_period_followup_report_artifact(
             settings,
@@ -806,12 +856,9 @@ def build_cloud_projection_artifact(
         if source.get("sourceType") == "jira"
     ]
     facts_sha256 = sha256_bytes(canonical_json_bytes(newsletter))
-    contact_center_enabled = (
-        normalize_country_name(country_text, settings=settings)
-        in contact_center_enabled_countries(settings)
-    )
     semantics = _semantic_trace(settings)
     semantics["contactCenterEnabled"] = contact_center_enabled
+    semantics["contactCenterMaterialized"] = contact_center_enabled
     revision_payload = {
         "country": country_text,
         "scopeMode": mode,

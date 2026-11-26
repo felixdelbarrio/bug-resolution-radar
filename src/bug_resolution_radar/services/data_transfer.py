@@ -364,30 +364,11 @@ def _validate_pptx(content: bytes) -> None:
         raise TransferValidationError("La presentación adjunta está dañada.") from exc
 
 
-def _validate_projection(
-    projection: Any,
-    *,
-    manifest: dict[str, Any],
-    report_content: bytes,
-) -> dict[str, Any]:
-    payload = _require_exact_fields(
-        projection, _PROJECTION_FIELDS, label=_DATASET_LABELS["projection"]
-    )
-    if (
-        payload.get("schema") != PROJECTION_SCHEMA
-        or payload.get("schemaVersion") != PROJECTION_SCHEMA_VERSION
-        or payload.get("semanticContract") != SEMANTIC_CONTRACT
-    ):
-        raise TransferValidationError("La proyección no pertenece al contrato GPC vigente.")
-    scope = _validate_scope(payload.get("scope"))
-    if scope != manifest.get("scope"):
-        raise TransferValidationError("El ámbito del manifest no coincide con la proyección.")
-    _require_exact_fields(
-        payload.get("views"),
-        {"overview", "insights", "trends", "issues"},
-        label="projection.views",
-    )
-    views = payload["views"]
+def _validate_materialized_views(views: Any, *, segmented: bool = False) -> set[str]:
+    fields = {"overview", "insights", "trends", "issues"}
+    if segmented:
+        fields |= {"kanban", "notes"}
+    views = _require_exact_fields(views, fields, label="projection.views")
     overview_charts = views["overview"].get("charts")
     overview_chart_ids = (
         [str(chart.get("id") or "") for chart in overview_charts if isinstance(chart, dict)]
@@ -412,8 +393,68 @@ def _validate_projection(
         raise TransferValidationError("El catálogo de Tendencias está incompleto.")
     _require_exact_fields(views["insights"], {"catalog", "byId"}, label="views.insights")
     issues = _require_exact_fields(views["issues"], {"total", "rows"}, label="views.issues")
-    if not isinstance(issues["rows"], list) or int(issues["total"]) != len(issues["rows"]):
+    if (not isinstance(issues["rows"], list)
+        or type(issues["total"]) is not int
+        or issues["total"] != len(issues["rows"])):
         raise TransferValidationError("La vista materializada de incidencias está incompleta.")
+    uids: set[str] = set()
+    for row in issues["rows"]:
+        uid = str(row.get("issue_uid") or "") if isinstance(row, dict) else ""
+        if "::" not in uid or uid in uids:
+            raise TransferValidationError("La vista contiene identidades de incidencia inválidas o duplicadas.")
+        uids.add(uid)
+    if segmented:
+        if not isinstance(views["kanban"], list) or not isinstance(views["notes"], list):
+            raise TransferValidationError("Kanban o Notas de Contact Center no materializados.")
+        for column in views["kanban"]:
+            if not isinstance(column, dict) or not isinstance(column.get("items"), list):
+                raise TransferValidationError("Columna Kanban inválida.")
+            if any(not isinstance(row, dict) or row.get("issue_uid") not in uids for row in column["items"]):
+                raise TransferValidationError("Kanban contiene incidencias de otro ámbito.")
+        if any(not isinstance(row, dict) or row.get("issue_uid") not in uids for row in views["notes"]):
+            raise TransferValidationError("Notas contiene incidencias de otro ámbito.")
+    return uids
+
+
+def _validate_projection(
+    projection: Any,
+    *,
+    manifest: dict[str, Any],
+    report_content: bytes,
+) -> dict[str, Any]:
+    payload = _require_exact_fields(
+        projection, _PROJECTION_FIELDS, label=_DATASET_LABELS["projection"]
+    )
+    if (
+        payload.get("schema") != PROJECTION_SCHEMA
+        or payload.get("schemaVersion") != PROJECTION_SCHEMA_VERSION
+        or payload.get("semanticContract") != SEMANTIC_CONTRACT
+    ):
+        raise TransferValidationError("La proyección no pertenece al contrato GPC vigente.")
+    scope = _validate_scope(payload.get("scope"))
+    if scope != manifest.get("scope"):
+        raise TransferValidationError("El ámbito del manifest no coincide con la proyección.")
+    views = payload.get("views")
+    if not isinstance(views, dict):
+        raise TransferValidationError("Las vistas de la proyección no son válidas.")
+    variants = views.get("contactCenter")
+    full_uids = _validate_materialized_views({
+        key: value for key, value in views.items() if key != "contactCenter"
+    })
+    semantics = payload.get("semantics")
+    if not isinstance(semantics, dict):
+        raise TransferValidationError("La trazabilidad semántica del escritorio no está disponible.")
+    materialized = semantics.get("contactCenterMaterialized", False)
+    if type(materialized) is not bool or materialized != ("contactCenter" in views):
+        raise TransferValidationError("Contact Center: incoherencia entre metadatos y vistas.")
+    if materialized:
+        if semantics.get("contactCenterEnabled") is not True:
+            raise TransferValidationError("Contact Center no está habilitado.")
+        variants = _require_exact_fields(variants, {"PYME", "BEI"}, label="contactCenter")
+        pyme = _validate_materialized_views(variants["PYME"], segmented=True)
+        bei = _validate_materialized_views(variants["BEI"], segmented=True)
+        if pyme & bei or pyme | bei != full_uids:
+            raise TransferValidationError("PYME/BEI no particiona todas las incidencias del traslado.")
     administration = _require_exact_fields(
         payload.get("administration"), {"jiraSources"}, label="projection.administration"
     )
@@ -442,11 +483,6 @@ def _validate_projection(
             )
         except ValueError as exc:
             raise TransferValidationError(str(exc)) from exc
-    semantics = payload.get("semantics")
-    if not isinstance(semantics, dict):
-        raise TransferValidationError(
-            "La trazabilidad semántica del escritorio no está disponible."
-        )
     if not isinstance(semantics.get("contactCenterEnabled", False), bool):
         raise TransferValidationError("semantics.contactCenterEnabled debe ser booleano.")
     newsletter = payload.get("newsletterFacts")
