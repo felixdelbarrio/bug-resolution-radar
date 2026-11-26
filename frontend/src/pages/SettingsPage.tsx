@@ -30,12 +30,19 @@ const FunctionalityTaxonomiesPage = lazy(() =>
   }))
 );
 
+const ContactCenterPymePage = lazy(() =>
+  import("./ContactCenterPymePage").then((module) => ({
+    default: module.ContactCenterPymePage
+  }))
+);
+
 type SettingsTabId =
   | "taxonomies"
   | "preferences"
   | "jira"
   | "helix"
   | "rollups"
+  | "contact-center-pyme"
   | "cache"
   | "telemetry";
 
@@ -50,6 +57,7 @@ const settingsTabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "helix", label: "Helix" },
   { id: "rollups", label: "Agregados" },
   { id: "taxonomies", label: "Taxonomías" },
+  { id: "contact-center-pyme", label: "Contact Center PYME" },
   { id: "cache", label: "Cache" },
   { id: "telemetry", label: "Telemetría" }
 ];
@@ -1344,6 +1352,11 @@ export function SettingsPage() {
         </section>
       ) : null}
 
+      {activeTab === "contact-center-pyme" ? (
+        <Suspense fallback={<section className="surface-panel empty-panel">Cargando configuración...</section>}>
+          <ContactCenterPymePage countries={countries} />
+        </Suspense>
+      ) : null}
       {activeTab === "cache" ? (
         <section className="page-stack">
           <section className="surface-card page-stack">

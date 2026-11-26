@@ -33,6 +33,7 @@ from bug_resolution_radar.analytics.quincenal_scope import (
     QUINCENAL_SCOPE_ALL,
     quincenal_scope_options,
 )
+from bug_resolution_radar.api.contact_center_pyme import router as contact_center_pyme_router
 from bug_resolution_radar.common.issue_links import normalize_helix_id, normalize_jira_key
 from bug_resolution_radar.config import (
     Settings,
@@ -777,6 +778,7 @@ def _reveal_in_file_manager(path: Path) -> bool:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Bug Resolution Radar API", version="1.0.0")
+    app.include_router(contact_center_pyme_router)
     telemetry = TelemetryStore()
     app.add_middleware(
         CORSMiddleware,
