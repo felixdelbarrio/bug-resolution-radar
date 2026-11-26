@@ -60,7 +60,9 @@ const runtimeFiles = files.filter((name) =>
   !["BrandAssets.html", "90_Setup.gs"].includes(name)
 );
 const runtime = runtimeFiles.map(source).join("\n").toLowerCase();
-for (const retired of ["kanban", "opshealth", "salud operativa", "gemini"]) {
+// Kanban is intentionally materialized for Contact center (PYME/BEI).
+// Keep blocking the retired operational-health and generative runtimes.
+for (const retired of ["opshealth", "salud operativa", "gemini"]) {
   if (runtime.includes(retired)) throw new Error(`Referencia runtime retirada detectada: ${retired}`);
 }
 const newsletter = source("56_Newsletter.gs").toLowerCase();

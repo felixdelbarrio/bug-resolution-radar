@@ -45,7 +45,9 @@ def active_contact_center(settings: Settings, country: str, selection: str) -> s
 
 
 @lru_cache(maxsize=8)
-def _legacy_helix_submitters(path: str, mtime_ns: int, size: int) -> dict[tuple[str, str, str], str]:
+def _legacy_helix_submitters(
+    path: str, mtime_ns: int, size: int
+) -> dict[tuple[str, str, str], str]:
     """Recover the source field from the raw cache for pre-migration issues."""
     del mtime_ns, size
     document = HelixRepo(Path(path)).load()

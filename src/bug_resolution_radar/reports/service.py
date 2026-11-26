@@ -373,8 +373,13 @@ def generate_period_followup_report_artifact(
             deck.save(buffer)
             return PeriodFollowupReportResult(
                 file_name=f"seguimiento-{segment.lower()}-{datetime.now(timezone.utc):%Y%m%d-%H%M}.pptx",
-                content=buffer.getvalue(), slide_count=1, total_issues=0, open_issues=0,
-                closed_issues=0, country=country, source_ids=tuple(source_ids),
+                content=buffer.getvalue(),
+                slide_count=1,
+                total_issues=0,
+                open_issues=0,
+                closed_issues=0,
+                country=country,
+                source_ids=tuple(source_ids),
                 applied_filter_summary=f"Contact center: {segment}",
             )
         raise ValueError("No hay incidencias en la ventana temporal y filtros seleccionados.")

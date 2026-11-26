@@ -473,7 +473,10 @@ def _workspace_payload(
         )
     if include_filter_options:
         scoped_df = apply_contact_center_filter(
-            scoped_df, settings=settings, country=selected_country, selection=contact_center,
+            scoped_df,
+            settings=settings,
+            country=selected_country,
+            selection=contact_center,
         )
         scoped_df = enrich_issue_dataframe_with_helix(scoped_df, settings=settings)
     active_source_ids = (
@@ -586,9 +589,14 @@ def _notes_list_payload(
                 "source_alias": _note_meta_text(row, "source_alias"),
             }
     rows: list[dict[str, Any]] = []
-    segmented = bool(query and active_contact_center(
-        settings, query.workspace.country, query.contact_center,
-    ))
+    segmented = bool(
+        query
+        and active_contact_center(
+            settings,
+            query.workspace.country,
+            query.contact_center,
+        )
+    )
     for key, entries in store.entry_items():
         meta = issue_meta.get(str(key or "").strip().upper(), {})
         if segmented and not meta:

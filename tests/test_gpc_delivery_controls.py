@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,7 +24,88 @@ def test_gpc_quality_script_validates_the_real_local_webapp() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "GPC quality gate OK" in result.stdout
-    assert "17 nodos de arranque" in result.stdout
+    assert "19 nodos de arranque" in result.stdout
+
+
+@pytest.fixture
+def gpc_runtime(tmp_path: Path) -> Path:
+    shutil.copytree(ROOT / "apps-script", tmp_path / "apps-script")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("check_gpc_quality.mjs", "run_webapp_local.mjs"):
+        shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+    return tmp_path
+
+
+@pytest.mark.parametrize("retired", ["opshealth", "salud operativa", "gemini"])
+def test_gpc_quality_rejects_retired_runtime(gpc_runtime: Path, retired: str) -> None:
+    app = gpc_runtime / "apps-script" / "App.html"
+    app.write_text(app.read_text(encoding="utf-8") + f"\n<!-- {retired} -->\n", encoding="utf-8")
+    result = subprocess.run(
+        ["node", "scripts/check_gpc_quality.mjs"],
+        cwd=gpc_runtime,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert f"Referencia runtime retirada detectada: {retired}" in result.stderr
+
+
+def test_gpc_quality_rejects_missing_contact_center_shell_control(gpc_runtime: Path) -> None:
+    index = gpc_runtime / "apps-script" / "Index.html"
+    content = index.read_text(encoding="utf-8")
+    content = content.replace('id="workspaceContactCenter"', 'id="missingContactCenter"')
+    index.write_text(content, encoding="utf-8")
+    result = subprocess.run(
+        ["node", "scripts/check_gpc_quality.mjs"],
+        cwd=gpc_runtime,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    expected = "Index.html no satisface el contrato de arranque: workspaceContactCenter"
+    assert expected in result.stderr
+
+
+def test_kanban_and_notes_require_materialized_contact_center() -> None:
+    names = ("00_Config.gs", "25_MaterializedSnapshots.gs", "99_Core.gs")
+    script = "\n".join(_text(f"apps-script/{name}") for name in names)
+    script += r"""
+const assert = require('node:assert/strict');
+function _snapshotHeader_(record) { return {semantics: record.semantics}; }
+function _loadSnapshotPart_(_record, key) { return [{key}]; }
+const record = {scope_key: 'argentina::*', semantics: {}};
+for (const view of ['kanban', 'notes']) {
+  const request = segment => _normalizeMaterializedRequest_({
+    scopeKey: record.scope_key, view, contactCenter: segment
+  });
+  for (const semantics of [
+    {},
+    {contactCenterEnabled: false, contactCenterMaterialized: true},
+    {contactCenterEnabled: true, contactCenterMaterialized: false}
+  ]) {
+    record.semantics = semantics;
+    for (const segment of ['', 'PYME', 'BEI']) {
+      assert.throws(() => _materializedViewPayload_(record, request(segment)),
+        error => error.code === 'VIEW_NOT_MATERIALIZED');
+    }
+  }
+  record.semantics = {contactCenterEnabled: true, contactCenterMaterialized: true};
+  for (const segment of ['', 'PYME', 'BEI']) {
+    const expected = segment || 'PYME';
+    const response = _materializedViewPayload_(record, request(segment));
+    assert.equal(response.contactCenter, expected);
+    assert.deepEqual(response[view], [{key: 'contact-center/' + expected + '/' + view}]);
+  }
+}
+"""
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True, check=False)
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_webapp_reports_incomplete_html_deployments_without_null_errors() -> None:

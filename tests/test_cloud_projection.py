@@ -504,7 +504,9 @@ def test_contact_center_materializes_both_variants_and_changes_data_version(
             contact_center_report_results={
                 segment: replace(_report(content=segment.encode()), file_name=f"{segment}.pptx")
                 for segment in ("PYME", "BEI")
-            } if segmented else None,
+            }
+            if segmented
+            else None,
             generated_at="2026-07-23T10:00:00+00:00",
         ).projection
 
@@ -522,5 +524,10 @@ def test_contact_center_materializes_both_variants_and_changes_data_version(
     assert all(name in full["contactCenter"]["BEI"] for name in ("kanban", "notes"))
     assert "contactCenterReports" not in first
     assert second["contactCenterReports"]["PYME"]["newsletterFacts"] == second["newsletterFacts"]
-    assert second["contactCenterReports"]["BEI"]["newsletterFacts"]["draft"]["subject"].startswith("[BEI]")
-    assert second["contactCenterReports"]["PYME"]["report"]["sha256"] != second["contactCenterReports"]["BEI"]["report"]["sha256"]
+    assert second["contactCenterReports"]["BEI"]["newsletterFacts"]["draft"]["subject"].startswith(
+        "[BEI]"
+    )
+    assert (
+        second["contactCenterReports"]["PYME"]["report"]["sha256"]
+        != second["contactCenterReports"]["BEI"]["report"]["sha256"]
+    )

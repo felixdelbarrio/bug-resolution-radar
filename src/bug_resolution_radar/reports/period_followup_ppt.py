@@ -4871,8 +4871,9 @@ def generate_country_period_followup_ppt(
     aggregate = quincenal.aggregate
 
     _update_followup_cover(
-        prs.slides[0], period_label=(f"{segment} · " if segment else "")
-        + format_window_label(aggregate.summary.window)
+        prs.slides[0],
+        period_label=(f"{segment} · " if segment else "")
+        + format_window_label(aggregate.summary.window),
     )
 
     show_source_breakdown = _show_source_breakdown(clean_source_ids)

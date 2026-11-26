@@ -720,7 +720,9 @@ def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd
         ].copy(deep=False)
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
     scoped_df = apply_contact_center_filter(
-        scoped_df, settings=settings, country=query.workspace.country,
+        scoped_df,
+        settings=settings,
+        country=query.workspace.country,
         selection=query.contact_center,
     )
     return enrich_issue_dataframe_with_helix(scoped_df, settings=settings)
@@ -804,11 +806,15 @@ def _build_scope_context(
     # The country history used by final-state and discrepancy analytics must
     # observe the same segment as the visible scope, including historical rows.
     country_df = apply_contact_center_filter(
-        country_df, settings=settings, country=query.workspace.country,
+        country_df,
+        settings=settings,
+        country=query.workspace.country,
         selection=query.contact_center,
     )
     country_history_df = apply_contact_center_filter(
-        country_history_df, settings=settings, country=query.workspace.country,
+        country_history_df,
+        settings=settings,
+        country=query.workspace.country,
         selection=query.contact_center,
     )
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
@@ -1291,7 +1297,9 @@ def build_trend_detail(
         country=query.workspace.country,
         source_ids=context.source_ids,
         snapshot=current_snapshot,
-        contact_center=active_contact_center(settings, query.workspace.country, query.contact_center),
+        contact_center=active_contact_center(
+            settings, query.workspace.country, query.contact_center
+        ),
     )
     return {
         "chart": {

@@ -680,7 +680,7 @@ def test_cloud_removes_retired_views_and_generative_newsletter_code() -> None:
         if path.is_file() and path.name != "BrandAssets.html"
     )
     folded = cloud_code.casefold()
-    assert 'data-contact-center-panel' in _source("Index.html")
+    assert "data-contact-center-panel" in _source("Index.html")
     assert "opshealth" not in folded
     assert "salud operativa" not in folded
     runtime_newsletter = _source("56_Newsletter.gs").casefold()
@@ -1005,7 +1005,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
 
 def test_contact_center_bootstrap_reads_each_authorized_scope_flag() -> None:
-    script = _source("10_Main.gs") + r"""
+    script = (
+        _source("10_Main.gs")
+        + r"""
 function _text_(value) { return value == null ? '' : String(value); }
 function _date_(value) { const date = new Date(value); return isNaN(date) ? null : date; }
 const reads = [];
@@ -1027,12 +1029,18 @@ const manifest = { scopes: [
 ], sources: [] };
 console.log(JSON.stringify({ countries: _contactCenterEnabledCountries_(manifest), reads: reads }));
 """
-    result = subprocess.run(
-        ["node", "-"], input=script, text=True, capture_output=True, check=True
     )
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True, check=True)
     response = json.loads(result.stdout)
     assert response["countries"] == ["Argentina"]
-    assert sorted(response["reads"]) == ["ar-new", "ar-old", "es-old", "invalid", "missing", "mx-new"]
+    assert sorted(response["reads"]) == [
+        "ar-new",
+        "ar-old",
+        "es-old",
+        "invalid",
+        "missing",
+        "mx-new",
+    ]
     assert "_contactCenterEnabledCountries_(manifest)" in _function_body(
         _source("10_Main.gs"), "getBootstrap"
     )
@@ -1044,7 +1052,9 @@ console.log(JSON.stringify({ countries: _contactCenterEnabledCountries_(manifest
     )
 
 
-def test_contact_center_selector_is_between_country_and_rollup_and_filters_materialized_views() -> None:
+def test_contact_center_selector_is_between_country_and_rollup_and_filters_materialized_views() -> (
+    None
+):
     index = _source("Index.html")
     app = _source("App.html")
     assert index.index('id="workspaceCountry"') < index.index('id="workspaceContactCenter"')

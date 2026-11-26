@@ -270,12 +270,22 @@ def export_business_data(
         )
         saved_path = save_download_content(settings, file_name=file_name, content=archive_content)
         stats = [
-            {"key": key, "label": "Presentación de seguimiento PYME" if key == "report" and "reportBei" in files else _DATASET_LABELS[key], "count": 1}
+            {
+                "key": key,
+                "label": "Presentación de seguimiento PYME"
+                if key == "report" and "reportBei" in files
+                else _DATASET_LABELS[key],
+                "count": 1,
+            }
             for key in files
         ]
         payload = {
             "operation": "export",
-            "summary": ("Proyección GPC y presentaciones PYME y BEI preparadas." if "reportBei" in files else "Proyección GPC y presentación local exacta preparadas."),
+            "summary": (
+                "Proyección GPC y presentaciones PYME y BEI preparadas."
+                if "reportBei" in files
+                else "Proyección GPC y presentación local exacta preparadas."
+            ),
             "completedAt": created_at,
             "fileName": saved_path.name,
             "savedPath": str(saved_path),
@@ -401,15 +411,19 @@ def _validate_materialized_views(views: Any, *, segmented: bool = False) -> set[
         raise TransferValidationError("El catálogo de Tendencias está incompleto.")
     _require_exact_fields(views["insights"], {"catalog", "byId"}, label="views.insights")
     issues = _require_exact_fields(views["issues"], {"total", "rows"}, label="views.issues")
-    if (not isinstance(issues["rows"], list)
+    if (
+        not isinstance(issues["rows"], list)
         or type(issues["total"]) is not int
-        or issues["total"] != len(issues["rows"])):
+        or issues["total"] != len(issues["rows"])
+    ):
         raise TransferValidationError("La vista materializada de incidencias está incompleta.")
     uids: set[str] = set()
     for row in issues["rows"]:
         uid = str(row.get("issue_uid") or "") if isinstance(row, dict) else ""
         if "::" not in uid or uid in uids:
-            raise TransferValidationError("La vista contiene identidades de incidencia inválidas o duplicadas.")
+            raise TransferValidationError(
+                "La vista contiene identidades de incidencia inválidas o duplicadas."
+            )
         uids.add(uid)
     if segmented:
         if not isinstance(views["kanban"], list) or not isinstance(views["notes"], list):
@@ -417,9 +431,14 @@ def _validate_materialized_views(views: Any, *, segmented: bool = False) -> set[
         for column in views["kanban"]:
             if not isinstance(column, dict) or not isinstance(column.get("items"), list):
                 raise TransferValidationError("Columna Kanban inválida.")
-            if any(not isinstance(row, dict) or row.get("issue_uid") not in uids for row in column["items"]):
+            if any(
+                not isinstance(row, dict) or row.get("issue_uid") not in uids
+                for row in column["items"]
+            ):
                 raise TransferValidationError("Kanban contiene incidencias de otro ámbito.")
-        if any(not isinstance(row, dict) or row.get("issue_uid") not in uids for row in views["notes"]):
+        if any(
+            not isinstance(row, dict) or row.get("issue_uid") not in uids for row in views["notes"]
+        ):
             raise TransferValidationError("Notas contiene incidencias de otro ámbito.")
     return uids
 
@@ -432,12 +451,18 @@ def _validate_projection(
     report_bei_content: bytes = b"",
 ) -> dict[str, Any]:
     semantics_value = projection.get("semantics") if isinstance(projection, dict) else None
-    enabled = isinstance(semantics_value, dict) and semantics_value.get("contactCenterEnabled") is True
+    enabled = (
+        isinstance(semantics_value, dict) and semantics_value.get("contactCenterEnabled") is True
+    )
     fields = _PROJECTION_FIELDS | ({"contactCenterReports"} if enabled else set())
     payload = _require_exact_fields(projection, fields, label=_DATASET_LABELS["projection"])
-    expected_datasets = {"projection", "report", "reportBei"} if enabled else {"projection", "report"}
+    expected_datasets = (
+        {"projection", "report", "reportBei"} if enabled else {"projection", "report"}
+    )
     if set(manifest["datasets"]) != expected_datasets or bool(report_bei_content) != enabled:
-        raise TransferValidationError("Los informes no coinciden con la configuración Contact Center.")
+        raise TransferValidationError(
+            "Los informes no coinciden con la configuración Contact Center."
+        )
     if (
         payload.get("schema") != PROJECTION_SCHEMA
         or payload.get("schemaVersion") != PROJECTION_SCHEMA_VERSION
@@ -451,12 +476,14 @@ def _validate_projection(
     if not isinstance(views, dict):
         raise TransferValidationError("Las vistas de la proyección no son válidas.")
     variants = views.get("contactCenter")
-    full_uids = _validate_materialized_views({
-        key: value for key, value in views.items() if key != "contactCenter"
-    })
+    full_uids = _validate_materialized_views(
+        {key: value for key, value in views.items() if key != "contactCenter"}
+    )
     semantics = payload.get("semantics")
     if not isinstance(semantics, dict):
-        raise TransferValidationError("La trazabilidad semántica del escritorio no está disponible.")
+        raise TransferValidationError(
+            "La trazabilidad semántica del escritorio no está disponible."
+        )
     materialized = semantics.get("contactCenterMaterialized", False)
     if type(materialized) is not bool or materialized != ("contactCenter" in views):
         raise TransferValidationError("Contact Center: incoherencia entre metadatos y vistas.")
@@ -467,7 +494,9 @@ def _validate_projection(
         pyme = _validate_materialized_views(variants["PYME"], segmented=True)
         bei = _validate_materialized_views(variants["BEI"], segmented=True)
         if pyme & bei or pyme | bei != full_uids:
-            raise TransferValidationError("PYME/BEI no particiona todas las incidencias del traslado.")
+            raise TransferValidationError(
+                "PYME/BEI no particiona todas las incidencias del traslado."
+            )
     administration = _require_exact_fields(
         payload.get("administration"), {"jiraSources"}, label="projection.administration"
     )
@@ -522,23 +551,45 @@ def _validate_projection(
     if enabled:
         if not materialized:
             raise TransferValidationError("Se requieren ambas vistas Contact Center.")
-        reports = _require_exact_fields(payload["contactCenterReports"], {"PYME", "BEI"}, label="contactCenterReports")
-        for segment, key, content in (("PYME", "report", report_content), ("BEI", "reportBei", report_bei_content)):
-            variant = _require_exact_fields(reports[segment], {"report", "newsletterFacts", "factsSha256"}, label=segment)
+        reports = _require_exact_fields(
+            payload["contactCenterReports"], {"PYME", "BEI"}, label="contactCenterReports"
+        )
+        for segment, key, content in (
+            ("PYME", "report", report_content),
+            ("BEI", "reportBei", report_bei_content),
+        ):
+            variant = _require_exact_fields(
+                reports[segment], {"report", "newsletterFacts", "factsSha256"}, label=segment
+            )
             facts = variant["newsletterFacts"]
-            if not isinstance(facts, dict) or sha256_bytes(canonical_json_bytes(facts)) != variant["factsSha256"]:
+            if (
+                not isinstance(facts, dict)
+                or sha256_bytes(canonical_json_bytes(facts)) != variant["factsSha256"]
+            ):
                 raise TransferValidationError(f"Huella de newsletter {segment} inválida.")
             draft = facts.get("draft")
-            if not isinstance(draft, dict) or not str(draft.get("subject", "")).startswith(f"[{segment}] "):
+            if not isinstance(draft, dict) or not str(draft.get("subject", "")).startswith(
+                f"[{segment}] "
+            ):
                 raise TransferValidationError(f"Newsletter {segment} no identificada.")
             desc = _require_exact_fields(variant["report"], set(report), label=f"report.{segment}")
             dataset = manifest["datasets"][key]
-            if (desc["mimeType"] != REPORT_MIME_TYPE or not str(desc["fileName"]).lower().endswith(".pptx")
-                or desc["bytes"] != len(content) or desc["bytes"] != dataset["bytes"]
-                or desc["sha256"] != dataset["sha256"] or desc["sha256"] != sha256_bytes(content)
-                or type(desc["slideCount"]) is not int or desc["slideCount"] <= 0):
+            if (
+                desc["mimeType"] != REPORT_MIME_TYPE
+                or not str(desc["fileName"]).lower().endswith(".pptx")
+                or desc["bytes"] != len(content)
+                or desc["bytes"] != dataset["bytes"]
+                or desc["sha256"] != dataset["sha256"]
+                or desc["sha256"] != sha256_bytes(content)
+                or type(desc["slideCount"]) is not int
+                or desc["slideCount"] <= 0
+            ):
                 raise TransferValidationError(f"PPTX {segment} incoherente.")
-        if reports["PYME"] != {"report": report, "newsletterFacts": newsletter, "factsSha256": payload["factsSha256"]}:
+        if reports["PYME"] != {
+            "report": report,
+            "newsletterFacts": newsletter,
+            "factsSha256": payload["factsSha256"],
+        }:
             raise TransferValidationError("El índice principal no coincide con PYME.")
         if reports["PYME"]["report"]["sha256"] == reports["BEI"]["report"]["sha256"]:
             raise TransferValidationError("Los PPTX PYME y BEI deben ser distintos.")
