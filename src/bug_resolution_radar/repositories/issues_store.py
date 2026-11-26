@@ -261,7 +261,9 @@ def _load_issues_df_cached(path: str, json_mtime_ns: int, parquet_mtime_ns: int)
     parquet_path = _parquet_path(resolved)
     if parquet_mtime_ns >= json_mtime_ns and parquet_path.exists():
         try:
-            return _normalize_issue_dataframe(pd.read_parquet(parquet_path))
+            frame = pd.read_parquet(parquet_path)
+            if "submitter" in frame.columns:
+                return _normalize_issue_dataframe(frame)
         except Exception:
             pass
 

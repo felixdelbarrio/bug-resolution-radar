@@ -87,13 +87,16 @@ function _newsletterSentCountForReport_(reportId) {
   }, 0);
 }
 
-function getAdminConsole(scopeKey) {
+function getAdminConsole(scopeKey, contactCenter) {
   return _rpc_(function () {
     _requireAdmin_();
     const record = _activeSnapshotRecordForScope_(_text_(scopeKey), false);
     const latestImport = _latestImportRun_();
     const folder = _reportDriveFolderSetting_();
     const header = record ? _snapshotHeader_(record) : null;
+    const report = record ? _snapshotReportRecords_(record, header).find(function (item) {
+      return item.contact_center === '' || item.contact_center === (_text_(contactCenter) || 'PYME');
+    }) : null;
     const administration = record ? _snapshotAdministration_(record) : { jiraSources: [] };
     const analyticsSheet = _sheet_(RADAR.sheets.analyticsEvents);
     const analyticsEvents = Math.max(0, analyticsSheet.getLastRow() - 1);
@@ -109,18 +112,18 @@ function getAdminConsole(scopeKey) {
         contractVersion: RADAR.contractVersion,
         lastImportAt: latestImport ? latestImport.finished_at : null,
         importedRecords: record ? Number(record.row_count || 0) : 0,
-        newsletterRecipientsSent: record
-          ? _newsletterSentCountForReport_(record.report_id)
+        newsletterRecipientsSent: report
+          ? _newsletterSentCountForReport_(report.report_id)
           : 0,
         snapshotId: record ? _text_(record.snapshot_id) : '',
         dataVersion: record ? _text_(record.data_version) : '',
         projectionBytes: record ? Number(record.projection_bytes || 0) : 0,
-        reportSlides: record ? Number(record.slide_count || 0) : 0,
+        reportSlides: report ? Number(report.slide_count || 0) : 0,
         applicationUrl: _applicationBaseUrl_(),
         versionUrl: record
           ? _applicationBaseUrl_() + '?v=' + encodeURIComponent(_text_(record.data_version))
           : _applicationBaseUrl_(),
-        slidesUrl: record ? _text_(record.slides_url) : '',
+        slidesUrl: report ? _text_(report.slides_url) : '',
         generatedAt: header ? header.generatedAt : null,
         accessPolicy: 'Dominio @' + RADAR.allowedDomain,
         analyticsUsers: analyticsUsers,

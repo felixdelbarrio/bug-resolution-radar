@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pandas as pd
@@ -8,11 +9,17 @@ import pytest
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
+from bug_resolution_radar.services import cloud_projection
 from bug_resolution_radar.services.cloud_projection import (
     _CLOUD_ACTION_KEYS,
     build_cloud_projection_artifact,
     canonical_json_bytes,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_contact_center(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cloud_projection, "contact_center_enabled_countries", lambda settings: [])
 
 
 def _report(content: bytes = b"PK exact desktop report") -> PeriodFollowupReportResult:
@@ -472,3 +479,55 @@ def test_data_version_changes_when_materialized_detail_changes(
     ).projection["scope"]["dataVersion"]
 
     assert first != second
+
+
+def test_contact_center_materializes_both_variants_and_changes_data_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_materializers(monkeypatch)
+    original_rows = cloud_projection.build_issue_rows
+
+    def rows(*args, query, **kwargs):
+        result = original_rows(*args, query=query, **kwargs)
+        return {**result, "rows": result["rows"] if query.contact_center != "BEI" else []}
+
+    monkeypatch.setattr(cloud_projection, "build_issue_rows", rows)
+    monkeypatch.setattr(cloud_projection, "build_kanban_columns", lambda *args, **kwargs: [])
+
+    def projection(segmented: bool = False) -> dict:
+        return build_cloud_projection_artifact(
+            Settings(),
+            country="España",
+            source_ids=["jira:espana:core"],
+            scope_mode="source",
+            report_result=None if segmented else _report(),
+            contact_center_report_results={
+                segment: replace(_report(content=segment.encode()), file_name=f"{segment}.pptx")
+                for segment in ("PYME", "BEI")
+            }
+            if segmented
+            else None,
+            generated_at="2026-07-23T10:00:00+00:00",
+        ).projection
+
+    first = projection()
+    monkeypatch.setattr(
+        cloud_projection, "contact_center_enabled_countries", lambda settings: ["España"]
+    )
+    second = projection(segmented=True)
+    assert first["semantics"]["contactCenterMaterialized"] is False
+    assert second["semantics"]["contactCenterMaterialized"] is True
+    assert first["scope"]["dataVersion"] != second["scope"]["dataVersion"]
+    full = second["views"]
+    assert full["contactCenter"]["PYME"]["issues"] == first["views"]["issues"]
+    assert full["contactCenter"]["BEI"]["issues"]["rows"] == []
+    assert all(name in full["contactCenter"]["BEI"] for name in ("kanban", "notes"))
+    assert "contactCenterReports" not in first
+    assert second["contactCenterReports"]["PYME"]["newsletterFacts"] == second["newsletterFacts"]
+    assert second["contactCenterReports"]["BEI"]["newsletterFacts"]["draft"]["subject"].startswith(
+        "[BEI]"
+    )
+    assert (
+        second["contactCenterReports"]["PYME"]["report"]["sha256"]
+        != second["contactCenterReports"]["BEI"]["report"]["sha256"]
+    )

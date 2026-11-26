@@ -1,20 +1,24 @@
 /** Deterministic delivery of the exact newsletter authored by the desktop snapshot. */
 function _newsletterReports_() {
-  return _workspaceManifest_().scopes.map(function (scope) {
-    const record = _snapshotRecordById_(scope.snapshotId, false);
-    if (!record || !_text_(record.report_id)) return null;
-    return {
-      reportId: _text_(record.report_id),
-      snapshotId: _text_(record.snapshot_id),
-      scopeKey: _text_(scope.scopeKey),
-      label: _text_(scope.scopeLabel),
-      country: _text_(scope.country),
-      sourceIds: (scope.sourceIds || []).map(_text_),
-      dataVersion: _text_(scope.dataVersion),
-      reportUrl: _text_(record.slides_url),
-      createdAt: record.created_at
-    };
-  }).filter(Boolean);
+  return _workspaceManifest_().scopes.flatMap(function (scope) {
+    const snapshot = _snapshotRecordById_(scope.snapshotId, false);
+    if (!snapshot || !_text_(snapshot.report_id)) return [];
+    return _snapshotReportRecords_(snapshot).map(function (record) {
+      return {
+        reportId: _text_(record.report_id),
+        snapshotId: _text_(record.snapshot_id),
+        scopeKey: _text_(record.scope_key),
+        baseScopeKey: _text_(scope.scopeKey),
+        contactCenter: record.contact_center,
+        label: _text_(record.scope_label),
+        country: _text_(scope.country),
+        sourceIds: (scope.sourceIds || []).map(_text_),
+        dataVersion: _text_(scope.dataVersion),
+        reportUrl: _text_(record.slides_url),
+        createdAt: record.created_at
+      };
+    });
+  });
 }
 
 function _newsletterSenderCacheKey_() {
@@ -190,16 +194,22 @@ function _newsletterContext_(reportId) {
     return _text_(row.report_id) === _text_(reportId);
   });
   _assert_(report, 'No existe la presentación seleccionada.', 'NOT_FOUND');
-  const record = _snapshotRecordById_(report.snapshot_id, true);
-  _assert_(
-    _text_(record.report_id) === _text_(report.report_id) &&
+  const snapshot = _snapshotRecordById_(report.snapshot_id, true);
+  const header = _snapshotHeader_(snapshot);
+  const record = _snapshotReportRecords_(snapshot, header).find(function (item) {
+    return _text_(item.report_id) === _text_(report.report_id);
+  });
+  _assert_(record &&
+    _text_(record.scope_key) === _text_(report.scope_key) &&
     _text_(record.projection_sha256) === _text_(report.projection_sha256) &&
-    _text_(record.facts_sha256) === _text_(report.facts_sha256),
+    _text_(record.facts_sha256) === _text_(report.facts_sha256) &&
+    _text_(record.pptx_sha256) === _text_(report.pptx_sha256) &&
+    _text_(record.slides_file_id) === _text_(report.slides_file_id) &&
+    _text_(record.slides_url) === _text_(report.slides_url),
     'La auditoría del informe no coincide con su snapshot.',
     'NEWSLETTER_VALIDATION_FAILED'
   );
-  const header = _snapshotHeader_(record);
-  const newsletter = _snapshotNewsletter_(record);
+  const newsletter = _snapshotNewsletter_(snapshot, record.contact_center);
   _assert_(
     _hash_(_stableJsonStringify_(newsletter)) === _text_(report.facts_sha256),
     'La newsletter local no supera la validación de integridad.',
@@ -537,6 +547,8 @@ function sendPeriodNewsletter(reportId, mode) {
     const user = _requireAdmin_();
     const deliveryMode = _text_(mode) === 'send' ? 'send' : 'test';
     const context = _newsletterContext_(reportId);
+    _assert_(_newsletterReports_().some(function (item) { return item.reportId === _text_(reportId); }),
+      'El informe ya no está activo. Selecciona el snapshot vigente.', 'SNAPSHOT_NOT_FOUND');
     if (deliveryMode === 'send') {
       _assert_(
         _newsletterTestWasSentBy_(reportId, user.email),

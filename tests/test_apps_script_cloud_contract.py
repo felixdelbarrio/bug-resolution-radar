@@ -680,7 +680,7 @@ def test_cloud_removes_retired_views_and_generative_newsletter_code() -> None:
         if path.is_file() and path.name != "BrandAssets.html"
     )
     folded = cloud_code.casefold()
-    assert "kanban" not in folded
+    assert "data-contact-center-panel" in _source("Index.html")
     assert "opshealth" not in folded
     assert "salud operativa" not in folded
     runtime_newsletter = _source("56_Newsletter.gs").casefold()
@@ -1001,4 +1001,126 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 """
     )
     result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_contact_center_bootstrap_reads_each_authorized_scope_flag() -> None:
+    script = (
+        _source("10_Main.gs")
+        + r"""
+function _text_(value) { return value == null ? '' : String(value); }
+function _date_(value) { const date = new Date(value); return isNaN(date) ? null : date; }
+const reads = [];
+function _snapshotRecordById_(id) { reads.push(id); return { id: id }; }
+function _snapshotReportRecords_() { return []; }
+function _snapshotHeader_(record) {
+  if (record.id === 'missing') throw new Error('missing');
+  return { semantics: record.id === 'ar-new' ? { contactCenterEnabled: true, contactCenterMaterialized: true } :
+    record.id === 'mx-new' ? { contactCenterEnabled: false } :
+    record.id === 'es-old' ? {} : { contactCenterEnabled: 'true' } };
+}
+const manifest = { scopes: [
+  { scopeKey: 'ar::old', country: 'Argentina', snapshotId: 'ar-old', activatedAt: '2026-01-01' },
+  { scopeKey: 'ar::new', country: 'Argentina', snapshotId: 'ar-new', activatedAt: '2026-02-01' },
+  { scopeKey: 'mx::new', country: 'México', snapshotId: 'mx-new', activatedAt: '2026-02-01' },
+  { scopeKey: 'es::old', country: 'España', snapshotId: 'es-old', activatedAt: '2026-02-01' },
+  { scopeKey: 'co::new', country: 'Colombia', snapshotId: 'missing', activatedAt: '2026-02-01' },
+  { scopeKey: 'pe::new', country: 'Perú', snapshotId: 'invalid', activatedAt: '2026-02-01' }
+], sources: [] };
+console.log(JSON.stringify({ countries: _contactCenterEnabledCountries_(manifest), reads: reads }));
+"""
+    )
+    result = subprocess.run(["node", "-"], input=script, text=True, capture_output=True, check=True)
+    response = json.loads(result.stdout)
+    assert response["countries"] == ["Argentina"]
+    assert sorted(response["reads"]) == [
+        "ar-new",
+        "ar-old",
+        "es-old",
+        "invalid",
+        "missing",
+        "mx-new",
+    ]
+    assert "_contactCenterEnabledCountries_(manifest)" in _function_body(
+        _source("10_Main.gs"), "getBootstrap"
+    )
+    assert "_contactCenterEnabledCountries_" not in _function_body(
+        _source("10_Main.gs"), "_requireScopeAccess_"
+    )
+    assert "_snapshotContactCenterEnabled_(header)" in _function_body(
+        _source("59_SharedAccess.gs"), "getSharedBootstrap"
+    )
+
+
+def test_contact_center_selector_is_between_country_and_rollup_and_filters_materialized_views() -> (
+    None
+):
+    index = _source("Index.html")
+    app = _source("App.html")
+    assert index.index('id="workspaceCountry"') < index.index('id="workspaceContactCenter"')
+    assert index.index('id="workspaceContactCenter"') < index.index('id="workspaceRollup"')
+    assert '<option value="PYME" selected>PYME</option>' in index
+    assert '<option value="BEI">BEI</option>' in index
+    sync = _function_body(app, "syncScope")
+    assert "active.contactCenterEnabled === true" in sync
+    assert "state.contactCenter = 'PYME'" in sync
+    assert "'hidden', !contactCenterEnabled" in sync
+    assert "contactCenter" in _source("Domain.html")
+    assert "contactCenter" in _function_body(app, "requestKey")
+    assert "contactCenter" in _function_body(
+        _source("25_MaterializedSnapshots.gs"), "_normalizeMaterializedRequest_"
+    )
+
+
+def test_contact_center_sync_scope_resets_on_country_change_and_hides_when_disabled() -> None:
+    app = _source("App.html")
+    script = r"""
+const makeNode = () => {
+  const classes = new Set();
+  return { classList: {
+    toggle: (key, force) => force ? classes.add(key) : classes.delete(key),
+    contains: key => classes.has(key)
+  }, setAttribute() {}, value: '', disabled: false, textContent: '', innerHTML: '' };
+};
+const nodes = new Map();
+const $ = id => { if (!nodes.has(id)) nodes.set(id, makeNode()); return nodes.get(id); };
+const document = { querySelector: selector => $(selector), querySelectorAll: () => [] };
+const UI = { escape: String, formatDate: String };
+const state = { contactCenter: 'PYME', contactCenterCountry: '', scopeKey: 'ar::*',
+  bootstrap: { contactCenterEnabledCountries: ['Argentina'], scopes: [
+    {country: 'Argentina', scopeKey: 'ar::*', scopeLabel: 'Argentina agregado', contactCenterEnabled: true},
+    {country: 'Argentina', scopeKey: 'ar::core', scopeLabel: 'Argentina Core', contactCenterEnabled: true},
+    {country: 'España', scopeKey: 'es::*', scopeLabel: 'España agregado'}
+  ] } };
+const isAdmin = () => true;
+const isShared = () => false;
+const currentScope = () => state.bootstrap.scopes.find(s => s.scopeKey === state.scopeKey);
+const countryScopes = country => state.bootstrap.scopes.filter(s => s.country === country);
+const aggregateScope = scopes => scopes.find(s => s.scopeKey.endsWith('::*')) || null;
+const assert = (test, name) => { if (!test) throw Error(name); };
+"""
+    script += "\nfunction syncScope() {" + _function_body(app, "syncScope") + "}\n"
+    script += r"""
+syncScope();
+assert(!$('workspaceContactCenterField').classList.contains('hidden'), 'Argentina visible');
+assert($('workspaceContactCenter').value === 'PYME', 'default PYME');
+assert(!$('workspaceRollupCaption').classList.contains('hidden'), 'aggregate caption visible');
+state.contactCenter = 'BEI';
+state.scopeKey = 'ar::core';
+syncScope();
+assert($('workspaceContactCenter').value === 'BEI', 'retain BEI on same country');
+assert($('workspaceRollupCaption').classList.contains('hidden'), 'source caption hidden');
+state.scopeKey = 'es::*';
+syncScope();
+assert($('workspaceContactCenterField').classList.contains('hidden'), 'Spain hidden');
+state.scopeKey = 'ar::*';
+syncScope();
+assert($('workspaceContactCenter').value === 'PYME', 'reset on return');
+state.bootstrap.scopes[0].contactCenterEnabled = false;
+syncScope();
+assert($('workspaceContactCenterField').classList.contains('hidden'), 'disabled hidden');
+"""
+    result = subprocess.run(
+        ["node", "-"], input=script, text=True, capture_output=True, check=False
+    )
     assert result.returncode == 0, result.stderr

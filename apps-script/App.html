@@ -60,6 +60,8 @@ const App = (() => {
     bootstrap: null,
     dashboard: null,
     scopeKey: '',
+    contactCenter: 'PYME',
+    contactCenterCountry: '',
     trendChart: 'open_status_bar',
     insightsId: 'evolution',
     issuesView: 'Cards',
@@ -105,6 +107,8 @@ const App = (() => {
     'sharedScopeBanner',
     'themeToggle',
     'workspaceCountry',
+    'workspaceContactCenterField',
+    'workspaceContactCenter',
     'workspaceRollup',
     'workspaceRollupCaption',
     'workspaceSource'
@@ -268,6 +272,7 @@ const App = (() => {
       contract: state.bootstrap.app.contractVersion,
       cacheGeneration: state.bootstrap.app.cacheEpoch,
       scopeKey: request.scopeKey,
+      contactCenter: request.contactCenter || '',
       scopeVersion: scope.dataVersion || state.bootstrap.app.dataVersion,
       snapshotId: scope.snapshotId || '',
       view: request.view,
@@ -319,7 +324,7 @@ const App = (() => {
     if (reports) {
       const adminReports = isAdmin() && !isShared();
       reports.innerHTML = UI.icon('presentation');
-      reports.title = adminReports ? 'Newsletter' : 'Presentación';
+      reports.title = adminReports ? 'Newsletter del ámbito completo' : 'Presentación del ámbito completo';
       reports.setAttribute(
         'aria-label',
         adminReports ? 'Probar o enviar newsletter' : 'Abrir presentación publicada'
@@ -365,6 +370,19 @@ const App = (() => {
       `${UI.escape(country)}</option>`
     )).join('') || '<option value="">Sin ámbitos publicados</option>';
 
+    const contactCenterEnabled = active.contactCenterEnabled === true;
+    if (!contactCenterEnabled || state.contactCenterCountry !== active.country) {
+      state.contactCenter = 'PYME';
+    }
+    state.contactCenterCountry = contactCenterEnabled ? active.country : '';
+    $('workspaceContactCenterField').classList.toggle('hidden', !contactCenterEnabled);
+    $('workspaceContactCenter').disabled = !contactCenterEnabled;
+    $('workspaceContactCenter').value = state.contactCenter;
+    $('scopeBar').classList.toggle('has-contact-center', contactCenterEnabled);
+    document.querySelectorAll('[data-contact-center-panel]').forEach(button => button.classList.toggle('hidden', !contactCenterEnabled));
+    if (!contactCenterEnabled && ['kanban', 'notes'].includes(state.panel)) state.panel = 'overview';
+    $('scopeBar').classList.toggle('has-visible-country', !countryField.classList.contains('hidden'));
+
     const related = countryScopes(active.country);
     const aggregate = aggregateScope(related);
     const individual = related.filter(scope => scope !== aggregate);
@@ -381,14 +399,17 @@ const App = (() => {
     const sourceSlot = document.querySelector('.workspace-source-slot');
     sourceSlot.classList.toggle('hidden', rollup);
     sourceSlot.setAttribute('aria-hidden', String(rollup));
-    $('workspaceRollupCaption').classList.toggle('hidden', !rollup);
-    $('workspaceRollupCaption').textContent = rollup ? (active.scopeLabel || active.country) : '';
+    const showRollupCaption = rollup && isAdmin() && !isShared();
+    $('workspaceRollupCaption').classList.toggle('hidden', !showRollupCaption);
+    $('workspaceRollupCaption').textContent = showRollupCaption
+      ? `Agregado país activo: ${active.scopeLabel || active.country}` : '';
     const banner = $('sharedScopeBanner');
     banner.classList.toggle('hidden', !isShared());
     banner.textContent = isShared()
       ? `Vista compartida de solo lectura · ${active.scopeLabel || ''}`
       : '';
-    $('scopeDescription').textContent = active.scopeLabel || active.country || 'Sin ámbito';
+    $('scopeDescription').textContent = (active.scopeLabel || active.country || 'Sin ámbito') +
+      (contactCenterEnabled ? ` · ${state.contactCenter}` : active.contactCenterPending ? ' · Republicar para segmentar' : '');
     $('dataVersion').textContent = active.activatedAt
       ? `Última importación: ${UI.formatDate(active.activatedAt)}`
       : 'Sin importación';
@@ -809,10 +830,36 @@ const App = (() => {
     bindIssueLinks();
   }
 
+  function renderKanban() {
+    const columns = (state.dashboard && state.dashboard.kanban) || [];
+    Charts.begin(view());
+    view().innerHTML = columns.length ? `<section class="page-stack">
+      <div class="panel-head"><div><h3>Kanban · ${UI.escape(state.contactCenter)}</h3><p class="minor-copy">Estado al publicar el snapshot.</p></div></div>
+      <div class="contact-center-kanban">${columns.map(column => `<article class="surface-card">
+        <h4>${UI.chip(column.status)} · ${UI.formatNumber(column.count)}</h4>
+        ${issueList(column.items || [])}
+      </article>`).join('')}</div></section>` : UI.empty('Sin incidencias abiertas', 'No hay incidencias Kanban en este segmento.');
+    bindIssueLinks();
+  }
+
+  function renderNotes() {
+    const rows = (state.dashboard && state.dashboard.notes) || [];
+    Charts.begin(view());
+    view().innerHTML = `<section class="page-stack"><div class="surface-panel panel-head"><div>
+      <h3>Notas · ${UI.escape(state.contactCenter)}</h3><p class="minor-copy">Solo lectura · ${UI.formatNumber(rows.length)} incidencias con notas al publicar.</p>
+      </div></div>${rows.length ? rows.map(row => `<article class="surface-card notes-index-card"><div>
+        <h4>${UI.issueKey(row)} · ${UI.escape(row.summary)}</h4>
+        <div class="issue-card-meta">${UI.chip(row.status)} ${UI.chip(row.priority, 'priority')}</div>
+        <p class="contact-center-note">${UI.escape(row.note)}</p></div></article>`).join('') : UI.empty('Sin notas', 'No hay notas publicadas para este segmento.')}</section>`;
+    bindIssueLinks();
+  }
+
   function renderCurrent() {
     if (state.panel === 'overview') renderOverview();
     else if (state.panel === 'insights') renderInsights();
     else if (state.panel === 'trends') renderTrends();
+    else if (state.panel === 'kanban') renderKanban();
+    else if (state.panel === 'notes') renderNotes();
     else renderIssues();
   }
 
@@ -823,9 +870,12 @@ const App = (() => {
     }
     try {
       setBusy(true);
+      const epoch = state.navigationEpoch;
+      const contactCenter = state.contactCenterCountry ? state.contactCenter : '';
       const issue = isShared()
-        ? await RPC.call('getSharedIssueDetail', state.sharedToken, issueUid)
-        : await RPC.call('getIssueDetail', { scopeKey: state.scopeKey, issueUid });
+        ? await RPC.call('getSharedIssueDetail', state.sharedToken, issueUid, contactCenter)
+        : await RPC.call('getIssueDetail', { scopeKey: state.scopeKey, issueUid, contactCenter });
+      if (epoch !== state.navigationEpoch) return;
       const root = $('issueDrawerRoot');
       root.innerHTML = `<aside class="issue-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
         <button id="drawerBackdrop" class="issue-drawer-backdrop" aria-label="Cerrar detalle" type="button"></button>
@@ -853,12 +903,12 @@ const App = (() => {
 
   function reportSuccess(job) {
     const senderReady = job.newsletterSenderReady !== false;
-    const canSend = senderReady && job.newsletterTested && !job.newsletterSent;
+    const canSend = senderReady && job.newsletterTested && !job.newsletterSent && job.recipientCount > 0;
     const sendLabel = job.newsletterSent
       ? 'Newsletter enviada ✓'
       : 'Enviar newsletter';
     return `<div class="report-success">
-      <strong>Presentación exacta publicada</strong>
+      <strong>Presentación exacta publicada${job.contactCenter ? ` · ${UI.escape(job.contactCenter)}` : ''}</strong>
       <span>${UI.formatNumber(job.slideCount)} diapositivas · ${UI.formatNumber(job.rowCount)} incidencias</span>
       <a href="${UI.escape(job.fileUrl)}" target="_blank" rel="noopener">Abrir en Google Slides ↗</a>
       ${senderReady ? `<div class="newsletter-sender-ready"><strong>Remitente corporativo</strong><span>${UI.escape(job.newsletterSender || '')}</span></div>` : `<div class="newsletter-sender-blocked" role="alert"><strong>Canal corporativo no disponible</strong><span>${UI.escape(job.newsletterSender || '')} no está aceptado en «Enviar correo como» para ${UI.escape(job.newsletterSenderExecutor || 'el propietario del despliegue')}. Estado: ${UI.escape(job.newsletterSenderStatus || 'no disponible')}.</span><button id="revalidateNewsletterSenderReport" class="ghost-button" type="button">Revalidar buzón</button></div>`}
@@ -872,9 +922,10 @@ const App = (() => {
 
   async function deliverNewsletter(mode) {
     const job = state.lastPeriodReport;
+    const epoch = state.navigationEpoch;
     if (!job) return;
     if (mode === 'send' && !window.confirm(
-      'Se enviará la newsletter a todos los destinatarios activos de este ámbito. ¿Continuar?'
+      `Se enviará la newsletter ${job.contactCenter || ''} a todos los destinatarios activos de este ámbito. ¿Continuar?`
     )) return;
     const testButton = $('testPeriodNewsletter');
     const sendButton = $('sendPeriodNewsletter');
@@ -898,7 +949,7 @@ const App = (() => {
         'success'
       );
       if (mode === 'send') job.newsletterSent = true;
-      await renderReports();
+      if (epoch === state.navigationEpoch && state.route === 'reports') await renderReports();
     } catch (error) {
       UI.message(error.message, 'error');
     } finally {
@@ -930,15 +981,16 @@ const App = (() => {
 
   async function renderReports() {
     const epoch = state.navigationEpoch;
+    state.lastPeriodReport = null;
     view().innerHTML = `<section class="page-stack">
       <section class="surface-panel report-intro"><div>
         <p class="section-kicker">Reports</p><h3>Presentación y newsletter</h3>
-        <p class="minor-copy">La publicación reutiliza el PPTX autoritativo del escritorio; GPC no vuelve a calcular ni reconstruir el informe.</p>
+        <p class="minor-copy">${state.contactCenterCountry ? `Informe y newsletter exclusivos de ${UI.escape(state.contactCenter)}.` : 'Informe y newsletter del ámbito completo.'} GPC conserva el PPTX autoritativo del escritorio.</p>
       </div></section>
       <section class="surface-panel"><div id="periodReportResult">Consultando snapshot…</div></section>
     </section>`;
     try {
-      const status = await RPC.call('getPeriodReportStatus', state.scopeKey);
+      const status = await RPC.call('getPeriodReportStatus', state.scopeKey, state.contactCenterCountry ? state.contactCenter : '');
       if (epoch !== state.navigationEpoch || state.route !== 'reports') return;
       state.lastPeriodReport = status.job;
       $('periodReportResult').innerHTML = reportSuccess(status.job);
@@ -1111,7 +1163,7 @@ const App = (() => {
     state.settingsTab = activeTab;
     const needsAdminConsole = ['health', 'drive', 'sources', 'summary'].includes(activeTab);
     if (needsAdminConsole && !state.adminConsole) {
-      state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey);
+      state.adminConsole = await RPC.call('getAdminConsole', state.scopeKey, state.contactCenterCountry ? state.contactCenter : '');
     }
     if (epoch !== state.navigationEpoch || state.route !== 'settings') return;
     let body = '';
@@ -1164,7 +1216,7 @@ const App = (() => {
       const reports = newsletter.reports || [];
       let selectedReport = reports.find(report => report.reportId === state.newsletterReportId);
       if (!selectedReport) {
-        selectedReport = reports.find(report => report.scopeKey === state.scopeKey) || reports[0] || null;
+        selectedReport = reports.find(report => report.baseScopeKey === state.scopeKey && report.contactCenter === (state.contactCenterCountry ? state.contactCenter : '')) || null;
       }
       state.newsletterReportId = selectedReport ? selectedReport.reportId : '';
       const recipients = (newsletter.recipients || []).filter(
@@ -1179,7 +1231,7 @@ const App = (() => {
             <span>${UI.escape(newsletter.sender.effective || newsletter.sender.requested)} · ${UI.escape(newsletter.sender.mode)}</span>
             ${newsletter.sender.ready ? '' : `<small>${UI.escape(newsletter.sender.executor || 'El propietario de la WebApp')} debe tener aceptado este remitente en «Enviar correo como». Hasta entonces el envío permanece bloqueado.</small><button id="revalidateNewsletterSenderSettings" class="ghost-button" type="button">Revalidar buzón</button>`}
           </div>
-          <label class="field"><span>Informe cargado</span><select id="recipientReport">${reports.map(report =>
+          <label class="field"><span>Informe cargado</span><select id="recipientReport"><option value="" ${selectedReport ? '' : 'selected'} disabled>Selecciona un informe</option>${reports.map(report =>
             `<option value="${UI.escape(report.reportId)}" ${report.reportId === state.newsletterReportId ? 'selected' : ''}>${UI.escape(report.label)} · ${UI.escape(UI.formatDate(report.createdAt))}</option>`
           ).join('')}</select></label>
           <div class="newsletter-recipient-summary"><strong>${UI.formatNumber(activeRecipients)} activos</strong><span>${UI.formatNumber(recipients.length)} persistidos para este ámbito</span></div>
@@ -1451,6 +1503,9 @@ const App = (() => {
       setBusy(true);
       const dashboard = await fetchDashboard(request);
       if (expectedEpoch !== state.navigationEpoch || state.route !== 'dashboard') return;
+      if ((dashboard.contactCenter || '') !== (request.contactCenter || '')) {
+        throw new Error('La variante del snapshot no coincide con el Contact center. Recarga la aplicación.');
+      }
       state.dashboard = dashboard;
       state.route = 'dashboard';
       syncNavigation();
@@ -1494,7 +1549,7 @@ const App = (() => {
       state.dashboard = cached;
       renderCurrent();
     } else {
-      showRouteLoading(`Abriendo ${panel === 'overview' ? 'Resumen' : panel === 'insights' ? 'Insights' : panel === 'trends' ? 'Tendencias' : 'Issues'}…`);
+      showRouteLoading(`Abriendo ${({ overview: 'Resumen', insights: 'Insights', trends: 'Tendencias', issues: 'Issues', kanban: 'Kanban', notes: 'Notas' })[panel] || 'Sección'}…`);
     }
     trackEvent('navigation', { target: panel });
     await refreshDashboard(epoch);
@@ -1534,7 +1589,12 @@ const App = (() => {
         bootstrap = unavailableBootstrap(error);
       }
       state.bootstrap = bootstrap;
+      state.contactCenter = 'PYME';
+      state.contactCenterCountry = '';
       const initial = bootstrap.initialState || {};
+      state.newsletterSettings = null;
+      state.newsletterReportId = '';
+      state.lastPeriodReport = null;
       const local = readLocalPreferences();
       const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
       state.scopeKey = isAdmin() && validScopeKeys.has(local.scopeKey)
@@ -1556,6 +1616,10 @@ const App = (() => {
       ].filter(Boolean).join(' ');
       window.clearTimeout(window.__RADAR_STARTUP_WATCHDOG__);
       $('appTitle').textContent = bootstrap.app.name;
+      if (isShared() && initial.contactCenter && currentScope()) {
+        state.contactCenterCountry = currentScope().country;
+        state.contactCenter = initial.contactCenter;
+      }
       syncScope();
       syncNavigation();
       $('loadingView').classList.add('hidden');
@@ -1564,6 +1628,7 @@ const App = (() => {
       if (bootstrap.dashboard && requestKey(requestFor()) === requestKey({
         ...requestFor(),
         scopeKey: initial.scopeKey,
+        contactCenter: bootstrap.dashboard.contactCenter || '',
         view: initial.panel || 'overview'
       })) {
         state.dashboard = bootstrap.dashboard;
@@ -1602,6 +1667,26 @@ const App = (() => {
     }
   }
 
+  async function refreshScopeSelection(epoch) {
+    state.dashboard = null;
+    const drawer = $('issueDrawerRoot');
+    if (drawer) drawer.innerHTML = '';
+    syncScope();
+    syncNavigation();
+    if (state.route === 'dashboard') {
+      showRouteLoading('Actualizando ámbito…');
+      await refreshDashboard(epoch);
+    } else if (state.route === 'reports') {
+      await renderReports();
+    } else if (state.route === 'settings') {
+      state.adminConsole = null;
+      state.newsletterSettings = null;
+      state.newsletterReportId = '';
+      await renderSettings();
+    }
+    schedulePreferenceSave();
+  }
+
   function bindShell() {
     document.querySelectorAll('[data-panel]').forEach(button => {
       button.addEventListener('click', () => openPanel(button.dataset.panel));
@@ -1610,7 +1695,8 @@ const App = (() => {
       button.addEventListener('click', async () => {
         if (button.dataset.route === 'reports' && !isAdmin() && !isShared()) {
           const scope = currentScope();
-          const slidesUrl = String(scope && scope.slidesUrl || '').trim();
+          const urls = scope && scope.contactCenterReportUrls;
+          const slidesUrl = String(scope && (scope.contactCenterEnabled ? (urls || {})[state.contactCenter] : scope.slidesUrl) || '').trim();
           if (!/^https:[/][/]/i.test(slidesUrl)) {
             UI.message('Este snapshot no tiene una presentación publicada disponible.', 'warning');
             return;
@@ -1636,9 +1722,14 @@ const App = (() => {
       const scopes = countryScopes(event.target.value);
       state.scopeKey = (aggregateScope(scopes) || scopes[0] || {}).scopeKey || '';
       state.page = 1;
-      syncScope();
-      await refreshDashboard(epoch);
-      schedulePreferenceSave();
+      await refreshScopeSelection(epoch);
+    });
+    $('workspaceContactCenter').addEventListener('change', async event => {
+      if (!state.contactCenterCountry) return;
+      const epoch = ++state.navigationEpoch;
+      state.contactCenter = event.target.value === 'BEI' ? 'BEI' : 'PYME';
+      state.page = 1;
+      await refreshScopeSelection(epoch);
     });
     $('workspaceRollup').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;
@@ -1650,17 +1741,13 @@ const App = (() => {
         ? aggregate.scopeKey
         : (individual && individual.scopeKey) || (aggregate && aggregate.scopeKey) || '';
       state.page = 1;
-      syncScope();
-      await refreshDashboard(epoch);
-      schedulePreferenceSave();
+      await refreshScopeSelection(epoch);
     });
     $('workspaceSource').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;
       state.scopeKey = event.target.value;
       state.page = 1;
-      syncScope();
-      await refreshDashboard(epoch);
-      schedulePreferenceSave();
+      await refreshScopeSelection(epoch);
     });
     $('themeToggle').addEventListener('click', () => setTheme(!state.dark));
     $('accessGateRetry').addEventListener('click', boot);
