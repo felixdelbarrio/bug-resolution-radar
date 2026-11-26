@@ -1,9 +1,7 @@
 # Bug Resolution Radar
 
 Aplicación local para ingesta, análisis y seguimiento operativo de incidencias Jira/Helix con foco en ejecución diaria y reporting ejecutivo.
-
 ## CI/CD Status
-
 [![Quality Gate (develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml/badge.svg?branch=develop)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml?query=branch%3Adevelop)
 [![Quality Gate (master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml/badge.svg?branch=master)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/quality-gate.yml?query=branch%3Amaster)
 [![CodeQL](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/codeql.yml)
@@ -11,20 +9,20 @@ Aplicación local para ingesta, análisis y seguimiento operativo de incidencias
 [![Build macOS](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-macos.yml)
 [![Build Windows](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/build-windows.yml)
 [![Release Binaries](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/release-binaries.yml/badge.svg)](https://github.com/felixdelbarrio/bug-resolution-radar/actions/workflows/release-binaries.yml)
-
 ## Support / Donaciones
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-2ea44f.svg)](https://github.com/sponsors/felixdelbarrio)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/felixdelbarrio)
 
 Si este proyecto te aporta valor, puedes apoyarlo por GitHub Sponsors o PayPal.
-
 ## Quick Start
 
 Requisitos:
-- Python `>=3.9`
+- Python `3.13.x` (CPython; en equipos corporativos, usar la distribución autorizada)
 - `pip`
 - Navegador Chrome o Edge (opcional, para bootstrap automático de sesión)
+
+La serie soportada se declara en `.python-version` y es compartida por Make y GitHub Actions. No se admiten otras series de Python para el desarrollo y empaquetado.
 
 Instalación y ejecución:
 
@@ -34,16 +32,23 @@ make CI
 make run
 ```
 
+`make setup` utiliza `python3.13` por defecto y comprueba la versión de cualquier entorno virtual existente antes de instalar dependencias.
+Si `.venv` ya usa Python 3.13, se puede reutilizar. Si usa otra serie, desactiva ese entorno y crea uno nuevo sin modificar `.env` ni `data/`:
+
+```bash
+make setup VENV=.venv313
+make CI VENV=.venv313
+make run VENV=.venv313
+```
+
+También puedes usar `PY=/ruta/al/python3.13` al crear el entorno.
 `make run` abre el contenedor desktop local.
 `make CI` valida formato, tipado, cobertura, build frontend, `pip check` y guardias de documentación/código muerto.
-
 `make run` y `make build` detienen la ejecución si la rama local está por detrás
 de su upstream conocido, para evitar empaquetar un frontend antiguo. Actualiza
 con `git pull --ff-only`; para reproducir deliberadamente un commit histórico se
 puede usar `make ALLOW_STALE_SOURCE=1 run` o `make ALLOW_STALE_SOURCE=1 build`.
-
 ## Architecture
-
 Resumen de capas:
 - `src/bug_resolution_radar/config.py`: contrato único de configuración y persistencia `.env`.
 - `frontend/src/`: SPA React/Vite, routing, estado URL-driven y consumo HTTP.
@@ -54,7 +59,6 @@ Resumen de capas:
 - `src/bug_resolution_radar/services/`: notas, mantenimiento de fuentes, snapshots, merge/mapeo de ingesta, exportes e ingesta asíncrona.
 - `src/bug_resolution_radar/services/data_transfer.py`: handoff `.brr` v3, compacto y verificable, desde escritorio hacia GPC.
 - El runtime de presentación es 100% React/FastAPI; no queda shell Python legacy ni dependencia de UI obsoleta en el paquete.
-
 Flujo cloud:
 - Escritorio materializa el racional completo y genera el PPTX local autoritativo.
 - El handoff solo contiene `projection.json` y ese PPTX, ambos con SHA-256.
@@ -62,13 +66,11 @@ Flujo cloud:
   y sirve la WebApp sin filtros ni recálculos de negocio.
 - La newsletter usa el texto y las agrupaciones calculadas localmente en el mismo
   snapshot, enlaza Slides y adjunta el PPTX exacto sin servicios generativos.
-
 Flujo clave de estados finalistas:
 - El lookup ARSQL solo toma referencias `INC...` desde la descripción de Jira y descarta Jira ya finalistas (`Accepted`, `Ready to deploy`, `Deployed`/`Acepted`) antes de deduplicar por país/`Owner Support Company`.
 - Antes de lanzar ARSQL, el conjunto se cruza con el histórico Helix local. Los INC ya finalistas se reutilizan y se persisten bajo el origen canónico `Lookup estados finalistas Jira`.
 - El cruce finalista usa el histórico Helix completo del país aunque la vista del reporte esté recortada por `ANALYSIS_LOOKBACK_MONTHS`; las filas Jira con Helix finalista quedan fuera de listas abiertas.
 - Los PPT de seguimiento enlazan cualquier `INC...` visible en tablas cuando existe URL Helix en el dataset normalizado o en discrepancias finalistas, y las secciones `>30 días` usan días completos para evitar filas visibles como `30 días`.
-
 ## Documentation
 
 Guía detallada por tema:
@@ -79,17 +81,14 @@ Guía detallada por tema:
 - [Handoff de escritorio a GPC](docs/CLOUD_HANDOFF.md)
 - [WoW de cambios y promociones](docs/GPC_WOW.md)
 - [Calidad y CI](docs/QUALITY.md)
-
 ## Desktop Runtime
 
 Variables recomendadas para ejecución local/desktop:
 - `BUG_RESOLUTION_RADAR_DESKTOP_WEBVIEW=true` (contenedor embebido)
 - `BUG_RESOLUTION_RADAR_HOME=/ruta/escribible` (opcional, para datos/config fuera del repo)
-
 ## Configuration
 
 El proyecto usa `.env` (puedes partir de `.env.example`).
-
 Variables clave:
 - App: `APP_TITLE`, `DATA_PATH`, `NOTES_PATH`, `INSIGHTS_LEARNING_PATH`, `LOG_LEVEL`.
 - Jira: `JIRA_BASE_URL`, `SUPPORTED_COUNTRIES`, `JIRA_SOURCES_JSON`, `JIRA_INGEST_DISABLED_SOURCES_JSON`, `JIRA_BROWSER`, `JIRA_BROWSER_LOGIN_URL`.
@@ -100,9 +99,7 @@ Variables clave:
   - `INGEST_PROFILE_ENABLED`, `INGEST_PROFILE_JSONL_PATH`
   - `INGEST_CIRCUIT_ENABLED`, `INGEST_CIRCUIT_STATE_PATH`
   - `INGEST_CIRCUIT_FAILURE_THRESHOLD`, `INGEST_CIRCUIT_WINDOW_SECONDS`, `INGEST_CIRCUIT_COOLDOWN_SECONDS`
-
 `SUPPORTED_COUNTRIES` se normaliza con acentos canónicos; por ejemplo `Peru` y `Perú` se consolidan como `Perú`.
-
 ## Quality
 
 Comandos locales principales:
@@ -125,10 +122,9 @@ make test
 Para revisar el último perfil de ingesta:
 
 ```bash
-python3 scripts/ingest_profile_report.py --connector jira
-python3 scripts/ingest_profile_report.py --connector helix
+python3.13 scripts/ingest_profile_report.py --connector jira
+python3.13 scripts/ingest_profile_report.py --connector helix
 ```
-
 ## Build and Packaging
 
 Para empaquetado local robusto:
@@ -140,9 +136,7 @@ make build
 Firma/notarización (opcional, macOS):
 - `APPLE_CODESIGN_IDENTITY="Developer ID Application: ..."`
 - `APPLE_NOTARY_PROFILE="nombre-perfil-notarytool"`
-
 ## Local Data
-
 - Issues: `data/issues.json`
 - Read model de issues: `data/issues.parquet`
 - Índice ligero de workspace: `data/issues.workspace.json`
@@ -155,7 +149,6 @@ Firma/notarización (opcional, macOS):
 - Observabilidad de ingesta:
   - `data/observability/ingest_profiles.jsonl`
   - `data/observability/ingest_circuit_state.json`
-
 Los handoffs cloud se crean desde `Ingesta > Exportar` y se guardan en la carpeta
 configurada para Descargas de Informes. Son entregas unidireccionales para GPC:
 incluyen la proyección inmutable de la vista activa y la presentación local exacta,

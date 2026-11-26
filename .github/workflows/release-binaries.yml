@@ -22,7 +22,6 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin master
           git merge-base --is-ancestor "$GITHUB_SHA" "origin/master"
-
   build-release-assets:
     name: Build ${{ matrix.label }} release asset
     needs: validate-tag
@@ -43,7 +42,6 @@ jobs:
             label: Windows
             archive_suffix: windows
             artifact_path: release_bundle/bug-resolution-radar-windows.zip
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -58,13 +56,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
 
       - name: Setup toolchain (POSIX)
         if: runner.os != 'Windows'
-        run: make setup PY=python3
-
+        run: make setup
       - name: Install backend dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -81,11 +78,9 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: frontend
         run: npm run build
-
       - name: Build release asset (POSIX)
         if: runner.os != 'Windows'
         run: make build
-
       - name: Build release asset (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -95,7 +90,6 @@ jobs:
           pytest -q tests/test_executive_report_ppt.py
           pytest -q tests/test_period_followup_report_ppt.py
           python scripts/update_app_icon.py --input assets/app_icon/bug-resolution-radar.png
-
           $iconPath = (Resolve-Path "assets/app_icon/bug-resolution-radar.ico").Path
           $frontendDist = (Resolve-Path "frontend/dist").Path
           $args = @(
@@ -140,7 +134,6 @@ jobs:
             "run_desktop.py"
           )
           pyinstaller @args
-
           $bundleDir = "release_bundle/bug-resolution-radar-windows"
           New-Item -ItemType Directory -Force -Path "$bundleDir/dist" | Out-Null
           Copy-Item "dist/bug-resolution-radar.exe" "$bundleDir/dist/bug-resolution-radar.exe" -Force
@@ -152,7 +145,6 @@ jobs:
             Remove-Item "release_bundle/bug-resolution-radar-windows.zip" -Force
           }
           Compress-Archive -Path "$bundleDir\*" -DestinationPath "release_bundle/bug-resolution-radar-windows.zip"
-
       - name: Upload release asset
         uses: softprops/action-gh-release@v3
         with:

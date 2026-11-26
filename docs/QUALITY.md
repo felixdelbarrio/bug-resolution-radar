@@ -3,8 +3,9 @@
 ## Objective
 
 Asegurar que cada cambio sea verificable, reproducible y entendible antes de merge.
-
 ## Local Commands
+
+Usar Python 3.13.x, declarado en `.python-version`. Los objetivos Python de Make comprueban la serie del intérprete del entorno virtual antes de ejecutar los controles.
 
 Comandos recomendados (en este orden):
 
@@ -12,7 +13,6 @@ Comandos recomendados (en este orden):
 make setup
 make CI
 ```
-
 Targets públicos disponibles:
 - `make setup`: prepara venv + dependencias de desarrollo.
 - `make CI`: cadena completa de calidad usada en local/CI.
@@ -21,7 +21,6 @@ Targets públicos disponibles:
 - `make runWebapp`: WebApp GPC local con plantillas reales y servicios Google simulados.
 - `make ci-gpc`: contrato cloud, Apps Script y composición local de WebApp.
 - `make build`: build oficial con regresión PPT previa y empaquetado por OS.
-
 Detalle de la cadena `make CI`:
 - `ruff format --check .`
 - `mypy src`
@@ -32,20 +31,23 @@ Detalle de la cadena `make CI`:
 - `python scripts/check_docs_references.py`
 - regresiones rápidas de API, desktop y render PPT crítico
 - quality gate específica de GPC/WebApp
-
 Comando operativo adicional (observabilidad de ingesta):
-- `python scripts/ingest_profile_report.py --connector jira`
-- `python scripts/ingest_profile_report.py --connector helix`
-
+- `python3.13 scripts/ingest_profile_report.py --connector jira`
+- `python3.13 scripts/ingest_profile_report.py --connector helix`
 ## CI Pipeline
 
-Workflow principal:
+Todos los workflows que instalan Python usan `.python-version`, de modo que local, CI y empaquetado comparten la serie 3.13.x. Se mantiene el umbral de cobertura del 80 %.
+
+Workflows principales (checks independientes):
 - `.github/workflows/quality-gate.yml`
+- `.github/workflows/format.yml`
+- `.github/workflows/typecheck.yml`
+- `.github/workflows/coverage.yml`
 
 Workflow cloud:
 - `.github/workflows/gpc-quality-gate.yml`
 
-Valida:
+En conjunto, validan:
 1. instalación de dependencias y `pip check`
 2. `ruff format --check .`
 3. `mypy src`
@@ -54,7 +56,6 @@ Valida:
 6. `python scripts/check_dead_private_helpers.py`
 7. `python scripts/check_docs_references.py`
 8. regresiones rápidas de API, desktop y render PPT crítico
-
 La suite también incluye guardas del handoff cloud y Apps Script:
 - contrato v3 y hashes de proyección/PPTX;
 - ausencia de filtros y recálculos de incidencias en GPC;
@@ -63,7 +64,6 @@ La suite también incluye guardas del handoff cloud y Apps Script:
 - composición ejecutable de la WebApp local y ausencia de runtime retirado.
 
 `make lint` queda como target explícito para `ruff check .` y `mypy src`.
-
 ## Dead Code Policy
 
 - No se mantiene retrocompatibilidad de configuración fuera del contrato actual.
@@ -75,7 +75,6 @@ La suite también incluye guardas del handoff cloud y Apps Script:
 - Toda ruta de código documentada debe existir.
 - `README.md` y `docs/` pasan por `scripts/check_docs_references.py`.
 - No se aceptan referencias a módulos obsoletos.
-
 ## Release Safety
 
 Además de `quality-gate`:
@@ -85,7 +84,6 @@ Además de `quality-gate`:
 - empaquetado/release (`release-binaries`)
 
 El WoW de ramas, checks requeridos y publicación está en `docs/GPC_WOW.md`.
-
 ## Desktop/GPC Parity
 
 - El calendario quincenal autoritativo es 1–14 y 15–fin.
@@ -95,7 +93,6 @@ El WoW de ramas, checks requeridos y publicación está en `docs/GPC_WOW.md`.
 - GPC debe fallar de forma explícita si no existe snapshot materializado; no puede
   reconstruir un resultado aproximado.
 - El detalle de contrato y cachés se mantiene en `docs/CLOUD_HANDOFF.md`.
-
 ## Ingestion Hardening
 
 Variables de entorno (opcional):

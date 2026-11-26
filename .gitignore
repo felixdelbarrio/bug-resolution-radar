@@ -22,7 +22,7 @@ bug-resolution-radar.pkg
 .coverage
 htmlcov/
 
-.venv/
+.venv*/
 venv/
 .env
 frontend/node_modules/
