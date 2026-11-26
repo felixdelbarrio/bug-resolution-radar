@@ -8,6 +8,7 @@ import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from bug_resolution_radar.common.submitter import submitter_login
 from bug_resolution_radar.models.schema_helix import HelixWorkItem
 
 
@@ -479,6 +480,7 @@ def map_helix_values_to_item(
         or values.get("description")
     )
     return HelixWorkItem(
+        submitter=submitter_login(values),
         id=incident_number,
         internal_id=smartit_id,
         summary=summary,

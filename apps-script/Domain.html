@@ -3,6 +3,7 @@ const ClientDomain = Object.freeze({
   queryRequest(state) {
     return {
       scopeKey: String(state.scopeKey || ''),
+      contactCenter: state.contactCenterCountry ? String(state.contactCenter || 'PYME') : '',
       view: String(state.panel || 'overview'),
       chartId: String(state.trendChart || ''),
       insightsId: String(state.insightsId || ''),

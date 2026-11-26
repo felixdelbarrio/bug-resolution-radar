@@ -59,6 +59,29 @@ function applyThemeContract(
   }
 }
 
+function WorkspaceContactCenter({ disabled, contactCenter, onChange }: {
+  disabled: boolean;
+  contactCenter: "PYME" | "BEI";
+  onChange: (value: "PYME" | "BEI") => void;
+}) {
+  return (
+    <div className="workspace-contact-center-field">
+      <label className="field-label" htmlFor="workspace-contact-center">
+        Contact center
+      </label>
+      <select
+        id="workspace-contact-center"
+        value={contactCenter}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value === "BEI" ? "BEI" : "PYME")}
+      >
+        <option value="PYME">PYME</option>
+        <option value="BEI">BEI</option>
+      </select>
+    </div>
+  );
+}
+
 export function AppShell() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -201,6 +224,9 @@ export function AppShell() {
   function handleScopeChange(patch: Record<string, string>) {
     dashboardState.update({
       ...patch,
+      ...(patch.country && patch.country !== dashboardState.params.country ? { contactCenter: "PYME" as const } : {}),
+      issuePage: "1",
+      notesIssueKey: "",
       status: [],
       priority: [],
       assignee: [],
@@ -232,6 +258,9 @@ export function AppShell() {
     countryOptions.some((country) => country.country === dashboardState.params.country)
       ? dashboardState.params.country
       : (workspace?.selectedCountry ?? "");
+  const contactCenterEnabled = Boolean(
+    bootstrap.data?.contactCenterEnabledCountries?.includes(selectedCountryValue)
+  );
   const selectedSourceValue =
     dashboardState.params.sourceId === ""
       ? ""
@@ -255,7 +284,12 @@ export function AppShell() {
       </header>
 
       <section
-        className={cn("workspace-scope-bar", "surface-panel", workspaceRefreshing && "is-loading")}
+        className={cn(
+          "workspace-scope-bar",
+          "surface-panel",
+          contactCenterEnabled && "has-contact-center",
+          workspaceRefreshing && "is-loading"
+        )}
         aria-busy={workspaceRefreshing}
       >
         <div className="workspace-country-field">
@@ -285,6 +319,19 @@ export function AppShell() {
             )}
           </select>
         </div>
+
+        {contactCenterEnabled ? (
+          <WorkspaceContactCenter
+            contactCenter={dashboardState.params.contactCenter}
+            onChange={(contactCenter) => dashboardState.update({
+              contactCenter, issuePage: "1", notesIssueKey: "",
+              status: [], priority: [], assignee: [], functionality: [],
+              quincenalScope: "Todas", insightsStatus: [], insightsPriority: [],
+              insightsFunctionality: [], insightsStatusManual: ""
+            })}
+            disabled={workspaceLoading || workspaceRefreshing}
+          />
+        ) : null}
 
         <div className="workspace-scope-detail">
           <div className="workspace-rollup-slot">

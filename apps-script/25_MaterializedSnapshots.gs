@@ -61,6 +61,20 @@ function _activeSnapshotRecordForScope_(scopeKey, required) {
   return current;
 }
 
+function _contactCenterReportHeaders_(projection) {
+  if (!projection.contactCenterReports) return null;
+  const result = {};
+  ['PYME', 'BEI'].forEach(function (segment) {
+    const variant = projection.contactCenterReports[segment];
+    result[segment] = {
+      report: variant.report,
+      factsSha256: variant.factsSha256,
+      rowCount: projection.views.contactCenter[segment].issues.total
+    };
+  });
+  return result;
+}
+
 function _projectionPartValues_(projection) {
   const parts = {};
   parts.meta = {
@@ -75,6 +89,10 @@ function _projectionPartValues_(projection) {
   };
   parts.administration = projection.administration;
   parts.newsletter = projection.newsletterFacts;
+  if (projection.contactCenterReports && projection.views.contactCenter) {
+    parts.meta.contactCenterReports = _contactCenterReportHeaders_(projection);
+    parts['contact-center/BEI/newsletter'] = projection.contactCenterReports.BEI.newsletterFacts;
+  }
   parts.overview = projection.views.overview;
   parts['insights/catalog'] = projection.views.insights.catalog;
   Object.keys(projection.views.insights.byId).sort().forEach(function (id) {
@@ -137,11 +155,25 @@ function _projectionPartValues_(projection) {
     if (keyOccurrences[issueKey].length === 1) byKey[issueKey] = keyOccurrences[issueKey][0];
   });
   parts['issues/index'] = { byUid: byUid, byKey: byKey };
+  if (Array.isArray(projection.views.kanban)) parts.kanban = projection.views.kanban;
+  if (Array.isArray(projection.views.notes)) parts.notes = projection.views.notes;
+  const variants = projection.views.contactCenter;
+  if (variants) {
+    ['PYME', 'BEI'].forEach(function (segment) {
+      const sectional = _projectionPartValues_(Object.assign({}, projection, { views: variants[segment] }));
+      Object.keys(sectional).forEach(function (key) {
+        if (['meta', 'administration', 'newsletter'].indexOf(key) < 0) {
+          parts['contact-center/' + segment + '/' + key] = sectional[key];
+        }
+      });
+    });
+  }
   return parts;
 }
 
-function _appendSnapshotParts_(snapshotId, projection, createdAt) {
+function _appendSnapshotParts_(snapshotId, projection, createdAt, publications) {
   const values = _projectionPartValues_(projection);
+  if (publications) values.meta.reportPublications = publications;
   const keys = Object.keys(values).sort();
   const rows = [];
   const descriptors = [];
@@ -329,9 +361,64 @@ function _snapshotHeader_(record) {
   return meta;
 }
 
-function _snapshotNewsletter_(record) {
-  const newsletter = _loadSnapshotPart_(record, 'newsletter');
-  _assert_(_hash_(_stableJsonStringify_(newsletter)) === _text_(record.facts_sha256),
+/** The snapshot pointer stays at the full scope; report identities are separate. */
+function _snapshotReportRecords_(record, header) {
+  const meta = header || _snapshotHeader_(record);
+  if (!meta.semantics || meta.semantics.contactCenterEnabled !== true) {
+    return [Object.assign({}, record, { base_scope_key: _text_(record.scope_key), contact_center: '' })];
+  }
+  // An old aggregate report must never be exposed as either new segment.
+  if (!meta.contactCenterReports || !meta.reportPublications) return [];
+  const reports = ['PYME', 'BEI'].map(function (segment) {
+    const variant = meta.contactCenterReports[segment];
+    const publication = meta.reportPublications[segment];
+    _assert_(variant && publication && publication.reportId && publication.slidesFileId && publication.pptxFileId &&
+      publication.pptxSha256 === variant.report.sha256 && Number(publication.pptxBytes) === Number(variant.report.bytes) &&
+      Number(publication.slideCount) === Number(variant.report.slideCount) &&
+      publication.reportName === variant.report.fileName &&
+      Number.isInteger(variant.rowCount) && variant.rowCount >= 0,
+      'Los informes segmentados no coinciden con el snapshot.', 'SNAPSHOT_CORRUPT');
+    return Object.assign({}, record, {
+      base_scope_key: _text_(record.scope_key),
+      scope_key: _text_(record.scope_key) + '::contact-center:' + segment,
+      scope_label: _text_(record.scope_label) + ' · ' + segment,
+      contact_center: segment,
+      report_id: publication.reportId,
+      report_name: publication.reportName,
+      pptx_file_id: publication.pptxFileId,
+      pptx_sha256: publication.pptxSha256,
+      pptx_bytes: publication.pptxBytes,
+      slides_file_id: publication.slidesFileId,
+      slides_url: publication.slidesUrl,
+      slide_count: publication.slideCount,
+      row_count: variant.rowCount,
+      facts_sha256: variant.factsSha256
+    });
+  });
+  const primary = reports[0];
+  _assert_(primary.report_id === _text_(record.report_id) && primary.facts_sha256 === _text_(record.facts_sha256) &&
+    primary.pptx_sha256 === _text_(record.pptx_sha256) && primary.slides_file_id === _text_(record.slides_file_id) &&
+    reports[0].report_id !== reports[1].report_id && reports[0].pptx_sha256 !== reports[1].pptx_sha256 &&
+    reports[0].slides_file_id !== reports[1].slides_file_id && reports[0].pptx_file_id !== reports[1].pptx_file_id &&
+    reports[0].row_count + reports[1].row_count === Number(record.row_count),
+    'El índice de informes no coincide con el snapshot.', 'SNAPSHOT_CORRUPT');
+  return reports;
+}
+
+function _snapshotReportRecord_(record, contactCenter) {
+  const records = _snapshotReportRecords_(record);
+  const segment = _text_(contactCenter);
+  const selected = records.find(function (item) {
+    return item.contact_center === '' || item.contact_center === (segment || 'PYME');
+  });
+  _assert_(selected, 'No existe un informe para este Contact center. Republica el traslado desde Desktop.', 'VIEW_NOT_MATERIALIZED');
+  return selected;
+}
+
+function _snapshotNewsletter_(record, contactCenter) {
+  const report = _snapshotReportRecord_(record, contactCenter);
+  const newsletter = _loadSnapshotPart_(record, report.contact_center === 'BEI' ? 'contact-center/BEI/newsletter' : 'newsletter');
+  _assert_(_hash_(_stableJsonStringify_(newsletter)) === _text_(report.facts_sha256),
     'Los hechos de newsletter no coinciden con el snapshot.', 'SNAPSHOT_CORRUPT');
   return newsletter;
 }
@@ -340,9 +427,19 @@ function _snapshotAdministration_(record) {
   return _loadSnapshotPart_(record, 'administration');
 }
 
-function _snapshotIssueDetail_(record, issueKey) {
+function _snapshotContactCenterPrefix_(record, requested) {
+  const semantics = _snapshotHeader_(record).semantics || {};
+  if (semantics.contactCenterEnabled !== true || semantics.contactCenterMaterialized !== true) return '';
+  const segment = _text_(requested) || 'PYME';
+  _assert_(['PYME', 'BEI'].indexOf(segment) >= 0,
+    'Contact center debe ser PYME o BEI.', 'VIEW_NOT_MATERIALIZED');
+  return 'contact-center/' + segment + '/';
+}
+
+function _snapshotIssueDetail_(record, issueKey, contactCenter) {
   const key = _text_(issueKey);
-  const index = _loadSnapshotPart_(record, 'issues/index');
+  const prefix = _snapshotContactCenterPrefix_(record, contactCenter);
+  const index = _loadSnapshotPart_(record, prefix + 'issues/index');
   const page = Number(
     index && (
       (index.byUid && index.byUid[key]) ||
@@ -350,7 +447,7 @@ function _snapshotIssueDetail_(record, issueKey) {
     )
   );
   if (!page) return null;
-  const payload = _loadSnapshotPart_(record, 'issues/page/' + page);
+  const payload = _loadSnapshotPart_(record, prefix + 'issues/page/' + page);
   return (payload.rows || []).find(function (row) {
     return _text_(row.issue_uid || row.issueUid) === key || _text_(row.key) === key;
   }) || null;
@@ -368,7 +465,7 @@ function _publishSnapshotPointer_(record, user) {
 
 function _normalizeMaterializedRequest_(request, fixedScopeKey) {
   const input = request || {};
-  const allowed = new Set(['scopeKey', 'view', 'chartId', 'insightsId', 'page', 'pageSize', 'sortId']);
+  const allowed = new Set(['scopeKey', 'contactCenter', 'view', 'chartId', 'insightsId', 'page', 'pageSize', 'sortId']);
   Object.keys(input).forEach(function (key) {
     _assert_(allowed.has(key),
       'La vista materializada no admite el parámetro «' + key + '».',
@@ -381,8 +478,11 @@ function _normalizeMaterializedRequest_(request, fixedScopeKey) {
       'El enlace compartido no permite cambiar de ámbito.', 'FORBIDDEN');
   }
   const view = _text_(input.view) || 'overview';
-  _assert_(['overview', 'insights', 'trends', 'issues'].indexOf(view) >= 0,
+  _assert_(['overview', 'insights', 'trends', 'issues', 'kanban', 'notes'].indexOf(view) >= 0,
     'La vista solicitada no está materializada.', 'VIEW_NOT_MATERIALIZED');
+  const contactCenter = _text_(input.contactCenter);
+  _assert_(['', 'PYME', 'BEI'].indexOf(contactCenter) >= 0,
+    'Contact center debe ser PYME o BEI.', 'VIEW_NOT_MATERIALIZED');
   const page = Math.max(1, Math.floor(Number(input.page || 1)));
   const pageSize = Number(input.pageSize == null ? RADAR.defaultPageSize : input.pageSize);
   _assert_(pageSize === RADAR.defaultPageSize,
@@ -394,6 +494,7 @@ function _normalizeMaterializedRequest_(request, fixedScopeKey) {
     'VIEW_NOT_MATERIALIZED');
   return {
     scopeKey: scopeKey,
+    contactCenter: contactCenter,
     view: view,
     chartId: view === 'trends' ? _text_(input.chartId) : '',
     insightsId: view === 'insights' ? _text_(input.insightsId) : '',
@@ -424,9 +525,12 @@ function _materializedCommonPayload_(record, input) {
 }
 
 function _materializedViewPayload_(record, input) {
-  const common = _materializedCommonPayload_(record, input);
+  const prefix = _snapshotContactCenterPrefix_(record, input.contactCenter);
+  const common = Object.assign(_materializedCommonPayload_(record, input), {
+    contactCenter: prefix ? prefix.split('/')[1] : ''
+  });
   if (input.view === 'overview') {
-    const storedOverview = _loadSnapshotPart_(record, 'overview');
+    const storedOverview = _loadSnapshotPart_(record, prefix + 'overview');
     const overview = Object.assign({}, storedOverview);
     const availableCharts = Array.isArray(storedOverview.charts)
       ? storedOverview.charts
@@ -440,9 +544,9 @@ function _materializedViewPayload_(record, input) {
     return Object.assign({}, common, overview);
   }
   if (input.view === 'insights') {
-    const catalog = _loadSnapshotPart_(record, 'insights/catalog');
+    const catalog = _loadSnapshotPart_(record, prefix + 'insights/catalog');
     const activeId = _materializedCatalogId_(catalog, input.insightsId, 'evolution');
-    const selected = _loadSnapshotPart_(record, 'insights/' + activeId);
+    const selected = _loadSnapshotPart_(record, prefix + 'insights/' + activeId);
     const insights = {
       tabs: catalog,
       activeTab: activeId
@@ -453,9 +557,9 @@ function _materializedViewPayload_(record, input) {
     return Object.assign({}, common, { insights: insights });
   }
   if (input.view === 'trends') {
-    const catalog = _loadSnapshotPart_(record, 'trends/catalog');
+    const catalog = _loadSnapshotPart_(record, prefix + 'trends/catalog');
     const chartId = _materializedCatalogId_(catalog, input.chartId, 'open_status_bar');
-    const selected = _loadSnapshotPart_(record, 'trends/' + chartId);
+    const selected = _loadSnapshotPart_(record, prefix + 'trends/' + chartId);
     return Object.assign({}, common, {
       trends: Object.assign({
         chartCatalog: catalog,
@@ -464,10 +568,14 @@ function _materializedViewPayload_(record, input) {
     });
   }
   if (input.view === 'issues') {
-    const meta = _loadSnapshotPart_(record, 'issues/meta');
+    const meta = _loadSnapshotPart_(record, prefix + 'issues/meta');
     _assert_(input.page <= Number(meta.pageCount),
       'Esa página no fue materializada.', 'VIEW_NOT_MATERIALIZED');
-    return Object.assign({}, common, _loadSnapshotPart_(record, 'issues/page/' + input.page));
+    return Object.assign({}, common, _loadSnapshotPart_(record, prefix + 'issues/page/' + input.page));
+  }
+  if (input.view === 'kanban' || input.view === 'notes') {
+    _assert_(prefix, 'Esta vista no fue materializada para el ámbito.', 'VIEW_NOT_MATERIALIZED');
+    return Object.assign({}, common, { [input.view]: _loadSnapshotPart_(record, prefix + input.view) });
   }
   _assert_(false, 'La vista solicitada no está materializada.', 'VIEW_NOT_MATERIALIZED');
 }

@@ -28,10 +28,13 @@ def record_scope_measurement(
     country: str,
     source_ids: Sequence[str],
     snapshot: dict[str, Any],
+    contact_center: str = "",
 ) -> dict[str, Any]:
     """Record a distinct snapshot and return the prior comparable measurement."""
     source_token = history_source_token(source_ids)
     scope = learning_scope_key(country, source_token)
+    if contact_center:
+        scope += "::contact-center:" + contact_center
     with _HISTORY_LOCK:
         store = InsightsLearningStore(default_learning_path(settings))
         store.load()

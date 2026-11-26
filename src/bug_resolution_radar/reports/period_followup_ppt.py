@@ -4792,9 +4792,13 @@ def generate_country_period_followup_ppt(
     functionality_filters: Sequence[str] | None = None,
     reference_day: pd.Timestamp | str | None = None,
     evolution_insight: EvolutionInsight | None = None,
+    contact_center: str = "",
 ) -> PeriodFollowupReportResult:
     clean_source_ids = _clean_source_ids(source_ids)
     country_txt = str(country or "").strip()
+    segment = str(contact_center or "").strip()
+    if segment not in {"", "PYME", "BEI"}:
+        raise ValueError("Contact center debe ser PYME o BEI.")
     dff, _open_df, all_df = _load_or_scope_data(
         settings,
         country=country_txt,
@@ -4867,7 +4871,9 @@ def generate_country_period_followup_ppt(
     aggregate = quincenal.aggregate
 
     _update_followup_cover(
-        prs.slides[0], period_label=format_window_label(aggregate.summary.window)
+        prs.slides[0],
+        period_label=(f"{segment} · " if segment else "")
+        + format_window_label(aggregate.summary.window),
     )
 
     show_source_breakdown = _show_source_breakdown(clean_source_ids)
@@ -4875,7 +4881,8 @@ def generate_country_period_followup_ppt(
     if clean_source_ids:
         _populate_summary_slide(
             prs.slides[2],
-            title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)",
+            title=f"Seguimiento de incidencias - {country_txt.upper()} (vista agregada)"
+            + (f" · {segment}" if segment else ""),
             scope_result=aggregate,
         )
         aggregate_chart_anchor = _resolve_summary_chart_anchor(prs.slides[2])
@@ -5072,7 +5079,8 @@ def generate_country_period_followup_ppt(
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = (
         f"seguimiento-{_slug(country_txt)}-"
-        f"{_slug('rollups' if clean_source_ids else 'sin-agregados')}-{stamp}.pptx"
+        f"{_slug('rollups' if clean_source_ids else 'sin-agregados')}-"
+        f"{segment.lower() + '-' if segment else ''}{stamp}.pptx"
     )
     total_issues = int(len(aggregate.dff))
     open_issues = int(len(aggregate.open_df))

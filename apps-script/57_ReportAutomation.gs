@@ -16,13 +16,13 @@ function _periodNewsletterState_(reportId, adminEmail) {
   };
 }
 
-function getPeriodReportStatus(scopeKey) {
+function getPeriodReportStatus(scopeKey, contactCenter) {
   return _rpc_(function () {
     const user = _requireAdmin_();
     const key = _text_(scopeKey);
     _assert_(key, 'Selecciona un ámbito materializado.', 'SNAPSHOT_NOT_FOUND');
-    const record = _activeSnapshotRecordForScope_(key, true);
-    _snapshotHeader_(record);
+    const snapshot = _activeSnapshotRecordForScope_(key, true);
+    const record = _snapshotReportRecord_(snapshot, contactCenter);
     const newsletter = _periodNewsletterState_(record.report_id, user.email);
     const sender = _newsletterSenderIdentity_();
     return {
@@ -30,6 +30,7 @@ function getPeriodReportStatus(scopeKey) {
       job: {
         jobId: '',
         scopeKey: key,
+        contactCenter: record.contact_center,
         country: _text_(record.country),
         sourceIds: _safeJsonParse_(record.source_ids_json, []) || [],
         dataVersion: _text_(record.data_version),

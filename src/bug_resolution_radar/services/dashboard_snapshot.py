@@ -104,6 +104,11 @@ from bug_resolution_radar.repositories.issues_store import load_issues_df
 from bug_resolution_radar.services.functionality_taxonomies import (
     functionality_taxonomy_revision_token,
 )
+from bug_resolution_radar.services.contact_center_scope import (
+    active_contact_center,
+    apply_contact_center_filter,
+    contact_center_revision,
+)
 from bug_resolution_radar.services.insights_history import record_scope_measurement
 from bug_resolution_radar.services.issue_enrichment import (
     enrich_issue_dataframe_with_helix,
@@ -682,6 +687,7 @@ class DashboardQuery:
     issue_like_query: str = ""
     chart_ids: tuple[str, ...] = ()
     dark_mode: bool = False
+    contact_center: str = ""
 
 
 @dataclass(frozen=True)
@@ -713,6 +719,12 @@ def load_workspace_dataframe(settings: Settings, *, query: DashboardQuery) -> pd
             scoped_df["source_id"].fillna("").astype(str).isin(explicit_source_ids)
         ].copy(deep=False)
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
+    scoped_df = apply_contact_center_filter(
+        scoped_df,
+        settings=settings,
+        country=query.workspace.country,
+        selection=query.contact_center,
+    )
     return enrich_issue_dataframe_with_helix(scoped_df, settings=settings)
 
 
@@ -763,6 +775,8 @@ def _scope_context_cache_key(
         str(query.workspace.country or "").strip(),
         str(query.workspace.source_id or "").strip(),
         str(query.workspace.scope_mode or "").strip(),
+        query.contact_center,
+        contact_center_revision() if query.contact_center else (),
         tuple(str(item or "").strip() for item in query.source_ids),
         tuple(str(item or "").strip() for item in list(query.filters.status or [])),
         tuple(str(item or "").strip() for item in list(query.filters.priority or [])),
@@ -789,6 +803,20 @@ def _build_scope_context(
     source_ids = tuple(_active_source_ids(scoped_df, query=query))
     country_df = load_country_dataframe(settings, country=query.workspace.country)
     country_history_df = load_country_history_dataframe(settings, country=query.workspace.country)
+    # The country history used by final-state and discrepancy analytics must
+    # observe the same segment as the visible scope, including historical rows.
+    country_df = apply_contact_center_filter(
+        country_df,
+        settings=settings,
+        country=query.workspace.country,
+        selection=query.contact_center,
+    )
+    country_history_df = apply_contact_center_filter(
+        country_history_df,
+        settings=settings,
+        country=query.workspace.country,
+        selection=query.contact_center,
+    )
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
     scoped_df, finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
         scoped_df,
@@ -1269,6 +1297,9 @@ def build_trend_detail(
         country=query.workspace.country,
         source_ids=context.source_ids,
         snapshot=current_snapshot,
+        contact_center=active_contact_center(
+            settings, query.workspace.country, query.contact_center
+        ),
     )
     return {
         "chart": {
@@ -2725,6 +2756,7 @@ def build_intelligence_snapshot(
     insights_functionality_filters: Sequence[str] | None = None,
     insights_status_manual: bool = False,
     insights_tab: str = "all",
+    reference_day: pd.Timestamp | str | None = None,
 ) -> dict[str, Any]:
     active_tab = _normalize_insights_tab(insights_tab)
     build_all_tabs = active_tab == "all"
@@ -2743,6 +2775,7 @@ def build_intelligence_snapshot(
     if build_all_tabs or active_tab == "evolution":
         execution_evolution = build_execution_evolution(
             dff=context.scoped_df,
+            reference_day=reference_day,
             last_finished_only=_quincena_last_finished_only(settings),
         )
         measurement = dict(execution_evolution.pop("learningMeasurement", {}) or {})
@@ -2751,6 +2784,7 @@ def build_intelligence_snapshot(
             country=country_txt,
             source_ids=source_ids,
             snapshot=measurement,
+            contact_center=active_contact_center(settings, country_txt, query.contact_center),
         )
         execution_evolution["learning"] = {
             "comparison": build_evolution_lines(measurement, baseline),
@@ -2764,6 +2798,7 @@ def build_intelligence_snapshot(
             country=country_txt,
             source_ids=source_ids,
             source_label_by_id=labels,
+            reference_day=pd.Timestamp(reference_day) if reference_day is not None else None,
         )
         if needs_quincenal and not dff.empty
         else None

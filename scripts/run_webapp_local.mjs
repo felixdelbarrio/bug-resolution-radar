@@ -225,6 +225,17 @@ function localRuntimeMarkup() {
     }
     return { ...common, ...overview };
   };
+  const argentina = {
+    ...scope, scopeKey: "argentina::*", scopeLabel: "Argentina · Agregado",
+    country: "Argentina", sourceIds: ["helix:argentina:core", "helix:argentina:senda"],
+    snapshotId: "local-argentina", dataVersion: "local-argentina-v4",
+    contactCenterEnabled: true,
+    contactCenterReportUrls: { PYME: "https://docs.google.com/presentation/d/local-pyme/edit", BEI: "https://docs.google.com/presentation/d/local-bei/edit" }
+  };
+  const argentinaSource = {
+    ...argentina, scopeKey: "argentina::helix:argentina:core", scopeLabel: "Argentina · Core",
+    sourceIds: ["helix:argentina:core"], snapshotId: "local-argentina-core"
+  };
   const bootstrap = {
     app: {
       name: "Bug Resolution Radar · WebApp local",
@@ -234,13 +245,14 @@ function localRuntimeMarkup() {
       dataVersion: scope.dataVersion,
       cacheEpoch: "local-20260819-4",
       maxTransferBytes: 33554432,
-      scopeVersions: { [scope.scopeKey]: scope.dataVersion },
+      scopeVersions: { [scope.scopeKey]: scope.dataVersion, [argentina.scopeKey]: argentina.dataVersion, [argentinaSource.scopeKey]: argentinaSource.dataVersion },
       materializedOnly: true,
       issueFiltersEnabled: false
     },
     user: { email: "admin.local@bbva.com", role: "admin", displayName: "Admin local" },
-    scopes: [scope],
-    countries: ["España"],
+    scopes: [scope, argentina, argentinaSource],
+    countries: ["España", "Argentina"],
+    contactCenterEnabledCountries: ["Argentina"],
     sources: [{ source_id: "jira:espana:core", source_type: "materialized", alias: "Core", country: "España" }],
     administration: {
       reportDriveFolder: { id: "local-folder", name: "Informes locales", url: "https://drive.google.com/" },
@@ -259,14 +271,15 @@ function localRuntimeMarkup() {
   };
   const mocks = {
     getBootstrap: () => bootstrap,
-    queryDashboard: (request) => dashboard(request),
+    queryDashboard: (request) => ({ ...dashboard(request), scopeKey: request.scopeKey }),
     recordAnalyticsEvents: (events) => ({ accepted: Array.isArray(events) ? events.length : 0 }),
     getIssueDetail: () => issue,
-    getPeriodReportStatus: () => ({
-      scopeKey: scope.scopeKey,
+    getPeriodReportStatus: (scopeKey, contactCenter = "") => ({
+      scopeKey,
       job: {
-        reportId: "local-report",
-        fileUrl: "https://docs.google.com/presentation/",
+        contactCenter,
+        reportId: `${scopeKey}::${contactCenter || "all"}`,
+        fileUrl: `https://docs.google.com/presentation/d/local-${contactCenter || "all"}/edit`,
         slideCount: 9,
         rowCount: 13,
         newsletterTested: true,
@@ -327,11 +340,16 @@ function localRuntimeMarkup() {
         mode: "Gmail API · remitente corporativo verificado"
       },
       reports: [{
-        reportId: "local-report",
-        scopeKey: scope.scopeKey,
+        reportId: `${scope.scopeKey}::all`,
+        scopeKey: scope.scopeKey, baseScopeKey: scope.scopeKey, contactCenter: "",
         label: scope.scopeLabel,
         createdAt: scope.activatedAt
-      }],
+      }, ...[argentina, argentinaSource].flatMap(selected => ["PYME", "BEI"].map(contactCenter => ({
+        reportId: `${selected.scopeKey}::${contactCenter}`,
+        scopeKey: `${selected.scopeKey}::contact-center:${contactCenter}`,
+        baseScopeKey: selected.scopeKey, contactCenter,
+        label: `${selected.scopeLabel} · ${contactCenter}`, createdAt: selected.activatedAt
+      })))],
       recipients: [],
       audit: []
     }),

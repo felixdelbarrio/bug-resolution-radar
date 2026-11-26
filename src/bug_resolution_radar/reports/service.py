@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from io import BytesIO
+
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.util import Inches, Pt
 from typing import Sequence
 
 import pandas as pd
@@ -45,6 +51,10 @@ from bug_resolution_radar.services.downloads import (
 from bug_resolution_radar.services.downloads import (
     unique_download_path as unique_report_export_path,
 )
+from bug_resolution_radar.services.contact_center_scope import (
+    active_contact_center,
+    apply_contact_center_filter,
+)
 from bug_resolution_radar.services.insights_history import record_scope_measurement
 
 __all__ = (
@@ -68,6 +78,7 @@ class ReportFilters:
     priority: tuple[str, ...] = ()
     assignee: tuple[str, ...] = ()
     quincenal_scope: str = QUINCENAL_SCOPE_ALL
+    contact_center: str = ""
 
 
 @dataclass(frozen=True)
@@ -97,12 +108,14 @@ def build_report_filters(
     priority_filters: Sequence[str] | None = None,
     assignee_filters: Sequence[str] | None = None,
     quincenal_scope: object = QUINCENAL_SCOPE_ALL,
+    contact_center: str = "",
 ) -> ReportFilters:
     return ReportFilters(
         status=_normalize_tokens(status_filters),
         priority=_normalize_tokens(priority_filters),
         assignee=_normalize_tokens(assignee_filters),
         quincenal_scope=normalize_quincenal_scope_label(quincenal_scope),
+        contact_center=contact_center,
     )
 
 
@@ -245,6 +258,14 @@ def _build_context_for_scope(
     scoped_df = apply_analysis_depth_filter(scoped_df, settings=settings)
     country_history_df = _scope_country_df(base_df, country=country)
     country_df = apply_analysis_depth_filter(country_history_df, settings=settings)
+    segmented = active_contact_center(settings, country, filters.contact_center)
+    if segmented:
+        scoped_df, country_df, country_history_df = (
+            apply_contact_center_filter(
+                frame, settings=settings, country=country, selection=filters.contact_center
+            )
+            for frame in (scoped_df, country_df, country_history_df)
+        )
     reference_day = _scope_reference_day(country_df if not country_df.empty else scoped_df)
     scoped_df, finalist_discrepancies = apply_effective_finalist_lookup_state_for_scope(
         scoped_df,
@@ -265,7 +286,7 @@ def _build_context_for_scope(
     closed_mask = effective_closed_mask(dff) if not dff.empty else pd.Series(dtype=bool)
     open_df = dff.loc[~closed_mask].copy(deep=False) if not dff.empty else pd.DataFrame()
     return PreparedReportContext(
-        all_df=base_df,
+        all_df=country_history_df if segmented else base_df,
         scoped_df=scoped_df,
         dff=dff,
         open_df=open_df,
@@ -318,6 +339,7 @@ def generate_period_followup_report_artifact(
     functionality_filters: Sequence[str] | None = None,
     df_all: pd.DataFrame | None = None,
     reference_day: pd.Timestamp | str | None = None,
+    allow_empty: bool = False,
 ) -> PeriodFollowupReportResult:
     context = _build_context_for_scope(
         settings,
@@ -326,7 +348,40 @@ def generate_period_followup_report_artifact(
         filters=filters,
         df_all=df_all,
     )
+    segment = active_contact_center(settings, country, filters.contact_center)
     if context.dff.empty:
+        if allow_empty and segment:
+            # Never fall back to the unfiltered scope for an empty segment.
+            deck = Presentation()
+            deck.slide_width = Inches(13.333)
+            deck.slide_height = Inches(7.5)
+            slide = deck.slides.add_slide(deck.slide_layouts[6])
+            slide.background.fill.solid()
+            slide.background.fill.fore_color.rgb = RGBColor.from_string("070E46")
+            for y, text, size in (
+                (0.7, "BBVA | Banca de Empresas e Instituciones", 22),
+                (2.1, f"Seguimiento de incidencias - {country} | {segment}", 34),
+                (3.5, f"Fecha de referencia: {str(reference_day or '')[:10]}", 22),
+                (4.3, "Sin incidencias en el segmento y periodo analizado.", 24),
+            ):
+                box = slide.shapes.add_textbox(Inches(0.8), Inches(y), Inches(11.7), Inches(0.9))
+                paragraph = box.text_frame.paragraphs[0]
+                paragraph.text = text
+                paragraph.font.size = Pt(size)
+                paragraph.font.color.rgb = RGBColor.from_string("FFFFFF")
+            buffer = BytesIO()
+            deck.save(buffer)
+            return PeriodFollowupReportResult(
+                file_name=f"seguimiento-{segment.lower()}-{datetime.now(timezone.utc):%Y%m%d-%H%M}.pptx",
+                content=buffer.getvalue(),
+                slide_count=1,
+                total_issues=0,
+                open_issues=0,
+                closed_issues=0,
+                country=country,
+                source_ids=tuple(source_ids),
+                applied_filter_summary=f"Contact center: {segment}",
+            )
         raise ValueError("No hay incidencias en la ventana temporal y filtros seleccionados.")
 
     current_snapshot = build_operational_snapshot(
@@ -338,6 +393,7 @@ def generate_period_followup_report_artifact(
         country=country,
         source_ids=source_ids,
         snapshot=current_snapshot,
+        contact_center=active_contact_center(settings, country, filters.contact_center),
     )
 
     return generate_country_period_followup_ppt(
@@ -354,4 +410,5 @@ def generate_period_followup_report_artifact(
         functionality_filters=functionality_filters,
         reference_day=reference_day,
         evolution_insight=build_evolution_insight(current_snapshot, baseline_snapshot),
+        contact_center=segment,
     )

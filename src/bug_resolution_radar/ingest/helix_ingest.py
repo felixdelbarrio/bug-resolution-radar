@@ -405,6 +405,7 @@ _ARSQL_SELECT_ALIASES: List[str] = [
     "lastModifiedDate",
     "targetDate",
     "workItemId",
+    "submitter",
 ]
 
 
@@ -868,7 +869,8 @@ def _build_arsql_sql(
         f"{_select_alias('Closed Date', 'bbva_closeddate')}, "
         f"{_select_alias('Last Modified Date', 'lastModifiedDate')}, "
         f"{_select_alias('Submit Date', 'targetDate')}, "
-        f"{_select_alias('InstanceId', 'workItemId')} "
+        f"{_select_alias('InstanceId', 'workItemId')}, "
+        f"{_select_alias('Submitter', 'submitter')} "
         f"{extra_select} "
         "FROM `HPD:Help Desk` "
         f"WHERE {where_sql} "

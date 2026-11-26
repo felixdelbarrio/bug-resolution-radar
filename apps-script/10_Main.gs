@@ -104,6 +104,38 @@ function _requireScopeAccess_(user, scopeKey) {
   _assert_(allowed, 'No tienes acceso a este ámbito publicado.', 'FORBIDDEN');
 }
 
+function _snapshotContactCenterEnabled_(header) {
+  return Boolean(header && header.semantics && header.semantics.contactCenterEnabled === true &&
+    header.semantics.contactCenterMaterialized === true);
+}
+
+function _contactCenterEnabledCountries_(manifest) {
+  // Only authorized scopes. Decorate each one so an old individual source
+  // cannot accidentally display the new combo with unfiltered legacy data.
+  const countries = new Set();
+  (manifest.scopes || []).forEach(function (scope) {
+    scope.contactCenterEnabled = false;
+    try {
+      const record = _snapshotRecordById_(scope.snapshotId, true);
+      const header = _snapshotHeader_(record);
+      scope.contactCenterEnabled = _snapshotContactCenterEnabled_(header);
+      // Never expose the legacy aggregate link when segmentation is enabled.
+      if (header.semantics && header.semantics.contactCenterEnabled === true) {
+        scope.slidesUrl = '';
+        scope.contactCenterReportUrls = {};
+        _snapshotReportRecords_(record, header).forEach(function (item) {
+          scope.contactCenterReportUrls[item.contact_center] = item.slides_url;
+        });
+      }
+      scope.contactCenterPending = Boolean(header.semantics && header.semantics.contactCenterEnabled === true && !scope.contactCenterEnabled);
+      if (scope.contactCenterEnabled) countries.add(scope.country);
+    } catch (error) {
+      console.warn('radar_contact_center_metadata_unavailable');
+    }
+  });
+  return Array.from(countries);
+}
+
 function getBootstrap() {
   return _rpc_(function () {
     const user = _requireUser_();
@@ -132,6 +164,7 @@ function getBootstrap() {
         manifest = _viewerWorkspaceManifest_(manifest);
       }
     }
+    const contactCenterEnabledCountries = _contactCenterEnabledCountries_(manifest);
     const initialState = _initialDashboardState_(manifest);
     let dashboard = null;
     if (initialState.scopeKey) {
@@ -166,6 +199,7 @@ function getBootstrap() {
       user: user,
       scopes: manifest.scopes,
       countries: manifest.countries,
+      contactCenterEnabledCountries: contactCenterEnabledCountries,
       sources: manifest.sources,
       administration: administration,
       dataError: dataError,
@@ -187,10 +221,12 @@ function getIssueDetail(request) {
   return _rpc_(function () {
     const user = _requireUser_();
     const input = request || {};
-    _assertExactFields_(input, ['scopeKey', 'issueUid'], 'issueDetail');
+    const fields = ['scopeKey', 'issueUid'];
+    if (Object.prototype.hasOwnProperty.call(input, 'contactCenter')) fields.push('contactCenter');
+    _assertExactFields_(input, fields, 'issueDetail');
     _requireScopeAccess_(user, input.scopeKey);
     const record = _activeSnapshotRecordForScope_(_text_(input.scopeKey), true);
-    const row = _snapshotIssueDetail_(record, _text_(input.issueUid));
+    const row = _snapshotIssueDetail_(record, _text_(input.issueUid), input.contactCenter);
     _assert_(row, 'No existe la incidencia en el snapshot publicado.', 'NOT_FOUND');
     return row;
   });
@@ -232,6 +268,7 @@ function _stageDecodedTransfer_(decoded, token, user) {
   const expiresAt = Date.now() + RADAR.transferTtlSeconds * 1000;
   let projectionFileId = '';
   let reportFileId = '';
+  let reportBeiFileId = '';
   try {
     projectionFileId = _temporaryTransferFile_(
       Utilities.newBlob(decoded.projectionText, 'application/json', 'projection.json'),
@@ -247,6 +284,9 @@ function _stageDecodedTransfer_(decoded, token, user) {
       user.email,
       expiresAt
     );
+    if (decoded.reportBeiBlob) {
+      reportBeiFileId = _temporaryTransferFile_(decoded.reportBeiBlob, token, 'reportBei', user.email, expiresAt);
+    }
     return {
       owner: user.email,
       runId: _uuid_(),
@@ -265,11 +305,14 @@ function _stageDecodedTransfer_(decoded, token, user) {
       reportSha256: decoded.reportSha256,
       reportBytes: decoded.reportBytes,
       reportName: decoded.projection.report.fileName,
-      reportSlideCount: decoded.projection.report.slideCount
+      reportSlideCount: decoded.projection.report.slideCount,
+      reportBeiFileId: reportBeiFileId,
+      reportBeiDescriptor: decoded.reportBeiDescriptor || null
     };
   } catch (err) {
     _trashDriveFileQuietly_(projectionFileId);
     _trashDriveFileQuietly_(reportFileId);
+    _trashDriveFileQuietly_(reportBeiFileId);
     if (err && err.code) throw err;
     const error = new Error('No se pudo conservar temporalmente el traslado verificado.');
     error.code = 'TRANSFER_STAGING_FAILED';
@@ -296,15 +339,18 @@ function _discardTransfer_(token, meta) {
   const record = meta || {};
   _trashDriveFileQuietly_(record.projectionFileId);
   _trashDriveFileQuietly_(record.reportFileId);
+  _trashDriveFileQuietly_(record.reportBeiFileId);
   PropertiesService.getScriptProperties().deleteProperty('transfer:' + _text_(token));
 }
 
 function _loadStagedDecodedTransfer_(meta) {
   let projectionBlob;
   let reportBlob;
+  let reportBeiBlob = null;
   try {
     projectionBlob = DriveApp.getFileById(_text_(meta.projectionFileId)).getBlob();
     reportBlob = DriveApp.getFileById(_text_(meta.reportFileId)).getBlob();
+    if (meta.reportBeiFileId) reportBeiBlob = DriveApp.getFileById(_text_(meta.reportBeiFileId)).getBlob();
   } catch (err) {
     const missing = new Error('El staging temporal ya no está disponible en Google Drive.');
     missing.code = 'UPLOAD_EXPIRED';
@@ -351,6 +397,11 @@ function _loadStagedDecodedTransfer_(meta) {
       }
     }
   };
+  if (reportBeiBlob) {
+    manifest.datasets.reportBei = meta.reportBeiDescriptor;
+    const beiBytes = _validateDatasetDescriptor_(manifest.datasets.reportBei, 'reportBei', reportBeiBlob);
+    _validatePptxBlob_(reportBeiBlob, manifest.datasets.reportBei, beiBytes);
+  }
   const scope = _validateProjection_(projection, manifest, manifest.datasets.report);
   _validatePptxBlob_(reportBlob, manifest.datasets.report, reportBytes);
   return {
@@ -368,7 +419,9 @@ function _loadStagedDecodedTransfer_(meta) {
     projectionBytes: Number(meta.projectionBytes),
     reportBlob: reportBlob.setName(projection.report.fileName).setContentType(REPORT_PPTX_MIME),
     reportSha256: _text_(meta.reportSha256),
-    reportBytes: Number(meta.reportBytes)
+    reportBytes: Number(meta.reportBytes),
+    reportBeiBlob: reportBeiBlob,
+    reportBeiDescriptor: meta.reportBeiDescriptor || null
   };
 }
 
@@ -519,20 +572,40 @@ function _publishDecodedTransfer_(decoded, meta, user) {
   const createdAt = _nowIso_();
   const folder = _configuredReportDriveFolder_();
   let artifacts = null;
+  let beiArtifacts = null;
   let snapshotAppended = false;
-  let auditAppended = false;
+  const auditIds = [];
+  const beiReportId = decoded.reportBeiBlob ? _uuid_() : '';
   const priorDataVersion = _dataVersion_();
   let configChanged = false;
   try {
     artifacts = _importExactReportArtifacts_(decoded.reportBlob, decoded.projection, folder);
-    const parts = _appendSnapshotParts_(snapshotId, decoded.projection, createdAt);
+    let publications = null;
+    if (decoded.reportBeiBlob) {
+      beiArtifacts = _importExactReportArtifacts_(decoded.reportBeiBlob, decoded.projection.contactCenterReports.BEI, folder);
+      publications = {
+        PYME: Object.assign({ reportId: reportId }, artifacts),
+        BEI: Object.assign({ reportId: beiReportId }, beiArtifacts)
+      };
+    }
+    const parts = _appendSnapshotParts_(snapshotId, decoded.projection, createdAt, publications);
     const record = _snapshotRecordFromImport_(
       snapshotId, reportId, decoded, artifacts, parts, user, createdAt
     );
     _appendRecords_(RADAR.sheets.snapshots, [record]);
     snapshotAppended = true;
-    _appendRecords_(RADAR.sheets.reportAudit, [_reportAuditFromSnapshot_(record)]);
-    auditAppended = true;
+    const reportRecords = _snapshotReportRecords_(record, {
+      semantics: decoded.projection.semantics,
+      report: decoded.projection.report,
+      factsSha256: decoded.projection.factsSha256,
+      contactCenterReports: _contactCenterReportHeaders_(decoded.projection),
+      reportPublications: publications
+    });
+    _assert_(reportRecords.length === (decoded.reportBeiBlob ? 2 : 1), 'Publicación incompleta de informes.', 'REPORT_GENERATION_FAILED');
+    reportRecords.forEach(function (item) {
+      auditIds.push(item.report_id);
+      _appendRecords_(RADAR.sheets.reportAudit, [_reportAuditFromSnapshot_(item)]);
+    });
     _setConfig_(
       'DATA_VERSION',
       decoded.dataVersion,
@@ -568,14 +641,14 @@ function _publishDecodedTransfer_(decoded, meta, user) {
         console.error('transfer_config_rollback_failed', { snapshotId: snapshotId });
       }
     }
-    if (auditAppended) _deleteRecord_(RADAR.sheets.reportAudit, reportId);
+    auditIds.forEach(function (id) { _deleteRecord_(RADAR.sheets.reportAudit, id); });
     if (snapshotAppended) _deleteRecord_(RADAR.sheets.snapshots, snapshotId);
     _deleteSnapshotChunkRows_([snapshotId]);
     _deleteSnapshotPartRows_([snapshotId]);
-    if (artifacts) {
-      _trashDriveFileQuietly_(artifacts.pptxFileId);
-      _trashDriveFileQuietly_(artifacts.slidesFileId);
-    }
+    [artifacts, beiArtifacts].filter(Boolean).forEach(function (item) {
+      _trashDriveFileQuietly_(item.pptxFileId);
+      _trashDriveFileQuietly_(item.slidesFileId);
+    });
     throw err;
   }
 }
