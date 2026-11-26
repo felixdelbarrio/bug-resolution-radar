@@ -27,7 +27,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
@@ -38,13 +37,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
 
       - name: Install backend test dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-
       - name: Run GPC quality gate
         run: make ci-gpc VENV="$(python -c 'import sys; print(sys.prefix)')"
