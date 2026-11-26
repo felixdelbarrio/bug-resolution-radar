@@ -59,6 +59,26 @@ function applyThemeContract(
   }
 }
 
+function WorkspaceContactCenter({ disabled }: { disabled: boolean }) {
+  const [contactCenter, setContactCenter] = useState<"PYME" | "BEI">("PYME");
+  return (
+    <div className="workspace-contact-center-field">
+      <label className="field-label" htmlFor="workspace-contact-center">
+        Contact center
+      </label>
+      <select
+        id="workspace-contact-center"
+        value={contactCenter}
+        disabled={disabled}
+        onChange={(event) => setContactCenter(event.target.value === "BEI" ? "BEI" : "PYME")}
+      >
+        <option value="PYME">PYME</option>
+        <option value="BEI">BEI</option>
+      </select>
+    </div>
+  );
+}
+
 export function AppShell() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -232,6 +252,9 @@ export function AppShell() {
     countryOptions.some((country) => country.country === dashboardState.params.country)
       ? dashboardState.params.country
       : (workspace?.selectedCountry ?? "");
+  const contactCenterEnabled = Boolean(
+    bootstrap.data?.contactCenterEnabledCountries?.includes(selectedCountryValue)
+  );
   const selectedSourceValue =
     dashboardState.params.sourceId === ""
       ? ""
@@ -255,7 +278,12 @@ export function AppShell() {
       </header>
 
       <section
-        className={cn("workspace-scope-bar", "surface-panel", workspaceRefreshing && "is-loading")}
+        className={cn(
+          "workspace-scope-bar",
+          "surface-panel",
+          contactCenterEnabled && "has-contact-center",
+          workspaceRefreshing && "is-loading"
+        )}
         aria-busy={workspaceRefreshing}
       >
         <div className="workspace-country-field">
@@ -285,6 +313,13 @@ export function AppShell() {
             )}
           </select>
         </div>
+
+        {contactCenterEnabled ? (
+          <WorkspaceContactCenter
+            key={selectedCountryValue}
+            disabled={workspaceLoading || workspaceRefreshing}
+          />
+        ) : null}
 
         <div className="workspace-scope-detail">
           <div className="workspace-rollup-slot">

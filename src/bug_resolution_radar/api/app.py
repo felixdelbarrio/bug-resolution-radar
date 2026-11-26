@@ -58,6 +58,10 @@ from bug_resolution_radar.repositories.issues_store import (
     load_issues_df,
     load_issues_workspace_index,
 )
+from bug_resolution_radar.services.contact_center_pyme import (
+    ContactCenterStorageError,
+    contact_center_enabled_countries,
+)
 from bug_resolution_radar.services.dashboard_snapshot import (
     DashboardQuery,
     build_dashboard_defaults,
@@ -834,7 +838,14 @@ def create_app() -> FastAPI:
         scopeMode: str = "source",
     ) -> dict[str, Any]:
         settings = load_settings()
+        try:
+            contact_center_countries = contact_center_enabled_countries(settings)
+        except ContactCenterStorageError:
+            # Configuration failures must not take down the rest of the dashboard.
+            LOGGER.warning("contact_center_configuration_unavailable")
+            contact_center_countries = []
         return {
+            "contactCenterEnabledCountries": contact_center_countries,
             "appTitle": str(settings.APP_TITLE or "Bug Resolution Radar"),
             "brand": frontend_brand_contract(),
             "theme": str(settings.THEME or "auto"),

@@ -60,6 +60,8 @@ const App = (() => {
     bootstrap: null,
     dashboard: null,
     scopeKey: '',
+    contactCenter: 'PYME',
+    contactCenterCountry: '',
     trendChart: 'open_status_bar',
     insightsId: 'evolution',
     issuesView: 'Cards',
@@ -105,6 +107,8 @@ const App = (() => {
     'sharedScopeBanner',
     'themeToggle',
     'workspaceCountry',
+    'workspaceContactCenterField',
+    'workspaceContactCenter',
     'workspaceRollup',
     'workspaceRollupCaption',
     'workspaceSource'
@@ -365,6 +369,18 @@ const App = (() => {
       `${UI.escape(country)}</option>`
     )).join('') || '<option value="">Sin ámbitos publicados</option>';
 
+    const contactCenterEnabled = Boolean(active.country &&
+      (state.bootstrap.contactCenterEnabledCountries || []).includes(active.country));
+    if (!contactCenterEnabled || state.contactCenterCountry !== active.country) {
+      state.contactCenter = 'PYME';
+    }
+    state.contactCenterCountry = contactCenterEnabled ? active.country : '';
+    $('workspaceContactCenterField').classList.toggle('hidden', !contactCenterEnabled);
+    $('workspaceContactCenter').disabled = !contactCenterEnabled;
+    $('workspaceContactCenter').value = state.contactCenter;
+    $('scopeBar').classList.toggle('has-contact-center', contactCenterEnabled);
+    $('scopeBar').classList.toggle('has-visible-country', !countryField.classList.contains('hidden'));
+
     const related = countryScopes(active.country);
     const aggregate = aggregateScope(related);
     const individual = related.filter(scope => scope !== aggregate);
@@ -381,8 +397,10 @@ const App = (() => {
     const sourceSlot = document.querySelector('.workspace-source-slot');
     sourceSlot.classList.toggle('hidden', rollup);
     sourceSlot.setAttribute('aria-hidden', String(rollup));
-    $('workspaceRollupCaption').classList.toggle('hidden', !rollup);
-    $('workspaceRollupCaption').textContent = rollup ? (active.scopeLabel || active.country) : '';
+    const showRollupCaption = rollup && isAdmin() && !isShared();
+    $('workspaceRollupCaption').classList.toggle('hidden', !showRollupCaption);
+    $('workspaceRollupCaption').textContent = showRollupCaption
+      ? `Agregado país activo: ${active.scopeLabel || active.country}` : '';
     const banner = $('sharedScopeBanner');
     banner.classList.toggle('hidden', !isShared());
     banner.textContent = isShared()
@@ -1534,6 +1552,8 @@ const App = (() => {
         bootstrap = unavailableBootstrap(error);
       }
       state.bootstrap = bootstrap;
+      state.contactCenter = 'PYME';
+      state.contactCenterCountry = '';
       const initial = bootstrap.initialState || {};
       const local = readLocalPreferences();
       const validScopeKeys = new Set((bootstrap.scopes || []).map(scope => scope.scopeKey));
@@ -1639,6 +1659,10 @@ const App = (() => {
       syncScope();
       await refreshDashboard(epoch);
       schedulePreferenceSave();
+    });
+    $('workspaceContactCenter').addEventListener('change', event => {
+      state.contactCenter = event.target.value === 'BEI' ? 'BEI' : 'PYME';
+      event.target.value = state.contactCenter;
     });
     $('workspaceRollup').addEventListener('change', async event => {
       const epoch = ++state.navigationEpoch;

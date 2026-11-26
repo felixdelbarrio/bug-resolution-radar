@@ -2,7 +2,7 @@
 const RADAR = Object.freeze({
   appName: 'Bug Resolution Radar',
   corporateBrand: 'BBVA Banca de Empresas e Instituciones',
-  appVersion: '2026.09.24.4',
+  appVersion: '2026.11.26.1',
   contractVersion: '8.0.0',
   projectionContract: 'bug-resolution-radar-cloud-projection',
   projectionVersion: 4,

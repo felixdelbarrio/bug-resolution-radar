@@ -102,3 +102,16 @@ def test_empty_list_is_persisted(client: TestClient) -> None:
     endpoint = "/api/contact-center-pyme/Argentina"
     assert client.put(endpoint, json={"enabled": True, "people": []}).status_code == 200
     assert client.get(endpoint).json()["people"] == []
+
+
+def test_enabled_countries_follow_saved_flags_without_personal_data(client: TestClient) -> None:
+    settings = Settings()
+    assert service.contact_center_enabled_countries(settings) == ["Argentina"]
+    assert client.put(
+        "/api/contact-center-pyme/Argentina", json={"enabled": False, "people": [sample()]}
+    ).status_code == 200
+    assert client.put(
+        "/api/contact-center-pyme/México", json={"enabled": True, "people": [sample()]}
+    ).status_code == 200
+    assert service.contact_center_enabled_countries(settings) == ["México"]
+    assert client.get("/api/contact-center-pyme/Argentina").json()["people"] == [sample()]

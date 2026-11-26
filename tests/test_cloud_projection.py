@@ -8,11 +8,17 @@ import pytest
 
 from bug_resolution_radar.config import Settings
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
+from bug_resolution_radar.services import cloud_projection
 from bug_resolution_radar.services.cloud_projection import (
     _CLOUD_ACTION_KEYS,
     build_cloud_projection_artifact,
     canonical_json_bytes,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_contact_center(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cloud_projection, "contact_center_enabled_countries", lambda settings: [])
 
 
 def _report(content: bytes = b"PK exact desktop report") -> PeriodFollowupReportResult:
@@ -472,3 +478,33 @@ def test_data_version_changes_when_materialized_detail_changes(
     ).projection["scope"]["dataVersion"]
 
     assert first != second
+
+
+def test_contact_center_flag_is_metadata_and_changes_data_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_materializers(monkeypatch)
+    monkeypatch.setattr(cloud_projection, "contact_center_enabled_countries", lambda settings: [])
+
+    def projection() -> dict:
+        return build_cloud_projection_artifact(
+            Settings(),
+            country="España",
+            source_ids=["jira:espana:core"],
+            scope_mode="source",
+            report_result=_report(),
+            generated_at="2026-07-23T10:00:00+00:00",
+        ).projection
+
+    first = projection()
+    monkeypatch.setattr(
+        cloud_projection, "contact_center_enabled_countries", lambda settings: ["España"]
+    )
+    second = projection()
+    assert first["semantics"]["contactCenterEnabled"] is False
+    assert second["semantics"]["contactCenterEnabled"] is True
+    assert first["scope"]["dataVersion"] != second["scope"]["dataVersion"]
+    assert first["views"] == second["views"]
+    assert first["newsletterFacts"] == second["newsletterFacts"]
+    assert first["report"] == second["report"]
+    assert set(second["semantics"]) == set(first["semantics"])

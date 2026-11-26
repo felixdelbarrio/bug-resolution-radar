@@ -38,6 +38,7 @@ export type WorkspaceData = {
 };
 
 export type BootstrapPayload = {
+  contactCenterEnabledCountries: string[];
   appTitle: string;
   brand: CorporateBrandContract;
   theme: string;

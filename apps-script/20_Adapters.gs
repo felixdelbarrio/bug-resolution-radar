@@ -352,6 +352,10 @@ function _validateProjection_(projection, manifest, reportDescriptor) {
   _assert_(_stableJsonStringify_(scope) === _stableJsonStringify_(manifestScope),
     'El ámbito del manifest no coincide con la proyección.', 'TRANSFER_INVALID');
   _assertObject_(projection.semantics, 'projection.semantics no es un objeto de trazabilidad.');
+  if (Object.prototype.hasOwnProperty.call(projection.semantics, 'contactCenterEnabled')) {
+    _assert_(typeof projection.semantics.contactCenterEnabled === 'boolean',
+      'semantics.contactCenterEnabled debe ser booleano.', 'TRANSFER_INVALID');
+  }
   _assertExactFields_(projection.administration, ['jiraSources'], 'projection.administration');
   _assert_(Array.isArray(projection.administration.jiraSources),
     'projection.administration.jiraSources no es una lista.', 'TRANSFER_INVALID');

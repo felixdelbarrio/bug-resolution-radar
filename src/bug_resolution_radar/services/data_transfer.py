@@ -24,6 +24,10 @@ from bug_resolution_radar.services.cloud_projection import (
     canonical_json_bytes,
     sha256_bytes,
 )
+from bug_resolution_radar.services.contact_center_pyme import (
+    ContactCenterStorageError,
+    contact_center_pyme_path,
+)
 from bug_resolution_radar.services.downloads import ensure_download_dir, save_download_content
 
 TRANSFER_FORMAT = "bug-resolution-radar-transfer"
@@ -189,6 +193,7 @@ def _source_revision(settings: Settings) -> tuple[tuple[str, int, int], ...]:
         settings.DATA_PATH,
         settings.HELIX_DATA_PATH,
         settings.NOTES_PATH,
+        contact_center_pyme_path(),
     ):
         path = Path(str(raw_path or "")).expanduser()
         try:
@@ -220,7 +225,7 @@ def export_business_data(
                 )
             except TransferValidationError:
                 raise
-            except ValueError as exc:
+            except (ValueError, ContactCenterStorageError) as exc:
                 raise TransferValidationError(str(exc)) from exc
             if before == _source_revision(settings):
                 artifact = candidate
@@ -437,10 +442,13 @@ def _validate_projection(
             )
         except ValueError as exc:
             raise TransferValidationError(str(exc)) from exc
-    if not isinstance(payload.get("semantics"), dict):
+    semantics = payload.get("semantics")
+    if not isinstance(semantics, dict):
         raise TransferValidationError(
             "La trazabilidad semántica del escritorio no está disponible."
         )
+    if not isinstance(semantics.get("contactCenterEnabled", False), bool):
+        raise TransferValidationError("semantics.contactCenterEnabled debe ser booleano.")
     newsletter = payload.get("newsletterFacts")
     if not isinstance(newsletter, dict):
         raise TransferValidationError("Los hechos de newsletter no son válidos.")

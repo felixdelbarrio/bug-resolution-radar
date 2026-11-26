@@ -34,6 +34,7 @@ from bug_resolution_radar.config import (
     helix_sources,
     jira_root_cause_labels_by_country,
     jira_sources,
+    normalize_country_name,
     supported_countries,
 )
 from bug_resolution_radar.reports.period_followup_ppt import PeriodFollowupReportResult
@@ -41,6 +42,7 @@ from bug_resolution_radar.reports.service import (
     build_report_filters,
     generate_period_followup_report_artifact,
 )
+from bug_resolution_radar.services.contact_center_pyme import contact_center_enabled_countries
 from bug_resolution_radar.services.dashboard_snapshot import (
     DashboardQuery,
     build_dashboard_snapshot,
@@ -804,11 +806,18 @@ def build_cloud_projection_artifact(
         if source.get("sourceType") == "jira"
     ]
     facts_sha256 = sha256_bytes(canonical_json_bytes(newsletter))
+    contact_center_enabled = (
+        normalize_country_name(country_text, settings=settings)
+        in contact_center_enabled_countries(settings)
+    )
+    semantics = _semantic_trace(settings)
+    semantics["contactCenterEnabled"] = contact_center_enabled
     revision_payload = {
         "country": country_text,
         "scopeMode": mode,
         "sourceIds": list(clean_source_ids),
         "referenceDate": reference_date,
+        "contactCenterEnabled": contact_center_enabled,
         "administration": {"jiraSources": jira_administration},
         "views": views,
         "newsletterFacts": newsletter,
@@ -836,7 +845,7 @@ def build_cloud_projection_artifact(
         "semanticContract": SEMANTIC_CONTRACT,
         "generatedAt": stamp,
         "scope": scope,
-        "semantics": _semantic_trace(settings),
+        "semantics": semantics,
         "administration": {"jiraSources": jira_administration},
         "views": views,
         "newsletterFacts": newsletter,

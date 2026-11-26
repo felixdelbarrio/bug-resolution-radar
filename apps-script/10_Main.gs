@@ -104,6 +104,23 @@ function _requireScopeAccess_(user, scopeKey) {
   _assert_(allowed, 'No tienes acceso a este ámbito publicado.', 'FORBIDDEN');
 }
 
+function _snapshotContactCenterEnabled_(header) {
+  return Boolean(header && header.semantics && header.semantics.contactCenterEnabled === true);
+}
+
+function _contactCenterEnabledCountries_(manifest) {
+  // Read only the latest authorized snapshot per country, and only during bootstrap.
+  return _viewerWorkspaceManifest_(manifest).scopes.filter(function (scope) {
+    try {
+      const record = _snapshotRecordById_(scope.snapshotId, true);
+      return _snapshotContactCenterEnabled_(_snapshotHeader_(record));
+    } catch (error) {
+      console.warn('radar_contact_center_metadata_unavailable');
+      return false;
+    }
+  }).map(function (scope) { return scope.country; });
+}
+
 function getBootstrap() {
   return _rpc_(function () {
     const user = _requireUser_();
@@ -166,6 +183,7 @@ function getBootstrap() {
       user: user,
       scopes: manifest.scopes,
       countries: manifest.countries,
+      contactCenterEnabledCountries: _contactCenterEnabledCountries_(manifest),
       sources: manifest.sources,
       administration: administration,
       dataError: dataError,

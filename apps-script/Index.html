@@ -39,6 +39,13 @@
         <label class="field-label" for="workspaceCountry">País</label>
         <select id="workspaceCountry"><option value="">Cargando países...</option></select>
       </div>
+      <div id="workspaceContactCenterField" class="workspace-contact-center-field hidden">
+        <label class="field-label" for="workspaceContactCenter">Contact center</label>
+        <select id="workspaceContactCenter">
+          <option value="PYME" selected>PYME</option>
+          <option value="BEI">BEI</option>
+        </select>
+      </div>
       <div class="workspace-scope-detail">
         <div class="workspace-rollup-slot scope-admin-control">
           <label class="checkbox-field"><input id="workspaceRollup" type="checkbox"><span>Vista agregada</span></label>
@@ -48,8 +55,8 @@
             <label class="field-label" for="workspaceSource">Origen</label>
             <select id="workspaceSource"><option value="">Selecciona un origen</option></select>
           </div>
-          <p id="workspaceRollupCaption" class="workspace-rollup-caption hidden"></p>
         </div>
+        <p id="workspaceRollupCaption" class="workspace-rollup-caption hidden"></p>
         <div class="workspace-scope-status">
           <div class="workspace-meta"><strong id="scopeDescription">Sin ámbito</strong><span id="dataVersion">Sin datos</span></div>
         </div>

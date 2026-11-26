@@ -150,6 +150,7 @@ function getSharedBootstrap(token) {
         activatedAt: context.share.created_at
       }],
       countries: [scope.country],
+      contactCenterEnabledCountries: _snapshotContactCenterEnabled_(header) ? [scope.country] : [],
       sources: scope.sourceIds.map(function (sourceId) {
         return {
           source_id: sourceId,

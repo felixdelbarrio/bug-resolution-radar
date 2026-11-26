@@ -81,6 +81,7 @@ function CountryEditor({ country, countries, onCountryChange }: {
     mutationFn: (value: Config) => putJson<Payload>(endpoint, value),
     onSuccess: (payload) => {
       queryClient.setQueryData(queryKey, payload);
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap-shell"] });
       setDraft(toDraft(payload));
       setSaved({ enabled: payload.enabled, people: payload.people });
       setError("");

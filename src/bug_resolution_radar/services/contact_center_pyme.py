@@ -120,13 +120,27 @@ def _payload(country: str, config: ContactCenterConfig) -> ContactCenterPayload:
     return ContactCenterPayload(country=country, enabled=config.enabled, people=config.people)
 
 
+def _country_config(store: ContactCenterStore, country: str) -> ContactCenterConfig:
+    config = store.countries.get(country)
+    if config is not None:
+        return config
+    return ContactCenterConfig(enabled=country == "Argentina", people=[])
+
+
+def contact_center_enabled_countries(settings: Settings) -> list[str]:
+    """Expose only the activation flag, never operator data."""
+    store = _read_store(contact_center_pyme_path())
+    return [
+        country
+        for country in supported_countries(settings)
+        if _country_config(store, country).enabled
+    ]
+
+
 def contact_center_pyme_payload(settings: Settings, country: str) -> ContactCenterPayload:
     canonical = _canonical_country(settings, country)
     store = _read_store(contact_center_pyme_path())
-    config = store.countries.get(canonical)
-    if config is None:
-        config = ContactCenterConfig(enabled=canonical == "Argentina", people=[])
-    return _payload(canonical, config)
+    return _payload(canonical, _country_config(store, canonical))
 
 
 def save_contact_center_pyme(
