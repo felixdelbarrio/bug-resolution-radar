@@ -1,9 +1,10 @@
 SHELL := /bin/bash
-
-PY ?= python3
+PYTHON_VERSION := $(strip $(shell cat .python-version))
+PY ?= python$(PYTHON_VERSION)
 VENV ?= .venv
 PIP = $(VENV)/bin/pip
 PYTHON = $(VENV)/bin/python
+PYTHON_VERSION_CHECK = import sys; sys.exit(0 if ".".join(map(str, sys.version_info[:2])) == sys.argv[1] else f"BRR requiere Python {sys.argv[1]}; detectado {sys.version.split()[0]}. Usa un entorno virtual compatible.")
 PYTEST = $(VENV)/bin/pytest
 PYINSTALLER = $(VENV)/bin/pyinstaller
 NPM ?= npm
@@ -40,11 +41,9 @@ PYINSTALLER_COLLECT_ARGS = \
 	--collect-all openpyxl \
 	--collect-all xlsxwriter \
 	--collect-all pptx
-
 .DEFAULT_GOAL := help
 
 .PHONY: help setup test run runWebapp format lint ci CI ci-format ci-typecheck ci-coverage ci-quality ci-gpc kill clean build build-frontend _ensure-source-current _ensure-backend _ensure-frontend _ensure-build _ensure-icon-assets _ensure-node _build-macos _build-linux
-
 help:
 	@echo ""
 	@echo "Bug Resolution Radar"
@@ -61,16 +60,18 @@ help:
 	@echo "  make kill         Detiene puertos 8000 y 5173"
 	@echo "  make clean        Limpia venv, cachés y build frontend"
 	@echo ""
-
 setup:
-	@if [ ! -d $(VENV) ]; then $(PY) -m venv $(VENV); fi
+	@if [ ! -d "$(VENV)" ]; then \
+		$(PY) -c '$(PYTHON_VERSION_CHECK)' "$(PYTHON_VERSION)" && $(PY) -m venv "$(VENV)"; \
+	fi
+	@$(MAKE) --no-print-directory _ensure-backend
 	$(PIP) install -U pip
 	$(PIP) install -e ".[dev]"
 	$(NPM) --prefix $(FRONTEND_DIR) install
 
 _ensure-backend:
 	@if [ ! -x "$(PYTHON)" ]; then echo "Ejecuta primero: make setup"; exit 1; fi
-
+	@"$(PYTHON)" -c '$(PYTHON_VERSION_CHECK)' "$(PYTHON_VERSION)"
 _ensure-source-current:
 	@if [ "$(ALLOW_STALE_SOURCE)" != "1" ] && command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
 		upstream="$$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"; \
@@ -85,7 +86,6 @@ _ensure-source-current:
 			fi; \
 		fi; \
 	fi
-
 _ensure-frontend: _ensure-backend
 	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then echo "Faltan dependencias frontend. Ejecuta: make setup"; exit 1; fi
 
@@ -95,13 +95,11 @@ _ensure-build: _ensure-backend
 
 _ensure-node:
 	@if ! command -v node >/dev/null 2>&1; then echo "Falta Node.js 22 o superior."; exit 1; fi
-
 _ensure-icon-assets: _ensure-backend
 	@if [ ! -f "$(ICON_PNG)" ] || [ ! -f "$(ICON_ICO)" ] || [ ! -f "$(ICON_ICNS)" ]; then \
 		if [ ! -f "$(ICON_SOURCE)" ]; then echo "Falta icono fuente: $(ICON_SOURCE)"; exit 1; fi; \
 		PYTHONPATH=src $(PYTHON) scripts/update_app_icon.py --input "$(ICON_SOURCE)" --png-out "$(ICON_PNG)" --ico-out "$(ICON_ICO)" --icns-out "$(ICON_ICNS)"; \
 	fi
-
 test: _ensure-backend
 	PYTHONPATH=src $(PYTEST) -q \
 		tests/test_api_app.py \
@@ -117,7 +115,6 @@ test: _ensure-backend
 
 format: _ensure-backend
 	PYTHONPATH=src $(PYTHON) -m ruff format .
-
 lint: _ensure-backend
 	PYTHONPATH=src $(PYTHON) -m ruff check .
 	PYTHONPATH=src $(PYTHON) -m mypy src
@@ -131,7 +128,6 @@ runWebapp: _ensure-source-current _ensure-node
 ci: ci-format ci-typecheck ci-coverage ci-quality ci-gpc
 
 CI: ci
-
 ci-format: _ensure-backend
 	PYTHONPATH=src $(PYTHON) -m ruff format --check .
 
@@ -140,7 +136,6 @@ ci-typecheck: _ensure-backend
 
 ci-coverage: _ensure-backend
 	PYTHONPATH=src $(PYTEST) -q --cov=bug_resolution_radar --cov-report=term-missing --cov-report=xml
-
 ci-quality: _ensure-frontend
 	$(PYTHON) -m pip check
 	$(NPM) --prefix $(FRONTEND_DIR) run build
@@ -149,7 +144,6 @@ ci-quality: _ensure-frontend
 	PYTHONPATH=src $(PYTEST) -q tests/test_run_desktop_entrypoint.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_api_app.py
 	PYTHONPATH=src $(PYTEST) -q tests/test_executive_report_ppt.py -k "render_chart_png_bytes_uses_cache or prerender_section_images_populates_payload"
-
 ci-gpc: _ensure-backend _ensure-node
 	node scripts/check_gpc_quality.mjs
 	node scripts/run_webapp_local.mjs --check
@@ -163,14 +157,12 @@ ci-gpc: _ensure-backend _ensure-node
 
 build-frontend: _ensure-frontend
 	$(NPM) --prefix $(FRONTEND_DIR) run build
-
 build: _ensure-source-current _ensure-build _ensure-icon-assets build-frontend test
 	@case "$(HOST_UNAME)" in \
 		Darwin) $(MAKE) _build-macos ;; \
 		Linux) $(MAKE) _build-linux ;; \
 		*) echo "OS no soportado para make build: $(HOST_UNAME)"; exit 1 ;; \
 	esac
-
 _build-macos:
 	rm -rf dist_app build_app build_bundle/bug-resolution-radar-macos build_bundle/bug-resolution-radar-macos.zip
 	$(PYINSTALLER) \
@@ -191,7 +183,6 @@ _build-macos:
 	@cp README.md build_bundle/bug-resolution-radar-macos/README.md
 	@if [ -f .env.example ]; then cp .env.example build_bundle/bug-resolution-radar-macos/.env.example; fi
 	@ditto -c -k --sequesterRsrc --keepParent build_bundle/bug-resolution-radar-macos build_bundle/bug-resolution-radar-macos.zip
-
 _build-linux:
 	rm -rf dist build build_bundle/bug-resolution-radar-linux
 	$(PYINSTALLER) \
@@ -212,7 +203,6 @@ _build-linux:
 	@cp dist/bug-resolution-radar build_bundle/bug-resolution-radar-linux/dist/bug-resolution-radar
 	@cp README.md build_bundle/bug-resolution-radar-linux/README.md
 	@if [ -f .env.example ]; then cp .env.example build_bundle/bug-resolution-radar-linux/.env.example; fi
-
 kill:
 	@set -e; \
 	for port in 8000 5173 $(WEBAPP_PORT); do \
@@ -225,6 +215,5 @@ kill:
 	pkill -f "run_desktop.py" 2>/dev/null || true; \
 	pkill -f "vite --host 127.0.0.1 --port 5173" 2>/dev/null || true; \
 	echo "Puertos de desarrollo liberados."
-
 clean:
 	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache .coverage htmlcov $(FRONTEND_DIR)/node_modules $(FRONTEND_DIST) dist dist_app build build_app build_bundle
